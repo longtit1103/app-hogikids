@@ -1,19 +1,41 @@
 name: CI
 
-# 3 job gác chất lượng mỗi PR vào main + push main:
-#   typecheck  — tsc --noEmit (không cần DB)
+# 4 job gác chất lượng mỗi PR vào main (KHÔNG chạy lại khi push main — xem `on:` dưới):
+#   typecheck  — cổng allowlist snapshot public (chạy TRƯỚC npm ci) + tsc --noEmit (không cần DB)
 #   unit       — Vitest (Postgres tạm: tạo schema app + migrate deploy trước, rồi vitest)
 #   e2e        — Playwright (Postgres tạm + browser; global-setup tự migrate + seed user)
+#   docker     — dựng ảnh y như lúc deploy (không push ảnh); ba job trên đều MÙ với lỗi chỉ vỡ trong ảnh
 # CI KHÔNG bao giờ đụng DB minipc/prod — mỗi job dựng Postgres tạm riêng, xong vứt.
 # TZ ép Asia/Ho_Chi_Minh (bất biến #3): assert P&L neo theo ngày giờ VN, runner UTC sẽ lệch.
 # Node 24: harness e2e nạp .ts động (global-setup import src/lib/password) → cần Node có
 # native TypeScript (máy dev chạy Node 25). Node 20 không nạp được .ts → e2e chết ở seed.
 
+# CHỈ pull_request (+ workflow_dispatch để bấm tay), KHÔNG push main — bỏ 18/09. Đo 30 lượt CI
+# gần nhất của repo private, tính Σ thời lượng 4 job (= phút Actions bị trừ): 17/30 là lượt push
+# main, ≈13 phút/lượt, tổng 220 phút — lặp lại gần y nguyên PR đã xanh vì merge là squash. Gói
+# Free chỉ có 2.000 phút/tháng (08/2026 đốt 2.624). Cái mất: main KHÔNG được test lại nếu hai PR
+# đan xen (PR sau xanh trên base cũ) — 1 người dev, PR nối tiếp nên chấp nhận; nghi ngờ thì bấm
+# "Run workflow" (workflow_dispatch) trên main, hoặc publish --ref để CI free ở public. Push THẲNG
+# code lên main = không CI (đo 60 commit gần nhất: 14 commit không qua PR, TẤT CẢ là docs) — luật
+# CLAUDE.md đã cấm push thẳng main; giữ luật đó là điều kiện để cổng này có nghĩa.
+# Bản public (app-hogikids, Actions miễn phí) được script publish CHÈN thêm trigger push cho
+# main + nhánh CI tạm ci/** — để `--watch` vẫn tìm thấy run. Đừng thêm push: vào đây.
+# paths-ignore: PR CHỈ đụng docs/, plans/, deploy/*.md (đúng vùng exclude của bản public) thì
+# KHÔNG chạy CI — 14/30 commit main gần nhất chỉ sửa tài liệu. Cố ý KHÔNG chặn `*.md` toàn cây:
+# file .md mới ở gốc repo vẫn phải qua cổng allowlist (job typecheck).
 on:
+  push:
+    branches: [main, "ci/**"]
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+    paths-ignore: ['docs/**', 'plans/**', 'deploy/*.md']
+  workflow_dispatch:
+
+# Đẩy commit mới lên PR đang chạy CI ⇒ HUỶ lượt cũ: 4 job × ~13' trên HEAD đã bị thay không còn
+# giá trị. Group theo ref (refs/pull/<n>/merge) nên hai PR khác nhau không huỷ nhau.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   typecheck:
@@ -24,6 +46,31 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=app
     steps:
       - uses: actions/checkout@v4
+      # Cổng allowlist của bản snapshot công khai: file nguồn mới nào chưa được phân loại
+      # (allowlist hoặc luật exclude) thì lượt publish sẽ ABORT — nhưng cổng đó chỉ nổ lúc có
+      # NGƯỜI chạy publish, tức muộn hơn hẳn lúc file được thêm vào (ca thật 20/08: lộ ra sau
+      # khi PR đã mở và đã nghiệm thu xong). Đây là đúng phép phân loại ấy, gọi chung một hàm.
+      # Bám vào job có sẵn thay vì đẻ job thứ 5 (tiết kiệm runner), và đặt TRƯỚC npm ci vì nó
+      # chỉ cần git — không deps, không mạng, không token, không ghi gì vào worktree. Hỏng ở đây
+      # thì dừng luôn, khỏi tốn phút cài phụ thuộc.
+      - name: Cổng allowlist snapshot public (chỉ kiểm, không publish)
+        # ĐÚNG FILE ci.yml NÀY chạy ở CẢ HAI repo — repo gốc và bản snapshot công khai — mà bản
+        # snapshot thì CỐ Ý không mang script publish lẫn allowlist (chúng tự loại khỏi bản public).
+        # Nên phải phân biệt tường minh, đừng để "không thấy file" thành lỗi câm:
+        #   có cả hai      ⇒ repo gốc            ⇒ chạy cổng
+        #   thiếu cả hai   ⇒ đúng bản snapshot   ⇒ bỏ qua, in rõ lý do
+        #   thiếu một      ⇒ không nhất quán     ⇒ ĐỎ, không đoán bừa
+        run: |
+          S=scripts/publish-public-snapshot.sh
+          A=scripts/public-snapshot-allowlist.txt
+          if [ -f "$S" ] && [ -f "$A" ]; then
+            bash "$S" --chi-kiem-allowlist
+          elif [ ! -f "$S" ] && [ ! -f "$A" ]; then
+            echo "▸ Bỏ qua: đây là bản snapshot công khai (script + allowlist cố ý không có mặt)."
+          else
+            echo "✗ Chỉ thiếu MỘT trong hai ($S / $A) — trạng thái không nhất quán." >&2
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -124,3 +171,25 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  docker:
+    name: Dựng ảnh Docker
+    runs-on: ubuntu-latest
+    # Trần thời gian: một bước treo im lặng đã từng đốt 106 phút hạn mức Actions mà không ai biết
+    # cho tới lúc mở log từng bước. Lượt NGUỘI đo thật trên runner: 1m19s (npm ci 21,4s ·
+    # prisma generate + next build 22,7s) ⇒ quá 25 phút là treo, không phải chậm.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      # VÌ SAO CÓ JOB NÀY: ba job trên đều chạy trên repo ĐÃ CHECKOUT ĐỦ nên mù với trọn lớp lỗi
+      # chỉ vỡ BÊN TRONG ảnh — thứ tự COPY sai, file thiếu trong build context, .dockerignore loại
+      # nhầm, kho apt/PGDG đổi. Ca thật 19/08: `npm ci` chết ENOENT vì tarball vendor
+      # (package.json trỏ xlsx vào file:./third-party/...) chưa được chép trước, trong khi CI xanh
+      # 3/3 suốt hơn một ngày — lỗi chỉ lộ đúng lúc bấm deploy, lúc prod đã tụt lại 1 commit.
+      # Không cần chạy thử ảnh: dựng được là đủ để đóng lớp lỗi đó.
+      - name: Dựng ảnh (không push)
+        # Tag mang SHA, KHÔNG BAO GIỜ `latest`: trên máy thật `latest` là ảnh đang chạy, dựng đè lên
+        # là mất bản ghi để lùi (đã xảy ra 19/08 — cả `docker tag` lẫn `docker commit` đều không cứu
+        # lại được). Runner ubuntu-latest cùng kiến trúc amd64 với minipc nên đây là phép thử thật.
+        # --progress=plain: log đầy đủ từng bước, đọc được ngay dòng chết mà không phải mở lại ảnh.
+        run: docker build --progress=plain -t hogikids-app:ci-${{ github.sha }} .

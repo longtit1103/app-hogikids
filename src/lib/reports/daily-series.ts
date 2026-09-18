@@ -2,7 +2,13 @@ import { eachDayOfInterval, endOfDay, format, startOfDay } from "date-fns";
 
 import { type DateRange } from "@/lib/date-range";
 import { prisma } from "@/lib/prisma";
-import { calcPnlCore, pnlOrderSelect, toPnlOrderInput, type PnlExpenseInput } from "@/lib/reports/pnl";
+import {
+  calcPnlCore,
+  pnlOrderSelect,
+  toPnlOrderInput,
+  type PnlExpenseInput,
+  type PnlIncomeInput,
+} from "@/lib/reports/pnl";
 
 import type { OrderStatus } from "@prisma/client";
 
@@ -42,7 +48,7 @@ export interface DailyPoint {
  */
 export async function computeDailySeries(range: DateRange): Promise<DailyPoint[]> {
   const to = endOfDay(range.to);
-  const [orders, expenses] = await Promise.all([
+  const [orders, expenses, incomes] = await Promise.all([
     prisma.order.findMany({
       where: { orderedAt: { gte: range.from, lte: to } },
       select: { orderedAt: true, ...pnlOrderSelect },
@@ -50,6 +56,10 @@ export async function computeDailySeries(range: DateRange): Promise<DailyPoint[]
     prisma.expense.findMany({
       where: { date: { gte: range.from, lte: to } },
       select: { date: true, categoryId: true, adsSource: true, channelId: true, amount: true },
+    }),
+    prisma.thuNhap.findMany({
+      where: { date: { gte: range.from, lte: to } },
+      select: { date: true, amount: true },
     }),
   ]);
 
@@ -69,8 +79,21 @@ export async function computeDailySeries(range: DateRange): Promise<DailyPoint[]
     expensesByDay.set(key, bucket);
   }
 
+  // Thu nhập tài chính PHẢI bucket theo ngày như đơn và chi phí. Truyền cả kỳ vào mỗi ngày là
+  // nhân bản khoản lãi lên số ngày; không truyền gì là Σ netProfit từng ngày ≠ netProfit cả kỳ —
+  // biểu đồ Dashboard lệch bảng Lãi/Lỗ đúng bằng số lãi mà không màn nào báo.
+  const incomesByDay = new Map<string, PnlIncomeInput[]>();
+  for (const t of incomes) {
+    const key = format(t.date, DAY_KEY);
+    const bucket = incomesByDay.get(key) ?? [];
+    bucket.push({ amount: t.amount });
+    incomesByDay.set(key, bucket);
+  }
+
   return enumerateDayKeys(range).map((date) => {
-    const b = calcPnlCore(ordersByDay.get(date) ?? [], expensesByDay.get(date) ?? []);
+    const b = calcPnlCore(ordersByDay.get(date) ?? [], expensesByDay.get(date) ?? [], {
+      incomes: incomesByDay.get(date) ?? [],
+    });
     return { date, revenue: b.revenue, netProfit: b.netProfit };
   });
 }
@@ -144,6 +167,31 @@ export async function computeChannelRevenueAdsSeries(
     revenue: revenueByDay.get(date) ?? 0,
     ads: adsByDay.get(date) ?? 0,
   }));
+}
+
+/**
+ * Đếm ĐƠN HỢP LỆ (Pancake, cùng predicate `VALID_ORDER_STATUS` với các hàm trên) của MỘT kênh
+ * từng ngày. Dùng cho biểu đồ "Xu hướng ngày" của `/marketing` (tab Tổng quan) — đối chiếu đơn
+ * THẬT với lượt truy cập do TikTok Shop Analytics báo. Chỉ ĐẾM, không đụng công thức doanh thu
+ * (`revenue`/`ads` đã có sẵn ở `computeChannelRevenueAdsSeries`) ⇒ không phải viết lại `pnl.ts`.
+ */
+export async function computeChannelDailyOrderCount(
+  range: DateRange,
+  channelId: string
+): Promise<Array<{ date: string; orderCount: number }>> {
+  const to = endOfDay(range.to);
+  const orders = await prisma.order.findMany({
+    where: { orderedAt: { gte: range.from, lte: to }, status: VALID_ORDER_STATUS, channelId },
+    select: { orderedAt: true },
+  });
+
+  const countByDay = new Map<string, number>();
+  for (const o of orders) {
+    const key = format(o.orderedAt, DAY_KEY);
+    countByDay.set(key, (countByDay.get(key) ?? 0) + 1);
+  }
+
+  return enumerateDayKeys(range).map((date) => ({ date, orderCount: countByDay.get(date) ?? 0 }));
 }
 
 // Gộp point ngày → tuần: `group-by-week.ts` — module thuần riêng vì chart Client Component cũng

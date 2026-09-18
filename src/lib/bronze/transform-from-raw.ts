@@ -39,6 +39,18 @@ const LAND_ONLY: readonly BronzeStream[] = [
   // Hoá đơn quảng cáo TikTok: KHÔNG có bảng Silver riêng — nó là NGUỒN ĐO VAT mà nhánh
   // `tiktokbusiness/report` đọc thẳng từ kho thô (xem `buildVatByMonth`), không phải sổ sách.
   "tiktokbusiness/invoice",
+  // 4 stream analytics + GMV Max cấp item: SỐ SÀN, cố ý KHÔNG có bảng Silver (spec §3 — "bảng Silver
+  // cho analytics" nằm ngoài phạm vi). Reader `src/lib/reports/marketing/*` đọc thẳng Bronze bằng
+  // DISTINCT ON, đúng khuôn `quang-cao-chien-dich.ts`. Quên khai ở đây ⇒ `transformFromRaw` không tìm
+  // thấy nhánh và ném "stream chưa có nhánh dựng Silver" cho MỌI trang land.
+  "tiktok/analytics_shop",
+  "tiktok/analytics_products",
+  "tiktok/analytics_videos",
+  "tiktok/analytics_lives",
+  "tiktokbusiness/gmvmax_item",
+  // Đơn affiliate cấp dòng SKU (P3): SỐ SÀN như 4 stream analytics — reader `creator-tiktok.ts`
+  // đọc thẳng Bronze; không đường nào chạm `Expense`/`pnl.ts` (hoa hồng THẬT đã có từ Pancake).
+  "tiktok/affiliate_orders",
 ];
 
 /** Thân nhánh dựng Silver: cộng dồn vào `stats` sẵn có, không tự tạo bộ đếm riêng. */

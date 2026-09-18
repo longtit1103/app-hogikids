@@ -75,7 +75,13 @@ test.describe("Phase 5 smoke — Dashboard / Báo cáo / Kênh", () => {
   });
 
   test("Dashboard hiện 4 KPI card + card Tình trạng đồng bộ", async ({ page }) => {
-    await expect(page.getByText("Doanh thu", { exact: true }).first()).toBeVisible();
+    // Neo vào ĐÚNG nhãn "Doanh thu gộp". Bản cũ neo `getByText("Doanh thu", { exact: true })`
+    // — chú giải biểu đồ bên dưới cũng có đúng chuỗi "Doanh thu", nên phép kiểm đó vẫn XANH kể
+    // cả khi card KPI đổi nhãn hay biến mất hoàn toàn; `.first()` chỉ giấu chuyện đó kỹ hơn.
+    await expect(page.getByText("Doanh thu gộp", { exact: true })).toBeVisible();
+    // Dòng đối chiếu Pancake: `netRevenue` (gộp − phí sàn − voucher), cùng nhãn với bảng Lãi/Lỗ
+    // và ứng với ô "Doanh thu" bên Pancake POS. Mất dòng ⇒ chủ shop lại so hai màn ra hai số lệch.
+    await expect(page.getByText(/^Thực nhận từ sàn:/)).toBeVisible();
     await expect(page.getByText("Số đơn hợp lệ")).toBeVisible();
     await expect(page.getByText("LN ròng ước tính tháng")).toBeVisible();
     await expect(page.getByText("Tỷ lệ hoàn/bom tháng")).toBeVisible();
@@ -138,6 +144,11 @@ test.describe("Phase 5 smoke — Dashboard / Báo cáo / Kênh", () => {
     await expect(page.getByText("Hoàn/Bom", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("LN ròng", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("ROAS", { exact: true }).first()).toBeVisible();
+  });
+
+  test("/kenh/shopee có khối sản phẩm bán chạy theo kênh", async ({ page }) => {
+    await page.goto("/kenh/shopee");
+    await expect(page.getByRole("heading", { name: /Sản phẩm bán chạy/ })).toBeVisible();
   });
 
   test("picker toàn cục theo kịp URL khi drill client-side đổi tu/den (không kẹt nhãn cũ)", async ({ page }) => {

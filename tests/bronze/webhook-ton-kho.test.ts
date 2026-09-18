@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { clearBronzeBacklog } from "@/lib/bronze/bronze-only";
-import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK } from "@/lib/bronze/streams";
+import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK } from "../helpers/shop-ids-fixture";
 import { KET_CUC_CAN_XEM, xuLySuKienWebhook } from "@/lib/ingest/webhook-processor";
-import { WAREHOUSE_KHO_TONG } from "@/lib/ingest/webhook-stock";
+import { WAREHOUSE_KHO_TONG } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
@@ -32,6 +32,31 @@ const SU_KIEN = (opts: {
   `"warehouse_id":"${opts.warehouseId ?? WAREHOUSE_KHO_TONG}",` +
   `"remain_quantity":${opts.remain},"order_id":"AF100975192O582","change_quantity":-1,` +
   `"is_actual_remain_quantity":false,"actual_remain_quantity":${opts.actual ?? 99}}`;
+
+/**
+ * Sự kiện do PHIẾU NHẬP KHO sinh ra — shape khác hẳn sự kiện do đơn hàng, copy nguyên từ hộp thư
+ * prod (phiếu nhập thật 2026-09-04 22:32:46 giờ VN, 8 mã × 30 cái):
+ *
+ *   {"type":"variations_warehouses","inserted_at":"2026-09-04 15:32:46.779394",
+ *    "variation_id":"7dc17043-…","warehouse_id":"8ea354a7-…","remain_quantity":29,
+ *    "actual_remain_quantity":30,"change_quantity":30,"is_actual_remain_quantity":true}
+ *
+ * Ba khác biệt so với sự kiện đơn hàng, cả ba đều là chỗ dễ vỡ nếu ai siết schema:
+ *  - **`order_id` VẮNG HẲN** (8 khoá, không phải 9) — không có đơn nào gây ra biến động này.
+ *  - `change_quantity` DƯƠNG (hàng vào kho), không âm như bán hàng.
+ *  - `is_actual_remain_quantity` = `true`, và `remain` vẫn có thể KHÁC `actual` (ca SP000417 thật:
+ *    remain 29 vs actual 30 — 1 cái đang giữ cho đơn chưa xuất).
+ */
+const SU_KIEN_PHIEU_NHAP = (opts: {
+  remain: number;
+  insertedAt: string;
+  actual?: number;
+  changeQuantity?: number;
+}) =>
+  `{"type":"variations_warehouses","inserted_at":"${opts.insertedAt}",` +
+  `"variation_id":"${VARIATION_ID}","warehouse_id":"${WAREHOUSE_KHO_TONG}",` +
+  `"remain_quantity":${opts.remain},"actual_remain_quantity":${opts.actual ?? opts.remain},` +
+  `"change_quantity":${opts.changeQuantity ?? 30},"is_actual_remain_quantity":true}`;
 
 /** `syncedAt` = lần cuối API ghi biến thể. Guard thứ tự so mốc sự kiện với nó. */
 async function taoVariant(stock: number, syncedAt: Date, pancakeId = VARIATION_ID): Promise<void> {
@@ -114,6 +139,84 @@ describe("webhook tồn kho — đường ghi", () => {
     });
 
     expect((await tonHienTai()).stock).toBe(1);
+  });
+});
+
+/**
+ * Ca PHIẾU NHẬP KHO — đo thật 2026-09-04, đóng câu hỏi treo từ 2026-07-27.
+ *
+ * Phiếu nhập bên Pancake CÓ bắn `variations_warehouses`, độ trễ 1 giây (lưu 22:32:46 → app nhận
+ * 22:32:47 giờ VN), 8/8 mã ghi đúng, 0 sự kiện `ton-kho-can-xem`. Trước đó tài liệu chỉ dám hứa
+ * "chậm nhất ~24 giờ theo lượt API đêm" vì chưa có mẫu thật.
+ *
+ * Lưới này giữ đúng hành vi ĐANG ĐÚNG: `order_id` tuỳ chọn là thứ DUY NHẤT cho phép phiếu nhập đi
+ * lọt. Ai siết nó thành bắt buộc thì mọi phiếu nhập rơi hết vào `ton-kho-can-xem` — tồn đứng im tới
+ * lượt vá đêm mà không cổng nào bắt.
+ */
+describe("webhook tồn kho — phiếu nhập kho (đo thật 2026-09-04)", () => {
+  it("phiếu nhập KHÔNG có `order_id` + `change_quantity` DƯƠNG → vẫn ghi tồn", async () => {
+    await taoVariant(7, new Date("2026-09-04T10:00:00Z"));
+
+    const kq = await xuLySuKienWebhook({
+      shopId: SHOP_KHO,
+      payload: SU_KIEN_PHIEU_NHAP({ remain: 37, insertedAt: "2026-09-04 15:32:46.779501" }),
+    });
+
+    expect(kq.processedAs).toBe("ton-kho");
+    const v = await tonHienTai();
+    expect(v.stock).toBe(37);
+    expect(v.stockUpdatedAt?.toISOString()).toBe("2026-09-04T15:32:46.779Z");
+  });
+
+  it("phiếu nhập: `remain` ≠ `actual` → lấy remain (tồn khả dụng), kể cả khi remain ÂM", async () => {
+    // Ca SP000417 thật: 30 cái vừa nhập nhưng 1 cái đang giữ cho đơn chưa xuất ⇒ remain 29, actual 30.
+    await taoVariant(-1, new Date("2026-09-04T10:00:00Z"));
+
+    await xuLySuKienWebhook({
+      shopId: SHOP_KHO,
+      payload: SU_KIEN_PHIEU_NHAP({
+        remain: 29,
+        actual: 30,
+        insertedAt: "2026-09-04 15:32:46.779394",
+      }),
+    });
+
+    expect((await tonHienTai()).stock).toBe(29);
+  });
+
+  it("phiếu nhập KHÔNG đụng giá vốn — Pancake tính lại giá TB, app giữ số của mình", async () => {
+    // Đúng chỗ này là lý do giá vốn phải chạy công cụ đối chiếu có người duyệt (bất biến #5):
+    // phiếu nhập làm Pancake đổi `average_imported_price`, nhưng webhook TUYỆT ĐỐI không được
+    // mang số đó vào — nó chỉ chạm cột `stock`.
+    await taoVariant(0, new Date("2026-09-04T10:00:00Z"));
+
+    await xuLySuKienWebhook({
+      shopId: SHOP_KHO,
+      payload: SU_KIEN_PHIEU_NHAP({ remain: 30, insertedAt: "2026-09-04 15:32:46.779250" }),
+    });
+
+    const v = await tonHienTai();
+    expect(v.stock).toBe(30);
+    expect(v.costPrice).toBe(50_000);
+  });
+
+  it("hai sự kiện SONG SINH cùng lô nhập → bản chụp cũ hơn không kéo tồn lùi", async () => {
+    // Pancake bắn nhiều sự kiện cho cùng một lô, lệch nhau vài chục micro-giây (đo thật: 6/18 sự
+    // kiện của phiếu 04/09 rơi vào `ton-kho-cu-hon`). Bản tới sau nhưng chụp TRƯỚC phải bị bỏ.
+    await taoVariant(0, new Date("2026-09-04T10:00:00Z"));
+
+    const moi = await xuLySuKienWebhook({
+      shopId: SHOP_KHO,
+      payload: SU_KIEN_PHIEU_NHAP({ remain: 30, insertedAt: "2026-09-04 15:32:46.779250" }),
+    });
+    const cu = await xuLySuKienWebhook({
+      shopId: SHOP_KHO,
+      payload: SU_KIEN_PHIEU_NHAP({ remain: 0, insertedAt: "2026-09-04 15:32:46.746346" }),
+    });
+
+    expect(moi.processedAs).toBe("ton-kho");
+    expect(cu.processedAs).toBe("ton-kho-cu-hon");
+    expect((await tonHienTai()).stock).toBe(30);
   });
 });
 

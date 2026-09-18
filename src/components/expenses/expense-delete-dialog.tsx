@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import Link from "next/link";
+
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { deleteExpense } from "@/lib/actions/expenses";
@@ -34,6 +36,8 @@ export function ExpenseDeleteDialog({ open, onOpenChange, expense }: ExpenseDele
   if (!expense) return null;
 
   const isRecurring = Boolean(expense.recurringId);
+  // Lãi vay do duyệt kỳ trả nợ sinh ra: con dấu `lastDueHandled` KHÔNG lùi khi xoá dòng này.
+  const doDuyetKySinh = expense.refId?.startsWith("LOAN:") ?? false;
 
   async function handleDelete() {
     if (!expense) return;
@@ -62,8 +66,21 @@ export function ExpenseDeleteDialog({ open, onOpenChange, expense }: ExpenseDele
         </DialogHeader>
 
         <p className="text-sm text-ink">
-          {`Xóa khoản chi '${expense.description}' — ${formatVnd(expense.amount)}? Hành động không hoàn tác.`}
+          {`Xóa khoản chi '${expense.description}' — ${formatVnd(expense.amount)}?`}
         </p>
+        <p className="text-sm text-muted-foreground">
+          Mục này sẽ chuyển vào{" "}
+          <Link href="/tai-chinh/thung-rac" className="underline">
+            Thùng rác
+          </Link>{" "}
+          — bạn khôi phục lại được.
+        </p>
+
+        {doDuyetKySinh && (
+          <p className="text-sm text-muted-foreground">
+            Dòng này do duyệt kỳ trả nợ sinh ra — xoá không mở lại kỳ; muốn ghi lại thì nhập tay.
+          </p>
+        )}
 
         {isRecurring && (
           <div className="flex flex-col gap-2">

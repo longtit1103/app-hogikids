@@ -82,10 +82,18 @@ const DRILL_TARGETS: readonly DrillTarget[] = [
   },
 ];
 
-/** Tách href thành path + URLSearchParams để thêm param mà không mất query cũ. */
-function splitHref(href: string): { path: string; params: URLSearchParams } {
-  const [path, qs] = href.split("?");
-  return { path, params: new URLSearchParams(qs) };
+/**
+ * Tách href thành path + query + NEO (`#…`) để thêm param mà không mất query cũ VÀ không mất neo.
+ * Cắt neo TRƯỚC khi cắt `?`: `URLSearchParams` không biết gì về neo, để nguyên thì `#tiet-kiem`
+ * chui vào giá trị param cuối rồi bị encode thành `%23` — link mở sai tab và không cuộn tới khối
+ * cần xem.
+ */
+function splitHref(href: string): { path: string; params: URLSearchParams; neo: string } {
+  const viTriNeo = href.indexOf("#");
+  const neo = viTriNeo === -1 ? "" : href.slice(viTriNeo);
+  const khongNeo = viTriNeo === -1 ? href : href.slice(0, viTriNeo);
+  const [path, qs] = khongNeo.split("?");
+  return { path, params: new URLSearchParams(qs), neo };
 }
 
 /** Đích đến có nằm dưới `base` không (khớp đúng path, không dính `/tai-chinh-abc`). */
@@ -94,7 +102,7 @@ function isUnder(path: string, base: string): boolean {
 }
 
 export function resolvePnlDrillHref(href: string, month: Date): string {
-  const { path, params } = splitHref(href);
+  const { path, params, neo } = splitHref(href);
 
   const target = DRILL_TARGETS.find((t) => isUnder(path, t.base));
   if (!target) {
@@ -106,5 +114,5 @@ export function resolvePnlDrillHref(href: string, month: Date): string {
   for (const [key, value] of Object.entries(target.extraParams ?? {})) {
     if (!params.has(key)) params.set(key, value); // dòng tự set trang_thai (hoàn/hủy) được giữ nguyên
   }
-  return `${path}?${params.toString()}`;
+  return `${path}?${params.toString()}${neo}`;
 }

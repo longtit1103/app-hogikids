@@ -1,6 +1,7 @@
+import type { CauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import type { UpsertStats } from "@/lib/ingest/pancake-upsert";
 
-import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK_SHOP, type BronzeStream } from "./streams";
+import { type BronzeStream } from "./streams";
 
 /**
  * ĐỐI SOÁT "đã land" vs "đã hạch toán" — MỘT nguồn công thức cho cả hai cổng đang soi
@@ -68,17 +69,25 @@ export function demDaHachToan(stats: UpsertStats): number {
  * vừa land" phải nằm TƯỜNG MINH ở đây — bỏ đi thì mai ai nới whitelist là cổng soi kêu oan mà
  * không hiểu vì sao.
  */
-export function coTheDoiSoat(stream: BronzeStream, shopId: string): boolean {
+export function coTheDoiSoat(
+  stream: BronzeStream,
+  shopId: string,
+  cauHinh: CauHinhShop | null
+): boolean {
+  // Hàm GIỮ THUẦN (không tự đọc DB): cấu hình do người gọi resolve sẵn — route resolve TRƯỚC
+  // transaction land (xem ghi chú ở /api/ingest/raw) rồi truyền xuống, test truyền thẳng object.
+  // `null` = route KHÔNG resolve (stream danh sách mở — ads): các stream đó vốn ngoài phạm vi soi.
+  if (cauHinh === null) return false;
   switch (stream) {
     case "orders":
       return true;
     case "products":
-      return shopId === SHOP_KHO;
+      return shopId === cauHinh.kho;
     case "tiktok/statements":
     case "tiktok/payments":
-      return shopId === SHOP_TIKTOK_SHOP;
+      return cauHinh.tiktokShop !== null && shopId === cauHinh.tiktokShop;
     case "shopee/wallet":
-      return shopId === SHOP_SHOPEE;
+      return shopId === cauHinh.shopee;
     default:
       return false;
   }

@@ -2,7 +2,7 @@ import { format } from "date-fns";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { prisma } from "@/lib/prisma";
-import { quangCaoTheoChienDich } from "@/lib/reports/quang-cao-chien-dich";
+import { quangCaoTheoChienDich } from "@/lib/reports/marketing/quang-cao-chien-dich";
 
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
@@ -18,6 +18,7 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 const RANGE = { from: new Date("2026-05-01T00:00:00+07:00"), to: new Date("2026-05-31T00:00:00+07:00") };
 const TRONG_KY = new Date("2026-05-15T00:00:00+07:00");
+const TRONG_KY_2 = new Date("2026-05-16T00:00:00+07:00");
 const NGOAI_KY = new Date("2026-04-15T00:00:00+07:00");
 
 beforeAll(async () => {
@@ -27,6 +28,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await truncateBusinessTables();
   await prisma.rawMetaAdsReport.deleteMany();
+  await prisma.rawTiktokBusinessReport.deleteMany();
 });
 
 afterAll(async () => {
@@ -89,6 +91,52 @@ async function taoChiSoMeta(opts: {
   });
 }
 
+/**
+ * Land một dòng-ngày Bronze report TikTok Business, đúng shape n8n land:
+ * `{dimensions:{campaign_id, stat_time_day}, metrics:{campaign_name, cost|spend[, orders, gross_revenue, roi]}}`.
+ * `orders: undefined` = bản payload ĐỜI CŨ (trước 21/08, chưa xin metric orders) — key vắng hẳn.
+ * `grossRevenue`/`roi: undefined` = bản ĐỜI CŨ hơn nữa (trước 25/08) — hai key này vắng hẳn.
+ */
+async function taoDonTiktok(opts: {
+  campaignId: string;
+  /** number = giá trị bình thường; string = giá trị DỊ ("1.5", "abc") để test cổng regex. */
+  orders?: number | string;
+  auction?: boolean;
+  date?: Date;
+  fetchedAt?: Date;
+  /** number = giá trị bình thường; string = giá trị DỊ ("N/A") để test cổng regex của MẪU SỐ ROI. */
+  cost?: number | string;
+  /** Tiền sàn trả dạng CHUỖI, có thể mang phần thập phân ("219789.00") hoặc dị ("N/A"). */
+  grossRevenue?: number | string;
+  /** Chỉ để ĐỐI CHỨNG ca một-ngày — reader KHÔNG đọc key này (cộng tỉ số là số vô nghĩa). */
+  roi?: number | string;
+}): Promise<void> {
+  const ngay = format(opts.date ?? TRONG_KY, "yyyy-MM-dd");
+  const externalId = `${opts.auction ? "auction:" : ""}${opts.campaignId}:${ngay}`;
+  const metrics: Record<string, string> = {
+    campaign_name: `CD ${opts.campaignId}`,
+    // Auction dùng metric `spend`, GMV Max dùng `cost` — hai bộ RỜI NHAU (luật `mapTiktokAdsReport`).
+    [opts.auction ? "spend" : "cost"]: String(opts.cost ?? 0),
+  };
+  if (opts.orders !== undefined) metrics.orders = String(opts.orders);
+  if (opts.grossRevenue !== undefined) metrics.gross_revenue = String(opts.grossRevenue);
+  if (opts.roi !== undefined) metrics.roi = String(opts.roi);
+  await prisma.rawTiktokBusinessReport.create({
+    data: {
+      shopId: "7090000000000000001",
+      externalId,
+      // payloadHash phải đổi theo MỌI metric: hai bản khác nội dung cùng khoá gốc mà trùng hash là
+      // đụng unique — đúng chỗ ca "backfill land bản giàu hơn" cần hai dòng cùng externalId.
+      payloadHash: `h-${externalId}-${opts.orders ?? "khong-key"}-${opts.cost ?? 0}-${opts.grossRevenue ?? "khong-gmv"}-${opts.roi ?? "khong-roi"}`,
+      fetchedAt: opts.fetchedAt ?? new Date(),
+      payload: {
+        dimensions: { campaign_id: opts.campaignId, stat_time_day: `${ngay} 00:00:00` },
+        metrics,
+      },
+    },
+  });
+}
+
 describe("quangCaoTheoChienDich", () => {
   it("Meta: gom đúng chi tiêu + tính CTR/CPM/CPC từ tiền của sổ", async () => {
     await taoChiAds({ nguon: "META", campaignId: "C1", ten: "Váy hè", amount: 1_000_000 });
@@ -104,6 +152,8 @@ describe("quangCaoTheoChienDich", () => {
     expect(c.ctr).toBeCloseTo(2, 6); // 2000/100000 × 100
     expect(c.cpm).toBeCloseTo(10_000, 6); // 1.000.000/100.000 × 1000
     expect(c.cpc).toBeCloseTo(500, 6); // 1.000.000/2.000
+    expect(c.donSan).toBeNull(); // Meta không có metric đơn — null chứ không 0
+    expect(c.cpo).toBeNull();
     expect(r.tongChiTieu).toBe(1_000_000);
   });
 
@@ -118,8 +168,213 @@ describe("quangCaoTheoChienDich", () => {
     expect(c.ctr).toBeNull();
     expect(c.cpm).toBeNull();
     expect(c.cpc).toBeNull();
+    expect(c.donSan).toBeNull();
+    expect(c.cpo).toBeNull();
     expect(r.nguonThieuChiSo).toEqual(["TIKTOK_ADS"]);
     expect(r.nguonCoChiSo).toEqual([]);
+  });
+
+  it("TikTok GMV Max: cộng đơn sàn báo theo kỳ + CPO tính trên tiền sổ GỒM VAT", async () => {
+    // Mỗi ngày một dòng sổ — đúng khuôn prepareAdsExpenseRow ghi (refId mang ngày).
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G1", ten: "Toàn shop", amount: 300_000, date: new Date("2026-05-15T00:00:00+07:00") });
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G1", ten: "Toàn shop", amount: 200_000, date: new Date("2026-05-16T00:00:00+07:00") });
+    await taoDonTiktok({ campaignId: "G1", orders: 3, date: new Date("2026-05-15T00:00:00+07:00") });
+    await taoDonTiktok({ campaignId: "G1", orders: 2, date: new Date("2026-05-16T00:00:00+07:00") });
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    const c = r.chienDich[0];
+    expect(c.chiTieu).toBe(500_000);
+    expect(c.donSan).toBe(5);
+    expect(c.cpo).toBeCloseTo(100_000, 6); // 500.000 (gồm VAT, từ sổ) / 5 đơn
+    // Đơn/CPO KHÔNG làm TikTok bị coi là "có chỉ số hiển thị/click".
+    expect(r.nguonThieuChiSo).toEqual(["TIKTOK_ADS"]);
+  });
+
+  it("kỳ có ngày THIẾU key orders (payload đời cũ, chưa backfill) ⇒ Đơn null, KHÔNG cộng thiếu", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G2", ten: "Thiếu ngày", amount: 200_000, date: new Date("2026-05-15T00:00:00+07:00") });
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G2", ten: "Thiếu ngày", amount: 200_000, date: new Date("2026-05-16T00:00:00+07:00") });
+    await taoDonTiktok({ campaignId: "G2", orders: 4, date: new Date("2026-05-15T00:00:00+07:00") });
+    // Ngày 16/05 land TRƯỚC 21/08 — metrics chỉ có campaign_name + cost, không có key orders.
+    await taoDonTiktok({ campaignId: "G2", date: new Date("2026-05-16T00:00:00+07:00") });
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    expect(r.chienDich[0].donSan).toBeNull(); // 4 là số THIẾU của kỳ, hiện ra là số sai không tín hiệu
+    expect(r.chienDich[0].cpo).toBeNull();
+  });
+
+  it("ngày sổ CÓ tiền GMV Max mà Bronze KHÔNG có dòng nào ⇒ Đơn null (ca ads mồ côi)", async () => {
+    // landRaw trong n8n là best-effort — land hỏng lẻ một ngày thì Expense vẫn ghi.
+    // Review đối kháng 21/08: cổng "thiếu key orders" cũ MÙ với ca này (đếm trên dòng
+    // CÓ MẶT). Cổng mới đếm phủ NGÀY theo sổ nên phải bắt được.
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G7", ten: "Mồ côi", amount: 100_000, date: new Date("2026-05-15T00:00:00+07:00") });
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G7", ten: "Mồ côi", amount: 100_000, date: new Date("2026-05-16T00:00:00+07:00") });
+    await taoDonTiktok({ campaignId: "G7", orders: 2, date: new Date("2026-05-15T00:00:00+07:00") });
+    // 16/05: KHÔNG có dòng Bronze nào.
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    expect(r.chienDich[0].donSan).toBeNull();
+    expect(r.chienDich[0].cpo).toBeNull();
+  });
+
+  it("orders CÓ key nhưng giá trị dị ('1.5'/'abc') ⇒ Đơn null, không ép 0 không văng query", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G8", ten: "Giá trị dị", amount: 100_000, date: new Date("2026-05-15T00:00:00+07:00") });
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G8", ten: "Giá trị dị", amount: 100_000, date: new Date("2026-05-16T00:00:00+07:00") });
+    await taoDonTiktok({ campaignId: "G8", orders: "1.5", date: new Date("2026-05-15T00:00:00+07:00") });
+    await taoDonTiktok({ campaignId: "G8", orders: "abc", date: new Date("2026-05-16T00:00:00+07:00") });
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    expect(r.chienDich[0].donSan).toBeNull();
+    expect(r.chienDich[0].cpo).toBeNull();
+  });
+
+  it("campaign chạy CẢ auction lẫn GMV Max: CPO chia tiền GMV Max riêng, KHÔNG chia tổng", async () => {
+    const ngay = format(TRONG_KY, "yyyy-MM-dd");
+    // Sổ: 100.000đ auction (refId 4 mảnh) + 200.000đ GMV Max (refId 3 mảnh) cùng ngày.
+    await prisma.expense.create({
+      data: {
+        date: TRONG_KY, categoryId: "ads", adsSource: "TIKTOK_ADS",
+        description: "Hai loại", amount: 100_000, source: "ADS_API",
+        refId: `TIKTOK_ADS:auction:${ngay}:G9`,
+      },
+    });
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G9", ten: "Hai loại", amount: 200_000 });
+    await taoDonTiktok({ campaignId: "G9", orders: 2 });
+    await taoDonTiktok({ campaignId: "G9", auction: true }); // Bronze auction không bao giờ có orders
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    const c = r.chienDich[0];
+    expect(c.chiTieu).toBe(300_000); // cột Chi tiêu vẫn là tổng cả 2 loại — tiền không biến mất
+    expect(c.donSan).toBe(2);
+    // Review đối kháng 21/08: chia tổng 300.000/2 = 150.000 là CPO thổi +50% câm.
+    expect(c.cpo).toBeCloseTo(100_000, 6); // 200.000 (GMV Max) / 2 đơn
+  });
+
+  it("bắn lại cùng ngày (backfill mang thêm key orders) ⇒ chỉ bản MỚI NHẤT thắng", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G3", ten: "Backfill", amount: 300_000 });
+    // Bản đời cũ không có orders, land trước.
+    await taoDonTiktok({ campaignId: "G3", fetchedAt: new Date("2026-05-20"), cost: 100 });
+    // Backfill land bản mới CÙNG khoá (externalId y hệt) có orders.
+    await taoDonTiktok({ campaignId: "G3", orders: 7, fetchedAt: new Date("2026-05-21"), cost: 100 });
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    expect(r.chienDich[0].donSan).toBe(7);
+  });
+
+  it("dòng AUCTION cùng chiến dịch bị loại khỏi phép đếm đơn — không kéo Đơn về null oan", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G4", ten: "Chạy cả 2 loại", amount: 200_000 });
+    await taoDonTiktok({ campaignId: "G4", orders: 2 });
+    // Dòng auction không bao giờ có orders (bộ metric rời nhau) — nằm chung Bronze với tiền tố khoá.
+    await taoDonTiktok({ campaignId: "G4", auction: true });
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    expect(r.chienDich[0].donSan).toBe(2);
+    expect(r.chienDich[0].cpo).toBeCloseTo(100_000, 6);
+  });
+
+  it("đơn sàn báo NGOÀI kỳ bị loại — biên ngày không được lệch", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G5", ten: "Biên kỳ", amount: 100_000 });
+    await taoDonTiktok({ campaignId: "G5", orders: 1 });
+    await taoDonTiktok({ campaignId: "G5", orders: 99, date: new Date("2026-04-30T00:00:00+07:00") });
+    await taoDonTiktok({ campaignId: "G5", orders: 88, date: new Date("2026-06-01T00:00:00+07:00") });
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    expect(r.chienDich[0].donSan).toBe(1);
+  });
+
+  it("đơn = 0 đo được ⇒ Đơn hiện 0 (khác null), CPO null vì không chia 0", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "G6", ten: "Không ra đơn", amount: 100_000 });
+    await taoDonTiktok({ campaignId: "G6", orders: 0 });
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    expect(r.chienDich[0].donSan).toBe(0);
+    expect(r.chienDich[0].cpo).toBeNull();
+  });
+
+  it("GMV Max: gmvSan = Σ gross_revenue, roiSan = gmvSan / Σ cost (CHƯA VAT)", async () => {
+    // Sổ ghi tiền GỒM VAT (75.789 × 1,1 = 83.368) — roiSan KHÔNG được dùng số này làm mẫu.
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T1", ten: "TOÀN SHOP", amount: 83_368 });
+    await taoDonTiktok({ campaignId: "T1", orders: 1, cost: 75_789, grossRevenue: "219789.00", roi: "2.90" });
+
+    const c = (await quangCaoTheoChienDich(RANGE)).chienDich[0];
+    expect(c.gmvSan).toBe(219_789);
+    expect(c.roiSan).toBeCloseTo(2.9, 2); // đối chứng với chính `metrics.roi` sàn trả cho ca 1 ngày
+  });
+
+  it("chiGmvMax trả ra ngoài = tiền SỔ gồm VAT của phần GMV Max; dòng Meta là null", async () => {
+    // Bảng con item-level cần đúng con số này để tính dòng "Chưa phân bổ". Trả ra đây thay vì
+    // để người gọi tự dò lại refId: chép cái regex ra nơi thứ hai là bảo đảm hai nơi sẽ trôi khác nhau.
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T1", ten: "TOÀN SHOP", amount: 83_368 });
+    await taoDonTiktok({ campaignId: "T1", orders: 1, cost: 75_789 });
+    await taoChiAds({ nguon: "META", campaignId: "M1", ten: "CD Meta", amount: 90_000 });
+
+    const r = await quangCaoTheoChienDich(RANGE);
+
+    expect(r.chienDich.find((c) => c.campaignId === "T1")!.chiGmvMax).toBe(83_368);
+    expect(r.chienDich.find((c) => c.campaignId === "M1")!.chiGmvMax).toBeNull();
+  });
+
+  it("gộp NHIỀU ngày: gmvSan cộng được, roiSan là THƯƠNG SỐ chứ không phải trung bình roi", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T2", ten: "CD2", amount: 110_000, date: TRONG_KY });
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T2", ten: "CD2", amount: 220_000, date: TRONG_KY_2 });
+    await taoDonTiktok({ campaignId: "T2", orders: 1, cost: 100_000, grossRevenue: "100000", roi: "1.00", date: TRONG_KY });
+    await taoDonTiktok({ campaignId: "T2", orders: 3, cost: 200_000, grossRevenue: "800000", roi: "4.00", date: TRONG_KY_2 });
+
+    const c = (await quangCaoTheoChienDich(RANGE)).chienDich[0];
+    expect(c.gmvSan).toBe(900_000);
+    expect(c.roiSan).toBeCloseTo(3.0, 6); // 900.000 / 300.000 — KHÔNG phải (1+4)/2 = 2,5
+  });
+
+  it("một ngày trong kỳ THIẾU key gross_revenue ⇒ gmvSan/roiSan null, nhưng donSan vẫn có số", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T3", ten: "CD3", amount: 110_000, date: TRONG_KY });
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T3", ten: "CD3", amount: 110_000, date: TRONG_KY_2 });
+    await taoDonTiktok({ campaignId: "T3", orders: 1, cost: 100_000, grossRevenue: "100000", roi: "1.00", date: TRONG_KY });
+    await taoDonTiktok({ campaignId: "T3", orders: 2, cost: 100_000, date: TRONG_KY_2 }); // bản ĐỜI CŨ, chưa backfill
+    const c = (await quangCaoTheoChienDich(RANGE)).chienDich[0];
+    expect(c.donSan).toBe(3);
+    expect(c.gmvSan).toBeNull();
+    expect(c.roiSan).toBeNull();
+  });
+
+  it("gross_revenue dạng chuỗi DỊ (\"N/A\") ⇒ null, KHÔNG ra 0", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T4", ten: "CD4", amount: 110_000 });
+    await taoDonTiktok({ campaignId: "T4", orders: 1, cost: 100_000, grossRevenue: "N/A" });
+    const c = (await quangCaoTheoChienDich(RANGE)).chienDich[0];
+    expect(c.gmvSan).toBeNull();
+  });
+
+  it("gmv hợp lệ nhưng cost DỊ ⇒ gmvSan/roiSan null (không phồng), donSan vẫn có số", async () => {
+    // Chiều hở của cổng chỉ-kẹp-gmv: ngày 2 cộng 500.000 vào TỬ mà mẫu +0 ⇒ ROI phồng mà không tín hiệu.
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T5", ten: "CD5", amount: 110_000, date: TRONG_KY });
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T5", ten: "CD5", amount: 110_000, date: TRONG_KY_2 });
+    await taoDonTiktok({ campaignId: "T5", orders: 1, cost: 100_000, grossRevenue: "100000", date: TRONG_KY });
+    await taoDonTiktok({ campaignId: "T5", orders: 2, cost: "N/A", grossRevenue: "500000", date: TRONG_KY_2 });
+
+    const c = (await quangCaoTheoChienDich(RANGE)).chienDich[0];
+    expect(c.donSan).toBe(3); // cổng của Đơn không liên quan — orders hai ngày đều đọc được
+    expect(c.gmvSan).toBeNull();
+    expect(c.roiSan).toBeNull();
+  });
+
+  it("hai cổng phủ-ngày ĐỘC LẬP: orders THIẾU / gmv ĐỦ ⇒ donSan null nhưng gmvSan có số", async () => {
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T6", ten: "CD6", amount: 110_000, date: TRONG_KY });
+    await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "T6", ten: "CD6", amount: 110_000, date: TRONG_KY_2 });
+    await taoDonTiktok({ campaignId: "T6", orders: 1, cost: 100_000, grossRevenue: "100000", date: TRONG_KY });
+    // Ngày 2 KHÔNG có key orders nhưng CÓ đủ cost + gross_revenue.
+    await taoDonTiktok({ campaignId: "T6", cost: 300_000, grossRevenue: "500000", date: TRONG_KY_2 });
+
+    const c = (await quangCaoTheoChienDich(RANGE)).chienDich[0];
+    expect(c.donSan).toBeNull();
+    expect(c.gmvSan).toBe(600_000);
+    expect(c.roiSan).toBeCloseTo(1.5, 6); // 600.000 / 400.000
   });
 
   it("hiển thị = 0 thì CTR/CPM là null, KHÔNG chia cho 0", async () => {
@@ -210,10 +465,11 @@ describe("quangCaoTheoChienDich", () => {
     expect(r.chienDich[0].cpm).toBeCloseTo(10_000, 6);
   });
 
-  it("cùng campaignId ở HAI nguồn: tách 2 dòng, dòng TikTok KHÔNG mượn chỉ số của Meta", async () => {
+  it("cùng campaignId ở HAI nguồn: tách 2 dòng, KHÔNG mượn chỉ số chéo nguồn (cả 2 chiều)", async () => {
     await taoChiAds({ nguon: "META", campaignId: "XX", ten: "Meta XX", amount: 200_000 });
     await taoChiAds({ nguon: "TIKTOK_ADS", campaignId: "XX", ten: "TikTok XX", amount: 100_000 });
     await taoChiSoMeta({ campaignId: "XX", externalId: "m-xx", impressions: 50_000, clicks: 500 });
+    await taoDonTiktok({ campaignId: "XX", orders: 3 });
 
     const r = await quangCaoTheoChienDich(RANGE);
 
@@ -221,7 +477,9 @@ describe("quangCaoTheoChienDich", () => {
     const meta = r.chienDich.find((c) => c.nguon === "META")!;
     const tiktok = r.chienDich.find((c) => c.nguon === "TIKTOK_ADS")!;
     expect(meta.hienThi).toBe(50_000);
-    expect(tiktok.hienThi).toBeNull();
+    expect(tiktok.hienThi).toBeNull(); // TikTok không mượn hiển thị/click của Meta
+    expect(meta.donSan).toBeNull(); // Meta không mượn đơn sàn báo của TikTok
+    expect(tiktok.donSan).toBe(3);
   });
 
   it("nguồn CÓ chỉ số không bị gắn nhãn 'thiếu chỉ số' chỉ vì một dòng không tra được", async () => {

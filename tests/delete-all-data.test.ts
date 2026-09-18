@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { moTaKhoanMatTrang } from "@/components/settings/delete-all-dialog";
 import {
   coDuLieuGiaoDich,
   deleteAllData,
@@ -7,10 +8,13 @@ import {
   demChiPhiKhongDungLai,
   demDonMoCoi,
   dungLaiTuKhoTho,
+  type ChiPhiKhongDungLai,
 } from "@/lib/actions/data-admin";
 import { landRaw } from "@/lib/bronze/land-raw";
 import { prisma } from "@/lib/prisma";
-import { seedReference } from "./helpers/test-db";
+import { seedReference, seedShopIdSetting } from "./helpers/test-db";
+
+import { xoaCacheCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 
 /**
  * Integration test hợp đồng "Xóa dữ liệu giao dịch" + đường phục hồi, chạy trên
@@ -112,6 +116,64 @@ async function seedFullDataset(): Promise<void> {
   await prisma.recurringExpense.create({
     data: { categoryId: "fixed", amount: 2000000, dayOfMonth: 1, description: "Mặt bằng" },
   });
+  // Khoản tiền khác ghi tay — sổ sách giao dịch, không có bản gốc ngoài app.
+  await prisma.cashMovement.create({
+    data: { date: new Date("2026-07-05T00:00:00+07:00"), kind: "CAPITAL_IN", amount: 7_000_000, description: "Góp vốn test" },
+  });
+  // Hồ sơ khoản vay + dòng giải ngân của nó: FK `onDelete: Restrict` nên lượt xoá PHẢI dọn
+  // `CashMovement` trước `Loan`; sai thứ tự là cả transaction xoá vỡ, không phải hỏng lặng.
+  const loan = await prisma.loan.create({
+    data: {
+      name: "Vay test",
+      lender: "VPBank",
+      startDate: new Date("2026-07-01T00:00:00+07:00"),
+      annualRateBp: 1050,
+      termMonths: 12,
+      firstDueDate: new Date("2026-08-01T00:00:00+07:00"),
+    },
+  });
+  await prisma.cashMovement.create({
+    data: {
+      date: new Date("2026-07-01T00:00:00+07:00"),
+      kind: "LOAN_IN",
+      amount: 50_000_000,
+      loanId: loan.id,
+      description: "Giải ngân test",
+    },
+  });
+  // Sổ tiết kiệm sinh lãi ĐÃ TẤT TOÁN: đủ cả ba bảng con-cha (`ThuNhap` → `CashMovement` →
+  // `SoTietKiem`) để lượt xoá phải đi đúng thứ tự, nếu không FK `Restrict` chặn ngay.
+  const soTietKiem = await prisma.soTietKiem.create({
+    data: {
+      name: "Sổ 6 tháng test",
+      bank: "Vietcombank",
+      principal: 30_000_000,
+      startDate: new Date("2026-07-01T00:00:00+07:00"),
+      termMonths: 6,
+      maturityDate: new Date("2027-01-01T00:00:00+07:00"),
+      annualRateBp: 520,
+      closedAt: new Date("2027-01-01T00:00:00+07:00"),
+    },
+  });
+  await prisma.cashMovement.create({
+    data: {
+      date: new Date("2026-07-01T00:00:00+07:00"),
+      kind: "SAVINGS_OUT",
+      amount: 30_000_000,
+      savingsId: soTietKiem.id,
+      description: "Gửi tiết kiệm test",
+    },
+  });
+  await prisma.thuNhap.create({
+    data: {
+      date: new Date("2027-01-01T00:00:00+07:00"),
+      kind: "LAI_TIET_KIEM",
+      amount: 780_000,
+      savingsId: soTietKiem.id,
+      refId: `TIETKIEM:${soTietKiem.id}`,
+      description: "Lãi sổ test",
+    },
+  });
   await prisma.syncLog.create({ data: { kind: "PANCAKE", status: "OK" } });
   // Dòng BACKUP = nguồn trạng thái sao lưu của màn Cài đặt (`lib/backup/trang-thai-sao-luu.ts`),
   // KHÔNG phải log giao dịch — phải sống sót qua lượt xoá.
@@ -193,6 +255,10 @@ async function clearAll(): Promise<void> {
   await prisma.product.deleteMany();
   await prisma.expense.deleteMany();
   await prisma.recurringExpense.deleteMany();
+  await prisma.thuNhap.deleteMany(); // TRƯỚC SoTietKiem (FK Restrict)
+  await prisma.cashMovement.deleteMany();
+  await prisma.soTietKiem.deleteMany(); // SAU ThuNhap + CashMovement (FK Restrict)
+  await prisma.loan.deleteMany(); // SAU CashMovement (FK Restrict)
   await prisma.syncLog.deleteMany();
   await prisma.rawPancakeOrder.deleteMany();
   await prisma.rawPancakeProduct.deleteMany();
@@ -212,10 +278,14 @@ async function clearAll(): Promise<void> {
   await prisma.shopeeSettlement.deleteMany();
   await prisma.setting.deleteMany();
   await prisma.user.deleteMany();
+  // Vừa xoá TRỌN Setting ⇒ mất luôn shop id mà đường transform/rebuild đọc từ cấu hình
+  // (cau-hinh-shop.ts) — seed lại + xoá cache, nếu không dungLaiTuKhoTho ném "Chưa cấu hình".
+  await seedShopIdSetting();
+  xoaCacheCauHinhShop();
 }
 
 beforeAll(async () => {
-  await seedReference(); // 4 kênh + 7 danh mục hệ thống
+  await seedReference(); // 4 kênh + 8 danh mục hệ thống
 }, 60_000);
 
 beforeEach(async () => {
@@ -230,6 +300,7 @@ afterAll(async () => {
 
 describe("deleteAllData", () => {
   it("gõ SAI tên shop → ok:false, KHÔNG xoá gì", async () => {
+    const settingTruoc = await prisma.setting.count();
     const res = await deleteAllData("Tên Sai");
     expect(res.ok).toBe(false);
     if (res.ok) return;
@@ -242,16 +313,23 @@ describe("deleteAllData", () => {
     expect(await prisma.variant.count()).toBe(1);
     expect(await prisma.expense.count()).toBe(1);
     expect(await prisma.recurringExpense.count()).toBe(1);
+    expect(await prisma.cashMovement.count()).toBe(3); // 1 góp vốn + 1 giải ngân vay + 1 gửi tiết kiệm
+    expect(await prisma.loan.count()).toBe(1);
+    expect(await prisma.soTietKiem.count()).toBe(1);
+    expect(await prisma.thuNhap.count()).toBe(1);
     expect(await prisma.syncLog.count()).toBe(2); // 1 PANCAKE + 1 BACKUP
     expect(await prisma.tiktokSettlement.count()).toBe(1);
     expect(await prisma.tiktokAdsSettlement.count()).toBe(1);
     expect(await prisma.tiktokPayment.count()).toBe(1);
     expect(await prisma.shopeeSettlement.count()).toBe(1);
     expect(await prisma.rawPancakeOrder.count()).toBe(1);
-    expect(await prisma.setting.count()).toBe(2);
+    // So trước/sau thay vì số cứng: seed toàn cục (tests/setup.ts + clearAll) còn thêm các key
+    // shop id cấu hình — ý định của assert là "Setting không bị đụng", không phải đếm đúng N.
+    expect(await prisma.setting.count()).toBe(settingTruoc);
   });
 
   it("gõ ĐÚNG tên shop → ok:true, xoá giao dịch, GIỮ cấu hình", async () => {
+    const settingTruoc = await prisma.setting.count();
     const res = await deleteAllData(SHOP_NAME);
     expect(res.ok).toBe(true);
 
@@ -260,6 +338,14 @@ describe("deleteAllData", () => {
     expect(await prisma.orderItem.count()).toBe(0);
     expect(await prisma.expense.count()).toBe(0);
     expect(await prisma.recurringExpense.count()).toBe(0);
+    expect(await prisma.cashMovement.count()).toBe(0);
+    // Hồ sơ khoản vay cũng là sổ sách nhập tay — bỏ sót thì màn Dòng tiền còn dư nợ của một khoản
+    // không còn dòng tiền nào đỡ.
+    expect(await prisma.loan.count()).toBe(0);
+    // Sổ tiết kiệm + lãi đã ghi. `ThuNhap` là ca hỏng LẶNG nguy nhất: sót nó thì dòng "Thu nhập tài
+    // chính" của P&L vẫn cộng lãi của một sổ không còn tồn tại, mà không phép đếm nào khác đỏ.
+    expect(await prisma.soTietKiem.count()).toBe(0);
+    expect(await prisma.thuNhap.count()).toBe(0);
     expect(await prisma.syncLog.count({ where: { kind: { not: "BACKUP" } } })).toBe(0);
 
     // 4 bảng "Tiền đã về" cũng về 0 — cùng là sổ sách giao dịch.
@@ -273,8 +359,9 @@ describe("deleteAllData", () => {
     expect(await prisma.channel.count()).toBe(4);
     expect(await prisma.expenseCategory.count()).toBeGreaterThanOrEqual(7);
 
-    // Setting còn NGUYÊN — cấu hình, không phải giao dịch.
-    expect(await prisma.setting.count()).toBe(2);
+    // Setting còn NGUYÊN — cấu hình, không phải giao dịch. So trước/sau thay vì số cứng (seed
+    // toàn cục còn thêm key shop id cấu hình).
+    expect(await prisma.setting.count()).toBe(settingTruoc);
 
     // Dòng SyncLog kind BACKUP còn NGUYÊN: quy trình đúng là "Sao lưu ngay rồi mới xóa", xóa dấu
     // vết lượt sao lưu đi thì màn Cài đặt lại kêu "Chưa sao lưu lần nào" ngay sau lượt xóa —
@@ -344,6 +431,12 @@ describe("demChiPhiKhongDungLai", () => {
       soChiPhi: 1,
       tongChiPhi: 50_000,
       soDinhKy: 1,
+      // 3 dòng: góp vốn 7tr + giải ngân vay 50tr + gửi tiết kiệm 30tr.
+      soKhoanTienKhac: 3,
+      tongKhoanTienKhac: 87_000_000,
+      soKhoanVay: 1,
+      soSoTietKiem: 1,
+      tongThuNhap: 780_000,
     });
   });
 
@@ -365,6 +458,12 @@ describe("demChiPhiKhongDungLai", () => {
       soChiPhi: 1,
       tongChiPhi: 50_000,
       soDinhKy: 1,
+      // 3 dòng: góp vốn 7tr + giải ngân vay 50tr + gửi tiết kiệm 30tr.
+      soKhoanTienKhac: 3,
+      tongKhoanTienKhac: 87_000_000,
+      soKhoanVay: 1,
+      soSoTietKiem: 1,
+      tongThuNhap: 780_000,
     });
 
     await prisma.expense.deleteMany({ where: { source: "ADS_API" } });
@@ -373,8 +472,35 @@ describe("demChiPhiKhongDungLai", () => {
   it("không có chi phí nào → 0 hết (không trả null)", async () => {
     await prisma.expense.deleteMany();
     await prisma.recurringExpense.deleteMany();
+    await prisma.thuNhap.deleteMany(); // TRƯỚC SoTietKiem (FK Restrict)
+    await prisma.cashMovement.deleteMany();
+    await prisma.soTietKiem.deleteMany();
+    await prisma.loan.deleteMany();
 
-    expect(await demChiPhiKhongDungLai()).toEqual({ soChiPhi: 0, tongChiPhi: 0, soDinhKy: 0 });
+    expect(await demChiPhiKhongDungLai()).toEqual({
+      soChiPhi: 0,
+      tongChiPhi: 0,
+      soDinhKy: 0,
+      soKhoanTienKhac: 0,
+      tongKhoanTienKhac: 0,
+      soKhoanVay: 0,
+      soSoTietKiem: 0,
+      tongThuNhap: 0,
+    });
+  });
+
+  it("CHỈ còn khoản tiền khác (đã xoá hết chi phí) → vẫn đếm để dialog cảnh báo", async () => {
+    await prisma.expense.deleteMany();
+    await prisma.recurringExpense.deleteMany();
+    expect(await demChiPhiKhongDungLai()).toMatchObject({
+      soChiPhi: 0,
+      // 3 dòng: góp vốn 7tr + giải ngân vay 50tr + gửi tiết kiệm 30tr.
+      soKhoanTienKhac: 3,
+      tongKhoanTienKhac: 87_000_000,
+      soKhoanVay: 1,
+      soSoTietKiem: 1,
+      tongThuNhap: 780_000,
+    });
   });
 });
 
@@ -448,6 +574,10 @@ async function xoaHetGiaoDich(): Promise<void> {
   await prisma.order.deleteMany();
   await prisma.expense.deleteMany();
   await prisma.recurringExpense.deleteMany();
+  await prisma.thuNhap.deleteMany(); // TRƯỚC SoTietKiem (FK Restrict)
+  await prisma.cashMovement.deleteMany();
+  await prisma.soTietKiem.deleteMany(); // SAU ThuNhap + CashMovement (FK Restrict)
+  await prisma.loan.deleteMany(); // SAU CashMovement (FK Restrict)
   await prisma.tiktokSettlement.deleteMany();
   await prisma.tiktokAdsSettlement.deleteMany();
   await prisma.tiktokPayment.deleteMany();
@@ -472,6 +602,15 @@ describe("coDuLieuGiaoDich", () => {
         status: "ok",
         runningBalance: 0,
       },
+    });
+
+    expect(await coDuLieuGiaoDich()).toBe(true);
+  });
+
+  it("CHỈ còn khoản tiền khác ghi tay → vẫn true (là giao dịch, nút xóa phải chạm)", async () => {
+    await xoaHetGiaoDich();
+    await prisma.cashMovement.create({
+      data: { date: new Date("2026-07-06T00:00:00+07:00"), kind: "CAPITAL_OUT", amount: 500_000, description: "còn lại" },
     });
 
     expect(await coDuLieuGiaoDich()).toBe(true);
@@ -561,5 +700,69 @@ describe("dungLaiTuKhoTho", () => {
 
     const res = await dungLaiTuKhoTho();
     expect(res.ok).toBe(true);
+  });
+});
+
+/**
+ * Câu định lượng trên dialog xoá — hàm THUẦN, không chạm DB. Khoá CHUỖI CHÍNH XÁC vì đây là câu chủ
+ * shop đọc ngay trước khi xoá vĩnh viễn: vế 0 lọt vào câu ("0 khoản chi phí nhập tay (0 ₫)") làm câu
+ * đọc như lỗi số liệu, và sai số đếm/số tiền thì chủ shop hiểu sai độ lớn khoản sắp mất.
+ */
+describe("moTaKhoanMatTrang", () => {
+  const chiPhi = (ghiDe: Partial<ChiPhiKhongDungLai> = {}): ChiPhiKhongDungLai => ({
+    soChiPhi: 0,
+    tongChiPhi: 0,
+    soDinhKy: 0,
+    soKhoanTienKhac: 0,
+    tongKhoanTienKhac: 0,
+    soKhoanVay: 0,
+    soSoTietKiem: 0,
+    tongThuNhap: 0,
+    ...ghiDe,
+  });
+
+  it("chưa nhập gì → câu 'chưa có'", () => {
+    expect(moTaKhoanMatTrang(chiPhi())).toBe("Hiện chưa có khoản chi phí hay khoản tiền khác nhập tay nào.");
+  });
+
+  it("chỉ chi phí nhập tay → một vế", () => {
+    expect(moTaKhoanMatTrang(chiPhi({ soChiPhi: 2, tongChiPhi: 50_000 }))).toBe(
+      "Đang có 2 khoản chi phí nhập tay (50.000 ₫).",
+    );
+  });
+
+  it("chỉ khoản tiền khác → KHÔNG in vế chi phí 0", () => {
+    expect(moTaKhoanMatTrang(chiPhi({ soKhoanTienKhac: 1, tongKhoanTienKhac: 7_000_000 }))).toBe(
+      "Đang có 1 khoản tiền khác ghi tay (7.000.000 ₫).",
+    );
+  });
+
+  it("cả ba vế → nối ', ' và ' và ' trước vế cuối", () => {
+    expect(
+      moTaKhoanMatTrang(
+        chiPhi({ soChiPhi: 2, tongChiPhi: 50_000, soDinhKy: 1, soKhoanTienKhac: 1, tongKhoanTienKhac: 7_000_000 }),
+      ),
+    ).toBe("Đang có 2 khoản chi phí nhập tay (50.000 ₫), 1 chi phí định kỳ và 1 khoản tiền khác ghi tay (7.000.000 ₫).");
+  });
+
+  it("chỉ khoản vay → một vế riêng (hồ sơ vay mất là mất dư nợ, không dựng lại được)", () => {
+    expect(moTaKhoanMatTrang(chiPhi({ soKhoanVay: 2 }))).toBe("Đang có 2 khoản vay (hồ sơ + dư nợ).");
+  });
+
+  it("đủ bốn vế → khoản vay là vế cuối", () => {
+    expect(
+      moTaKhoanMatTrang(
+        chiPhi({
+          soChiPhi: 2,
+          tongChiPhi: 50_000,
+          soDinhKy: 1,
+          soKhoanTienKhac: 1,
+          tongKhoanTienKhac: 7_000_000,
+          soKhoanVay: 1,
+        }),
+      ),
+    ).toBe(
+      "Đang có 2 khoản chi phí nhập tay (50.000 ₫), 1 chi phí định kỳ, 1 khoản tiền khác ghi tay (7.000.000 ₫) và 1 khoản vay (hồ sơ + dư nợ).",
+    );
   });
 });

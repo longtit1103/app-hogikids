@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/actions/action-result";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { landRaw } from "@/lib/bronze/land-raw";
-import { SHOP_SHOPEE } from "@/lib/bronze/streams";
+import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
 import { thongDiepGaySoDu, timGaySoDuVi } from "@/lib/import/shopee-wallet-lien-tuc-so-du";
 import { parseShopeeWalletFile, type WalletSummary } from "@/lib/import/shopee-wallet-xlsx";
@@ -239,7 +239,8 @@ export async function importShopeeWallet(formData: FormData): Promise<ActionResu
   }
 
   try {
-    const landRes = await landRaw("shopee/wallet", SHOP_SHOPEE, JSON.stringify({ data: rows }));
+    const { shopee } = await layCauHinhShop();
+    const landRes = await landRaw("shopee/wallet", shopee, JSON.stringify({ data: rows }));
 
     const tWarnings: string[] = [];
     // [RT-FM6] Transform dòng vừa land (O(trang)) + TỰ CHỮA dòng kẹt từ lượt hỏng trước — cùng

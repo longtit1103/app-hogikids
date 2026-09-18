@@ -58,8 +58,8 @@ describe("resolvePnlDrillHref — link sổ chi phí /tai-chinh", () => {
     expect(queryOf(out)).toMatchObject({ tu: "2026-06-01", den: "2026-06-30" });
   });
 
-  it("giữ nguyên danh_muc của cả 6 dòng chi phí", () => {
-    for (const cat of ["ads", "shipping", "packaging", "return_bom", "fixed", "other"]) {
+  it("giữ nguyên danh_muc của cả 7 dòng chi phí", () => {
+    for (const cat of ["ads", "shipping", "packaging", "return_bom", "fixed", "interest", "other"]) {
       const out = resolvePnlDrillHref(`/tai-chinh?tab=so-chi-phi&danh_muc=${cat}`, MONTH);
       expect(queryOf(out)).toMatchObject({ tab: "so-chi-phi", danh_muc: cat, tu: "2026-06-01", den: "2026-06-30" });
     }
@@ -185,5 +185,32 @@ describe("resolvePnlDrillHref — dòng đơn hoàn/hủy tự set trang_thai ri
     expect(params.get("trang_thai")).toBe(EXCLUDED_ORDER_STATUS_SLUGS.join(","));
     expect(params.get("ngay_tu")).toBe("2026-05-01");
     expect(params.get("ngay_den")).toBe("2026-05-31");
+  });
+});
+
+/**
+ * Dòng "Thu nhập tài chính" drill về đúng KHỐI Sổ tiết kiệm trong tab Dòng tiền, nên href của nó
+ * mang neo `#tiet-kiem`. Hàm này neo kỳ bằng cách dựng lại query — neo phải đi qua nguyên vẹn,
+ * nếu không nó bị nuốt vào giá trị param cuối cùng và link mở sai tab.
+ */
+describe("resolvePnlDrillHref — giữ nguyên neo #… của href drill", () => {
+  it("neo #tiet-kiem sống sót, KHÔNG lọt vào giá trị param tab", () => {
+    const out = resolvePnlDrillHref("/tai-chinh?tab=dong-tien#tiet-kiem", MONTH);
+    expect(out.endsWith("#tiet-kiem")).toBe(true);
+    const params = new URLSearchParams(out.split("?")[1].split("#")[0]);
+    expect(params.get("tab")).toBe("dong-tien");
+    expect(params.get("tu")).toBe("2026-06-01");
+    expect(params.get("den")).toBe("2026-06-30");
+    expect(out).not.toContain("%23");
+  });
+
+  it("đích KHÔNG neo kỳ vẫn giữ nguyên cả neo", () => {
+    expect(resolvePnlDrillHref("/san-pham?loc=thieu_gia_von#top", MONTH)).toBe(
+      "/san-pham?loc=thieu_gia_von#top",
+    );
+  });
+
+  it("href không có neo thì không mọc dấu # thừa", () => {
+    expect(resolvePnlDrillHref("/tai-chinh?tab=so-chi-phi&danh_muc=ads", MONTH)).not.toContain("#");
   });
 });

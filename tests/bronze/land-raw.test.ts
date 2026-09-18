@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { landRaw } from "@/lib/bronze/land-raw";
-import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK, SHOP_TIKTOK_SHOP } from "@/lib/bronze/streams";
+import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK, SHOP_TIKTOK_SHOP } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";

@@ -1,0 +1,126 @@
+{
+  "name": "pancake-webhook-tiktok",
+  "nodes": [
+    {
+      "id": "8eac2445-ad4d-415f-985f-b6175cf169b1",
+      "name": "Pancake Webhook TikTok",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pancake-pos-hogikids2",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "webhookId": "07978d43-5f33-4cc8-ab8c-418f56689257"
+    },
+    {
+      "id": "9cff792f-d4e0-4f5f-8acb-40df4a596d0c",
+      "name": "Ghi file mau",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        540,
+        300
+      ],
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/webhook-samples/tiktok/{{ $now.toFormat(\"yyyyLLdd-HHmmss\") }}-{{ $execution.id }}.json",
+        "dataPropertyName": "data"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b1a10000-0000-4a10-9c01-784937600003",
+      "name": "Lấy khoá từ bảng Setting",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        540,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select key, value from app.\"SettingN8n\"\nwhere key in ('n8nAppUrl', 'n8nIngestSecret')",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "id-credential-cua-instance-goc",
+          "name": "hogikids-config-ro (bảng Setting)"
+        }
+      }
+    },
+    {
+      "id": "c1a10000-0000-4a10-9c01-784937600003",
+      "name": "Bắn về app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ Object.fromEntries($('Lấy khoá từ bảng Setting').all().map(i => [i.json.key, i.json.value])).n8nAppUrl }}/api/ingest/webhook/tiktok",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ Object.fromEntries($('Lấy khoá từ bảng Setting').all().map(i => [i.json.key, i.json.value])).n8nIngestSecret }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Pancake Webhook TikTok": {
+      "main": [
+        [
+          {
+            "node": "Ghi file mau",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Lấy khoá từ bảng Setting",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Bắn về app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  }
+}

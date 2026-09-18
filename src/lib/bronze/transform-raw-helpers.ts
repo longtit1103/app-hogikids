@@ -33,7 +33,8 @@ export type TransformOptions = {
    * (thay vì `externalId = ANY(...)` toàn bảng, seq scan lớn dần theo raw history) VÀ tránh
    * over-transform khi hai shop lỡ có `externalId` trùng. Route ingest LUÔN truyền; bỏ trống ⇒
    * quét mọi shop = rebuild (giữ nguyên hành vi dựng lại toàn bảng). CHỈ nhánh `orders` đọc field
-   * này — `products`/`tiktok/*` neo shop cố định (SHOP_KHO / SHOP_TIKTOK_SHOP) theo nghiệp vụ.
+   * này — `products`/`tiktok/*` neo shop cố định theo nghiệp vụ (vai kho / tiktokShop, id resolve
+   * từ cấu hình `Setting` — xem cau-hinh-shop.ts).
    */
   shopId?: string;
   /**

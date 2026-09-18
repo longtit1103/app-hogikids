@@ -48,6 +48,7 @@ export function OrderTable({
         <TableHeader>
           <TableRow>
             <TableHead>Mã</TableHead>
+            <TableHead title="Mã đơn hàng bên sàn (Shopee/TikTok) — để đối chiếu với seller center">Mã sàn</TableHead>
             <TableHead>Ngày tạo</TableHead>
             <TableHead>Cập nhật</TableHead>
             <TableHead>Kênh</TableHead>
@@ -73,6 +74,11 @@ export function OrderTable({
                   <Link href={hrefWith(sp, { don: o.id })} className="font-mono text-sm text-primary hover:underline">
                     {o.code}
                   </Link>
+                </TableCell>
+                {/* Mã đơn BÊN SÀN — `select-all` để 1 click chọn trọn mã, dán sang seller center đối chiếu.
+                    "—" = đơn không có mã sàn thật (đơn bù từ mirror kho / kênh ngoài sàn). */}
+                <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+                  {o.maSan ? <span className="select-all">{o.maSan}</span> : "—"}
                 </TableCell>
                 <TableCell className="text-sm">{format(o.orderedAt, "dd/MM HH:mm")}</TableCell>
                 {/* Thời điểm đơn VÀO trạng thái hiện tại (Pancake status_history) — "—" khi thiếu dữ liệu. */}
@@ -129,6 +135,8 @@ export function OrderTable({
               <span className="font-mono text-sm text-primary">{o.code}</span>
               <OrderStatusBadge status={o.status} />
             </div>
+            {/* Mã đơn bên sàn — chỉ hiện khi có, card không cần dòng "—" thừa. */}
+            {o.maSan && <span className="font-mono text-xs text-muted-foreground">Mã sàn {o.maSan}</span>}
             <div className="flex items-center justify-between text-sm text-muted-foreground">
               <span>
                 {format(o.orderedAt, "dd/MM HH:mm")}

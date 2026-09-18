@@ -10,6 +10,9 @@ export const KIND_LABEL: Record<SyncKind, string> = {
   TIKTOK_ADS: "TikTok Ads",
   // Luồng PHÍ/ĐỐI SOÁT (TikTok Shop Open API) — KHÔNG phải doanh thu, KHÔNG phải ads.
   TIKTOK_SHOP: "TikTok Shop (phí/đối soát)",
+  // Nhãn phải KHÁC HẲN dòng trên: hai luồng này đứng cạnh nhau trên cùng màn hình, đọc nhầm là
+  // tưởng luồng tiền vẫn xanh trong khi chỉ có lượt chỉ số marketing chạy được.
+  TIKTOK_SHOP_ANALYTICS: "TikTok Shop (chỉ số marketing)",
   BACKUP: "Sao lưu",
 };
 

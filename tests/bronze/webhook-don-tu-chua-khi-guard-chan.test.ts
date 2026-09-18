@@ -27,7 +27,7 @@ vi.mock("@/lib/bronze/transform-from-raw", async (importOriginal) => {
 });
 
 import { dongDauDaXoaTay } from "@/lib/bronze/ket-cuc-silver";
-import { SHOP_SHOPEE } from "@/lib/bronze/streams";
+import { SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { xuLySuKienWebhook } from "@/lib/ingest/webhook-processor";
 import { prisma } from "@/lib/prisma";
 

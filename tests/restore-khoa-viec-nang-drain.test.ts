@@ -69,6 +69,7 @@ import { runPgDump } from "@/lib/backup/run-pg-dump";
 import { runRestore } from "@/lib/backup/run-restore";
 import { coLuotDangChay } from "@/lib/ingest/sync-log";
 import { prisma } from "@/lib/prisma";
+import { VIEC_GHI_GIA_VON } from "@/lib/gia-von/ghi-gia-von-theo-pancake";
 import { donKhoaPhucHoi } from "./helpers/khoa-bao-tri-reset";
 
 const KHOA_KEY = "khoaViecNang";
@@ -140,6 +141,29 @@ describe("POST /api/restore — giành khoá việc nặng làm cổng drain", (
     expect(await docKhoaTrongDb()).toContain(khoa.the.token);
     // Khoá bảo trì phải được trả trong finally — không kẹt app chỉ-đọc.
     expect(thuGiuKhoaPhucHoi()).not.toBeNull();
+
+    await traKhoaViecNang(khoa.the);
+  });
+
+  it("lượt ghi giá vốn đang giữ lease → 409 nêu đúng tên việc đó, không đụng pg", async () => {
+    // Hai đường ghi giá vốn (CLI ngoài tiến trình app + nút "Áp giá vốn Pancake" trong app) dùng
+    // CHUNG lease này. CLI không thấy cờ khoá bảo trì trong tiến trình app nên lease là kênh DUY
+    // NHẤT nó và route phục hồi cùng thấy. Chốt tên việc để câu 409 chỉ thẳng thủ phạm cho chủ shop.
+    const khoa = await giuKhoaViecNang(VIEC_GHI_GIA_VON);
+    if (!khoa.the) throw new Error("không giành được khoá để dựng cảnh");
+
+    const res = await postDumpGia();
+
+    expect(res.status).toBe(409);
+    // Ràng theo GIÁ TRỊ, không chỉ theo hằng: tên rỗng/vô nghĩa làm câu 409 rơi về "một việc nặng
+    // khác" mà `toContain("")` vẫn xanh — chủ shop phải đọc ra được "giá vốn".
+    // KHÔNG ràng chữ "script" nữa (bỏ 2026-09-07): nút trong app dùng cùng lease, nhãn nói "script"
+    // trong khi chủ shop vừa bấm nút thì câu từ chối đọc như báo lỗi của hệ khác.
+    expect(VIEC_GHI_GIA_VON).toMatch(/giá vốn/);
+    expect(VIEC_GHI_GIA_VON.trim().length).toBeGreaterThan(8);
+    expect((await res.json()).error).toContain(VIEC_GHI_GIA_VON);
+    expect(vi.mocked(runPgDump)).not.toHaveBeenCalled();
+    expect(await docKhoaTrongDb()).toContain(khoa.the.token);
 
     await traKhoaViecNang(khoa.the);
   });

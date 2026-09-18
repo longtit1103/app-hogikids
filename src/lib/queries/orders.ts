@@ -1,5 +1,6 @@
 import type { OrderStatus, Prisma } from "@prisma/client";
 
+import { REAL_FEE_CHANNELS } from "@/lib/channels/real-fee-channels";
 import { sumPnlPlatformFee } from "@/lib/orders/order-list-totals";
 import { prisma } from "@/lib/prisma";
 import { tachChiTietPhiTuRaw, type PlatformFeeComponent } from "@/lib/reports/platform-fee-breakdown";
@@ -17,6 +18,8 @@ export type OrderListParams = {
 export type OrderListRow = {
   id: string;
   code: string;
+  /** Mã đơn hàng BÊN SÀN (Shopee/TikTok) để đối chiếu — null khi đơn không có mã sàn thật. */
+  maSan: string | null;
   orderedAt: Date;
   statusChangedAt: Date | null; // thời điểm đơn VÀO trạng thái hiện tại (Pancake) — null khi thiếu dữ liệu
 
@@ -52,6 +55,8 @@ export type OrderListTotals = {
 export type OrderDetail = {
   id: string;
   pancakeId: string;
+  /** Mã đơn hàng BÊN SÀN để đối chiếu — null khi đơn không có mã sàn thật (xem `maDonBenSan`). */
+  maSan: string | null;
   code: string;
   status: OrderStatus;
   orderedAt: Date;
@@ -84,12 +89,26 @@ export type OrderDetail = {
 
 const PAGE_SIZE = 20;
 
+/**
+ * Mã đơn hàng BÊN SÀN — chính là `Order.pancakeId`: với đơn marketplace, Pancake dùng luôn
+ * mã đơn của sàn làm `id` (Shopee dạng "MAU-DON-0001", TikTok 18 chữ số), khác `code`
+ * (`system_id` — mã ngắn Pancake hiển thị). Trả null khi pancakeId KHÔNG phải mã sàn thật:
+ *  - đơn bù từ bản sao kho (`backfilledFromMirror`): pancakeId là id mirror "AF…";
+ *  - kênh ngoài sàn (facebook/website): pancakeId là id nội bộ Pancake.
+ */
+function maDonBenSan(o: { pancakeId: string; backfilledFromMirror: boolean; channelId: string }): string | null {
+  if (o.backfilledFromMirror) return null;
+  return REAL_FEE_CHANNELS.has(o.channelId) ? o.pancakeId : null;
+}
+
 function buildWhere(p: Pick<OrderListParams, "q" | "channels" | "statuses" | "from" | "to">): Prisma.OrderWhereInput {
   const where: Prisma.OrderWhereInput = {};
   if (p.q && p.q.trim()) {
     const q = p.q.trim();
     where.OR = [
       { code: { contains: q, mode: "insensitive" } },
+      // pancakeId = mã đơn bên sàn (đơn marketplace) — chủ shop dán mã từ Shopee/TikTok vào để đối chiếu.
+      { pancakeId: { contains: q, mode: "insensitive" } },
       { customerName: { contains: q, mode: "insensitive" } },
     ];
   }
@@ -119,6 +138,8 @@ export async function getOrderListPage(
       select: {
         id: true,
         code: true,
+        pancakeId: true,
+        backfilledFromMirror: true,
         orderedAt: true,
         statusChangedAt: true,
         customerName: true,
@@ -153,6 +174,7 @@ export async function getOrderListPage(
     rows: orders.map((o) => ({
       id: o.id,
       code: o.code,
+      maSan: maDonBenSan({ pancakeId: o.pancakeId, backfilledFromMirror: o.backfilledFromMirror, channelId: o.channel.id }),
       orderedAt: o.orderedAt,
       statusChangedAt: o.statusChangedAt,
       channelId: o.channel.id,
@@ -214,6 +236,7 @@ export async function getOrderDetail(id: string): Promise<OrderDetail | null> {
     select: {
       id: true,
       pancakeId: true,
+      backfilledFromMirror: true,
       code: true,
       status: true,
       orderedAt: true,
@@ -260,6 +283,11 @@ export async function getOrderDetail(id: string): Promise<OrderDetail | null> {
   return {
     id: order.id,
     pancakeId: order.pancakeId,
+    maSan: maDonBenSan({
+      pancakeId: order.pancakeId,
+      backfilledFromMirror: order.backfilledFromMirror,
+      channelId: order.channel.id,
+    }),
     code: order.code,
     status: order.status,
     orderedAt: order.orderedAt,

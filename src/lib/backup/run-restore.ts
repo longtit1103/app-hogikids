@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { constants as zlibConstants, gunzip, gunzipSync } from "node:zlib";
 
+import { N8N_RO_ROLE, N8N_SETTING_VIEW } from "@/lib/n8n/role-doc-kho-khoa";
+
 import { assertDumpOnlySchema } from "./assert-dump-schema";
 import { assertPlainSqlOnlySchema } from "./assert-plain-sql-only-schema";
 import {
@@ -308,13 +310,7 @@ async function donSchemaChoDumpPlain(dbUrl: string, schema: string, sql: string)
   await runPgClient(cmd, [...args, "-c", donDep], env, HAN_NHANH);
 }
 
-/**
- * Role CHỈ-ĐỌC của n8n trên bảng kho khoá `Setting`. Tên phải khớp CHÍNH XÁC hằng cùng tên trong
- * `deploy/restore.sh` và câu tạo role trong `n8n/huong-dan-cai-dat-workflows.md`. Bash và TypeScript
- * không dùng chung được một hằng, nên có test đọc chéo 2 file: lệch chữ là đỏ ngay, không phải chờ
- * tới lượt phục hồi thật mới biết.
- */
-const N8N_RO_ROLE = "n8n_config_ro";
+
 
 /**
  * Câu SQL trả lại ĐÚNG 2 quyền đọc mà lượt phục hồi vừa xoá. Hàm THUẦN để test đọc được câu phát ra
@@ -336,12 +332,14 @@ const N8N_RO_ROLE = "n8n_config_ro";
  *    làm hỏng cả bước.
  */
 export function sqlCapQuyenDocN8n(schema: string): string {
+  // Từ 2026-08-21 role đọc VIEW "${N8N_SETTING_VIEW}" thay bảng "Setting" gốc — view loại 2 khoá
+  // hạ tầng (n8nApiKey/n8nDbRoPassword) khỏi tầm mắt n8n (xem role-doc-kho-khoa.ts).
   return `DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${N8N_RO_ROLE}') THEN
     EXECUTE 'GRANT USAGE ON SCHEMA "${schema}" TO ${N8N_RO_ROLE}';
-    IF to_regclass('"${schema}"."Setting"') IS NOT NULL THEN
-      EXECUTE 'GRANT SELECT ON "${schema}"."Setting" TO ${N8N_RO_ROLE}';
+    IF to_regclass('"${schema}"."${N8N_SETTING_VIEW}"') IS NOT NULL THEN
+      EXECUTE 'GRANT SELECT ON "${schema}"."${N8N_SETTING_VIEW}" TO ${N8N_RO_ROLE}';
     END IF;
   END IF;
 END

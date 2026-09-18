@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { formatVnd } from "@/lib/format";
+import { chuThichBienRongCoThuNhap } from "@/lib/reports/chu-thich-thu-nhap-tai-chinh";
 import { pnlPercentBase } from "@/lib/reports/pnl-percent-base";
 import type { PnlBreakdown } from "@/lib/reports/pnl";
 import { cn } from "@/lib/utils";
@@ -91,14 +92,27 @@ export function KpiCards({
   const isNegative = thisMonth.netProfit < 0;
   const thisRate = returnBomRatePct(thisMonth);
   const prevRate = returnBomRatePct(lastMonthSameDays);
+  const ghiChuBienRong = chuThichBienRongCoThuNhap(thisMonth.financialIncome);
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      {/* ① Doanh thu */}
+      {/* ① Doanh thu gộp — nhãn CỐ Ý trùng dòng "Doanh thu gộp" của bảng Lãi/Lỗ và dải tổng
+          màn Đơn hàng: cùng một số (Σ itemsTotal) thì phải mang cùng một tên ở mọi màn, nếu
+          không chủ shop đọc hai màn ra hai khái niệm.
+          Dòng dưới là `netRevenue` = doanh thu gộp − phí sàn − voucher, mang ĐÚNG nhãn "Thực
+          nhận từ sàn" đã dùng ở bảng Lãi/Lỗ. KHÔNG gọi "Sau phí sàn": kỳ nào voucher ≠ 0 là
+          nhãn đó mô tả thiếu một vế của công thức.
+          Nó đứng đây để đối chiếu Pancake POS: Pancake gọi "Doanh thu" cho Σ `cod` — phần sàn
+          đã cắt phí — nên thiếu dòng này thì so hai màn luôn thấy lệch dù cả hai đều đúng (đo
+          22/08: gộp 4.458.500 so Pancake 3.074.872).
+          Cả hai số lấy THẲNG từ PnlBreakdown của `calcPnl` — KHÔNG cộng trừ lại ở UI, để định
+          nghĩa tiền chỉ tồn tại một chỗ là `pnl.ts`. Hai dòng tháng đứng liền nhau (không chèn
+          margin) để đọc thành một cặp: cả hai đều là số THÁNG NÀY, không phải hôm nay. */}
       <CardShell href="/tai-chinh?tab=loi-lo">
-        <p className="text-sm text-muted-foreground">Doanh thu</p>
+        <p className="text-sm text-muted-foreground">Doanh thu gộp</p>
         <p className="mt-1 font-serif text-2xl text-ink">{formatVnd(today.revenue)}</p>
         <p className="mt-1 text-xs text-muted-foreground">Tháng này: {formatVnd(thisMonth.revenue)}</p>
+        <p className="text-xs text-muted-foreground">Thực nhận từ sàn: {formatVnd(thisMonth.netRevenue)}</p>
         <div className="mt-1">
           <RevenueDelta current={thisMonth.revenue} previous={lastMonthSameDays.revenue} />
         </div>
@@ -124,6 +138,9 @@ export function KpiCards({
             {formatVnd(thisMonth.netProfit)}
           </p>
           <p className="mt-1 text-xs text-on-dark/70">Biên ròng {marginPct === null ? "—" : formatPct1(marginPct)}</p>
+          {/* Công thức biên ròng KHÔNG đổi (quyết định #10) — nhưng tháng tất toán sổ thì tử số có
+              thêm lãi tiết kiệm, biên nhảy vọt. Thiếu câu này là đọc thành bán hàng lãi hơn. */}
+          {ghiChuBienRong && <p className="text-xs text-on-dark/70">{ghiChuBienRong}</p>}
         </Link>
         {/* Link trỏ bộ lọc ĐÃ BÁN, không phải lọc thiếu-giá-vốn cả kho: cảnh báo này đếm SKU ĐÃ
             BÁN, nên dẫn sang danh sách cả kho (đo prod 12/08: 1391 biến thể, chỉ 38 từng bán) là

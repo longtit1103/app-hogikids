@@ -11,7 +11,8 @@ import {
   upsertOneSettlement,
 } from "@/lib/ingest/tiktok-settlement-upsert";
 
-import { SHOP_SHOPEE, SHOP_TIKTOK_SHOP } from "./streams";
+import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
+
 import {
   chamMoc,
   latestAdsPayloads,
@@ -26,6 +27,20 @@ import {
  * Gọi từ `transform-from-raw.ts`.
  */
 
+/**
+ * Id TikTok Shop Open API từ cấu hình. `null` (nguồn tuỳ chọn chưa bật) ⇒ nhánh transform BỎ QUA
+ * kèm cảnh báo thay vì throw: đường ingest thường ngày đã bị `landRaw` chặn to tiếng từ trước khi
+ * có gì để transform, còn lượt DỰNG LẠI toàn bảng của bản clone chưa bật TikTok Shop không được
+ * chết chỉ vì thiếu một nguồn tuỳ chọn (Bronze của nguồn đó vốn rỗng).
+ */
+async function tiktokShopIdHoacBoQua(warnings: string[], nhanh: string): Promise<string | null> {
+  const { tiktokShop } = await layCauHinhShop();
+  if (!tiktokShop) {
+    warnings.push(`Bỏ qua transform ${nhanh} — chưa cấu hình tiktokShopShopId (nguồn TikTok Shop tuỳ chọn).`);
+  }
+  return tiktokShop;
+}
+
 /** TikTok Shop statement → Silver `TiktokSettlement`. Chỉ shop TikTok Shop. */
 export async function transformTiktokStatements(
   stats: TransformStats,
@@ -33,9 +48,11 @@ export async function transformTiktokStatements(
   opts: TransformOptions,
 ): Promise<void> {
   const { externalIds, checkpoint } = opts;
+  const shopIdTiktok = await tiktokShopIdHoacBoQua(warnings, "tiktok/statements");
+  if (!shopIdTiktok) return;
   let iSt = 0;
   for (const row of await latestPayloads("RawTiktokShopStatement", {
-    shopId: SHOP_TIKTOK_SHOP,
+    shopId: shopIdTiktok,
     externalIds,
   })) {
     await chamMoc(checkpoint, iSt++);
@@ -58,10 +75,12 @@ export async function transformTiktokAdsTxns(
   opts: TransformOptions,
 ): Promise<void> {
   const { externalIds, checkpoint } = opts;
+  const shopIdTiktok = await tiktokShopIdHoacBoQua(warnings, "tiktok/statement_transactions");
+  if (!shopIdTiktok) return;
   // [C2] Ads nhận diện cross-version (chống re-fetch rớt `type`) — xem latestAdsPayloads.
   let iTx = 0;
   for (const row of await latestAdsPayloads({
-    shopId: SHOP_TIKTOK_SHOP,
+    shopId: shopIdTiktok,
     externalIds,
   })) {
     await chamMoc(checkpoint, iTx++);
@@ -84,9 +103,11 @@ export async function transformTiktokPayments(
   opts: TransformOptions,
 ): Promise<void> {
   const { externalIds, checkpoint } = opts;
+  const shopIdTiktok = await tiktokShopIdHoacBoQua(warnings, "tiktok/payments");
+  if (!shopIdTiktok) return;
   let iPay = 0;
   for (const row of await latestPayloads("RawTiktokShopPayment", {
-    shopId: SHOP_TIKTOK_SHOP,
+    shopId: shopIdTiktok,
     externalIds,
   })) {
     await chamMoc(checkpoint, iPay++);
@@ -109,16 +130,17 @@ export async function transformTiktokPayments(
   }
 }
 
-/** Ví Shopee (import file tay) → Silver `ShopeeSettlement`. Chỉ shop Shopee (SHOP_SHOPEE). */
+/** Ví Shopee (import file tay) → Silver `ShopeeSettlement`. Chỉ shop Shopee (vai `shopee`). */
 export async function transformShopeeWallet(
   stats: TransformStats,
   warnings: string[],
   opts: TransformOptions,
 ): Promise<void> {
   const { externalIds, checkpoint } = opts;
+  const { shopee } = await layCauHinhShop();
   let iSh = 0;
   for (const row of await latestPayloads("RawShopeeWalletTxn", {
-    shopId: SHOP_SHOPEE,
+    shopId: shopee,
     externalIds,
   })) {
     await chamMoc(checkpoint, iSh++);

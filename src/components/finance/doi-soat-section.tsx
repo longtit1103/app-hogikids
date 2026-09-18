@@ -45,18 +45,37 @@ function ODemDoiSoat({
   );
 }
 
-export function DoiSoatSection({ doiSoat }: { doiSoat: DoiSoatTienVe }) {
+/**
+ * Dùng cho CẢ HAI kênh. Shopee mang thêm `khongDuKhoa` (đơn mirror lịch sử không nối được với ví);
+ * TikTok không truyền field đó nên ô thứ 7 tự vắng — không cần nhân bản component.
+ */
+export function DoiSoatSection({
+  doiSoat,
+  tenKenh,
+  nguon,
+}: {
+  doiSoat: DoiSoatTienVe & { khongDuKhoa?: number; chuaNhapVi?: number };
+  tenKenh: string;
+  /** Nguồn số của sàn, hiện trong dòng khai trục để không ai tưởng hai kênh cùng một đường dữ liệu. */
+  nguon: string;
+}) {
   const {
     khop, lech, chuaThay, treoChuaGiao, dangCho,
     tongDelta, tongLechTuyetDoi, danhSachLech,
     hoanConTien, tongTienVeDonHoan,
   } = doiSoat;
-  const daKetLuan = khop + lech + chuaThay + treoChuaGiao;
+  // Cộng cả hai nhóm "không kết luận được" vào phép đếm ẩn khối: kỳ toàn đơn mirror (vd tháng 3 —
+  // 0/9 nối được) mà ẩn sạch thì chủ shop không thấy gì, kể cả chính lời giải thích vì sao không thấy.
+  const daKetLuan =
+    khop + lech + chuaThay + treoChuaGiao + (doiSoat.khongDuKhoa ?? 0) + (doiSoat.chuaNhapVi ?? 0);
 
   // Kỳ không có đơn TikTok nào thì khối này là nhiễu — ẩn hẳn thay vì hiện dải số 0.
   if (daKetLuan + dangCho + hoanConTien.length === 0) return null;
 
   const canKiemTra = hoanConTien.filter((d) => !d.choGiaoDichDao);
+  // Nguồn nào KHÔNG đo được "doanh thu sàn ghi nhận" thì ẩn hẳn cột, không in 0. "Không đo được" và
+  // "đo được và bằng 0" là hai chuyện khác nhau — cùng luật đã dựng cho bảng quảng cáo theo chiến dịch.
+  const coDoanhThuSan = hoanConTien.some((d) => d.doanhThuSan !== null);
 
   // Σ có DẤU bị bù trừ: hai đơn lệch ngược chiều 500k triệt tiêu thành "Σ 0đ" đọc
   // ra là "hoà, không mất gì". Nên màu bám theo CÓ ĐƠN LỆCH HAY KHÔNG, và khi hai
@@ -67,13 +86,14 @@ export function DoiSoatSection({ doiSoat }: { doiSoat: DoiSoatTienVe }) {
     <div className="rounded-xl border border-hairline p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <p className="text-sm text-muted-foreground">Đối soát tiền về — TikTok, từng đơn</p>
+          <p className="text-sm text-muted-foreground">Đối soát tiền về — {tenKenh}, từng đơn</p>
           {/* Khai TRỤC: khối "Tiền đã về" ngay trên chạy theo NGÀY SAO KÊ và gồm cả
               giao dịch quảng cáo, khối này theo NGÀY ĐẶT đơn. Không nói ra thì chủ
               shop sẽ cộng cột rồi so với card trên, thấy vênh và tưởng app sai. */}
           <p className="mt-0.5 text-xs text-muted-foreground">
             đơn lọc theo NGÀY ĐẶT · tiền sàn tính tới HÔM NAY (gồm cả giao dịch đảo rơi ngoài kỳ) ·
-            khác trục với &quot;Tiền đã về&quot; ở trên (ngày sao kê) — hai số không cộng khớp nhau
+            nguồn: {nguon} · khác trục với &quot;Tiền đã về&quot; ở trên (ngày sao kê) — hai số không
+            cộng khớp nhau
           </p>
         </div>
         {lech === 0 && chuaThay === 0 && canKiemTra.length === 0 && khop > 0 && (
@@ -96,6 +116,20 @@ export function DoiSoatSection({ doiSoat }: { doiSoat: DoiSoatTienVe }) {
             mà hai ô "Treo chưa giao"/"Đang chờ sàn" đang giữ. Và vì sàn LUÔN trả
             tiền trước rồi mới đảo, mọi đơn hoàn đều đi qua nhóm chờ ⇒ đỏ theo tổng
             sẽ sáng gần như thường trực, tới lúc chủ shop thôi đọc màu đỏ. */}
+        {/* Ô RIÊNG, cố ý KHÔNG canhBao: nhóm này vô phương cứu và sẽ không bao giờ đổi. Nhét nó vào
+            "Chưa thấy quyết toán" là dựng một vệt đỏ vĩnh viễn, mà vệt đỏ không tắt thì người ta thôi
+            đọc màu đỏ — giết luôn cảnh báo thật. */}
+        {doiSoat.khongDuKhoa !== undefined && doiSoat.khongDuKhoa > 0 && (
+          <ODemDoiSoat
+            nhan="Không đủ khoá liên kết lịch sử"
+            so={doiSoat.khongDuKhoa}
+            mo="đơn cũ không còn mã sàn"
+          />
+        )}
+        {/* Cũng KHÔNG cảnh báo: nguyên nhân nằm ở chỗ chưa nhập file, không phải sàn thiếu tiền. */}
+        {doiSoat.chuaNhapVi !== undefined && doiSoat.chuaNhapVi > 0 && (
+          <ODemDoiSoat nhan="Chưa nhập file kỳ này" so={doiSoat.chuaNhapVi} mo="ngoài vùng file đã nhập" />
+        )}
         <ODemDoiSoat
           nhan="Hoàn mà còn tiền"
           so={canKiemTra.length}
@@ -176,8 +210,8 @@ export function DoiSoatSection({ doiSoat }: { doiSoat: DoiSoatTienVe }) {
               <p>
                 Đơn gắn nhãn <span className="text-warning">tạm tính</span>: app CHƯA nhận được phí sàn thật
                 vì sàn chưa đối soát xong — lệch ở đây KHÔNG phải mất tiền. Phí thật tự về khi đơn
-                được đồng bộ lại; nếu đơn kẹt trạng thái quá lâu thì báo hỗ trợ Pancake, đừng đi tra soát
-                với sàn.
+                được đồng bộ lại; nếu quá lâu mà phí vẫn thấp bất thường thì báo hỗ trợ Pancake, đừng đi
+                tra soát với sàn.
               </p>
             )}
             <p>
@@ -213,7 +247,9 @@ export function DoiSoatSection({ doiSoat }: { doiSoat: DoiSoatTienVe }) {
                 <tr className="border-b border-hairline text-left text-xs text-muted-foreground">
                   <th className="py-1.5 pr-2 font-normal">Đơn</th>
                   <th className="py-1.5 pr-2 font-normal">Trạng thái</th>
-                  <th className="py-1.5 pr-2 text-right font-normal">Sàn ghi doanh thu</th>
+                  {coDoanhThuSan && (
+                    <th className="py-1.5 pr-2 text-right font-normal">Sàn ghi doanh thu</th>
+                  )}
                   <th className="py-1.5 pr-2 text-right font-normal">Sàn đã trả</th>
                   <th className="py-1.5 font-normal">Cần làm gì</th>
                 </tr>
@@ -233,7 +269,11 @@ export function DoiSoatSection({ doiSoat }: { doiSoat: DoiSoatTienVe }) {
                     <td className="py-1.5 pr-2">
                       <OrderStatusBadge status={d.status} />
                     </td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums">{formatVnd(d.doanhThuSan)}</td>
+                    {coDoanhThuSan && (
+                      <td className="py-1.5 pr-2 text-right tabular-nums">
+                        {d.doanhThuSan === null ? "—" : formatVnd(d.doanhThuSan)}
+                      </td>
+                    )}
                     <td className={cn("py-1.5 pr-2 text-right tabular-nums", d.sanTra > 0 && "text-error")}>
                       {formatVnd(d.sanTra)}
                     </td>
@@ -283,9 +323,6 @@ export function DoiSoatSection({ doiSoat }: { doiSoat: DoiSoatTienVe }) {
         </p>
       )}
 
-      <p className="mt-3 text-xs text-muted-foreground">
-        Chưa đối soát được Shopee ở cấp đơn — file ví Shopee không mang đủ chi tiết từng đơn.
-      </p>
     </div>
   );
 }

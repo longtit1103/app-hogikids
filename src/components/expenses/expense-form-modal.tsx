@@ -221,6 +221,12 @@ export function ExpenseFormModal({
   }
 
   async function handleSubmit() {
+    // Ô Ngày trống ⇒ Invalid Date ⇒ server nhận null. Nút Lưu đã khoá (canSave) nên bình thường không tới
+    // đây; nếu ai đó nới canSave sau này thì vẫn chặn và NÓI RÕ thay vì im lặng.
+    if (!date) {
+      setFieldErrors({ date: "Chọn ngày" });
+      return;
+    }
     setFieldErrors({});
     setSaving(true);
     const input = {
@@ -252,9 +258,17 @@ export function ExpenseFormModal({
     }
   }
 
-  const canSave = Boolean(categoryId) && amount > 0 && (categoryId !== "ads" || Boolean(adsSource)) && !saving;
+  // Ô Ngày xoá trống ⇒ `date` rỗng ⇒ `new Date("T00:00:00+07:00")` là Invalid Date, React serialize
+  // thành null và server coerce ra 01/01/1970: dòng ghi xong không hiện ở tháng nào mà toast vẫn xanh
+  // (lúc SỬA thì dời luôn dòng thật về 1970). Server đã chặn bằng schema; đây là lớp UI, cùng điều kiện
+  // `Boolean(date)` với cash-movement-form-modal.
+  const canSave =
+    Boolean(date) && Boolean(categoryId) && amount > 0 && (categoryId !== "ads" || Boolean(adsSource)) && !saving;
   const showRecurringToggle = !isEdit && categoryId !== "ads";
   const showStopRecurring = isEdit && Boolean(expense?.recurringId);
+  // Dòng lãi vay theo kỳ (`refId` `LOAN:…`): server khoá ngày + danh mục, mở số tiền. Khoá luôn 2 ô
+  // ở đây để chủ shop thấy trước khi bấm Lưu, thay vì nhận câu lỗi đỏ sau khi đã gõ.
+  const khoaTheoKyVay = isEdit && Boolean(expense?.refId?.startsWith("LOAN:"));
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -265,11 +279,26 @@ export function ExpenseFormModal({
 
         <div className="flex flex-col gap-4">
           <Field label="Ngày" error={fieldErrors.date}>
-            <Input type="date" value={date} max={todayStr} onChange={(e) => setDate(e.target.value)} />
+            <Input
+              type="date"
+              value={date}
+              max={todayStr}
+              disabled={khoaTheoKyVay}
+              onChange={(e) => setDate(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              {khoaTheoKyVay
+                ? "Dòng lãi vay theo kỳ — ngày và danh mục khoá theo kỳ; sửa được số tiền. Muốn bỏ thì xoá dòng (vào Thùng rác, khôi phục được)."
+                : "Ngày ghi = ngày tiền rời tài khoản (quỹ trừ theo ngày này)."}
+            </p>
           </Field>
 
           <Field label="Danh mục" error={fieldErrors.categoryId}>
-            <Select value={categoryId} onValueChange={handleCategoryChange} disabled={preset?.lockCategory}>
+            <Select
+              value={categoryId}
+              onValueChange={handleCategoryChange}
+              disabled={preset?.lockCategory || khoaTheoKyVay}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Chọn danh mục" />
               </SelectTrigger>
@@ -352,7 +381,7 @@ export function ExpenseFormModal({
             <div className="flex items-center justify-between rounded-lg border border-hairline p-3">
               <div>
                 <p className="text-sm text-ink">Lặp lại hàng tháng</p>
-                {recurringMonthly && (
+                {recurringMonthly && Boolean(date) && (
                   <p className="text-xs text-muted-foreground">
                     Tự ghi vào ngày {getDate(new Date(`${date}T00:00:00+07:00`))} hàng tháng
                   </p>

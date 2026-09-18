@@ -52,8 +52,21 @@ function findColumn(header: (string | number | Date)[], aliases: string[]): numb
   return -1;
 }
 
-/** Chuẩn hoá ô ngày → "yyyy-MM-dd" (VN) hoặc null. Nhận Date (xlsx), serial số, hoặc chuỗi. */
-function parseDateCell(value: unknown): string | null {
+/** Ngày sớm nhất một ô trong file ads được phép mang. Trước mốc này là lỗi đọc ô, không phải dữ liệu thật. */
+const NGAY_SOM_NHAT = "2000-01-01";
+
+/**
+ * Khoá ngày "hôm nay" theo giờ VN.
+ *
+ * VN = UTC+7 CỐ ĐỊNH (không có DST) nên cộng 7 giờ rồi lấy phần ngày của ISO là đúng biên ngày VN —
+ * bất biến #3, không lệ thuộc TZ của máy chạy test/CI.
+ */
+function khoaNgayVnHomNay(): string {
+  return new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/** Đọc ô ngày thô → "yyyy-MM-dd" (VN) hoặc null. Nhận Date (xlsx), serial số, hoặc chuỗi. */
+function docKhoaNgay(value: unknown): string | null {
   if (value == null || value === "") return null;
 
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -82,6 +95,30 @@ function parseDateCell(value: unknown): string | null {
     return laNgayCoThat(y, mo, d) ? `${y}-${pad2(mo)}-${pad2(d)}` : null;
   }
   return null;
+}
+
+/**
+ * Chuẩn hoá ô ngày → "yyyy-MM-dd" (VN) trong khoảng [2000-01-01, hôm nay giờ VN], ngoài khoảng → null.
+ *
+ * Vì sao phải kẹp CẢ HAI biên: `docKhoaNgay` chỉ hỏi "ngày có thật trên lịch", không hỏi năm có hợp lý.
+ * Một ô ngày lẫn số nhỏ (serial Excel 1 → 31/12/1899, serial 45 → 1900) hay năm gõ sai (serial 300000 →
+ * năm 2721) vẫn ra ngày "có thật" ⇒ `createMany` ghi thẳng `Expense` source IMPORT ở một năm mà KHÔNG
+ * range báo cáo nào phủ: tiền vào sổ mà không ai thấy, cũng không có dòng lỗi nào để chủ shop sửa file.
+ * Biên trên khớp đường nhập tay (`ngay-ghi-tay-schema.ts` cũng chặn tương lai).
+ *
+ * ⚠️ PHẢI kiểm KHUÔN khoá trước khi so chuỗi. So chuỗi chỉ tương đương so thứ tự ngày khi năm đúng
+ * 4 chữ số, mà `docKhoaNgay` KHÔNG pad phần năm (`pad2` chỉ áp cho tháng/ngày) — serial Excel lớn cho
+ * ra năm 5-6 chữ số và khi đó so chuỗi cho kết quả NGƯỢC: `"20107-01-29"` (serial 6.650.000) đứng
+ * giữa `"2000-01-01"` và `"2026-09-18"` vì ký tự thứ ba `'1'` nằm giữa `'0'` và `'2'` ⇒ lọt cổng, rồi
+ * `new Date("20107-01-29T00:00:00+07:00")` thành Invalid Date và `vnDateKey` ném `RangeError` ra khỏi
+ * server action ⇒ CẢ FILE bị từ chối kèm câu "không đọc được file" thay vì chỉ ra đúng dòng sai.
+ * Đo thật: dải lọt là 6.610.891–6.705.853 và 72.354.541–73.304.171 — đúng tầm số tiền VND đời thường
+ * (6,6 triệu · 72 triệu), tức ca "số tiền lạc sang cột ngày" mà cổng này sinh ra để bắt.
+ */
+function parseDateCell(value: unknown): string | null {
+  const khoa = docKhoaNgay(value);
+  if (khoa === null || !/^\d{4}-\d{2}-\d{2}$/.test(khoa)) return null;
+  return khoa >= NGAY_SOM_NHAT && khoa <= khoaNgayVnHomNay() ? khoa : null;
 }
 
 /**

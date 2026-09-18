@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK } from "@/lib/bronze/streams";
+import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK } from "./helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 import { doiChieuDonKhoVsSan } from "@/lib/reports/doi-chieu-don-kho";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";

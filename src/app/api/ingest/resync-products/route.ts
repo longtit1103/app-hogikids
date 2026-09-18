@@ -1,8 +1,10 @@
 import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { isBronzeOnly } from "@/lib/bronze/bronze-only";
-import { SHOP_KHO } from "@/lib/bronze/streams";
+import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
+import { capNhatSoLechGiaVon } from "@/lib/gia-von/cap-nhat-so-lech";
+import { capNhatSoPhieuNhapChuaGhi } from "@/lib/nhap-hang/cap-nhat-so-phieu-nhap";
 import { KEY_MOC_VA_TON_KHO } from "@/lib/ingest/stock-resync-status";
 import { withSyncLog } from "@/lib/ingest/sync-log";
 import { prisma } from "@/lib/prisma";
@@ -56,10 +58,11 @@ export async function POST(req: Request): Promise<Response> {
     // (SyncLog đẻ 1 dòng/trang ⇒ ~60k dòng/15 ngày). Không mất gì: quá trần là hỏng rồi, không cần
     // biết chính xác hỏng từ bao giờ.
     const tuLuc = new Date(Date.now() - TRAN_TUOI_GIO * 3_600_000);
+    const { kho } = await layCauHinhShop();
     const [moc] = await prisma.$queryRaw<{ chayLuc: Date | null }[]>`
       SELECT MAX("startedAt") AS "chayLuc" FROM "SyncLog"
       WHERE kind = 'PANCAKE' AND status = 'OK' AND "startedAt" >= ${tuLuc}
-        AND stats->>'stream' = 'products' AND stats->>'shopId' = ${SHOP_KHO}
+        AND stats->>'stream' = 'products' AND stats->>'shopId' = ${kho}
     `;
     const tuoiGio = moc?.chayLuc
       ? (Date.now() - moc.chayLuc.getTime()) / 3_600_000
@@ -139,11 +142,47 @@ export async function POST(req: Request): Promise<Response> {
       update: { value: new Date().toISOString() },
     });
 
+    // ĐẾM LỆCH GIÁ VỐN — nối vào đây vì đúng lúc Bronze products vừa tươi nhất trong đêm; làm chỗ
+    // khác thì phải kéo lại dữ liệu đã có sẵn. Con số đẩy lên badge sidebar để chủ shop KHÔNG phải
+    // nhớ mà chạy CLI (yêu cầu 2026-09-07).
+    //
+    // KHÔNG được để việc đếm kéo sập lượt vá tồn: vá tồn là thứ giữ cho "API là chuẩn" đúng với tồn
+    // kho, còn đếm chỉ là tín hiệu nhắc việc. Hỏng thì cảnh báo rồi đi tiếp — mốc không được ghi nên
+    // trạng thái tự chuyển "tre" sau 26 giờ, chủ shop vẫn thấy có gì đó không ổn.
+    let soLechGiaVon: number | null = null;
+    try {
+      soLechGiaVon = await capNhatSoLechGiaVon();
+    } catch (e) {
+      warnings.push(`Đếm lệch giá vốn hỏng (vá tồn vẫn OK): ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // ĐẾM PHIẾU NHẬP CHƯA GHI — nối vào đây vì workflow `pancake-nightly` land stream `purchases`
+    // TRƯỚC khi gọi endpoint này (STREAMS chạy hết rồi mới tới bước vá tồn), nên Bronze phiếu nhập
+    // đã tươi nhất trong đêm. Cùng khuôn + cùng lý do nuốt lỗi với phép đếm giá vốn ngay trên: đếm
+    // chỉ là tín hiệu nhắc việc, KHÔNG được kéo sập lượt vá tồn.
+    let soPhieuNhapChuaGhi: number | null = null;
+    let soViecHauKiemPhieuNhap: number | null = null;
+    try {
+      const soViec = await capNhatSoPhieuNhapChuaGhi();
+      soPhieuNhapChuaGhi = soViec.choDuyet;
+      soViecHauKiemPhieuNhap = soViec.hauKiem;
+    } catch (e) {
+      warnings.push(
+        `Đếm phiếu nhập chưa ghi hỏng (vá tồn vẫn OK): ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
     return {
       mode: "resynced" as const,
       productsUpserted: t.productsUpserted,
       variantsUpserted: t.variantsUpserted,
       skipped: t.skipped,
+      /** Số biến thể lệch giá vốn với Pancake; `null` = lượt đếm hỏng (xem warnings). */
+      soLechGiaVon,
+      /** Số phiếu nhập Pancake chưa vào Sổ chi phí; `null` = lượt đếm hỏng (xem warnings). */
+      soPhieuNhapChuaGhi,
+      /** Số phiếu ĐÃ ghi nay bị huỷ/đổi tiền/trạng thái lạ + phiếu trạng thái lạ chưa ghi. */
+      soViecHauKiemPhieuNhap,
       /** Số biến thể trả tồn về cho API khẳng định. */
       stockMocXoa: count,
       /** Số biến thể GIỮ tồn webhook vì nó mới hơn ảnh Bronze (sẽ về 0 ở lượt sau). */

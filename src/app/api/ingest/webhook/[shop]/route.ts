@@ -2,10 +2,13 @@ import { prisma } from "@/lib/prisma";
 import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { catNote, xuLySuKienWebhook, type KetQuaXuLy } from "@/lib/ingest/webhook-processor";
+import { LOI_CHUA_CAU_HINH_SHOP } from "@/lib/ket-noi/cau-hinh-shop";
 import {
+  laShopSlug,
   luuSuKienWebhook,
   MAX_WEBHOOK_PAYLOAD,
-  SHOP_ID_THEO_SLUG,
+  SHOP_SLUGS,
+  shopIdTheoSlug,
 } from "@/lib/ingest/webhook-inbox";
 
 /**
@@ -37,11 +40,29 @@ export async function POST(
   if (dangPhucHoi) return dangPhucHoi;
 
   const { shop } = await params;
-  const shopId = SHOP_ID_THEO_SLUG[shop];
-  if (!shopId) {
+  // Whitelist slug TĨNH — slug lạ là request hỏng/bịa, chặn 400 không đụng DB.
+  if (!laShopSlug(shop)) {
     return Response.json(
-      { ok: false, error: `shop không hợp lệ: ${shop} (hợp lệ: ${Object.keys(SHOP_ID_THEO_SLUG).join(", ")})` },
+      { ok: false, error: `shop không hợp lệ: ${shop} (hợp lệ: ${SHOP_SLUGS.join(", ")})` },
       { status: 400 }
+    );
+  }
+  // Slug đúng nhưng CHƯA CẤU HÌNH shop id (bản clone chưa setup / Setting bị lùi sau phục hồi):
+  // trả 503 tạm-bận như nhánh đang-phục-hồi ở trên — Pancake/n8n gửi lại được, nhánh ghi file của
+  // n8n vẫn giữ payload, nightly vét bù. KHÔNG được 500 sau khi đã đọc body rồi đánh rơi sự kiện.
+  let shopId: string;
+  try {
+    shopId = await shopIdTheoSlug(shop);
+  } catch (err) {
+    // Nhánh này bắt CẢ lỗi Prisma (DB chập) — chỉ thông điệp "Chưa cấu hình" (mở đầu bằng đúng
+    // hằng LOI_CHUA_CAU_HINH_SHOP) là dành cho người dùng; còn lại trả chuỗi cố định (không lộ
+    // chi tiết hạ tầng ra response) + log phía server.
+    const msg = err instanceof Error ? err.message : "";
+    const laChuaCauHinh = msg.startsWith(LOI_CHUA_CAU_HINH_SHOP);
+    if (!laChuaCauHinh) console.error("webhook: không resolve được shop id:", err);
+    return Response.json(
+      { ok: false, error: laChuaCauHinh ? msg : "Tạm chưa nhận được — thử lại sau" },
+      { status: 503 }
     );
   }
 

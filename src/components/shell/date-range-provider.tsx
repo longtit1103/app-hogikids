@@ -25,7 +25,7 @@ type DateRangeContextValue = {
   preset: RangePreset | "custom";
   /** Resolved concrete [from, to] for the current selection. */
   range: DateRange;
-  /** Whether the current route is one that shows the global picker (Dashboard, Tài chính, Kênh*, Báo cáo). */
+  /** Whether the current route is one that shows the global picker (Dashboard, Tài chính, Kênh*, Báo cáo, Marketing). */
   isApplicableRoute: boolean;
   /** Switches to a named preset (today/7d/this_month/last_month). */
   selectPreset: (preset: RangePreset) => void;
@@ -40,10 +40,10 @@ type DateRangeContextValue = {
 const DateRangeContext = createContext<DateRangeContextValue | null>(null);
 
 // Routes that show the global date-range picker: "/", "/tai-chinh",
-// "/kenh" (+ nested "/kenh/*"), "/bao-cao". "/" is checked exactly elsewhere.
+// "/kenh" (+ nested "/kenh/*"), "/bao-cao", "/marketing". "/" is checked exactly elsewhere.
 // Hub Tài chính (/tai-chinh) MUST be here or its month/range picker is dead
 // (selectPreset/applyCustomRange early-return without writing the URL).
-const APPLICABLE_ROUTE_PREFIXES = ["/tai-chinh", "/kenh", "/bao-cao"];
+const APPLICABLE_ROUTE_PREFIXES = ["/tai-chinh", "/kenh", "/bao-cao", "/marketing"];
 
 function isApplicablePathname(pathname: string): boolean {
   if (pathname === "/") {

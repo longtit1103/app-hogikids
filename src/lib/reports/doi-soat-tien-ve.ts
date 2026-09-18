@@ -28,9 +28,9 @@ import { prisma } from "@/lib/prisma";
  * ngày thật, nhưng khác TẬP ĐƠN — `expectedIn` chỉ lấy COMPLETED (`cash-flow.ts`),
  * còn ở đây gồm cả PENDING/SHIPPING để bắt được đơn Pancake quên cập nhật.
  *
- * Vì sao Shopee chưa có ở đây: ví Shopee chỉ mang mã đơn dạng text và không đủ
- * chi tiết cấp đơn để so (đo 2026-08-18: 15 dòng ví toàn kỳ). Muốn đối soát
- * Shopee cấp đơn phải có file Income — việc D2, chưa làm.
+ * Shopee KHÔNG ở đây mà ở module riêng `doi-soat-tien-ve-shopee.ts`: nguồn là VÍ
+ * (`ShopeeSettlement`) — đo 20/08 ví nối được cấp đơn (66/66) nên file Income đã bỏ
+ * (D2 xong 20/08). Câu cũ "ví không đủ chi tiết cấp đơn" là kết luận chưa đo, sai.
  */
 
 /**
@@ -87,8 +87,14 @@ export type DonHoanConTien = {
   code: string;
   pancakeId: string;
   status: OrderStatus;
-  /** Doanh thu sàn ghi nhận cho đơn (revenue_amount cộng dồn). */
-  doanhThuSan: number;
+  /**
+   * Doanh thu sàn ghi nhận cho đơn (revenue_amount cộng dồn).
+   *
+   * `null` = NGUỒN KHÔNG ĐO ĐƯỢC đại lượng này, không phải "đo được và bằng 0" — ví Shopee chỉ có số
+   * tiền vào/ra, không có khái niệm doanh thu sàn ghi nhận. In `0` cho ca đó là bịa số, và người đọc
+   * sẽ kết luận "sàn đã huỷ ghi nhận doanh thu" trong khi sàn chưa từng nói gì.
+   */
+  doanhThuSan: number | null;
   /** NET sàn trả về. Dương = tiền đã về mà P&L đang loại đơn này. */
   sanTra: number;
   soGiaoDich: number;

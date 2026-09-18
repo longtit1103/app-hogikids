@@ -1,0 +1,126 @@
+{
+  "name": "pancake-webhook-shopee",
+  "nodes": [
+    {
+      "id": "db9e4925-5d40-4cbe-b724-5b52f65ebb89",
+      "name": "Pancake Webhook Shopee",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pancake-pos-hogikids1",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "webhookId": "4bfafc38-cdb6-416f-941c-03d74bca6a6b"
+    },
+    {
+      "id": "e5c918b9-6e73-4973-9d60-d0c123c1d89c",
+      "name": "Ghi file mau",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        540,
+        300
+      ],
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/webhook-samples/shopee/{{ $now.toFormat(\"yyyyLLdd-HHmmss\") }}-{{ $execution.id }}.json",
+        "dataPropertyName": "data"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b1a10000-0000-4a10-9c01-784937600002",
+      "name": "Lấy khoá từ bảng Setting",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        540,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select key, value from app.\"SettingN8n\"\nwhere key in ('n8nAppUrl', 'n8nIngestSecret')",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "id-credential-cua-instance-goc",
+          "name": "hogikids-config-ro (bảng Setting)"
+        }
+      }
+    },
+    {
+      "id": "c1a10000-0000-4a10-9c01-784937600002",
+      "name": "Bắn về app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ Object.fromEntries($('Lấy khoá từ bảng Setting').all().map(i => [i.json.key, i.json.value])).n8nAppUrl }}/api/ingest/webhook/shopee",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ Object.fromEntries($('Lấy khoá từ bảng Setting').all().map(i => [i.json.key, i.json.value])).n8nIngestSecret }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Pancake Webhook Shopee": {
+      "main": [
+        [
+          {
+            "node": "Ghi file mau",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Lấy khoá từ bảng Setting",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Bắn về app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  }
+}

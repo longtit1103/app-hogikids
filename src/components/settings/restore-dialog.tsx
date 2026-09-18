@@ -134,7 +134,7 @@ export function RestoreDialog({ shopName }: { shopName: string }) {
                 <p className="text-xs text-muted-foreground">
                   Nhận bản <code>hogikids-*.dump</code> (1 DB, khuyến nghị) hoặc <code>.sql.gz</code>{" "}
                   1-DB. File &gt;~100MB vượt giới hạn Cloudflare → phục hồi qua{" "}
-                  <code>deploy/restore.sh</code> qua CLI trực tiếp, KHÔNG qua trang public. File{" "}
+                  <code>deploy/restore.sh</code> trên minipc/Tailscale, KHÔNG qua trang public. File{" "}
                   <code>.tar.gz</code> backup-toàn-server sẽ bị từ chối.
                 </p>
                 <p className="text-xs text-muted-foreground">

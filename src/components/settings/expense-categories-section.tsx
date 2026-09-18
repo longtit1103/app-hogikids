@@ -23,13 +23,12 @@ import {
   renameExpenseCategory,
   toggleExpenseCategoryHidden,
 } from "@/lib/actions/settings-expense-categories";
+import { laDanhMucKhoaAn, LOI_DANH_MUC_KHOA_AN } from "@/lib/expenses/danh-muc-khoa-an";
 
 const MAX_NAME_LENGTH = 30;
-const OTHER_CATEGORY_ID = "other";
-const OTHER_LOCKED_TOOLTIP = "Danh mục nhận ghi tự động, không thể ẩn";
 
-/** Thứ tự cố định 7 danh mục hệ thống — khớp `prisma/seed.ts` (schema không có cột order). */
-const SYSTEM_ORDER = ["purchase", "ads", "shipping", "packaging", "return_bom", "fixed", "other"];
+/** Thứ tự cố định 8 danh mục hệ thống — khớp `prisma/seed.ts` (schema không có cột order). */
+const SYSTEM_ORDER = ["purchase", "ads", "shipping", "packaging", "return_bom", "fixed", "interest", "other"];
 
 export type ExpenseCategoryRow = {
   id: string;
@@ -48,8 +47,8 @@ function sortCategories(categories: ExpenseCategoryRow[]): ExpenseCategoryRow[] 
 }
 
 /**
- * Section 3 "Danh mục chi phí": 7 dòng hệ thống (khóa tên, "other" khóa cả
- * toggle Hiện/Ẩn) rồi tới danh mục tùy chỉnh (sửa inline Enter/Esc, toggle,
+ * Section 3 "Danh mục chi phí": 8 dòng hệ thống (khóa tên, "other" và "interest"
+ * khoá cả toggle Hiện/Ẩn — xem danh-muc-khoa-an.ts) rồi tới danh mục tùy chỉnh (sửa inline Enter/Esc, toggle,
  * xóa). Mỗi thao tác lưu NGAY qua server action + `router.refresh()` — khác
  * Section 1/2 (1 form + nút "Lưu" chung) vì đây là list nhiều dòng độc lập.
  */
@@ -192,7 +191,7 @@ export function ExpenseCategoriesSection({ categories: initial }: { categories: 
     <div className="flex flex-col gap-4">
       <div className="flex flex-col divide-y divide-hairline rounded-lg border border-hairline">
         {categories.map((row) => {
-          const isOther = row.id === OTHER_CATEGORY_ID;
+          const khoaAn = laDanhMucKhoaAn(row.id); // "Khác" + "Lãi vay": app tự ghi vào, ẩn là tự chặn đường ghi
           const isEditing = editingId === row.id;
 
           return (
@@ -244,10 +243,10 @@ export function ExpenseCategoriesSection({ categories: initial }: { categories: 
                         <Pencil className="size-4" />
                       </button>
                     )}
-                    <span title={isOther ? OTHER_LOCKED_TOOLTIP : undefined}>
+                    <span title={khoaAn ? LOI_DANH_MUC_KHOA_AN : undefined}>
                       <Switch
                         checked={!row.isHidden}
-                        disabled={isOther || busyId === row.id}
+                        disabled={khoaAn || busyId === row.id}
                         onCheckedChange={(checked) => handleToggleHidden(row, !checked)}
                         aria-label={`Hiện/Ẩn danh mục ${row.name}`}
                       />

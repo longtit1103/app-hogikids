@@ -22,7 +22,7 @@ import {
   traKhoaViecNang,
 } from "@/lib/backup/khoa-viec-nang";
 import { rebuildFromRaw } from "@/lib/bronze/rebuild";
-import { SHOP_KHO, SHOP_SHOPEE } from "@/lib/bronze/streams";
+import { SHOP_KHO, SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
@@ -235,23 +235,21 @@ describe("mất khoá giữa chừng ⇒ caller THẬT phải dừng ghi", () =>
   it("mất lease GIỮA vòng ghi của một stream muộn: dừng ở lô kế, không ghi tiếp", async () => {
     // Chứng minh checkpoint nằm TRONG chính vòng ghi của stream muộn (shopee), không chỉ ở ranh
     // giới stream. 60 dòng ví: cướp lease ở mốc thứ hai (i=25) ⇒ chỉ lô đầu 25 dòng được ghi.
-    for (let i = 0; i < 60; i += 1) {
-      await prisma.rawShopeeWalletTxn.create({
-        data: {
-          shopId: SHOP_SHOPEE,
-          externalId: `2026-07-01T10:00:${String(i).padStart(2, "0")}+07:00|REVENUE|W${i}|1000`,
-          payloadHash: `h-w-${i}`,
-          payload: {
-            txnTime: `2026-07-01T10:00:${String(i).padStart(2, "0")}+07:00`,
-            type: "REVENUE",
-            orderCode: `W${i}`,
-            amount: 1000,
-            status: "done",
-            runningBalance: 1000,
-          },
+    await prisma.rawShopeeWalletTxn.createMany({
+      data: Array.from({ length: 60 }, (_, i) => ({
+        shopId: SHOP_SHOPEE,
+        externalId: `2026-07-01T10:00:${String(i).padStart(2, "0")}+07:00|REVENUE|W${i}|1000`,
+        payloadHash: `h-w-${i}`,
+        payload: {
+          txnTime: `2026-07-01T10:00:${String(i).padStart(2, "0")}+07:00`,
+          type: "REVENUE",
+          orderCode: `W${i}`,
+          amount: 1000,
+          status: "done",
+          runningBalance: 1000,
         },
-      });
-    }
+      })),
+    });
 
     const g = await giuKhoaViecNang("dựng lại từ kho thô");
     if (!g.the) throw new Error("phải giành được khoá");

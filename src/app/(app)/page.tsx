@@ -24,7 +24,7 @@ import { requireUser } from "@/lib/session";
 
 import type { SyncKind } from "@prisma/client";
 
-const SYNC_KINDS: SyncKind[] = ["PANCAKE", "META_ADS", "TIKTOK_ADS", "TIKTOK_SHOP"];
+const SYNC_KINDS: SyncKind[] = ["PANCAKE", "META_ADS", "TIKTOK_ADS", "TIKTOK_SHOP", "TIKTOK_SHOP_ANALYTICS"];
 const TOP_PRODUCTS_LIMIT = 5;
 
 type SearchParams = { tu?: string; den?: string; range?: string };

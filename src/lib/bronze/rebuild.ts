@@ -5,7 +5,7 @@ import {
   haCoBacklogNeuChuaBiBatLai,
   hasBronzeBacklog,
 } from "./bronze-only";
-import { SHOP_KHO } from "./streams";
+import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { transformFromRaw, type TransformStats } from "./transform-from-raw";
 
 /**
@@ -343,9 +343,9 @@ export async function dungLaiGiaoDichTuKhoTho(
  * từ lượt trước vẫn còn, chỉ biến thể MỚI là thiếu. Phép chỉ hỏi "`externalId` này đã có `Product`
  * chưa" sẽ trả lời "đủ rồi" trong đúng ca đó và hạ cờ trong lúc COGS còn thiếu giá vốn biến thể mới.
  *
- * Lọc `shopId = SHOP_KHO` là BẮT BUỘC: trang products của shop bán VẪN được land (whitelist cả 3
- * shop) nhưng transform CỐ Ý chỉ đọc shop kho (nguồn giá vốn) — không lọc thì luôn còn dòng "chưa
- * lên Silver" và cờ không bao giờ hạ được.
+ * Lọc theo shop KHO (id từ cấu hình `Setting`) là BẮT BUỘC: trang products của shop bán VẪN được
+ * land (whitelist cả 3 shop) nhưng transform CỐ Ý chỉ đọc shop kho (nguồn giá vốn) — không lọc
+ * thì luôn còn dòng "chưa lên Silver" và cờ không bao giờ hạ được.
  *
  * `jsonb_typeof(...) = 'array'`: payload đời cũ / hỏng có thể không có `variations` hoặc để `null`,
  * mà `jsonb_array_elements` gặp giá trị vô hướng thì NÉM LỖI — cả lượt dựng lại đổ vì một dòng rác.
@@ -354,11 +354,12 @@ export async function dungLaiGiaoDichTuKhoTho(
  * Đo prod 31/07 (chỉ đọc): 216 sản phẩm kho trong kho thô, 0 thiếu `Product`, 0 thiếu biến thể.
  */
 async function conSanPhamKetOBronze(): Promise<number> {
+  const { kho } = await layCauHinhShop();
   const [row] = await prisma.$queryRaw<{ n: number }[]>`
     WITH ban_moi_nhat AS (
       SELECT DISTINCT ON ("externalId") "externalId", payload
       FROM "RawPancakeProduct"
-      WHERE "shopId" = ${SHOP_KHO}
+      WHERE "shopId" = ${kho}
       ORDER BY "externalId", "fetchedAt" DESC, "id" DESC
     )
     SELECT COUNT(*)::int AS n

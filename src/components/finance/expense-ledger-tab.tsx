@@ -1,4 +1,5 @@
 import { endOfDay, format } from "date-fns";
+import Link from "next/link";
 
 import { AdsImportButton } from "@/components/expenses/ads-import-button";
 import { ExpenseAddButton } from "@/components/expenses/expense-add-button";
@@ -13,6 +14,12 @@ import {
   sumPlatformFeeEst,
   type ExpenseListParams,
 } from "@/lib/expenses/expense-queries";
+import {
+  KEY_MOC_KIEM_PHIEU_NHAP,
+  KEY_SO_PHIEU_NHAP_CHUA_GHI,
+  KEY_SO_VIEC_HAU_KIEM_PHIEU_NHAP,
+  trangThaiPhieuNhapChuaGhi,
+} from "@/lib/nhap-hang/trang-thai-phieu-nhap";
 import { docSoTrang } from "@/lib/pagination";
 import { prisma } from "@/lib/prisma";
 
@@ -53,10 +60,25 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
   // query sổ chi phí (range "Tùy chọn" có thể là tháng quá khứ/đa tháng).
   await ensureRecurringExpensesForMonths(monthStartsInRange(range));
 
-  const [categories, channels] = await Promise.all([
+  const [categories, channels, mocPhieuNhap] = await Promise.all([
     prisma.expenseCategory.findMany({ where: { isHidden: false } }),
     prisma.channel.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
+    // Chỉ ĐỌC 3 ô `Setting` do lượt đêm chốt — KHÔNG đếm ở đây (phép đếm phải quét trọn Bronze).
+    prisma.setting.findMany({
+      where: {
+        key: {
+          in: [KEY_SO_PHIEU_NHAP_CHUA_GHI, KEY_SO_VIEC_HAU_KIEM_PHIEU_NHAP, KEY_MOC_KIEM_PHIEU_NHAP],
+        },
+      },
+      select: { key: true, value: true },
+    }),
   ]);
+
+  const phieuNhapChuaGhi = trangThaiPhieuNhapChuaGhi(
+    mocPhieuNhap.find((s) => s.key === KEY_SO_PHIEU_NHAP_CHUA_GHI)?.value,
+    mocPhieuNhap.find((s) => s.key === KEY_SO_VIEC_HAU_KIEM_PHIEU_NHAP)?.value,
+    mocPhieuNhap.find((s) => s.key === KEY_MOC_KIEM_PHIEU_NHAP)?.value,
+  );
 
   const categoryIdSet = new Set(categories.map((c) => c.id));
   const categoryIds = (sp.danh_muc ?? "")
@@ -108,7 +130,31 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
         <p className="text-xs text-muted-foreground">
           Kỳ: {format(range.from, "dd/MM/yyyy")} – {format(range.to, "dd/MM/yyyy")}
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          {/*
+            LỐI VÀO CỐ ĐỊNH, không phụ thuộc banner. Bài học 07/09: banner chỉ kêu khi lượt đêm đã
+            chốt được số — ở mức `chua-kiem` nó cũng kêu, nhưng nếu ai chỉnh luật im lặng thì màn
+            hình kia thành đảo hoang không đường tới. Số phiếu chờ chỉ hiện khi CHẮC CHẮN > 0.
+          */}
+          <Link href="/tai-chinh/chi-phi-nhap-hang" className="text-sm text-primary underline">
+            Chi phí nhập hàng từ Pancake
+            {/*
+              HAI con số RIÊNG, không cộng lại: "chờ ghi" là việc duyệt, "cần kiểm lại" là phiếu ĐÃ
+              ghi nay không khớp Pancake (bị huỷ / đổi số tiền / trạng thái lạ). Gộp một số là chủ
+              shop mở màn ra không hiểu đang đếm cái gì.
+            */}
+            {phieuNhapChuaGhi.muc === "co-lech" && (
+              <>
+                {phieuNhapChuaGhi.soChoDuyet > 0 && <> ({phieuNhapChuaGhi.soChoDuyet} phiếu chờ)</>}
+                {phieuNhapChuaGhi.soViecHauKiem > 0 && (
+                  <> ({phieuNhapChuaGhi.soViecHauKiem} phiếu cần kiểm lại)</>
+                )}
+              </>
+            )}
+          </Link>
+          <Link href="/tai-chinh/thung-rac" className="text-sm text-muted-foreground underline">
+            Thùng rác
+          </Link>
           <AdsImportButton channels={channels} />
           <ExpenseAddButton categories={categories} channels={channels} />
         </div>

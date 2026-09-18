@@ -42,6 +42,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     });
 
     await seedTestUser();
+    await seedShopIds();
   } catch (e) {
     await khoa.nha(); // hỏng lúc dựng DB thì phải trả khoá ngay, đừng giam tới hết tiến trình
     throw e;
@@ -71,6 +72,27 @@ async function seedTestUser(): Promise<void> {
     await prisma.user.create({
       data: { email: TEST_USER_EMAIL, passwordHash },
     });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+/**
+ * Seed 4 shop id fixture vào `Setting` — app dưới webServer đọc shop id từ cấu hình
+ * (src/lib/ket-noi/cau-hinh-shop.ts) nên e2e ingest sẽ bị từ chối ngay cửa nếu thiếu.
+ * Cùng bộ giá trị với vitest (tests/setup.ts) — nguồn duy nhất: tests/helpers/shop-ids-fixture.ts.
+ */
+async function seedShopIds(): Promise<void> {
+  const { PrismaClient, Prisma } = await import("@prisma/client");
+  const { SEED_SHOP_ID } = await import("../helpers/shop-ids-fixture");
+
+  const prisma = new PrismaClient();
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO "Setting" (key, value)
+      VALUES ${Prisma.join(SEED_SHOP_ID.map(([k, v]) => Prisma.sql`(${k}, ${v})`))}
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `;
   } finally {
     await prisma.$disconnect();
   }

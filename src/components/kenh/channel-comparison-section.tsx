@@ -14,7 +14,7 @@ const VIEW_MODE_STORAGE_KEY = "hogikids_kenh_view_mode";
 type ViewMode = "card" | "table";
 
 /**
- * Header "Kênh & Marketing" + toggle "So với kỳ trước" + segmented Card⇄Bảng,
+ * Header "Kênh" + toggle "So với kỳ trước" + segmented Card⇄Bảng,
  * và vùng so sánh bên dưới (card grid mặc định hoặc bảng). Cả 2 control cùng
  * ảnh hưởng cách render vùng so sánh nên sở hữu state ở 1 component (khớp
  * pattern `expense-structure-chart.tsx`: toggle + nội dung trong cùng 1 file).
@@ -52,7 +52,7 @@ export function ChannelComparisonSection({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-serif text-2xl text-ink">Kênh &amp; Marketing</h1>
+        <h1 className="font-serif text-2xl text-ink">Kênh</h1>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-ink">
             <Switch checked={compareOn} onCheckedChange={setCompareOn} />

@@ -60,6 +60,7 @@ const EXPENSE_CATEGORY_LABEL: Record<string, string> = {
   packaging: "Đóng gói",
   return_bom: "Hoàn/Bom hàng",
   fixed: "Mặt bằng - cố định",
+  interest: "Lãi vay",
   other: "Khác",
 };
 
@@ -275,10 +276,10 @@ function buildOpexGroup(b: PnlBreakdown, adsChildren: PnlLineItem[]): PnlLineIte
     {
       id: "opex",
       label: "Chi phí vận hành",
-      value: b.grossProfit - b.netProfit,
+      value: b.grossProfit + b.financialIncome - b.netProfit,
       isDeduction: true,
       kind: "group",
-      hint: "Toàn bộ chi phí chạy shop trong kỳ: quảng cáo, vận chuyển, đóng gói, hoàn/bom, mặt bằng… Trừ nốt khoản này khỏi lãi gộp là ra lãi ròng.",
+      hint: "Toàn bộ chi phí chạy shop trong kỳ: quảng cáo, vận chuyển, đóng gói, hoàn/bom, mặt bằng, lãi vay… Trừ nốt khoản này khỏi lãi gộp là ra lãi ròng.",
     },
     child("ads", "Quảng cáo", b.ads, "/tai-chinh?tab=so-chi-phi&danh_muc=ads"),
     ...adsChildren,
@@ -295,6 +296,9 @@ function buildOpexGroup(b: PnlBreakdown, adsChildren: PnlLineItem[]): PnlLineIte
       }
     ),
     child("fixed", EXPENSE_CATEGORY_LABEL.fixed, b.fixed, "/tai-chinh?tab=so-chi-phi&danh_muc=fixed"),
+    child("interest", EXPENSE_CATEGORY_LABEL.interest, b.interest, "/tai-chinh?tab=so-chi-phi&danh_muc=interest", {
+      hint: "Tiền lãi trả cho khoản vay — là chi phí thật. Tiền GỐC vay/trả gốc không nằm ở đây (chỉ ở quỹ, tab Dòng tiền).",
+    }),
     child("other", EXPENSE_CATEGORY_LABEL.other, b.other, "/tai-chinh?tab=so-chi-phi&danh_muc=other"),
   ];
 }
@@ -327,6 +331,24 @@ function buildOpexGroup(b: PnlBreakdown, adsChildren: PnlLineItem[]): PnlLineIte
  * hai → bảng y hệt trước đây. `backfilledFee` (từ `computeBackfilledPlatformFee`)
  * chỉ tách dòng con của "Phí sàn", không đổi tổng.
  */
+const HINT_LN_RONG_GOC =
+  "Lãi ròng = lãi gộp trừ toàn bộ chi phí vận hành. Đây là số tiền shop thực sự lãi trong kỳ. Gọi là tạm tính vì sàn có thể còn điều chỉnh phí sau đối soát.";
+
+/**
+ * Chú thích dòng LN ròng. Kỳ có thu nhập tài chính thì CÔNG THỨC KHÁC (thêm một vế cộng) và biên
+ * ròng nhảy lên — không nói ra thì tháng đáo hạn sổ đọc như bán hàng đột nhiên lãi hơn.
+ *
+ * Đặt ở đây là CỐ Ý: `report-export-buttons.tsx` lấy cột "Ghi chú" của sheet Excel bằng
+ * `note ?? hint`, nên sửa MỘT chỗ này là cả bảng trên màn lẫn file xuất ra cùng có câu đó — không
+ * phải khai lần hai ở lớp export (đúng chỗ dễ lệch nếu hai nơi tự viết).
+ */
+function hintLnRong(b: PnlBreakdown): string {
+  if (b.financialIncome <= 0) return HINT_LN_RONG_GOC;
+  return `Lãi ròng = lãi gộp CỘNG thu nhập tài chính rồi trừ toàn bộ chi phí vận hành. Kỳ này có gồm thu nhập tài chính ${formatVnd(
+    b.financialIncome
+  )} — biên ròng vì thế cao hơn phần lãi từ bán hàng. Gọi là tạm tính vì sàn có thể còn điều chỉnh phí sau đối soát.`;
+}
+
 export function buildPnlLineItems(
   b: PnlBreakdown,
   feeComponents: PlatformFeeComponent[] = [],
@@ -407,6 +429,18 @@ export function buildPnlLineItems(
       kind: "subtotal",
       hint: "Lãi gộp = thực nhận từ sàn trừ giá vốn hàng đã bán. Là phần lãi từ việc bán hàng, chưa trừ chi phí chạy shop.",
     },
+    {
+      id: "financialIncome",
+      label: "Thu nhập tài chính",
+      value: b.financialIncome,
+      isDeduction: false,
+      kind: "line",
+      href: "/tai-chinh?tab=dong-tien#tiet-kiem",
+      // LUÔN hiện kể cả bằng 0 — cùng quy ước "Phí sàn đơn hoàn/hủy". Dòng trên MẠCH CHÍNH mà
+      // lúc có lúc không thì cột "so tháng trước" đứt đoạn (dòng mất = coi như Mới ở tháng sau)
+      // và hình bảng đổi theo từng tháng, chủ shop mất mốc đọc quen.
+      hint: "Lãi sổ tiết kiệm đã nhận về — ghi TRỌN vào tháng tất toán sổ, không chia đều các tháng gửi. Đây là thu nhập của cả shop nên bảng của từng kênh không có dòng này.",
+    },
     ...buildOpexGroup(b, adsChildren),
     {
       id: "netProfit",
@@ -414,7 +448,7 @@ export function buildPnlLineItems(
       value: b.netProfit,
       isDeduction: false,
       kind: "total",
-      hint: "Lãi ròng = lãi gộp trừ toàn bộ chi phí vận hành. Đây là số tiền shop thực sự lãi trong kỳ. Gọi là tạm tính vì sàn có thể còn điều chỉnh phí sau đối soát.",
+      hint: hintLnRong(b),
     },
   ];
 }
@@ -431,12 +465,17 @@ export function displayValue(item: Pick<PnlLineItem, "value" | "isDeduction">): 
   return item.isDeduction && item.value !== 0 ? -item.value : item.value;
 }
 
-/** Tháng trống = không đơn (kể cả hoàn/hủy) VÀ không khoản chi nào phát sinh — hiện empty card thay vì bảng toàn số 0. */
+/**
+ * Tháng trống = không đơn (kể cả hoàn/hủy) VÀ không khoản chi nào VÀ không khoản thu ngoài bán
+ * hàng nào phát sinh — hiện empty card thay vì bảng toàn số 0. Thiếu vế `financialIncome` thì
+ * tháng chỉ tất toán sổ tiết kiệm (không bán đơn nào) sẽ bị nuốt trọn: cả bảng lẫn nút Xuất Excel.
+ */
 export function isPnlMonthEmpty(b: PnlBreakdown): boolean {
   return (
     b.orderCount === 0 &&
     b.returnBomOrderCount === 0 &&
-    b.ads + b.shipping + b.packaging + b.returnBom + b.fixed + b.other === 0
+    b.financialIncome === 0 &&
+    b.ads + b.shipping + b.packaging + b.returnBom + b.fixed + b.interest + b.other === 0
   );
 }
 

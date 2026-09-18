@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { sqlCapQuyenDocN8n } from "@/lib/backup/run-restore";
+import { KEY_AN_KHOI_N8N } from "@/lib/n8n/role-doc-kho-khoa";
 
 /**
  * Mỗi lượt phục hồi đều xoá sạch quyền đọc bảng `Setting` của role n8n (`--clean --if-exists` dựng
@@ -24,9 +25,9 @@ function chiMaThucThi(ts: string): string {
 describe("cấp lại quyền đọc cho n8n sau khi phục hồi", () => {
   const sql = sqlCapQuyenDocN8n("app");
 
-  it("cấp ĐÚNG 2 quyền cũ: USAGE trên schema + SELECT bảng Setting", () => {
+  it("cấp ĐÚNG 2 quyền cũ: USAGE trên schema + SELECT view SettingN8n", () => {
     expect(sql).toContain('GRANT USAGE ON SCHEMA "app" TO n8n_config_ro');
-    expect(sql).toContain('GRANT SELECT ON "app"."Setting" TO n8n_config_ro');
+    expect(sql).toContain('GRANT SELECT ON "app"."SettingN8n" TO n8n_config_ro');
   });
 
   it("KHÔNG cấp rộng hơn — role này cố ý chỉ đọc đúng 1 bảng", () => {
@@ -48,7 +49,21 @@ describe("cấp lại quyền đọc cho n8n sau khi phục hồi", () => {
 
   it("thiếu role hoặc thiếu bảng thì bỏ qua, không làm hỏng lượt phục hồi", () => {
     expect(sql).toContain("SELECT 1 FROM pg_roles WHERE rolname = 'n8n_config_ro'");
-    expect(sql).toContain(`to_regclass('"app"."Setting"')`);
+    expect(sql).toContain(`to_regclass('"app"."SettingN8n"')`);
+  });
+
+  it("danh sách key GIẤU khỏi view khớp TUYỆT ĐỐI giữa hằng TS và SQL migration tạo view", () => {
+    // View nằm trong migration đã đóng băng; hằng KEY_AN_KHOI_N8N là bản TS. Hai bên lệch nghĩa
+    // là ai đó sửa một phía — key bí mật mới thêm vào Setting mà quên CREATE OR REPLACE VIEW thì
+    // MẶC ĐỊNH LỘ cho n8n (exclude-list), test này là chỗ duy nhất nhắc.
+    const sql = readFileSync(
+      "prisma/migrations/20260821224500_view_setting_n8n_va_bang_backup_workflow/migration.sql",
+      "utf8"
+    );
+    const m = sql.match(/key NOT IN \(([^)]*)\)/);
+    expect(m).not.toBeNull();
+    const trongSql = [...(m as RegExpMatchArray)[1].matchAll(/'([^']+)'/g)].map(([, k]) => k).sort();
+    expect(trongSql).toEqual([...KEY_AN_KHOI_N8N].sort());
   });
 
   it("CẢ HAI nhánh phục hồi đều gọi bước cấp lại quyền", () => {

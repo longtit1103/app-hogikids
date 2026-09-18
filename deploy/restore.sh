@@ -52,7 +52,7 @@ CONTAINER=supabase-db
 OWNER_ROLE=hogikids
 
 # Role CHỈ-ĐỌC của n8n (đọc kho khoá `Setting`). Thay sạch schema + `pg_restore --no-privileges`
-# xoá cả ACL, nên hậu kỳ phải cấp lại — nếu không, 9 workflow n8n chết ở node lấy khoá trong khi
+# xoá cả ACL, nên hậu kỳ phải cấp lại — nếu không, 10 workflow n8n chết ở node lấy khoá trong khi
 # app vẫn đăng nhập bình thường (ingest/ads/webhook tắt câm, không có báo động).
 N8N_RO_ROLE=n8n_config_ro
 
@@ -493,10 +493,12 @@ DO \$\$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$N8N_RO_ROLE') THEN
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO $N8N_RO_ROLE', '$schema');
-    IF to_regclass(format('%I.%I', '$schema', 'Setting')) IS NULL THEN
-      RAISE NOTICE 'Khong thay bang %.\"Setting\" — bo qua GRANT SELECT (ban dump qua cu?).', '$schema';
+    -- Tu 2026-08-21: role doc VIEW SettingN8n thay bang Setting goc (view loai 2 khoa ha tang
+    -- n8nApiKey/n8nDbRoPassword — xem src/lib/n8n/role-doc-kho-khoa.ts, phai khop hang N8N_SETTING_VIEW).
+    IF to_regclass(format('%I.%I', '$schema', 'SettingN8n')) IS NULL THEN
+      RAISE NOTICE 'Khong thay view %.\"SettingN8n\" — bo qua GRANT SELECT (ban dump qua cu?).', '$schema';
     ELSE
-      EXECUTE format('GRANT SELECT ON %I.%I TO $N8N_RO_ROLE', '$schema', 'Setting');
+      EXECUTE format('GRANT SELECT ON %I.%I TO $N8N_RO_ROLE', '$schema', 'SettingN8n');
     END IF;
   ELSE
     RAISE NOTICE 'Chua co role $N8N_RO_ROLE — bo qua cap quyen doc. Workflow n8n se chet o node lay khoa cho toi khi tao role (xem runbook DR muc 11, buoc tao role $N8N_RO_ROLE).';

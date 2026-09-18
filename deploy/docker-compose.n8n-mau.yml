@@ -1,0 +1,42 @@
+# Compose MẪU dựng n8n cho bản clone das-hogikids — đủ những thứ mà 10 workflow của app cần.
+# Dùng: sao chép về máy chạy n8n → `mkdir -p webhook-samples && sudo chown 1000:1000 webhook-samples`
+#       → `docker compose -f docker-compose.n8n-mau.yml up -d` → mở UI tạo tài khoản
+#       → Settings → n8n API → tạo API key → dán vào app tại /cai-dat › "Kết nối n8n".
+#
+# 3 điều BẮT BUỘC (thiếu là workflow chết khó hiểu):
+#   1. TZ + GENERIC_TIMEZONE = Asia/Ho_Chi_Minh — lịch cron của workflow neo giờ VN.
+#   2. Volume ./webhook-samples:/data/webhook-samples — 3 workflow webhook Pancake ghi bản sao
+#      sự kiện ra file (lưới dự phòng khi app chết). n8n chặn node ghi file ngoài allowlist nên
+#      cần cả env N8N_RESTRICT_FILE_ACCESS_TO. Thư mục host phải thuộc uid 1000 (user "node"
+#      trong ảnh n8n) — sai quyền là node ghi file lỗi từng sự kiện.
+#   3. n8n phải NHÌN THẤY app + Postgres qua mạng: cùng docker network (như dưới — đổi tên
+#      network cho khớp hạ tầng của bạn), hoặc host/port công khai.
+#
+# Webhook Pancake gọi VÀO n8n từ internet ⇒ cần đường công khai (reverse proxy/tunnel) trỏ tới
+# cổng 5678. URL công khai đó điền vào ô "n8n URL công khai (Pancake gọi tới)" ở /cai-dat.
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: hogikids-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
+      - N8N_RESTRICT_FILE_ACCESS_TO=/data/webhook-samples
+      # Node Code của workflow đọc biến qua $env trong vài chẩn đoán — giữ mặc định cho phép.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./webhook-samples:/data/webhook-samples
+    networks: [supabase_default]
+
+volumes:
+  n8n_data:
+
+networks:
+  # Cùng network với Postgres (Supabase self-host) + app để gọi nhau bằng tên container.
+  # Supabase cloud thì bỏ network này và cho n8n nối DB qua host công khai (SSL require).
+  supabase_default:
+    external: true

@@ -3,6 +3,13 @@ import { z } from "zod";
 import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { prisma } from "@/lib/prisma";
+import {
+  KEY_META_ACCESS_TOKEN,
+  KEY_META_DATA_EXPIRE_AT,
+  KEY_META_EXPIRE_AT,
+  KEY_META_SAVED_AT,
+  luuTokenMetaVaoKho,
+} from "@/lib/tokens/luu-token-meta";
 
 /**
  * Kho TOKEN Meta Ads (Setting) — nguồn sự thật duy nhất cho `meta-ads-nightly`.
@@ -21,11 +28,6 @@ import { prisma } from "@/lib/prisma";
  *
  * Cả GET lẫn POST đều yêu cầu bearer `INGEST_SECRET` — token KHÔNG BAO GIỜ lộ ra UI.
  */
-
-const KEY_ACCESS_TOKEN = "metaAdsAccessToken";
-const KEY_EXPIRE_AT = "metaAdsTokenExpireAt"; // epoch GIÂY — token hết hạn
-const KEY_DATA_EXPIRE_AT = "metaAdsDataAccessExpireAt"; // epoch GIÂY — quyền đọc dữ liệu hết hạn
-const KEY_SAVED_AT = "metaAdsTokenSavedAt"; // epoch GIÂY
 
 const tokenBodySchema = z.object({
   accessToken: z.string().min(1),
@@ -58,23 +60,11 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ ok: false, error: "invalid body", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const { accessToken, expireAt, dataAccessExpireAt } = parsed.data;
-  const savedAt = Math.floor(Date.now() / 1000);
-
-  // Một transaction: không để token mới đứng cạnh hạn cũ (đọc ra sẽ tưởng token sắp chết / còn lâu).
+  // Transaction 4 key nằm trong `luuTokenMetaVaoKho` — dùng chung với action "Đổi & lưu token
+  // Meta" của trang Cài đặt, hai đường nhập một cách ghi.
+  let savedAt: number;
   try {
-    await prisma.$transaction(
-      (
-        [
-          [KEY_ACCESS_TOKEN, accessToken],
-          [KEY_EXPIRE_AT, String(expireAt)],
-          [KEY_DATA_EXPIRE_AT, String(dataAccessExpireAt)],
-          [KEY_SAVED_AT, String(savedAt)],
-        ] as const
-      ).map(([key, value]) =>
-        prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } })
-      )
-    );
+    savedAt = await luuTokenMetaVaoKho(parsed.data);
   } catch {
     // KHÔNG đưa err.message vào body: lỗi Prisma có thể chứa giá trị token.
     return Response.json({ ok: false, error: "Lỗi khi lưu token vào kho" }, { status: 500 });
@@ -88,16 +78,16 @@ export async function GET(req: Request): Promise<Response> {
   if (unauthorized) return unauthorized;
 
   const rows = await prisma.setting.findMany({
-    where: { key: { in: [KEY_ACCESS_TOKEN, KEY_EXPIRE_AT, KEY_DATA_EXPIRE_AT, KEY_SAVED_AT] } },
+    where: { key: { in: [KEY_META_ACCESS_TOKEN, KEY_META_EXPIRE_AT, KEY_META_DATA_EXPIRE_AT, KEY_META_SAVED_AT] } },
   });
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
 
   // Kho rỗng ⇒ trả accessToken rỗng: workflow rơi về token HẠT GIỐNG trong CONFIG (lần chạy đầu).
   return Response.json({
     ok: true,
-    accessToken: map[KEY_ACCESS_TOKEN] ?? "",
-    expireAt: Number(map[KEY_EXPIRE_AT] ?? 0),
-    dataAccessExpireAt: Number(map[KEY_DATA_EXPIRE_AT] ?? 0),
-    savedAt: Number(map[KEY_SAVED_AT] ?? 0),
+    accessToken: map[KEY_META_ACCESS_TOKEN] ?? "",
+    expireAt: Number(map[KEY_META_EXPIRE_AT] ?? 0),
+    dataAccessExpireAt: Number(map[KEY_META_DATA_EXPIRE_AT] ?? 0),
+    savedAt: Number(map[KEY_META_SAVED_AT] ?? 0),
   });
 }

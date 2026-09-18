@@ -16,7 +16,7 @@ vi.mock("@/lib/ingest/shopee-settlement-upsert", async (importOriginal) => {
 });
 
 import { importShopeeWallet } from "@/lib/actions/shopee-wallet-import";
-import { SHOP_SHOPEE } from "@/lib/bronze/streams";
+import { SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { upsertOneShopeeSettlement } from "@/lib/ingest/shopee-settlement-upsert";
 import { prisma } from "@/lib/prisma";
 

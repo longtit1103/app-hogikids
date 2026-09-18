@@ -1,0 +1,59 @@
+{
+  "code": 0,
+  "message": "OK",
+  "data": {
+    "list": [
+      {
+        "dimensions": {
+          "campaign_id": "1873416520735281",
+          "item_group_id": "1729557518640450219",
+          "stat_time_day": "2026-08-15 00:00:00"
+        },
+        "metrics": {
+          "cost": "592",
+          "cost_per_order": "0",
+          "currency": "VND",
+          "gross_revenue": "0",
+          "orders": "0",
+          "roi": "0.00"
+        }
+      },
+      {
+        "dimensions": {
+          "campaign_id": "1873416520735281",
+          "item_group_id": "1729557518640450219",
+          "stat_time_day": "2026-08-16 00:00:00"
+        },
+        "metrics": {
+          "cost": "25",
+          "cost_per_order": "0",
+          "currency": "VND",
+          "gross_revenue": "0",
+          "orders": "0",
+          "roi": "0.00"
+        }
+      },
+      {
+        "dimensions": {
+          "campaign_id": "1873416520735281",
+          "item_group_id": "1729557551540701867",
+          "stat_time_day": "2026-08-14 00:00:00"
+        },
+        "metrics": {
+          "cost": "14",
+          "cost_per_order": "0",
+          "currency": "VND",
+          "gross_revenue": "0",
+          "orders": "0",
+          "roi": "0.00"
+        }
+      }
+    ],
+    "page_info": {
+      "page": 1,
+      "page_size": 50,
+      "total_number": 281,
+      "total_page": 6
+    }
+  }
+}

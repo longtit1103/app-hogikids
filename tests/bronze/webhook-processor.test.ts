@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { clearBronzeBacklog, hasBronzeBacklog, markBronzeBacklog } from "@/lib/bronze/bronze-only";
 import { landRaw } from "@/lib/bronze/land-raw";
-import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK } from "@/lib/bronze/streams";
+import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK } from "../helpers/shop-ids-fixture";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
 import { sniffLoaiSuKien, xuLySuKienWebhook } from "@/lib/ingest/webhook-processor";
 import { prisma } from "@/lib/prisma";

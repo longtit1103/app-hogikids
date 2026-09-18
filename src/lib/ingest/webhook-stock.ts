@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { SHOP_KHO } from "@/lib/bronze/streams";
+import { layCauHinhShop, layWarehouseKhoTong } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
 
 import { parseVnDate } from "./pancake-mapping";
@@ -24,18 +24,27 @@ import { parseVnDate } from "./pancake-mapping";
  * Toàn bộ hằng số + luật dưới đây rút từ số đo 114 sự kiện `variations_warehouses` thật trong hộp
  * thư prod (2026-07-27). CỠ MẪU THẬT SỰ CỦA SHOP KHO NHỎ: chỉ 9 sự kiện / 4 biến thể (105 sự kiện
  * còn lại là của shop bán, không dùng được) — đủ để chốt shape và ngữ nghĩa field, KHÔNG đủ để nói
- * "đã phủ mọi ca". Ca chưa từng thấy trong mẫu: chỉnh tồn tay, phiếu nhập, kho thứ hai.
+ * "đã phủ mọi ca".
+ *
+ * PHIẾU NHẬP KHO: ĐÃ CÓ MẪU THẬT (2026-09-04, phiếu 8 mã × 30 cái). Pancake CÓ bắn, độ trễ 1 giây,
+ * 8/8 mã ghi đúng, 0 ca `ton-kho-can-xem`. Shape khác sự kiện đơn hàng ở ba chỗ: **`order_id` vắng
+ * hẳn**, `change_quantity` dương, `is_actual_remain_quantity` = `true` (`remain` vẫn khác `actual`
+ * được khi có hàng đang giữ cho đơn chưa xuất). `order_id` là `nullish()` chính vì ca này — siết
+ * thành bắt buộc là mọi phiếu nhập rơi vào `ton-kho-can-xem`; lưới giữ ở
+ * `tests/bronze/webhook-ton-kho.test.ts` ("phiếu nhập kho").
+ *
+ * Ca CÒN chưa từng thấy trong mẫu: chỉnh tồn tay, kho thứ hai.
  */
 
-/**
+/*
  * Kho hàng DUY NHẤT của shop Kho Tổng — đo 2026-07-27: mỗi shop Pancake có đúng 1 `warehouse_id`
- * và 3 shop là 3 kho khác nhau.
+ * và 3 shop là 3 kho khác nhau. Id nằm ở cấu hình `Setting` key `pancakeWarehouseIdKhoTong`
+ * (clone-and-go 2026-08-21 — kho của bản clone mang uuid khác), đọc qua `layWarehouseKhoTong()`.
  *
  * Guard bắt buộc chứ không phải phòng xa: mở kho thứ hai thì `remain_quantity` trở thành tồn
  * TỪNG KHO, ghi thẳng vào `Variant.stock` sẽ báo thiếu hàng trong khi kho kia còn. Sự kiện mang
  * `warehouse_id` lạ được đẩy lên panel `/cai-dat#ket-noi` để chủ shop biết mà vào sửa, KHÔNG nuốt.
  */
-export const WAREHOUSE_KHO_TONG = "8ea354a7-2350-4446-a1d5-8308353ff841";
 
 /**
  * Shape sự kiện — đo 114/114 sự kiện đều có đủ 9 khoá này, không sự kiện nào thiếu.
@@ -70,7 +79,7 @@ const suKienTonKhoSchema = z
  * làm gì — đúng thói quen "đỏ mãi rồi thôi không xem" mà panel này sinh ra để chống.
  */
 export type KetQuaTonKho = {
-  ket: "ghi" | "cu-hon" | "bo-qua" | "chua-co-bien-the" | "can-xem";
+  ket: "ghi" | "cu-hon" | "bo-qua" | "chua-co-bien-the" | "chua-cau-hinh" | "can-xem";
   note?: string;
 };
 
@@ -90,7 +99,8 @@ export async function xuLyTonKho(shopId: string, payload: string): Promise<KetQu
   // 1. CHỈ shop Kho Tổng. Đo 2026-07-27: variation_id của shop bán khớp catalog app 0/29 (mỗi shop
   //    Pancake đánh UUID riêng cho cùng một món) ⇒ nhận sự kiện shop bán là ghi nhầm biến thể hoặc
   //    (thường hơn) không tra ra gì. Catalog app dựng từ shop Kho — bất biến #5.
-  if (shopId !== SHOP_KHO) {
+  const { kho } = await layCauHinhShop();
+  if (shopId !== kho) {
     return { ket: "bo-qua", note: "sự kiện shop bán — bộ mã biến thể riêng, không khớp catalog app" };
   }
 
@@ -105,12 +115,23 @@ export async function xuLyTonKho(shopId: string, payload: string): Promise<KetQu
     return { ket: "can-xem", note: "sự kiện tồn kho không phải JSON hợp lệ" };
   }
 
-  // 2. Đúng kho. Kho lạ ⇒ `remain_quantity` không còn là tồn TOÀN SHOP (xem WAREHOUSE_KHO_TONG).
-  if (duLieu.warehouse_id !== WAREHOUSE_KHO_TONG) {
+  // 2. Đúng kho. Kho lạ ⇒ `remain_quantity` không còn là tồn TOÀN SHOP (xem chú thích đầu file).
+  //    Chưa cấu hình warehouse id ⇒ bỏ qua CÓ KẾT CỤC — nightly vẫn vá tồn từ API, không hỏng câm.
+  const warehouseKhoTong = await layWarehouseKhoTong();
+  if (!warehouseKhoTong) {
+    // KHÔNG phải "can-xem": mỗi sự kiện một dòng đỏ sẽ ngập panel bằng cùng một thông điệp lặp
+    // lại và che mất sự kiện lạ THẬT. Thiếu cấu hình đã lộ sẵn ở khối "Khóa kết nối" (ô
+    // Warehouse ID trống) — kết cục riêng, không tính cần-xem (cùng lối với `chua-co-bien-the`).
+    return {
+      ket: "chua-cau-hinh",
+      note: "chưa cấu hình pancakeWarehouseIdKhoTong (/cai-dat) — tồn kho realtime đang tắt, lượt API đêm vẫn vá",
+    };
+  }
+  if (duLieu.warehouse_id !== warehouseKhoTong) {
     return {
       ket: "can-xem",
       note:
-        `kho lạ ${duLieu.warehouse_id} (đang chỉ nhận ${WAREHOUSE_KHO_TONG}) — ` +
+        `kho lạ ${duLieu.warehouse_id} (đang chỉ nhận ${warehouseKhoTong}) — ` +
         `shop có kho thứ hai thì tồn phải cộng theo từng kho, KHÔNG ghi thẳng số này`,
     };
   }

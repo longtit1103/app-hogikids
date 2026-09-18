@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
  * này và chạy pass). Push lại mỗi lần vừa thừa vừa chậm.
  *
  * Cung cấp:
- *  - seedReference(): upsert 4 kênh + 7 danh mục chi phí hệ thống (dữ liệu
+ *  - seedReference(): upsert 4 kênh + 8 danh mục chi phí hệ thống (dữ liệu
  *    tham chiếu, tồn tại suốt vòng đời suite; gọi 1 lần trong beforeAll).
  *  - truncateBusinessTables(): xoá các bảng nghiệp vụ theo thứ tự an toàn FK
  *    (gọi trong beforeEach để mỗi test khởi đầu sạch); GIỮ lại Channel +
@@ -32,8 +32,25 @@ const EXPENSE_CATEGORIES = [
   { id: "packaging", name: "Đóng gói" },
   { id: "return_bom", name: "Hoàn/Bom hàng" },
   { id: "fixed", name: "Mặt bằng-cố định" },
+  { id: "interest", name: "Lãi vay" },
   { id: "other", name: "Khác" },
 ];
+
+/**
+ * Seed lại 4 shop id + warehouse fixture vào `Setting` — cho suite nào tự `setting.deleteMany()`
+ * (vd delete-all-data). Bình thường không cần gọi: `tests/setup.ts` đã seed trước mỗi file; nhưng
+ * suite xoá trọn bảng thì mọi đường transform/rebuild sau đó throw "Chưa cấu hình shop ID".
+ * Nhớ kèm `xoaCacheCauHinhShop()` phía caller nếu suite đã lỡ mồi cache bằng giá trị khác.
+ */
+export async function seedShopIdSetting(): Promise<void> {
+  const { Prisma } = await import("@prisma/client");
+  const { SEED_SHOP_ID } = await import("./shop-ids-fixture");
+  await prisma.$executeRaw`
+    INSERT INTO "Setting" (key, value)
+    VALUES ${Prisma.join(SEED_SHOP_ID.map(([k, v]) => Prisma.sql`(${k}, ${v})`))}
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+  `;
+}
 
 /** Upsert dữ liệu tham chiếu (kênh + danh mục hệ thống). Idempotent. */
 export async function seedReference(): Promise<void> {
@@ -51,14 +68,27 @@ export async function seedReference(): Promise<void> {
 
 /**
  * Xoá dữ liệu nghiệp vụ theo thứ tự an toàn khoá ngoại (con → cha):
- * OrderItem → Order → Expense → RecurringExpense → Variant → Product.
- * Không đụng Channel/ExpenseCategory (dữ liệu tham chiếu).
+ * OrderItem → Order → Expense → RecurringExpense → ThuNhap → CashMovement → SoTietKiem → Loan →
+ * Variant → Product. Không đụng Channel/ExpenseCategory (dữ liệu tham chiếu).
+ *
+ * `ThuNhap` và `CashMovement` đều trỏ `SoTietKiem` bằng FK Restrict, còn `SoTietKiem` trỏ `Loan`
+ * bằng SetNull — nên thứ tự đúng là hai bảng con trước, rồi sổ, rồi khoản vay. Sai thứ tự thì chính
+ * hàm dọn ném lỗi FK và MỌI suite integration đỏ hàng loạt.
  */
 export async function truncateBusinessTables(): Promise<void> {
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
   await prisma.expense.deleteMany();
   await prisma.recurringExpense.deleteMany();
+  // Thu nhập ngoài bán hàng (lãi tiết kiệm) — trỏ SoTietKiem bằng FK Restrict ⇒ xoá TRƯỚC sổ.
+  await prisma.thuNhap.deleteMany();
+  // Khoản tiền khác ghi tay (CashMovement) — FK tới Loan và SoTietKiem, cả hai nullable + Restrict.
+  await prisma.cashMovement.deleteMany();
+  await prisma.soTietKiem.deleteMany(); // sổ tiết kiệm — xoá SAU ThuNhap + CashMovement (FK Restrict)
+  await prisma.loan.deleteMany(); // hồ sơ khoản vay — xoá SAU CashMovement (FK Restrict)
+  // Thùng rác khôi phục — không FK nào cả hai chiều, xoá độc lập. Bỏ sót thì ảnh chụp của suite
+  // trước sống sang suite sau và mọi phép đếm dòng thùng rác đều lệch.
+  await prisma.banGhiDaXoa.deleteMany();
   await prisma.variant.deleteMany();
   await prisma.product.deleteMany();
   // Silver "tiền đã về" TikTok (Phase 2) + ví Shopee (Phase 3) — không FK, xoá độc lập.

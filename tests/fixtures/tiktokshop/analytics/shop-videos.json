@@ -1,0 +1,100 @@
+{
+  "code": 0,
+  "message": "Success",
+  "data": {
+    "latest_available_date": "2026-08-23",
+    "next_page_token": "cGFnZV9udW1iZXI9MQ==",
+    "total_count": 600,
+    "videos": [
+      {
+        "avg_customers": 1,
+        "click_through_rate": "0.1431",
+        "creator": {
+          "author_type": "OFFICIAL_ACCOUNTS",
+          "nick_name": "creator_4",
+          "open_id": "openid_creator_5",
+          "user_name": "creator_6"
+        },
+        "duration": 14,
+        "gmv": {
+          "amount": "330000.00",
+          "currency": "VND"
+        },
+        "gpm": {
+          "amount": "297833.94",
+          "currency": "VND"
+        },
+        "hash_tags": [
+          "hashtag_1",
+          "hashtag_2",
+          "hashtag_3"
+        ],
+        "id": "7589461730787396885",
+        "items_sold": 1,
+        "products": [
+          {
+            "id": "1733583824365520555",
+            "name": "ten_san_pham_11"
+          }
+        ],
+        "sku_orders": 1,
+        "title": "tieu_de_1296",
+        "username": "creator_6",
+        "video_post_time": "2025-12-30 08:47:54",
+        "views": 1108
+      },
+      {
+        "avg_customers": 1,
+        "click_through_rate": "0.1389",
+        "creator": {
+          "author_type": "AFFILIATE_ACCOUNTS",
+          "nick_name": "creator_7",
+          "open_id": "openid_creator_8",
+          "user_name": "creator_9"
+        },
+        "duration": 27,
+        "gmv": {
+          "amount": "220000.00",
+          "currency": "VND"
+        },
+        "gpm": {
+          "amount": "3055555.56",
+          "currency": "VND"
+        },
+        "id": "7552020068545154322",
+        "items_sold": 1,
+        "products": [
+          {
+            "id": "1731910711337911979",
+            "name": "ten_san_pham_21"
+          }
+        ],
+        "sku_orders": 1,
+        "title": "tieu_de_6894",
+        "username": "creator_9",
+        "video_post_time": "2025-09-20 11:15:00",
+        "views": 72
+      },
+      {
+        "avg_customers": 0,
+        "click_through_rate": "0.0000",
+        "creator": {
+          "author_type": "AFFILIATE_ACCOUNTS"
+        },
+        "gmv": {
+          "amount": "0.00",
+          "currency": "VND"
+        },
+        "gpm": {
+          "amount": "0.00",
+          "currency": "VND"
+        },
+        "id": "0",
+        "items_sold": 0,
+        "products": [],
+        "sku_orders": 0,
+        "views": 0
+      }
+    ]
+  }
+}

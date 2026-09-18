@@ -5,14 +5,24 @@ import { PnlTab } from "@/components/bao-cao/pnl-tab";
 import { ReportExportButtons } from "@/components/bao-cao/report-export-buttons";
 import { CashFlowTab } from "@/components/finance/cash-flow-tab";
 import { ExpenseLedgerTab } from "@/components/finance/expense-ledger-tab";
+import { listCashMovements } from "@/lib/cash-movements/cash-movement-queries";
 import { resolveRangeFromParams } from "@/lib/date-range";
 import { ensureRecurringExpensesForMonths } from "@/lib/expenses/ensure-recurring-expenses";
+import { isPnlMonthEmpty } from "@/lib/reports/pnl-line-items";
 import { calcPnl } from "@/lib/reports/pnl";
 import { computeBackfilledPlatformFee, computePlatformFeeComponents } from "@/lib/reports/platform-fee-breakdown";
 import { computeVoucherBreakdown } from "@/lib/reports/voucher-breakdown";
 import { computeCashFlow, sumGmv } from "@/lib/reports/cash-flow";
 import { doiSoatTienVe } from "@/lib/reports/doi-soat-tien-ve";
+import { doiSoatTienVeShopee } from "@/lib/reports/doi-soat-tien-ve-shopee";
 import { requireUser } from "@/lib/session";
+import { listKhoanVay } from "@/lib/so-quy/khoan-vay-queries";
+import { tinhSoQuyThang } from "@/lib/so-quy/so-quy-queries";
+import {
+  listSoTietKiem,
+  tongDangGui,
+  tongLaiDaNhanTrongKy,
+} from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 import { cn } from "@/lib/utils";
 
 type FinanceTab = "loi-lo" | "dong-tien" | "so-chi-phi";
@@ -44,8 +54,8 @@ type SearchParams = {
 /**
  * `/tai-chinh` — hub Tài chính, 3 lăng kính (Lãi/Lỗ · Dòng tiền · Sổ chi phí)
  * chọn qua `?tab=`, mặc định `loi-lo`. Lãi/Lỗ theo THÁNG (chứa `range.to`, dời
- * nguyên từ `/bao-cao`); Sổ chi phí theo range toàn cục. Dòng tiền là
- * placeholder ở phase này (điền ở Phase 3).
+ * nguyên từ `/bao-cao`); Sổ chi phí theo range toàn cục. Dòng tiền theo THÁNG, mở đầu bằng thẻ Quỹ
+ * còn lại + khối Khoản vay (trục tiền THẬT) rồi mới tới các số dự kiến.
  */
 export default async function TaiChinhPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requireUser();
@@ -104,10 +114,10 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
       computeBackfilledPlatformFee(prevMonthRange),
     ]);
     const printPeriodLabel = `Tháng ${monthRange.from.getMonth() + 1}/${monthRange.from.getFullYear()}`;
-    const hasData =
-      monthPnl.orderCount > 0 ||
-      monthPnl.returnBomOrderCount > 0 ||
-      monthPnl.ads + monthPnl.shipping + monthPnl.packaging + monthPnl.returnBom + monthPnl.fixed + monthPnl.other > 0;
+    // Cổng bật nút Xuất Excel / In. Hỏi THẲNG `isPnlMonthEmpty` chứ không chép lại phép cộng
+    // danh mục ở đây: chép tay thì thêm danh mục thứ 9 phải nhớ sửa hai chỗ, quên một chỗ là
+    // tháng có phát sinh mà nút xuất vẫn tắt (hoặc ngược lại) — không lưới nào bắt được.
+    const hasData = !isPnlMonthEmpty(monthPnl);
 
     content = (
       <div className="flex flex-col gap-4">
@@ -154,11 +164,56 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
     // (getExpenseSummary trong computeCashFlow không tự backfill chi phí định kỳ).
     const monthRange = { from: startOfMonth(range.to), to: endOfMonth(range.to) };
     await ensureRecurringExpensesForMonths([monthRange.from]);
-    const [flow, doiSoat] = await Promise.all([computeCashFlow(monthRange), doiSoatTienVe(monthRange)]);
+    const [
+      flow,
+      doiSoat,
+      doiSoatShopee,
+      movements,
+      soQuy,
+      loans,
+      tietKiemTong,
+      soTietKiem,
+      laiTietKiemTrongKy,
+    ] = await Promise.all([
+      computeCashFlow(monthRange),
+      doiSoatTienVe(monthRange),
+      doiSoatTienVeShopee(monthRange),
+      listCashMovements(monthRange),
+      // Quỹ luỹ kế từ ngày mở sổ; KHÔNG ensure chi phí định kỳ toàn lịch sử (spec §5.6 — mỗi tháng
+      // là một transaction và luật Path A còn sinh lùi, tức đổi P&L quá khứ âm thầm).
+      tinhSoQuyThang(monthRange),
+      listKhoanVay(),
+      // 5 số cho footnote thẻ Quỹ, LUỸ KẾ tới hôm nay chứ không theo `monthRange`: câu chú thích nói
+      // "đang gửi bao nhiêu, đáo hạn ngày nào" — đó là trạng thái HIỆN TẠI, không phải số của tháng
+      // đang xem. Bốn số sau đều nói về CHÍNH sổ đáo hạn sớm nhất nên không tự ghép từ hai nguồn.
+      tongDangGui(),
+      // Danh sách sổ cho bảng + thẻ đến hạn, và Σ lãi đã nhận TRONG KỲ cho dòng tổng. Cùng một
+      // lượt `Promise.all` với các nguồn khác — không mở thêm vòng đọc DB nào.
+      listSoTietKiem(),
+      tongLaiDaNhanTrongKy(monthRange),
+    ]);
     const now = new Date();
     const isCurrentMonth =
       monthRange.from.getFullYear() === now.getFullYear() && monthRange.from.getMonth() === now.getMonth();
-    content = <CashFlowTab flow={flow} isCurrentMonth={isCurrentMonth} doiSoat={doiSoat} />;
+    content = (
+      <CashFlowTab
+        flow={flow}
+        isCurrentMonth={isCurrentMonth}
+        doiSoat={doiSoat}
+        doiSoatShopee={doiSoatShopee}
+        movements={movements}
+        soQuy={soQuy}
+        loans={loans}
+        tietKiem={{
+          tong: tietKiemTong.tong,
+          daoHanGanNhat: tietKiemTong.daoHanGanNhat,
+          gocDaoHan: tietKiemTong.gocDaoHanGanNhat,
+          laiDuKienDaoHan: tietKiemTong.laiDaoHanGanNhat,
+        }}
+        soTietKiem={soTietKiem}
+        laiTietKiemTrongKy={laiTietKiemTrongKy}
+      />
+    );
   }
 
   return (

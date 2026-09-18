@@ -47,3 +47,23 @@ process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 // Test luôn chạy hành vi MẶC ĐỊNH (land + transform). Máy dev bật BRONZE_ONLY trong `.env` (đúng
 // cách dùng) sẽ khiến Silver rỗng và test đỏ khó hiểu — test nào cần chế độ đó thì tự set lấy.
 delete process.env.BRONZE_ONLY;
+
+// Seed 4 shop id fixture vào `Setting` — runtime nay đọc shop id từ cấu hình (cau-hinh-shop.ts)
+// thay vì hằng, còn toàn bộ fixture test vẫn mang id cũ (tests/helpers/shop-ids-fixture.ts).
+// Chạy Ở ĐÂY (setupFiles — SAU khi DATABASE_URL đã hoán sang TEST ở trên) chứ TUYỆT ĐỐI không ở
+// globalSetup: file globalSetup cố ý trả DATABASE_URL về bản gốc (trỏ PROD qua Tailscale) nên
+// seed bằng prisma singleton ở đó là GHI VÀO DB THẬT. Import động cũng vì lý do đó — import tĩnh
+// bị hoist lên TRƯỚC dòng hoán URL.
+// Một câu ON CONFLICT DO UPDATE nguyên tử: nhiều worker chạy song song không đua nhau P2002.
+{
+  const { prisma } = await import("@/lib/prisma");
+  const { Prisma } = await import("@prisma/client");
+  const { SEED_SHOP_ID } = await import("./helpers/shop-ids-fixture");
+  await prisma.$executeRaw`
+    INSERT INTO "Setting" (key, value)
+    VALUES ${Prisma.join(SEED_SHOP_ID.map(([k, v]) => Prisma.sql`(${k}, ${v})`))}
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+  `;
+  // KHÔNG $disconnect: chính file test này dùng tiếp singleton — ngắt ở đây là mỗi file trả thêm
+  // một lượt bắt tay Postgres qua Tailscale (đúng loại độ trễ vừa buộc nâng testTimeout).
+}

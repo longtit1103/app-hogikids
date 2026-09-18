@@ -1,5 +1,9 @@
 import { endOfDay } from "date-fns";
 
+import {
+  getCashMovementSummary,
+  type CashMovementKindTotal,
+} from "@/lib/cash-movements/cash-movement-queries";
 import { type DateRange } from "@/lib/date-range";
 import { getExpenseSummary, type CategoryBreakdownItem } from "@/lib/expenses/expense-queries";
 import { prisma } from "@/lib/prisma";
@@ -7,7 +11,8 @@ import { calcPnlCore, pnlOrderSelect, toPnlOrderInput } from "@/lib/reports/pnl"
 
 /**
  * Loader lăng kính "Dòng tiền" của hub Tài chính. TÁI DÙNG `calcPnlCore`
- * (tiền vào) + `getExpenseSummary` (tiền ra) — KHÔNG viết lại aggregate
+ * (tiền vào) + `getExpenseSummary` (tiền ra) + `getCashMovementSummary` (khoản
+ * tiền khác ghi tay — vào/ra ngoài sàn) — KHÔNG viết lại aggregate
  * doanh thu/phí (Bất biến #1: nguồn P&L duy nhất là pnl.ts).
  */
 
@@ -33,7 +38,21 @@ export type CashFlow = {
   pendingCount: number;
   /** Tiền ra thật — MỌI chi phí GỒM Nhập hàng đã ghi. */
   cashOut: number;
-  /** = expectedIn − cashOut. */
+  /**
+   * Khoản tiền khác GHI TAY (bảng `CashMovement`: vay/góp vốn/bán trực tiếp/thu khác = VÀO; trả nợ
+   * gốc/rút vốn = RA), theo `date` trong kỳ. Trục dòng tiền thuần: KHÔNG liên quan P&L và KHÔNG gộp
+   * vào `actualIn` (đó là tiền SÀN trả). `otherOut` là số DƯƠNG.
+   */
+  otherIn: number;
+  otherOut: number;
+  otherByKind: CashMovementKindTotal[];
+  /**
+   * Thu nhập tài chính ghi nhận trong kỳ (Σ `ThuNhap.amount` — lãi sổ tiết kiệm đã NHẬN THẬT).
+   * Tiền vào THẬT chứ không phải số dự kiến, nên cộng thẳng vào `balance`. Đi đường RIÊNG, KHÔNG
+   * gộp vào `otherIn` (ghi tay) hay `expectedIn` (tiền sàn) — gộp là đếm hai lần.
+   */
+  thuNhapTaiChinh: number;
+  /** = expectedIn + otherIn + thuNhapTaiChinh − cashOut − otherOut. */
   balance: number;
   outBreakdown: CategoryBreakdownItem[];
   /**
@@ -87,8 +106,18 @@ export type ShopeeCashIn = {
  */
 export async function computeCashFlow(range: DateRange): Promise<CashFlow> {
   const to = endOfDay(range.to);
-  const [orderRows, expSummary, settleAgg, adsAgg, bankAgg, shopeeNetAgg, shopeeWithdrawAgg, shopeeOtherAgg] =
-    await Promise.all([
+  const [
+    orderRows,
+    expSummary,
+    settleAgg,
+    adsAgg,
+    bankAgg,
+    shopeeNetAgg,
+    shopeeWithdrawAgg,
+    shopeeOtherAgg,
+    otherSummary,
+    thuNhapAgg,
+  ] = await Promise.all([
     prisma.order.findMany({
       where: { orderedAt: { gte: range.from, lte: to } },
       select: pnlOrderSelect,
@@ -133,6 +162,13 @@ export async function computeCashFlow(range: DateRange): Promise<CashFlow> {
       _count: true,
       where: { type: "OTHER", txnTime: { gte: range.from, lte: to } },
     }),
+    // Khoản tiền khác ghi tay — trục dòng tiền thuần, không chạm P&L (bất biến #1).
+    getCashMovementSummary(range),
+    // Lãi sổ tiết kiệm đã nhận trong kỳ — tiền thật, cùng trục với `cashOut`/`otherIn`.
+    prisma.thuNhap.aggregate({
+      _sum: { amount: true },
+      where: { date: { gte: range.from, lte: to } },
+    }),
   ]);
 
   const orders = orderRows.map(toPnlOrderInput);
@@ -141,6 +177,7 @@ export async function computeCashFlow(range: DateRange): Promise<CashFlow> {
 
   const expectedIn = completed.netRevenue;
   const cashOut = expSummary.total; // gồm mọi danh mục kể cả "purchase" (Nhập hàng)
+  const thuNhapTaiChinh = thuNhapAgg._sum.amount ?? 0;
 
   const net = settleAgg._sum.settlementAmount ?? 0;
   const adsDeducted = Math.abs(adsAgg._sum.settlementAmount ?? 0); // ads lưu âm → hiện dương
@@ -172,7 +209,12 @@ export async function computeCashFlow(range: DateRange): Promise<CashFlow> {
     pendingIn: pending.netRevenue,
     pendingCount: pending.orderCount,
     cashOut,
-    balance: expectedIn - cashOut,
+    otherIn: otherSummary.inTotal,
+    otherOut: otherSummary.outTotal,
+    otherByKind: otherSummary.byKind,
+    thuNhapTaiChinh,
+    balance:
+      expectedIn + otherSummary.inTotal + thuNhapTaiChinh - cashOut - otherSummary.outTotal,
     outBreakdown: expSummary.breakdown,
     actualIn: { tiktok, shopee },
   };

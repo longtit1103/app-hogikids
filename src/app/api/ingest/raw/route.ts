@@ -6,19 +6,22 @@ import { coTheDoiSoat, demDaHachToan } from "@/lib/bronze/doi-soat-hach-toan";
 import { locDonChuaDongDau } from "@/lib/bronze/ket-cuc-silver";
 import { giuKhoaLandDon } from "@/lib/bronze/khoa-land-don";
 import { landRaw } from "@/lib/bronze/land-raw";
-import { isBronzeStream } from "@/lib/bronze/streams";
+import { BRONZE_STREAMS, isBronzeStream } from "@/lib/bronze/streams";
 import { transformFromRaw, type TransformStats } from "@/lib/bronze/transform-from-raw";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { withSyncLog } from "@/lib/ingest/sync-log";
+import { layCauHinhShop, shopIdsChoVai } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
 
 /**
  * POST /api/ingest/raw — n8n đẩy TEXT THÔ Pancake trả về (một stream, một shop, một trang).
  * THAY HẲN /api/ingest/pancake (không giữ 2 nguồn sự thật).
  *
- * Body: `{ stream: BronzeStream, shopId: string, payload: string }`.
+ * Body: `{ stream: BronzeStream, shopId: string, payload: string, ngay?: "YYYY-MM-DD" }`.
  * `payload` là CHUỖI: nội dung JSON của Pancake KHÔNG bị JS parse → int64 an toàn
- * (chỉ 3 field vỏ ngoài của request mới đi qua `req.json()`).
+ * (chỉ 4 field vỏ ngoài của request mới đi qua `req.json()`).
+ * `ngay` chỉ dành cho stream khai `chapNhanNgay` (record không mang trường ngày) — 3 nhánh 400 ở
+ * dưới, fail-closed cả hai chiều: gửi thừa cũng chặn, thiếu cũng chặn.
  *
  * Luồng: ① LAND (commit ngay, không lọc) → ② TRANSFORM ĐÚNG entity vừa land (`landedIds`).
  * Transform lỗi ⇒ raw vẫn còn: sửa code rồi gọi `transformFromRaw(stream, warnings)` KHÔNG kèm
@@ -45,14 +48,14 @@ export async function POST(req: Request): Promise<Response> {
   const dangPhucHoi = chanRouteKhiDangPhucHoi();
   if (dangPhucHoi) return dangPhucHoi;
 
-  let body: { stream?: string; shopId?: string; payload?: string };
+  let body: { stream?: string; shopId?: string; payload?: string; ngay?: string };
   try {
     body = await req.json();
   } catch {
     return Response.json({ ok: false, error: "invalid json" }, { status: 400 });
   }
 
-  const { stream, shopId, payload } = body;
+  const { stream, shopId, payload, ngay } = body;
   if (!stream || !isBronzeStream(stream)) {
     return Response.json({ ok: false, error: `stream không hợp lệ: ${stream}` }, { status: 400 });
   }
@@ -69,6 +72,28 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
+  // `ngay` — CỘNG THÊM, tuỳ chọn ở mức hợp đồng nhưng BẮT BUỘC với stream khai `chapNhanNgay`
+  // (record là TỔNG cả cửa sổ, không mang trường ngày nào — thiếu `ngay` thì lượt hôm sau đè lượt
+  // hôm trước, chuỗi ngày biến mất lặng lẽ). Kiểm Ở CỬA để n8n nhận 400 kèm lý do thay vì 500 mơ hồ
+  // từ tầng dưới; landRaw vẫn kiểm lại lần nữa (webhook/script cũng gọi thẳng nó).
+  const { chapNhanNgay } = BRONZE_STREAMS[stream];
+  if (ngay !== undefined) {
+    if (typeof ngay !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(ngay)) {
+      return Response.json({ ok: false, error: "ngay phải đúng khuôn YYYY-MM-DD (giờ VN)" }, { status: 400 });
+    }
+    if (!chapNhanNgay) {
+      return Response.json(
+        { ok: false, error: `stream "${stream}" không nhận 'ngay' (chỉ stream khai chapNhanNgay)` },
+        { status: 400 }
+      );
+    }
+  } else if (chapNhanNgay) {
+    return Response.json(
+      { ok: false, error: `stream "${stream}" BẮT BUỘC có 'ngay': record không mang trường ngày nào` },
+      { status: 400 }
+    );
+  }
+
   // SyncLog PHẢI tách theo NGUỒN — 3 nguồn đi chung endpoint này:
   //   `tiktok/*`         → TikTok Shop Open API (phí + đối soát)
   //   `tiktokbusiness/*` → TikTok Business (chi tiêu quảng cáo) — API KHÁC HẲN, token khác
@@ -78,13 +103,31 @@ export async function POST(req: Request): Promise<Response> {
   // vẫn về trong khi Pancake đã chết nhiều ngày — và đẩy log thật ra khỏi 10 dòng gần nhất.
   const kind: SyncKind = stream.startsWith("tiktokbusiness/")
     ? "TIKTOK_ADS"
-    : stream.startsWith("tiktok/")
-      ? "TIKTOK_SHOP"
-      : stream.startsWith("meta/")
-        ? "META_ADS"
-        : "PANCAKE";
+    : // Analytics + affiliate phải đứng TRƯỚC nhánh `tiktok/`: cả hai cũng bắt đầu bằng "tiktok/"
+      // nên nếu để sau thì rơi vào TIKTOK_SHOP và lượt 02:30 sẽ "sơn xanh" trạng thái tài chính
+      // 02:00 vừa chết. `tiktok/affiliate_` đi cùng lượt 02:30 nên chung kind với analytics.
+      stream.startsWith("tiktok/analytics_") || stream.startsWith("tiktok/affiliate_")
+      ? "TIKTOK_SHOP_ANALYTICS"
+      : stream.startsWith("tiktok/")
+        ? "TIKTOK_SHOP"
+        : stream.startsWith("meta/")
+          ? "META_ADS"
+          : "PANCAKE";
 
   return withSyncLog(kind, async (warnings, syncLogId) => {
+    // Resolve cấu hình shop TRƯỚC khi mở transaction: bước land của `orders` chạy trong
+    // transaction giữ khoá tư vấn — để landRaw tự tra bảng `Setting` lúc đó là xin kết nối
+    // THỨ HAI trong khi kết nối thứ nhất đang giữ khoá (webhook xếp hàng chờ cùng khoá cũng
+    // giữ kết nối) ⇒ pool cạn là mọi đường ingest cùng nghẽn. Thiếu cấu hình ⇒ throw ngay ở
+    // đây, withSyncLog ghi ERROR + 500 với thông báo "Chưa cấu hình shop ID" — kêu to đúng chỗ.
+    //
+    // Resolve LƯỜI theo stream: stream danh sách MỞ (`shops: null` — báo cáo ads Meta/TikTok
+    // Business) không dùng shop id Pancake nào, ép nó chờ cấu hình Pancake là buộc hai nguồn
+    // không liên quan chết chung (bản clone chỉ bật ads vẫn phải điền shop Pancake mới land được).
+    const { shops } = BRONZE_STREAMS[stream];
+    const cauHinh = shops === null ? null : await layCauHinhShop();
+    const shopIdsHopLe = shops === null ? undefined : await shopIdsChoVai(shops);
+
     // Stream `orders` land TRONG transaction có khoá tư vấn — cùng khoá mà guard thứ tự của
     // webhook giữ (`khoa-land-don.ts`). Không có bước này thì guard bên webhook vẫn hở: nó đọc
     // xong, trang API chen vào land bản mới, rồi webhook mới land bản cũ đè lên. Stream khác
@@ -94,11 +137,11 @@ export async function POST(req: Request): Promise<Response> {
         ? await prisma.$transaction(
             async (tx) => {
               await giuKhoaLandDon(tx);
-              return landRaw(stream, shopId, payload, syncLogId, tx);
+              return landRaw(stream, shopId, payload, syncLogId, tx, shopIdsHopLe);
             },
             { timeout: TIMEOUT_LAND_TRANG_MS }
           )
-        : await landRaw(stream, shopId, payload, syncLogId);
+        : await landRaw(stream, shopId, payload, syncLogId, undefined, shopIdsHopLe, ngay);
     if (skippedNoId > 0) warnings.push(`${skippedNoId} record thiếu 'id' → không land được`);
 
     // Chế độ chỉ-land: dừng ngay sau Bronze. Ghi warning để SyncLog nói rõ vì sao Silver không đổi —
@@ -106,7 +149,7 @@ export async function POST(req: Request): Promise<Response> {
     if (isBronzeOnly()) {
       await markBronzeBacklog();
       warnings.push("BRONZE_ONLY: chỉ land raw, KHÔNG dựng Silver");
-      return { stream, shopId, landed, skippedNoId, mode: "bronze-only" as const };
+      return { stream, shopId, landed, skippedNoId, seen: seenIds.length, mode: "bronze-only" as const };
     }
 
     // Backlog từ đợt trước (BRONZE_ONLY cố ý HOẶC transform lỗi ngoài ý): raw đã nằm sẵn trong
@@ -176,7 +219,7 @@ export async function POST(req: Request): Promise<Response> {
     // thức không đổi.
     const accounted = demDaHachToan(t);
     const distinctLanded = new Set(canTransform).size;
-    if (coTheDoiSoat(stream, shopId) && distinctLanded > accounted) {
+    if (coTheDoiSoat(stream, shopId, cauHinh) && distinctLanded > accounted) {
       warnings.push(
         `Stream "${stream}": ${distinctLanded} id cần dựng nhưng chỉ ${accounted} được hạch toán` +
           (t.skipped > 0 ? ` (${t.skipped} record hỏng shape — xem cảnh báo bên trên)` : "") +
@@ -184,6 +227,6 @@ export async function POST(req: Request): Promise<Response> {
       );
       await markBronzeBacklog();
     }
-    return { stream, shopId, landed, skippedNoId, mode: "land+transform" as const, ...t };
+    return { stream, shopId, landed, skippedNoId, seen: seenIds.length, mode: "land+transform" as const, ...t };
   });
 }

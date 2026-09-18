@@ -19,8 +19,13 @@ import type { DateRange } from "@/lib/date-range";
  *
  * Lưu ý semantics (Path A — schema không có mốc bắt đầu): khoản định kỳ
  * `active` áp cho MỌI tháng được render, kể cả tháng trước khi khoản đó được
- * tạo. Khoản mới phát sinh gần đây bị sinh lùi cho tháng cũ → user xoá tháng
- * sai qua "Xoá dòng này" (`deleteExpense(id, "only")`).
+ * tạo. Khoản mới phát sinh gần đây bị sinh lùi cho tháng cũ.
+ *
+ * ĐƯỜNG SỬA ĐÚNG là "Xoá và dừng lặp lại" (`deleteExpense(id, "stop_recurring")`) rồi
+ * nhập tay tháng cần. **KHÔNG phải "Xoá dòng này"** (`deleteExpense(id, "only")`) như chú
+ * thích cũ ở đây từng dạy: mẫu vẫn `active` nên cổng chống trùng dưới đây thấy tháng đó
+ * trống và sinh lại đúng dòng vừa xoá ở lần render kế — chủ shop xoá rồi thấy nó quay lại.
+ * Cùng lý do, `updateExpense` CHẶN dời dòng định kỳ sang tháng khác (chi phí đếm 2 lần).
  */
 export async function ensureRecurringExpensesForMonths(months: Date[]): Promise<number> {
   const seen = new Set<string>();

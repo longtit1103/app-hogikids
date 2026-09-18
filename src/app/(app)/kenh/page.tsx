@@ -1,12 +1,13 @@
+import Link from "next/link";
+
 import { ChannelComparisonSection } from "@/components/kenh/channel-comparison-section";
 import { ChannelNotFoundToast } from "@/components/kenh/channel-not-found-toast";
 import { ChannelTrendChart } from "@/components/kenh/channel-trend-chart";
-import { QuangCaoChienDichSection } from "@/components/kenh/quang-cao-chien-dich-section";
 import { clampRangeEndToNow, previousComparableRange, resolveRangeFromParams } from "@/lib/date-range";
 import { prisma } from "@/lib/prisma";
 import { computeChannelDailyRevenue } from "@/lib/reports/daily-series";
-import { computeChannelPnl, type ChannelPnl } from "@/lib/reports/pnl";
-import { quangCaoTheoChienDich } from "@/lib/reports/quang-cao-chien-dich";
+import { chuThichBienRongTheoKenh } from "@/lib/reports/chu-thich-thu-nhap-tai-chinh";
+import { computeChannelPnl, sumThuNhapTaiChinh, type ChannelPnl } from "@/lib/reports/pnl";
 import { requireUser } from "@/lib/session";
 
 type SearchParams = { tu?: string; den?: string; range?: string; loi?: string };
@@ -58,7 +59,7 @@ export default async function KenhPage({ searchParams }: { searchParams: Promise
   // (KHỚP hàng KPI Dashboard), các preset khác trượt cùng span như cũ.
   const range = clampRangeEndToNow(resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, now), now);
 
-  const [pnlChannels, prevPnlChannels, dailyRevenue, allChannels, quangCao] = await Promise.all([
+  const [pnlChannels, prevPnlChannels, dailyRevenue, allChannels, thuNhapTaiChinh] = await Promise.all([
     computeChannelPnl(range),
     computeChannelPnl(previousComparableRange(range, now)),
     computeChannelDailyRevenue(range),
@@ -66,7 +67,7 @@ export default async function KenhPage({ searchParams }: { searchParams: Promise
       orderBy: { sortOrder: "asc" },
       select: { id: true, name: true, color: true, isActive: true, platformFeePct: true, paymentFeePct: true },
     }),
-    quangCaoTheoChienDich(range),
+    sumThuNhapTaiChinh(range),
   ]);
 
   const feePctByChannel: Record<string, number> = {};
@@ -78,6 +79,9 @@ export default async function KenhPage({ searchParams }: { searchParams: Promise
     .map((c) => pnlByChannelId.get(c.id) ?? zeroChannelPnl(c));
   // Kênh tắt còn dữ liệu lịch sử trong kỳ — computeChannelPnl đã tự lọc "có phát sinh".
   const inactiveWithActivity = pnlChannels.filter((c) => !c.isActive);
+  // Lãi tiết kiệm KHÔNG thuộc kênh bán nào (calcPnlCore ép 0 dưới lăng kính kênh) — nói ra để
+  // cộng biên ròng các kênh lại không khớp bảng Lãi/Lỗ thì có lời giải thích ngay tại chỗ.
+  const ghiChuKenh = chuThichBienRongTheoKenh(thuNhapTaiChinh);
 
   return (
     <div className="flex flex-col gap-6">
@@ -89,9 +93,14 @@ export default async function KenhPage({ searchParams }: { searchParams: Promise
         feePctByChannel={feePctByChannel}
       />
 
+      {ghiChuKenh && <p className="-mt-2 text-xs text-muted-foreground">{ghiChuKenh}</p>}
       <ChannelTrendChart dailyRevenue={dailyRevenue} channels={[...activeChannels, ...inactiveWithActivity]} />
 
-      <QuangCaoChienDichSection dulieu={quangCao} />
+      <div className="flex justify-end">
+        <Link href="/marketing?tab=quang-cao" className="text-sm text-primary hover:underline">
+          Xem quảng cáo →
+        </Link>
+      </div>
     </div>
   );
 }

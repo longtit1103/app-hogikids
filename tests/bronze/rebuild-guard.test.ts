@@ -3,7 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { hasBronzeBacklog, markBronzeBacklog } from "@/lib/bronze/bronze-only";
 import { landRaw } from "@/lib/bronze/land-raw";
 import { dungLaiGiaoDichTuKhoTho, rebuildFromRaw } from "@/lib/bronze/rebuild";
-import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK_SHOP } from "@/lib/bronze/streams";
+import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK_SHOP } from "../helpers/shop-ids-fixture";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
 import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
 import { prisma } from "@/lib/prisma";

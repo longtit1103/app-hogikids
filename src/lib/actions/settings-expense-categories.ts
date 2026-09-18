@@ -8,14 +8,11 @@ import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { laDanhMucKhoaAn, LOI_DANH_MUC_KHOA_AN } from "@/lib/expenses/danh-muc-khoa-an";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 
 // ---- Cài đặt › Danh mục chi phí (CRUD) --------------------------------------
-
-/** "Khác" — fallback nhận ghi tự động (hao hụt, chênh lệch…), KHÔNG được ẩn. */
-const OTHER_CATEGORY_ID = "other";
-const CATEGORY_HIDE_LOCKED_ERROR = "Danh mục nhận ghi tự động, không thể ẩn";
 
 const expenseCategoryNameSchema = z
   .string()
@@ -104,16 +101,17 @@ export async function renameExpenseCategory(id: string, name: string): Promise<A
 }
 
 /**
- * Bật/tắt hiện-ẩn 1 danh mục trong dropdown "Thêm chi phí". `other` là fallback
- * nhận ghi tự động (đối soát/hao hụt…) nên KHÔNG được ẩn — chặn cứng ở server
- * dù UI đã disable toggle (không tin client).
+ * Bật/tắt hiện-ẩn 1 danh mục trong dropdown "Thêm chi phí". Danh mục app tự ghi vào
+ * (`other` hứng ghi tự động, `interest` nhận lãi vay khi duyệt kỳ trả nợ) KHÔNG được ẩn —
+ * chặn cứng ở server dù UI đã disable toggle (không tin client). Danh sách dùng CHUNG với UI
+ * ở `@/lib/expenses/danh-muc-khoa-an`.
  */
 export async function toggleExpenseCategoryHidden(id: string, isHidden: boolean): Promise<ActionResult> {
   await requireUser();
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
-  if (id === OTHER_CATEGORY_ID) {
-    return { ok: false, error: CATEGORY_HIDE_LOCKED_ERROR };
+  if (laDanhMucKhoaAn(id)) {
+    return { ok: false, error: LOI_DANH_MUC_KHOA_AN };
   }
 
   try {

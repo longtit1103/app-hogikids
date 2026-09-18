@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { calcPnlCore, type PnlBreakdown } from "@/lib/reports/pnl";
 import { pnlPercentBase } from "@/lib/reports/pnl-percent-base";
-import { buildPnlLineItems, displayValue } from "@/lib/reports/pnl-line-items";
+import { buildPnlLineItems, displayValue, isPnlMonthEmpty } from "@/lib/reports/pnl-line-items";
 import { summableChildren } from "@/lib/reports/pnl-line-tree";
 
 /**
  * Nhãn + href waterfall P&L (Phương án A — chuẩn hóa TÊN, KHÔNG đổi số).
- * "Doanh thu"→"Doanh thu gộp", "DT thuần"→"Thực nhận từ sàn"; 6 dòng chi phí
+ * "Doanh thu"→"Doanh thu gộp", "DT thuần"→"Thực nhận từ sàn"; 7 dòng chi phí
  * trỏ hub Tài chính (tab sổ chi phí) thay `/chi-phi` cũ.
  */
 
@@ -25,6 +25,8 @@ const EMPTY: PnlBreakdown = {
   packaging: 0,
   returnBom: 0,
   fixed: 0,
+  interest: 0,
+  financialIncome: 0,
   other: 0,
   netProfit: 0,
   orderCount: 0,
@@ -41,8 +43,8 @@ describe("buildPnlLineItems — nhãn + href", () => {
     expect(byId.get("netRevenue")?.label).toBe("Thực nhận từ sàn");
   });
 
-  it("6 dòng chi phí trỏ /tai-chinh?tab=so-chi-phi (không còn /chi-phi)", () => {
-    for (const id of ["ads", "shipping", "packaging", "returnBom", "fixed", "other"]) {
+  it("7 dòng chi phí trỏ /tai-chinh?tab=so-chi-phi (không còn /chi-phi)", () => {
+    for (const id of ["ads", "shipping", "packaging", "returnBom", "fixed", "interest", "other"]) {
       expect(byId.get(id)?.href).toContain("/tai-chinh?tab=so-chi-phi");
     }
   });
@@ -50,6 +52,19 @@ describe("buildPnlLineItems — nhãn + href", () => {
   it("COGS vẫn trỏ báo cáo sản phẩm; doanh thu gộp trỏ đơn hàng", () => {
     expect(byId.get("cogs")?.href).toBe("/bao-cao?tab=san-pham");
     expect(byId.get("revenue")?.href).toBe("/don-hang");
+  });
+
+  it("Lãi vay nằm giữa Mặt bằng và Khác, nhãn đúng", () => {
+    const ids = buildPnlLineItems(EMPTY).filter((i) => i.parentId === "opex").map((i) => i.id);
+    expect(ids.indexOf("interest")).toBe(ids.indexOf("fixed") + 1);
+    expect(ids.indexOf("other")).toBe(ids.indexOf("interest") + 1);
+    expect(byId.get("interest")?.label).toBe("Lãi vay");
+  });
+
+  it("tháng chỉ có lãi vay KHÔNG phải tháng trống", () => {
+    // `isPnlMonthEmpty` là cổng render riêng với `hasData` ở /tai-chinh — quên một trong hai
+    // là tháng không có đơn nhưng có lãi vay hiện empty card, "Lãi vay" tàng hình.
+    expect(isPnlMonthEmpty({ ...EMPTY, interest: 5_000_000 })).toBe(false);
   });
 });
 
@@ -270,11 +285,76 @@ describe("buildPnlLineItems — chi tiết phí sàn (dòng con)", () => {
  * dòng con ở đây — dòng tổng vẫn đúng (lấy theo hiệu) nhưng Σ con thì hụt, chủ
  * shop bung ra cộng tay lại ra số khác. Test dưới canh đúng chỗ đó.
  */
+/**
+ * Dòng "Thu nhập tài chính" — khoản CỘNG duy nhất trên mạch chính ngoài doanh thu bán hàng.
+ * Vị trí (sau LN gộp, trước nhóm Chi phí vận hành) là điều kiện để cộng tay dọc cột ra đúng:
+ *   LN gộp + Thu nhập tài chính − Chi phí vận hành = LN ròng.
+ */
+describe("buildPnlLineItems — dòng Thu nhập tài chính", () => {
+  const B: PnlBreakdown = {
+    ...EMPTY,
+    revenue: 30_000_000,
+    netRevenue: 25_000_000,
+    cogs: 15_000_000,
+    grossProfit: 10_000_000,
+    financialIncome: 2_000_000,
+    netProfit: 12_000_000, // không chi phí vận hành nào trong kỳ
+  };
+
+  it("đứng NGAY SAU LN gộp và TRƯỚC nhóm Chi phí vận hành", () => {
+    const ids = buildPnlLineItems(B).map((i) => i.id);
+    expect(ids.indexOf("financialIncome")).toBe(ids.indexOf("grossProfit") + 1);
+    expect(ids.indexOf("opex")).toBe(ids.indexOf("financialIncome") + 1);
+  });
+
+  it("là khoản CỘNG (không mang dấu trừ), nằm trên mạch chính, drill về khối Sổ tiết kiệm", () => {
+    const line = buildPnlLineItems(B).find((i) => i.id === "financialIncome")!;
+    expect(line.label).toBe("Thu nhập tài chính");
+    expect(line.value).toBe(2_000_000);
+    expect(line.isDeduction).toBe(false);
+    expect(line.parentId).toBeUndefined(); // không phải con của nhóm nào
+    expect(line.href).toBe("/tai-chinh?tab=dong-tien#tiet-kiem");
+    expect(displayValue(line)).toBe(2_000_000); // KHÔNG đổi dấu
+  });
+
+  it("hint nói rõ lãi ghi TRỌN vào tháng tất toán, không chia đều các tháng", () => {
+    const line = buildPnlLineItems(B).find((i) => i.id === "financialIncome")!;
+    expect(line.hint).toContain("tất toán");
+    expect(line.hint).toMatch(/không chia đều/i);
+  });
+
+  it("LUÔN hiện kể cả bằng 0 — mạch chính không đổi hình theo tháng", () => {
+    expect(buildPnlLineItems(EMPTY).some((i) => i.id === "financialIncome")).toBe(true);
+  });
+
+  it("dòng LN ròng mang chú thích 'có gồm thu nhập tài chính' khi khoản này > 0", () => {
+    const ln = buildPnlLineItems(B).find((i) => i.id === "netProfit")!;
+    expect(ln.hint).toContain("thu nhập tài chính");
+    expect(ln.hint).toContain("2.000.000");
+  });
+
+  it("thu nhập = 0 thì LN ròng KHÔNG mọc chú thích thừa", () => {
+    const ln = buildPnlLineItems(EMPTY).find((i) => i.id === "netProfit")!;
+    expect(ln.hint).not.toContain("thu nhập tài chính");
+  });
+
+  it("tháng chỉ có thu nhập tài chính KHÔNG phải tháng trống", () => {
+    // Cổng render riêng với `hasData` ở /tai-chinh: quên field này là tháng tất toán sổ mà không
+    // có đơn nào sẽ hiện empty card, dòng "Thu nhập tài chính" tàng hình.
+    expect(isPnlMonthEmpty({ ...EMPTY, financialIncome: 2_000_000 })).toBe(false);
+    expect(isPnlMonthEmpty(EMPTY)).toBe(true);
+  });
+});
+
 describe("buildPnlLineItems — nhóm Chi phí vận hành", () => {
   const B: PnlBreakdown = {
     ...EMPTY,
     revenue: 50_000_000,
     grossProfit: 20_000_000,
+    // Thu nhập tài chính ≠ 0 là ĐIỀU KIỆN SỐNG CÒN của khối test này: để 0 thì công thức sai
+    // (`grossProfit − netProfit`) và công thức đúng (`grossProfit + financialIncome − netProfit`)
+    // cho CÙNG một số, mọi ca dưới đây thành lưới rỗng.
+    financialIncome: 2_000_000,
     ads: 5_000_000,
     adsBySource: { META: 3_000_000, TIKTOK_ADS: 2_000_000 },
     shipping: 1_200_000,
@@ -283,7 +363,9 @@ describe("buildPnlLineItems — nhóm Chi phí vận hành", () => {
     returnedOrderFee: 400_000,
     fixed: 2_000_000,
     other: 500_000,
-    netProfit: 10_500_000,
+    // 20.000.000 + 2.000.000 − 9.500.000 (Σ 8 khoản con) = 12.500.000 — fixture TỰ NHẤT QUÁN với
+    // định nghĩa netProfit của pnl.ts, nếu không hai ca dưới mâu thuẫn nhau.
+    netProfit: 12_500_000,
   };
 
   it("dòng tổng = Σ dòng con trực tiếp", () => {
@@ -295,12 +377,15 @@ describe("buildPnlLineItems — nhóm Chi phí vận hành", () => {
     expect(con.reduce((s, i) => s + i.value, 0)).toBe(nhom.value);
   });
 
-  it("dòng tổng = LN gộp − LN ròng (đúng định nghĩa netProfit của pnl.ts)", () => {
+  it("dòng tổng = LN gộp + Thu nhập tài chính − LN ròng (đúng định nghĩa netProfit của pnl.ts)", () => {
     const nhom = buildPnlLineItems(B).find((i) => i.id === "opex")!;
-    expect(nhom.value).toBe(B.grossProfit - B.netProfit);
+    expect(nhom.value).toBe(B.grossProfit + B.financialIncome - B.netProfit);
+    // Non-vacuity: công thức CŨ (`grossProfit − netProfit`) phải cho số KHÁC, nếu không ca này
+    // không chứng minh được gì.
+    expect(nhom.value).not.toBe(B.grossProfit - B.netProfit);
   });
 
-  it("gom đủ 7 khoản, không bỏ sót khoản nào của netProfit", () => {
+  it("gom đủ 8 khoản, không bỏ sót khoản nào của netProfit", () => {
     const con = buildPnlLineItems(B)
       .filter((i) => i.parentId === "opex")
       .map((i) => i.id);
@@ -311,6 +396,7 @@ describe("buildPnlLineItems — nhóm Chi phí vận hành", () => {
       "returnBom",
       "returnedOrderFee",
       "fixed",
+      "interest",
       "other",
     ]);
   });
@@ -350,16 +436,21 @@ describe("buildPnlLineItems — nhóm Chi phí vận hành", () => {
         { categoryId: "packaging", adsSource: null, channelId: null, amount: 80_000 },
         { categoryId: "return_bom", adsSource: null, channelId: null, amount: 60_000 },
         { categoryId: "fixed", adsSource: null, channelId: null, amount: 2_000_000 },
+        { categoryId: "interest", adsSource: null, channelId: null, amount: 300_000 },
         { categoryId: "other", adsSource: null, channelId: null, amount: 40_000 },
         // "Nhập hàng" là dòng tiền, KHÔNG bao giờ vào P&L — nếu lọt sẽ làm lệch ngay.
         { categoryId: "purchase", adsSource: null, channelId: null, amount: 9_000_000 },
-      ]
+      ],
+      // Thu nhập tài chính đi qua LÕI THẬT — ca này là chỗ duy nhất trong file chứng minh dòng nhóm
+      // vẫn khớp Σ con khi `netProfit` có vế cộng, chứ không phải fixture tự khai số.
+      { incomes: [{ amount: 3_000_000 }] }
     );
 
     const items = buildPnlLineItems(b);
     const nhom = items.find((i) => i.id === "opex")!;
     expect(summableChildren(items, "opex").reduce((s, i) => s + i.value, 0)).toBe(nhom.value);
-    expect(nhom.value).toBe(b.grossProfit - b.netProfit);
+    expect(nhom.value).toBe(b.grossProfit + b.financialIncome - b.netProfit);
+    expect(b.financialIncome).toBe(3_000_000); // non-vacuity: lõi thật sự nhận thu nhập
     // Non-vacuity: kỳ này thật sự có chi phí, không phải so 0 với 0.
     expect(nhom.value).toBeGreaterThan(0);
   });
@@ -385,14 +476,17 @@ describe("buildPnlLineItems — mạch chính cộng dọc", () => {
     netRevenue: 44_276_673,
     cogs: 20_000_000,
     grossProfit: 24_276_673,
+    // ≠ 0 bắt buộc: để 0 thì ca cộng dọc dưới đây không phân biệt được công thức cũ với mới.
+    financialIncome: 1_000_000,
     ads: 5_000_000,
     adsBySource: { META: 5_000_000 },
     fixed: 2_000_000,
-    netProfit: 17_276_673,
+    // 24.276.673 + 1.000.000 − 7.000.000 (ads + fixed) = 18.276.673
+    netProfit: 18_276_673,
   };
   const V = { shopLineLevel: 14_223_568, marketplaceFunded: 3_835_735 };
 
-  it("7 dòng mạch chính, đúng thứ tự đọc", () => {
+  it("8 dòng mạch chính, đúng thứ tự đọc", () => {
     const ids = buildPnlLineItems(B, [], V)
       .filter((i) => !i.parentId && i.id !== "platformFunded")
       .map((i) => i.id);
@@ -402,6 +496,7 @@ describe("buildPnlLineItems — mạch chính cộng dọc", () => {
       "netRevenue",
       "cogs",
       "grossProfit",
+      "financialIncome",
       "opex",
       "netProfit",
     ]);
@@ -412,7 +507,9 @@ describe("buildPnlLineItems — mạch chính cộng dọc", () => {
     const v = (id: string) => m.get(id)!.value;
     expect(v("netOfDiscount") - v("platformFee")).toBe(v("netRevenue"));
     expect(v("netRevenue") - v("cogs")).toBe(v("grossProfit"));
-    expect(v("grossProfit") - v("opex")).toBe(v("netProfit"));
+    expect(v("grossProfit") + v("financialIncome") - v("opex")).toBe(v("netProfit"));
+    // Non-vacuity: chặng cuối theo công thức CŨ phải SAI, nếu không ca này khoá nhầm công thức.
+    expect(v("grossProfit") - v("opex")).not.toBe(v("netProfit"));
   });
 });
 

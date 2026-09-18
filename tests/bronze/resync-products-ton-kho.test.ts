@@ -5,7 +5,11 @@ const SECRET = "test-ingest-secret";
 process.env.INGEST_SECRET = SECRET;
 
 import { POST } from "@/app/api/ingest/resync-products/route";
-import { SHOP_KHO } from "@/lib/bronze/streams";
+import {
+  KEY_MOC_KIEM_GIA_VON,
+  KEY_SO_LECH_GIA_VON,
+} from "@/lib/gia-von/trang-thai-lech-gia-von";
+import { SHOP_KHO } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
@@ -245,4 +249,41 @@ describe("POST /api/ingest/resync-products", () => {
       delete process.env.BRONZE_ONLY;
     }
   });
+});
+
+/**
+ * Đếm lệch giá vốn — nối vào cuối lượt vá vì đúng lúc Bronze products tươi nhất trong đêm.
+ * Con số này là thứ đẩy lên banner nhắc việc, thay cho việc chủ shop phải NHỚ mà chạy CLI.
+ */
+describe("POST /api/ingest/resync-products — đếm lệch giá vốn", () => {
+  it("ghi số lệch + mốc vào Setting sau khi vá tồn", async () => {
+    await ghiNhatKySync();
+    await landBronze(new Date());
+    await post(); // lượt đầu tạo Variant (prefill costPrice = 60.000 lúc CREATE)
+
+    // Chủ shop sửa giá vốn tay xuống 50.000 ⇒ lệch với Pancake (60.000).
+    await prisma.variant.update({ where: { pancakeId: VARIATION_ID }, data: { costPrice: 50_000 } });
+
+    const res = await post();
+    const body = await res.json();
+
+    expect(body.stats.soLechGiaVon).toBe(1);
+    const soLech = await prisma.setting.findUnique({ where: { key: KEY_SO_LECH_GIA_VON } });
+    const moc = await prisma.setting.findUnique({ where: { key: KEY_MOC_KIEM_GIA_VON } });
+    expect(soLech?.value).toBe("1");
+    expect(Number.isNaN(new Date(moc!.value).getTime())).toBe(false);
+  });
+
+  it("app khớp Pancake ⇒ ghi 0 (KHÁC hẳn với 'chưa đếm lần nào')", async () => {
+    await ghiNhatKySync();
+    await landBronze(new Date());
+    await post();
+
+    const res = await post();
+    const body = await res.json();
+
+    expect(body.stats.soLechGiaVon).toBe(0);
+    expect((await prisma.setting.findUnique({ where: { key: KEY_SO_LECH_GIA_VON } }))?.value).toBe("0");
+  });
+
 });

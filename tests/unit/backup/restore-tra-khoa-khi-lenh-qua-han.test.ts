@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Đường TRẢ khoá bảo trì là `finally` của `POST /api/restore` — DUY NHẤT một chỗ. Suite này chốt
  * rằng nó chạy kể cả khi lệnh pg bị dừng vì QUÁ HẠN (nhánh lỗi mới), và kể cả khi route trả sớm
- * từ bên trong `try` (bản lùi hỏng). Sót đường nào là cờ kẹt: 9 workflow n8n nhận 503, sao lưu đêm
+ * từ bên trong `try` (bản lùi hỏng). Sót đường nào là cờ kẹt: 10 workflow n8n nhận 503, sao lưu đêm
  * 503, mọi nút ghi tay lỗi — và không có banner nào báo.
  *
  * Không chạy pg thật: cái cần kiểm là dây nối khoá ↔ `finally`, không phải hành vi của pg_restore.

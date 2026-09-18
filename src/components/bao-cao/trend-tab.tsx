@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { normalizeCustomRange, serializeDateRange } from "@/lib/date-range";
 import { formatVnd } from "@/lib/format";
+import { chuThichBienRongCoThuNhap } from "@/lib/reports/chu-thich-thu-nhap-tai-chinh";
 import type { MonthlyTrendRow } from "@/lib/reports/monthly-trend";
 import { formatPct1, monthLabel } from "@/lib/reports/trend-format";
 
@@ -52,6 +53,8 @@ export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
   const displayRows = rows.slice(-windowSize);
   const monthsWithData = displayRows.filter((r) => r.orderCount > 0).length;
   const showTable = monthsWithData >= 2;
+  // Có tháng nào gồm lãi tiết kiệm không — quyết định hiện chú thích dưới bảng.
+  const coThuNhapTaiChinh = displayRows.some((r) => r.financialIncome > 0);
 
   function handleRowClick(monthStr: string) {
     const monthDate = parse(monthStr, "yyyy-MM", new Date());
@@ -84,6 +87,7 @@ export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
       <TrendChart rows={displayRows} />
 
       {showTable ? (
+        <>
         <div className="overflow-hidden rounded-xl border border-hairline">
           <Table>
             <TableHeader>
@@ -112,6 +116,9 @@ export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
                   <TableCell className="text-right tabular-nums">{formatVnd(r.netProfit)}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {r.marginPct === null ? "—" : formatPct1(r.marginPct)}
+                    {r.financialIncome > 0 && (
+                      <span title={chuThichBienRongCoThuNhap(r.financialIncome) ?? ""}> *</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{r.orderCount.toLocaleString("vi-VN")}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
@@ -123,6 +130,13 @@ export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
             </TableBody>
           </Table>
         </div>
+        {coThuNhapTaiChinh && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            * tháng có thu nhập tài chính (lãi sổ tiết kiệm) — LN ròng và biên ròng đã gồm khoản này,
+            không phải lãi từ bán hàng.
+          </p>
+        )}
+        </>
       ) : (
         <p className="py-6 text-center text-sm text-muted-foreground">Cần ít nhất 2 tháng dữ liệu</p>
       )}
@@ -137,6 +151,7 @@ export function buildTrendSheetRows(rows: MonthlyTrendRow[]) {
     "Doanh thu": r.revenue,
     "DT thuần": r.netRevenue,
     "LN ròng": r.netProfit,
+    "Thu nhập tài chính": r.financialIncome,
     "Biên ròng %": r.marginPct === null ? "" : Math.round(r.marginPct * 10) / 10,
     "Số đơn": r.orderCount,
     "Hoàn/bom %": Math.round(r.returnBomRatePct * 10) / 10,

@@ -23,7 +23,7 @@ vi.mock("@/lib/bronze/transform-from-raw", async (importOriginal) => {
 
 import { POST } from "@/app/api/ingest/raw/route";
 import { demDaHachToan } from "@/lib/bronze/doi-soat-hach-toan";
-import { SHOP_SHOPEE, SHOP_TIKTOK_SHOP } from "@/lib/bronze/streams";
+import { SHOP_SHOPEE, SHOP_TIKTOK_SHOP } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";

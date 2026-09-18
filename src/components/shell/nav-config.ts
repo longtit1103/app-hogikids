@@ -6,6 +6,7 @@ import {
   Package,
   Settings,
   ShoppingCart,
+  TrendingUp,
   Wallet,
   Warehouse,
 } from "lucide-react";
@@ -17,7 +18,7 @@ export type NavItem = {
 };
 
 /**
- * The 7 primary sidebar destinations. Task 5 brief's "đủ 8 mục nav" = these 7
+ * The 8 primary sidebar destinations. Task 5 brief's "đủ 9 mục nav" = these 8
  * plus SETTINGS_NAV_ITEM below. Intentionally has NO badge/count fields —
  * "SKU thiếu giá vốn" and "tồn kho thấp" badges are deferred to Phase 3 and
  * must not be faked with a hardcoded placeholder here.
@@ -28,7 +29,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/san-pham", label: "Sản phẩm", icon: Package },
   { href: "/ton-kho", label: "Tồn kho", icon: Warehouse },
   { href: "/tai-chinh", label: "Tài chính", icon: Wallet },
-  { href: "/kenh", label: "Kênh & Marketing", icon: Megaphone },
+  { href: "/kenh", label: "Kênh", icon: Megaphone },
+  { href: "/marketing", label: "Marketing", icon: TrendingUp },
   { href: "/bao-cao", label: "Báo cáo", icon: BarChart3 },
 ];
 

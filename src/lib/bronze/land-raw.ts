@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { shopIdsChoVai } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
 
 import { BRONZE_STREAMS, isBronzeStream, type BronzeStream } from "./streams";
@@ -25,7 +26,54 @@ const OPEN_SHOP_SHAPE: Partial<Record<BronzeStream, { re: RegExp; moTa: string }
   "meta/report": { re: /^act_\d+$/, moTa: "ad account Meta dạng 'act_<số>'" },
   "tiktokbusiness/report": { re: /^\d{6,}$/, moTa: "advertiser_id TikTok Business (chuỗi ≥6 chữ số)" },
   "tiktokbusiness/invoice": { re: /^\d{6,}$/, moTa: "bc_id Business Center (chuỗi ≥6 chữ số)" },
+  "tiktokbusiness/gmvmax_item": { re: /^\d{6,}$/, moTa: "advertiser_id TikTok Business (chuỗi ≥6 chữ số)" },
 };
+
+/**
+ * Cận DƯỚI hợp lý của `ngay`. App chỉ có dữ liệu từ 2026 (Bronze dựng 2026-07), nên mọi ngày trước
+ * 2024 chắc chắn là lỗi tính toán ở người gọi chứ không phải backfill thật. Nới tới 2024 để còn chỗ
+ * cho ca backfill lịch sử xa nếu sàn mở, mà vẫn chặn `1970-01-01` (epoch 0 — kết quả kinh điển của
+ * một phép tính ngày hỏng).
+ */
+const NGAY_SOM_NHAT = "2024-01-01";
+
+/**
+ * Khoá ngày theo `Asia/Ho_Chi_Minh` (bất biến #3) — ĐỘC LẬP TZ của máy chạy, không dựa vào
+ * `process.env.TZ`. `en-CA` cho ra đúng khuôn `YYYY-MM-DD` nên so sánh chuỗi = so sánh thời gian.
+ */
+const VN_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Ho_Chi_Minh",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/**
+ * Cận TRÊN hợp lý của `ngay` = NGÀY MAI giờ VN. Cố ý KHÔNG lấy "hôm nay": người gọi (n8n) tính ngày
+ * ở tiến trình khác, và một lượt chạy vắt qua nửa đêm có thể gửi ngày lệch một nhịp — chừa đúng một
+ * ngày biên là đủ, không mở thêm.
+ */
+function ngayMaiGioVn(): string {
+  return VN_DATE_FORMATTER.format(new Date(Date.now() + 86_400_000));
+}
+
+/**
+ * `ngay` là NGÀY THẬT hay chỉ "đúng khuôn"? Regex `\d{4}-\d{2}-\d{2}` cho lọt `2026-02-31`,
+ * `2026-13-45`, `2026-00-00` — và `_ngay` là TEXT nên Postgres không bao giờ cãi. Ngày bịa lọt vào
+ * `externalId` là nằm VĨNH VIỄN (Bronze append-only, không sửa được), rồi reader gom chuỗi ngày sẽ
+ * thấy một điểm không tồn tại giữa biểu đồ mà không có log nào đỏ.
+ *
+ * Kiểm bằng chính lịch: dựng `Date` ở UTC rồi ép ba thành phần phải QUAY VỀ y hệt — `Date.UTC` tự
+ * cuộn tràn (31/02 → 03/03) nên chỉ cần so lại là bắt được. Cố ý KHÔNG dùng `new Date(s)` (parse
+ * theo múi giờ máy) và KHÔNG hỏi Postgres `::date` (một vòng mạng cho việc thuần lịch).
+ */
+function ngayCoThatTrenLich(ngay: string): boolean {
+  const [nam, thang, ngayTrongThang] = ngay.split("-").map(Number);
+  const d = new Date(Date.UTC(nam, thang - 1, ngayTrongThang));
+  return (
+    d.getUTCFullYear() === nam && d.getUTCMonth() === thang - 1 && d.getUTCDate() === ngayTrongThang
+  );
+}
 
 export type LandResult = {
   /** Số dòng THỰC SỰ ghi vào Bronze (đã trừ bản trùng hash). */
@@ -83,24 +131,86 @@ export async function landRaw(
   shopId: string,
   responseText: string,
   syncLogId?: string,
-  db: ClientBronze = prisma
+  db: ClientBronze = prisma,
+  /**
+   * Danh sách shop id ĐÃ resolve cho whitelist của stream. Khi `db` là TransactionClient (đường
+   * `orders` giữ khoá tư vấn) người gọi PHẢI resolve TRƯỚC khi mở transaction rồi truyền vào —
+   * để bước land không tự query bảng `Setting` bằng kết nối THỨ HAI trong lúc transaction đang
+   * giữ khoá (pool cạn là mọi đường ingest cùng nghẽn). Bỏ trống ⇒ tự resolve (cache 60s).
+   */
+  shopIdsHopLe?: readonly string[],
+  /**
+   * "YYYY-MM-DD" (giờ VN, người gọi tính sẵn) — CHỈ stream khai `chapNhanNgay`. Gắn vào record
+   * TRƯỚC khi rút khoá và trước khi băm ⇒ ngày nằm TRONG `externalId` VÀ TRONG `payloadHash`.
+   */
+  ngay?: string
 ): Promise<LandResult> {
   if (!isBronzeStream(stream)) throw new Error(`Stream không hợp lệ: ${stream}`);
   // `table` + `arrayPath` + `idExpr` là hằng số trong code (registry), KHÔNG lấy từ input.
-  const { table, arrayPath, shops, idExpr } = BRONZE_STREAMS[stream];
+  const { table, arrayPath, shops, idExpr, chapNhanNgay } = BRONZE_STREAMS[stream];
 
-  // shopId PHẢI thuộc `shops` của chính stream đó. Có HAI hệ đánh số shop (Pancake vs TikTok Shop
-  // Open API) và tên gọi trùng nhau ("TikTok") → điền nhầm CONFIG.shopId trong n8n là chuyện dễ xảy
-  // ra. Bronze là append-only: một lần backfill nhầm shopId sẽ nằm vĩnh viễn trên DB prod, không
-  // báo lỗi, SyncLog vẫn OK, mọi đối soát join theo shopId sau này lệch. Chặn NGAY tại cửa.
+  // `ngay` — CỘNG THÊM cho stream mà record không mang trường ngày (analytics products/videos).
+  // Kiểm Ở ĐÂY chứ không chỉ ở route: webhook và script cũng gọi landRaw, và một lần land nhầm
+  // khoá là nằm VĨNH VIỄN trong Bronze (append-only) — sửa được thì đã không cần guard.
+  if (ngay !== undefined) {
+    if (!chapNhanNgay) {
+      throw new Error(
+        `Stream "${stream}" không nhận 'ngay' — chỉ stream khai chapNhanNgay mới được bơm ngày vào khoá. ` +
+          `Thêm 'ngay' cho stream đang chạy là ĐỔI khoá/hash của mọi dòng đã land.`
+      );
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ngay)) {
+      throw new Error(`'ngay' phải đúng khuôn YYYY-MM-DD (nhận "${ngay}") — giờ VN, tính sẵn ở người gọi.`);
+    }
+    if (!ngayCoThatTrenLich(ngay)) {
+      throw new Error(
+        `'ngay' = "${ngay}" không phải ngày có thật trên lịch — khuôn YYYY-MM-DD vẫn cho lọt 2026-02-31 / ` +
+          `2026-13-45, mà '_ngay' là TEXT nên Postgres không cãi. Ngày bịa vào khoá là nằm vĩnh viễn (Bronze append-only).`
+      );
+    }
+    // CỬA SỔ HỢP LÝ. Ngày có thật trên lịch vẫn có thể vô nghĩa: `2126-08-19` và `1970-01-01` đi qua
+    // cả regex khuôn LẪN phép kiểm lịch. Bronze append-only ⇒ một điểm MA nằm vĩnh viễn giữa chuỗi
+    // ngày, và reader gom theo `_ngay` sẽ vẽ nó ra mà không một dòng log nào đỏ.
+    const canTren = ngayMaiGioVn();
+    if (ngay < NGAY_SOM_NHAT || ngay > canTren) {
+      throw new Error(
+        `'ngay' = "${ngay}" nằm ngoài cửa sổ hợp lý [${NGAY_SOM_NHAT} … ${canTren}] (cận trên = ngày mai giờ VN) — ` +
+          `nhiều khả năng người gọi tính sai ngày. Bronze append-only: điểm ma trong chuỗi ngày là nằm vĩnh viễn.`
+      );
+    }
+    // Cờ `chapNhanNgay` chỉ merge `_ngay` vào PAYLOAD (đủ để hash khác nhau) — KHOÁ vẫn do `idExpr`
+    // quyết. Khai cờ mà quên nhét `_ngay` vào `idExpr` thì mỗi ngày vẫn land đủ dòng (hash khác) mà
+    // `externalId` TRÙNG NHAU qua mọi ngày ⇒ reader kiểu `latestPayloads`
+    // (`DISTINCT ON (shopId, externalId)`) sập cả chuỗi ngày về ĐÚNG MỘT điểm — không một dòng log
+    // nào đỏ. Nổ ngay tại cửa land, trước khi có dòng nào nằm vĩnh viễn trong Bronze.
+    if (idExpr === undefined || !idExpr.includes("_ngay")) {
+      throw new Error(
+        `Stream "${stream}" khai chapNhanNgay nhưng idExpr (${idExpr ?? "mặc định elem->>'id'"}) KHÔNG chứa ` +
+          `'_ngay' ⇒ khoá giống hệt nhau ở mọi ngày, chuỗi ngày sập về 1 điểm khi đọc bằng DISTINCT ON. ` +
+          `Sửa registry: idExpr phải ghép \`(elem->>'_ngay')\`.`
+      );
+    }
+  } else if (chapNhanNgay) {
+    throw new Error(
+      `Stream "${stream}" khai chapNhanNgay nhưng thiếu 'ngay'. Record của endpoint này là TỔNG cả cửa sổ ` +
+        `và KHÔNG có trường ngày ⇒ không có 'ngay' thì mọi lượt kéo đè lên nhau, chuỗi ngày biến mất lặng lẽ.`
+    );
+  }
+
+  // shopId PHẢI thuộc whitelist của chính stream đó (vai trong registry → id thật từ cấu hình
+  // `Setting`). Có HAI hệ đánh số shop (Pancake vs TikTok Shop Open API) và tên gọi trùng nhau
+  // ("TikTok") → điền nhầm CONFIG.shopId trong n8n là chuyện dễ xảy ra. Bronze là append-only:
+  // một lần backfill nhầm shopId sẽ nằm vĩnh viễn trên DB prod, không báo lỗi, SyncLog vẫn OK,
+  // mọi đối soát join theo shopId sau này lệch. Chặn NGAY tại cửa.
   //
   // `shops: null` = stream có danh sách MỞ (advertiser/bc do chủ shop tự tạo) → không whitelist được;
   // KHÔNG để "không rỗng" là guard duy nhất mà ép SHAPE theo tên stream (xem OPEN_SHOP_SHAPE).
   if (shops !== null) {
-    if (!shops.includes(shopId)) {
+    const hopLe = shopIdsHopLe ?? (await shopIdsChoVai(shops));
+    if (!hopLe.includes(shopId)) {
       throw new Error(
-        `shopId "${shopId}" không hợp lệ cho stream "${stream}" (chỉ nhận: ${shops.join(", ")}) — ` +
-          `kiểm tra CONFIG.shopId trong n8n: id shop Pancake KHÁC id shop TikTok Shop Open API.`
+        `shopId "${shopId}" không hợp lệ cho stream "${stream}" (chỉ nhận: ${hopLe.join(", ")}) — ` +
+          `kiểm tra CONFIG.shopId trong n8n / shop ID ở /cai-dat: id shop Pancake KHÁC id shop TikTok Shop Open API.`
       );
     }
   } else {
@@ -121,6 +231,25 @@ export async function landRaw(
   const path = [...arrayPath];
   const shownPath = arrayPath.join(".");
 
+  // Gắn `_ngay` vào record NGAY KHI bung mảng — trước `${khoa}` và trước `md5(elem::text)` — nên
+  // ngày nằm trong CẢ khoá lẫn hash, và phần SQL bên dưới không phải biết gì về `ngay`.
+  // Tham số BIND ($3/$5), TUYỆT ĐỐI không nội suy chuỗi: `jsonb_build_object` nhận GIÁ TRỊ.
+  // Nhánh KHÔNG có `ngay` giữ NGUYÊN VĂN câu SQL cũ (không bọc subselect, không thêm tham số) —
+  // cách rẻ nhất để bảo đảm khoá/hash của mọi stream đang chạy không đổi một bit.
+  const chieuElemMeta = ngay === undefined ? `elem` : `elem || jsonb_build_object('_ngay', $3::text) AS elem`;
+  const thamSoMeta: unknown[] = ngay === undefined ? [responseText, path] : [responseText, path, ngay];
+  const tuElemInsert =
+    ngay === undefined
+      ? `jsonb_array_elements(($1::jsonb) #> $4::text[]) AS elem`
+      : `(
+      SELECT elem || jsonb_build_object('_ngay', $5::text) AS elem
+      FROM jsonb_array_elements(($1::jsonb) #> $4::text[]) AS elem
+    ) AS e`;
+  const thamSoInsert: unknown[] =
+    ngay === undefined
+      ? [responseText, shopId, syncLogId ?? null, path]
+      : [responseText, shopId, syncLogId ?? null, path, ngay];
+
   // KHÔNG IM LẶNG. MỘT query (parse payload 1 LẦN nhờ CTE MATERIALIZED, thay vì cast ::jsonb 3 lần)
   // làm CẢ HAI việc TRƯỚC insert:
   //   - `kind`: envelope có mảng ở đúng đường dẫn không? Thiếu → kêu to, không land trang rỗng giả.
@@ -134,7 +263,7 @@ export async function landRaw(
     `
     WITH src AS MATERIALIZED (SELECT ($1::jsonb) #> $2::text[] AS arr),
     elems AS (
-      SELECT elem
+      SELECT ${chieuElemMeta}
       FROM src, jsonb_array_elements(
         CASE WHEN jsonb_typeof(src.arr) = 'array' THEN src.arr ELSE '[]'::jsonb END
       ) AS elem
@@ -150,8 +279,7 @@ export async function landRaw(
       -- trên — payload chỉ cast ::jsonb một lần, đo thật trên prod: +0,2 ms cho trang 100 đơn.
       (SELECT array_agg(DISTINCT ${khoa}) FROM elems WHERE ${khoa} IS NOT NULL) AS "seenIds"
     `,
-    responseText,
-    path
+    ...thamSoMeta
   );
 
   if (meta.kind !== "array") {
@@ -185,15 +313,12 @@ export async function landRaw(
     -- thứ mà khoá sinh ra để chặn. clock_timestamp() đọc đồng hồ NGAY LÚC INSERT nên phản ánh đúng
     -- thứ tự land mà khoá vừa thiết lập.
     SELECT gen_random_uuid()::text, $2, ${khoa}, md5(elem::text), elem, clock_timestamp(), $3
-    FROM jsonb_array_elements(($1::jsonb) #> $4::text[]) AS elem
+    FROM ${tuElemInsert}
     WHERE ${khoa} IS NOT NULL   -- không có khoá thì không dedupe được (cần externalId)
     ON CONFLICT ("shopId", "externalId", "payloadHash") DO NOTHING
     RETURNING "externalId"
     `,
-    responseText,
-    shopId,
-    syncLogId ?? null,
-    path
+    ...thamSoInsert
   );
   const landedIds = [...new Set(inserted.map((r) => r.externalId))];
 

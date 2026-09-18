@@ -277,4 +277,58 @@ test.describe("Cài đặt", () => {
       await prisma.$disconnect();
     }
   });
+
+  /**
+   * Khối "Khóa kết nối nguồn dữ liệu": chủ shop tự dán khóa ngay trên web. Bất biến CHỈ-GHI:
+   * lưu xong trang chỉ được hiện đuôi 4 ký tự — giá trị đầy đủ TUYỆT ĐỐI không quay lại trình
+   * duyệt (soi cả HTML trang sau reload). DB E2E dùng chung ⇒ khôi phục key về y nguyên trong finally.
+   */
+  test("Section 5 — Khóa kết nối: đủ 4 nguồn, lưu khóa bí mật chỉ hiện đuôi 4 ký tự", async ({ page }) => {
+    const KHOA_KEY = "pancakeApiKeyKho";
+    const giaTri = `E2E-PAN-KHO-${Date.now()}`;
+    const prisma = testPrisma();
+    const coTruoc = await prisma.setting.findUnique({ where: { key: KHOA_KEY } });
+    try {
+      await page.goto("/cai-dat");
+      const khoi = page.locator("section#ket-noi");
+      await expect(khoi.getByRole("heading", { name: "Khóa kết nối nguồn dữ liệu" })).toBeVisible();
+      for (const ten of ["Pancake POS", "Meta Ads (Facebook)", "TikTok Shop", "TikTok Ads (Business)"]) {
+        await expect(khoi.getByRole("heading", { name: ten })).toBeVisible();
+      }
+
+      // Thẻ dạng gấp/mở: đảm bảo Pancake ĐANG MỞ trước khi đụng vào thân thẻ (thẻ đủ khóa
+      // tự gấp — click header để bung; thẻ thiếu khóa đã mở sẵn thì không click kẻo gấp lại).
+      const thePancake = khoi
+        .locator("div.rounded-lg.border")
+        .filter({ has: page.getByRole("heading", { name: "Pancake POS" }) });
+      const oKhoaKho = page.locator(`#khoa-${KHOA_KEY}`);
+      if (!(await oKhoaKho.isVisible())) {
+        await thePancake.getByRole("button", { name: /Pancake POS/ }).click();
+        await expect(oKhoaKho).toBeVisible();
+      }
+
+      // Khối webhook nằm trong thân thẻ Pancake: đủ URL để dán lại vào Pancake khi mất cấu hình.
+      await expect(khoi.getByText("Webhook (sự kiện realtime từ Pancake)")).toBeVisible();
+      await expect(khoi.getByText("https://n8n.example.com/webhook/pancake-pos-hogikids1")).toBeVisible();
+
+      // Lưu một khóa bí mật của thẻ Pancake — nút "Lưu khóa" chỉ mở khi có ô đã gõ.
+      const nutLuu = thePancake.getByRole("button", { name: "Lưu khóa" });
+      await expect(nutLuu).toBeDisabled();
+      await page.locator(`#khoa-${KHOA_KEY}`).fill(giaTri);
+      await nutLuu.click();
+      await expect(page.getByText("Đã lưu 1 khóa của Pancake POS")).toBeVisible();
+
+      // Reload: trạng thái đã che — có đuôi 4 ký tự, còn giá trị đầy đủ không nằm ĐÂU trong HTML.
+      await page.goto("/cai-dat");
+      await expect(khoi.getByText(`đuôi …${giaTri.slice(-4)}`).first()).toBeVisible();
+      expect(await page.content()).not.toContain(giaTri);
+    } finally {
+      if (coTruoc) {
+        await prisma.setting.update({ where: { key: KHOA_KEY }, data: { value: coTruoc.value } });
+      } else {
+        await prisma.setting.deleteMany({ where: { key: KHOA_KEY } });
+      }
+      await prisma.$disconnect();
+    }
+  });
 });

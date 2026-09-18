@@ -1,4 +1,4 @@
-import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK } from "@/lib/bronze/streams";
+import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { parseVnDate } from "@/lib/ingest/pancake-mapping";
 import { prisma } from "@/lib/prisma";
 
@@ -54,18 +54,19 @@ export async function doiChieuDonKhoVsSan(): Promise<KetQuaDoiChieuKho> {
   // Promise.all của trang Cài đặt — một giá trị dị là sập nguyên trang. Ngày trả về dạng TEXT rồi
   // parse phía JS bằng parseVnDate (parser chuẩn toàn app, neo naive = UTC); hỏng thì null chứ
   // không văng. `cod` giữ cast trong SQL nhưng chặn 15 chữ số (quá là rác, ::bigint sẽ tràn).
+  const { kho, shopee, tiktok } = await layCauHinhShop();
   const rows = await prisma.$queryRaw<
     { kenh: string; code: string; ngay_dat_tho: string | null; tt_kho: string; tien: bigint; tong: bigint }[]
   >`
     WITH ban_sao AS (
       SELECT DISTINCT ON ("externalId") "externalId", payload
       FROM "RawPancakeOrder"
-      WHERE "shopId" = ${SHOP_KHO} AND "externalId" ~ '^AF[0-9]+O'
+      WHERE "shopId" = ${kho} AND "externalId" ~ '^AF[0-9]+O'
       ORDER BY "externalId", "fetchedAt" DESC
     ), tach AS (
       SELECT CASE substring("externalId" from '^AF([0-9]+)O')
-               WHEN ${SHOP_SHOPEE} THEN 'shopee'
-               WHEN ${SHOP_TIKTOK} THEN 'tiktok'
+               WHEN ${shopee} THEN 'shopee'
+               WHEN ${tiktok} THEN 'tiktok'
                ELSE NULL END                                   AS kenh,
              substring("externalId" from '^AF[0-9]+O(.+)$')     AS code,
              payload->>'inserted_at'                            AS ngay_dat_tho,
@@ -109,11 +110,12 @@ export async function doiChieuDonKhoVsSan(): Promise<KetQuaDoiChieuKho> {
 
 /** Không đơn nào thiếu ⇒ truy vấn trên trả 0 dòng ⇒ vẫn cần con số tổng để hiện "đã đối chiếu N đơn". */
 async function demBanSao(): Promise<number> {
+  const { kho, shopee, tiktok } = await layCauHinhShop();
   const [row] = await prisma.$queryRaw<{ n: bigint }[]>`
     SELECT count(DISTINCT "externalId")::bigint AS n
     FROM "RawPancakeOrder"
-    WHERE "shopId" = ${SHOP_KHO}
-      AND ("externalId" LIKE ${`AF${SHOP_SHOPEE}O%`} OR "externalId" LIKE ${`AF${SHOP_TIKTOK}O%`})
+    WHERE "shopId" = ${kho}
+      AND ("externalId" LIKE ${`AF${shopee}O%`} OR "externalId" LIKE ${`AF${tiktok}O%`})
   `;
   return Number(row?.n ?? 0);
 }

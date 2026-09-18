@@ -175,6 +175,12 @@ export type MappedOrderItem = {
   variationPancakeId: string | null; // UUID per-shop (thường không khớp Variant.pancakeId cross-shop)
   sku: string; // = variation_info.display_id — khoá tra Variant.sku
   productName: string;
+  /**
+   * `variation_info.detail` — phân loại người mua chọn ("Phân loại B,Cỡ 2"). KHÔNG lưu xuống
+   * `OrderItem` (schema là hợp đồng, không thêm cột cho việc này); chỉ đi qua bộ nhớ để làm một
+   * phần khoá của bảng ghép thủ công (`ghep-variant-thu-cong.ts`). Vắng ⇒ chuỗi rỗng.
+   */
+  variantDetail: string;
   quantity: number;
   unitPrice: number; // đơn giá 1 sp (gross)
   lineDiscount: number; // giảm giá dòng SHOP CHỊU = quantity × discount_each_product − voucher sàn phân bổ về dòng (Σ dòng khớp itemsTotal)
@@ -307,6 +313,7 @@ export function mapPancakeOrder(raw: PancakeOrder, ctx: MapOrderCtx): MappedOrde
       variationPancakeId: it.variation_id ?? null,
       sku,
       productName: vi?.name ?? "",
+      variantDetail: vi?.detail ?? "",
       quantity: it.quantity,
       unitPrice: round(vi?.retail_price ?? 0),
       lineDiscount: giamGiaShopTheoDong[i],

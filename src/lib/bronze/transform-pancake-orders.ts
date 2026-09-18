@@ -16,9 +16,9 @@ import {
   pancakeProductSchema,
 } from "@/lib/ingest/pancake-schemas";
 import { upsertOneOrder, upsertOneProduct } from "@/lib/ingest/pancake-upsert";
+import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
 
-import { SHOP_KHO } from "./streams";
 import {
   chamMoc,
   latestPayloads,
@@ -39,9 +39,13 @@ const KHO_MIRROR_ID = /^AF\d+O/;
  * nếu lọt sẽ đếm doanh thu 2 lần kèm `fee_marketplace` thật (phá invariant #2).
  *
  * `isAffiliateMirror()` chỉ nhận diện qua nguồn ("Affiliate" + marketplace −3/−9). Mirror nào ghi
- * nguồn khác (vd "Shopee") sẽ LỌT → dùng thêm luật id `AF<shopId>O`. Với shop kho, mirror = 1
- * trong 2 luật khớp (rộng hơn = an toàn hơn cho tiền). 2 luật BẤT ĐỒNG → cảnh báo để phát hiện
- * luật đã trôi so với dữ liệu thật.
+ * nguồn khác (vd "Shopee") sẽ LỌT → dùng thêm luật id `AF<shopId>O`. Mirror = 1 trong 2 luật khớp,
+ * áp cho MỌI shop (chốt 2026-08-21): mã `AF...O` là dấu mirror của Pancake bất kể đơn nằm shop
+ * nào, còn đơn gốc Shopee/TikTok mang mã sàn không bao giờ có tiền tố này. Trước đây luật id chỉ
+ * áp cho shop kho — tức cổng an toàn tiền phụ thuộc việc so ĐÚNG một id cấu hình; id sai (bản
+ * clone điền nhầm) là cổng tắt ÂM THẦM và doanh thu đếm 2 lần. Luật rộng hơn = an toàn hơn cho
+ * tiền và KHÔNG phụ thuộc cấu hình. 2 luật BẤT ĐỒNG → cảnh báo để phát hiện luật trôi so với
+ * dữ liệu thật (đơn gốc hai luật đều false nên không gây nhiễu cảnh báo).
  */
 function isMirrorOrder(
   shopId: string,
@@ -50,12 +54,10 @@ function isMirrorOrder(
   warnings: string[],
 ): boolean {
   const bySource = isAffiliateMirror(raw);
-  if (shopId !== SHOP_KHO) return bySource;
-
   const byId = KHO_MIRROR_ID.test(externalId);
   if (bySource !== byId) {
     warnings.push(
-      `Đơn kho ${externalId}: 2 luật mirror bất đồng (nguồn "${raw.order_sources_name ?? ""}"/marketplace ` +
+      `Đơn ${externalId} (shop ${shopId}): 2 luật mirror bất đồng (nguồn "${raw.order_sources_name ?? ""}"/marketplace ` +
         `"${raw.marketplace_id ?? ""}" → ${bySource}; id khớp AF<shop>O → ${byId}) — vẫn LOẠI khỏi Silver ` +
         `để không đếm doanh thu 2 lần; kiểm lại luật mirror`,
     );
@@ -74,9 +76,11 @@ export async function transformProducts(
   opts: TransformOptions,
 ): Promise<void> {
   const { externalIds, checkpoint } = opts;
+  // Id shop kho từ cấu hình `Setting` (transform chạy NGOÀI transaction land nên tự resolve được).
+  const { kho } = await layCauHinhShop();
   let iP = 0;
   for (const row of await latestPayloads("RawPancakeProduct", {
-    shopId: SHOP_KHO,
+    shopId: kho,
     externalIds,
   })) {
     await chamMoc(checkpoint, iP++);

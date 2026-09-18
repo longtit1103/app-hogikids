@@ -41,6 +41,11 @@ export type ThamSoTrang = {
   /** Tổng số dòng khớp BỘ LỌC (không phải số dòng của trang). */
   tong: number;
   soDongMoiTrang: number;
+  /** Tên tham số querystring giữ số trang — mặc định "trang". Cho phép NHIỀU bảng cùng route dùng
+   *  tham số trang RIÊNG (vd `/marketing?tab=noi-dung` tách `trangvideo`/`tranglive` — hai bảng Video/
+   *  Phiên live dài khác hẳn nhau, dùng chung `?trang=` khiến "trang sau" của bảng này đẩy bảng kia
+   *  sang trang rỗng rồi tự mâu thuẫn với dòng đếm của chính nó). */
+  thamSo?: string;
 };
 
 /**
@@ -50,16 +55,16 @@ export type ThamSoTrang = {
  * mà không phải mock `next/navigation`.
  */
 export function urlTrangCuoiNeuVuot(args: ThamSoTrang): string | null {
-  const { duongDan, sp, trang, tong, soDongMoiTrang } = args;
+  const { duongDan, sp, trang, tong, soDongMoiTrang, thamSo = "trang" } = args;
   const trangCuoi = Math.max(1, Math.ceil(tong / soDongMoiTrang));
   if (trang <= trangCuoi) return null;
 
   const params = new URLSearchParams();
   for (const [khoa, giaTri] of Object.entries(sp)) {
-    if (khoa !== "trang" && giaTri !== undefined && giaTri !== "") params.set(khoa, giaTri);
+    if (khoa !== thamSo && giaTri !== undefined && giaTri !== "") params.set(khoa, giaTri);
   }
-  // Trang 1 là mặc định ⇒ để URL sạch, không gắn `?trang=1`.
-  if (trangCuoi > 1) params.set("trang", String(trangCuoi));
+  // Trang 1 là mặc định ⇒ để URL sạch, không gắn `?<thamSo>=1`.
+  if (trangCuoi > 1) params.set(thamSo, String(trangCuoi));
   const qs = params.toString();
   return qs ? `${duongDan}?${qs}` : duongDan;
 }

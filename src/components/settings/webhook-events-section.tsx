@@ -1,4 +1,10 @@
 import { Badge } from "@/components/ui/badge";
+// Hai ngưỡng CÙNG bằng 26 giờ nhưng là hai hằng KHÁC NHAU, cố ý không dùng chung: chúng canh hai
+// lượt việc khác nhau và có thể tách giá trị bất cứ lúc nào.
+import {
+  GIO_COI_LA_TRE as GIO_TRE_GIA_VON,
+  type TrangThaiLechGiaVon,
+} from "@/lib/gia-von/trang-thai-lech-gia-von";
 import { GIO_COI_LA_TRE, type TinhTrangVaTonKho } from "@/lib/ingest/stock-resync-status";
 import { KET_CUC_CAN_XEM } from "@/lib/ingest/webhook-processor";
 
@@ -20,6 +26,7 @@ const NHAN_KET_CUC: Record<string, string> = {
   "ton-kho-cu-hon": "Tồn kho — sự kiện cũ, đã bỏ qua",
   "ton-kho-bo-qua": "Tồn kho shop bán (bỏ qua — mã biến thể riêng)",
   "ton-kho-chua-co-bien-the": "Tồn kho — biến thể chưa có trong app (lượt API sẽ tạo)",
+  "ton-kho-chua-cau-hinh": "Tồn kho — chưa điền Warehouse ID (xem khối Khóa kết nối)",
   "ton-kho-can-xem": "TỒN KHO CẦN XEM",
   "san-pham-bo-qua": "Sản phẩm (bỏ qua — lấy từ API)",
   "bronze-only": "BRONZE_ONLY (tạm dừng Silver)",
@@ -55,12 +62,6 @@ export type SuKienCanXem = {
   processedNote: string | null;
 };
 
-const TEN_SHOP: Record<string, string> = {
-  "714995134": "Kho Tổng",
-  "1942992175": "Shopee",
-  "100975192": "TikTok",
-};
-
 function lucVN(d: Date): string {
   return d.toLocaleString("vi-VN", {
     timeZone: "Asia/Ho_Chi_Minh",
@@ -75,13 +76,19 @@ export function WebhookEventsSection({
   demTheoKetCuc,
   canXem,
   vaTonKho,
+  lechGiaVon,
+  tenShop,
 }: {
+  /** Map shop id → tên hiển thị (từ cấu hình `Setting` — page dựng, rỗng khi chưa cấu hình). */
+  tenShop: Record<string, string>;
   /** Đếm sự kiện 7 ngày gần nhất theo kết cục (source=webhook — không tính kho nạp bù). */
   demTheoKetCuc: DongDemWebhook[];
   /** Sự kiện cần người xem trong CÙNG cửa sổ 7 ngày — mỗi dòng là một việc cần vào fix. */
   canXem: SuKienCanXem[];
   /** Lượt vá tồn kho từ API gần nhất — thứ giữ cho tồn webhook không lệch lâu dài. */
   vaTonKho: TinhTrangVaTonKho;
+  /** Lệch giá vốn app ↔ Pancake — số do chính lượt đêm đó chốt. */
+  lechGiaVon: TrangThaiLechGiaVon;
 }) {
   const tong = demTheoKetCuc.reduce((s, d) => s + d.soLuong, 0);
   const soCanChuY = demTheoKetCuc
@@ -129,12 +136,27 @@ export function WebhookEventsSection({
             : `Tồn kho: vá từ API lần cuối ${lucVN(vaTonKho.mocLuc!)}.`}
       </p>
 
+      {/*
+        Cùng lý do với dòng trên, cho giá vốn: lượt đêm là thứ DUY NHẤT phát hiện app lệch giá vốn
+        với Pancake. Nó chết thì banner nhắc việc im lặng luôn — mà im lặng ở đó trông y hệt "đang
+        khớp". Mốc này để chủ shop kiểm được cơ chế còn sống, không phải tin suông.
+      */}
+      <p className={lechGiaVon.muc === "khop" ? "text-sm text-muted-foreground" : "text-sm font-medium text-error"}>
+        {lechGiaVon.muc === "chua-kiem"
+          ? "Giá vốn: CHƯA đối chiếu lần nào với Pancake — kiểm lượt chạy đêm (pancake-nightly)."
+          : lechGiaVon.muc === "tre"
+            ? `Giá vốn: đối chiếu gần nhất ${lucVN(lechGiaVon.mocLuc!)} — đã hơn ${GIO_TRE_GIA_VON} giờ, kiểm lượt chạy đêm.`
+            : lechGiaVon.muc === "co-lech"
+              ? `Giá vốn: ${lechGiaVon.soLech} mã đang lệch với Pancake (đối chiếu ${lucVN(lechGiaVon.mocLuc!)}).`
+              : `Giá vốn: khớp Pancake, đối chiếu lần cuối ${lucVN(lechGiaVon.mocLuc!)}.`}
+      </p>
+
       {canXem.length > 0 && (
         <div className="flex flex-col gap-1 rounded-lg bg-error/10 p-3 text-sm">
           <p className="font-semibold text-error">Sự kiện app chưa hiểu — cần vào fix:</p>
           {canXem.map((s) => (
             <p key={s.id} className="text-error/90">
-              {lucVN(s.receivedAt)} · {TEN_SHOP[s.shopId] ?? s.shopId} · {nhan(s.processedAs)} —{" "}
+              {lucVN(s.receivedAt)} · {tenShop[s.shopId] ?? s.shopId} · {nhan(s.processedAs)} —{" "}
               {s.processedNote ?? "(không có ghi chú)"}
             </p>
           ))}

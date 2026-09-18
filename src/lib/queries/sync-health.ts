@@ -3,7 +3,16 @@ import type { SyncKind } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 /** Mọi kind đồng bộ có thể sinh SyncLog. Thứ tự này cũng là thứ tự render cảnh báo. */
-export const ALL_SYNC_KINDS: SyncKind[] = ["PANCAKE", "META_ADS", "TIKTOK_ADS", "TIKTOK_SHOP", "BACKUP"];
+export const ALL_SYNC_KINDS: SyncKind[] = [
+  "PANCAKE",
+  "META_ADS",
+  "TIKTOK_ADS",
+  "TIKTOK_SHOP",
+  // Chỉ số marketing TikTok Shop — luồng RIÊNG (workflow 02:30). CỐ Ý **không** nằm ở
+  // `NON_DATA_SYNC_KINDS`: analytics hỏng là chỉ số marketing thiếu, đó vẫn là DỮ LIỆU, phải cảnh báo.
+  "TIKTOK_SHOP_ANALYTICS",
+  "BACKUP",
+];
 
 /**
  * Kind ĐỨNG NGOÀI cảnh báo đồng bộ. ĐỪNG "sửa lại cho đồng bộ" bằng cách nhét nó về danh sách

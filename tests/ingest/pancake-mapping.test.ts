@@ -103,12 +103,51 @@ describe("mapPancakeOrder — công thức tiền (chống trừ giảm giá 2 l
     expect(m.itemsTotal).toBe(245000); // 350000 − 105000, trừ giảm giá dòng ĐÚNG 1 lần
     expect(m.discount).toBe(5000); // voucher đơn độc lập
     expect(m.platformFeeEst).toBe(20000);
+    // `variantDetail` = "" vì payload này không có `variation_info.detail`. Giữ `toEqual` (so khớp
+    // ĐỦ KHOÁ) chứ không đổi sang `toMatchObject`: thêm/bớt trường ở dòng hàng phải làm test vỡ.
     expect(m.items).toEqual([
-      { variationPancakeId: "v-a", sku: "SKU-A", productName: "SP A", quantity: 2, unitPrice: 100000, lineDiscount: 60000 },
-      { variationPancakeId: "v-b", sku: "SKU-B", productName: "SP B", quantity: 3, unitPrice: 50000, lineDiscount: 45000 },
+      { variationPancakeId: "v-a", sku: "SKU-A", productName: "SP A", variantDetail: "", quantity: 2, unitPrice: 100000, lineDiscount: 60000 },
+      { variationPancakeId: "v-b", sku: "SKU-B", productName: "SP B", variantDetail: "", quantity: 3, unitPrice: 50000, lineDiscount: 45000 },
     ]);
     // Σ doanh thu dòng khớp itemsTotal: (2×100000−60000) + (3×50000−45000) = 140000 + 105000.
     expect(m.items.reduce((s, it) => s + it.unitPrice * it.quantity - it.lineDiscount, 0)).toBe(245000);
+  });
+
+  it("variation_info.detail đi thẳng vào variantDetail, KHÔNG chuẩn hoá gì", () => {
+    // `variantDetail` là một phần KHOÁ của bảng ghép biến thể thủ công, mà bảng đó so khớp bằng
+    // nhau tuyệt đối. Nếu mapping lỡ trim/lowercase/đổi dấu phẩy thì khoá lệch và ghép trượt CÂM
+    // (COGS về 0 mà không ai biết vì sao). Ca này khoá lại: giữ nguyên từng ký tự payload trả.
+    const raw = pancakeOrderSchema.parse({
+      id: "TEST-DETAIL-1",
+      status: 3,
+      inserted_at: "2026-08-13T08:34:53.000000",
+      order_sources_name: "Shopee",
+      marketplace_id: "-3",
+      total_price: 350000,
+      items: [
+        {
+          quantity: 1,
+          discount_each_product: 0,
+          variation_info: { name: " SP có  khoảng trắng ", detail: " Phân loại A,Cỡ 1 ", retail_price: 350000 },
+        },
+      ],
+    });
+    const m = mapPancakeOrder(raw, CTX);
+    expect(m.items[0].variantDetail).toBe(" Phân loại A,Cỡ 1 "); // khoảng trắng GIỮ NGUYÊN
+    expect(m.items[0].productName).toBe(" SP có  khoảng trắng "); // giữ nguyên, không trim
+  });
+
+  it("thiếu variation_info.detail → variantDetail rỗng, không phải undefined/null", () => {
+    const raw = pancakeOrderSchema.parse({
+      id: "TEST-DETAIL-2",
+      status: 3,
+      inserted_at: "2026-08-13T08:34:53.000000",
+      order_sources_name: "Shopee",
+      marketplace_id: "-3",
+      total_price: 100000,
+      items: [{ quantity: 1, discount_each_product: 0, variation_info: { name: "SP", retail_price: 100000 } }],
+    });
+    expect(mapPancakeOrder(raw, CTX).items[0].variantDetail).toBe("");
   });
 
   it("đơn ĐÃ GIAO có total_discount ÂM: sàn gánh trọn khoản giảm, doanh thu KHÔNG bị hụt", () => {

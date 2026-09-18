@@ -14,9 +14,10 @@ const CHART_MODE_STORAGE_KEY = "hogikids_chi_phi_chart_mode";
 type ChartMode = "donut" | "bar";
 
 /**
- * Màu ổn định theo `categoryId` — 7 danh mục hệ thống (seed.ts) không có cột
- * màu riêng trong schema nên khai HEX trực tiếp ở đây, đồng bộ 1-1 với token
- * `globals.css` (ghi chú cạnh mỗi dòng). Dùng HEX thay vì `var(--chart-*)` vì
+ * Màu ổn định theo `categoryId` — 8 danh mục hệ thống (seed.ts) không có cột
+ * màu riêng trong schema nên khai HEX trực tiếp ở đây: 7 màu đầu đồng bộ token
+ * `globals.css` (ghi chú cạnh mỗi dòng), riêng `interest` là màu riêng chưa có
+ * token. Dùng HEX thay vì `var(--chart-*)` vì
  * SVG `fill` là attribute (không phải style) — CSS custom property không
  * đảm bảo resolve nhất quán khi gán qua attribute trên mọi trình duyệt.
  */
@@ -27,9 +28,10 @@ const CATEGORY_COLORS: Record<string, string> = {
   packaging: "#5db872", // --success / --chart-4
   return_bom: "#d4a017", // --warning / --chart-5
   fixed: "#c64545", // --error
+  interest: "#7a5c99", // tím trầm — chưa có token globals.css, chọn khác 7 màu hiện có
   other: "#6c6a64", // --muted (text)
 };
-const FALLBACK_CATEGORY_COLOR = "#a9583e"; // --primary-active — danh mục tùy chỉnh ngoài 7 id hệ thống
+const FALLBACK_CATEGORY_COLOR = "#a9583e"; // --primary-active — danh mục tùy chỉnh ngoài 8 id hệ thống
 
 function colorForCategory(categoryId: string): string {
   return CATEGORY_COLORS[categoryId] ?? FALLBACK_CATEGORY_COLOR;

@@ -80,4 +80,16 @@ describe("calcPnlCore — statusIn (ADDITIVE)", () => {
     expect(typeof full.returnBomOrderCount).toBe("number");
     expect(typeof full.returnedOrderFee).toBe("number");
   });
+
+  /**
+   * Thu nhập tài chính chỉ có nghĩa khi có `netProfit` để cộng vào — mà lăng kính `statusIn`
+   * không có field đó. Nếu overload `statusIn` lỡ nhận `incomes`, caller Dòng tiền sẽ truyền vào
+   * rồi tưởng đã tính, trong khi số không đi đâu cả. `@ts-expect-error` giữ cánh cửa đó đóng:
+   * gỡ guard ⇒ dòng này thành "thừa" ⇒ `tsc --noEmit` đỏ.
+   */
+  it("KHÔNG cho truyền incomes kèm statusIn (thu nhập tài chính vô nghĩa dưới lăng kính này)", () => {
+    // @ts-expect-error `incomes` chỉ có ở overload không-statusIn — cố ý không có chỗ rơi vào đây
+    const lens = calcPnlCore(all, [], { statusIn: ["COMPLETED"], incomes: [{ amount: 1_000_000 }] });
+    expect(lens.revenue).toBe(500_000);
+  });
 });

@@ -26,7 +26,19 @@ const NHAN_TRANG_THAI: Record<string, string> = {
   canceled: "đã hủy",
 };
 
-export function DoiChieuDonKhoSection({ ketQua }: { ketQua: KetQuaDoiChieuKho }) {
+export function DoiChieuDonKhoSection({ ketQua }: { ketQua: KetQuaDoiChieuKho | null }) {
+  // null = phép đối chiếu không chạy được (thường: chưa cấu hình shop ID) — trang Cài đặt vẫn
+  // phải render vì chính nó là nơi điền cấu hình.
+  if (ketQua === null) {
+    return (
+      <div className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium text-ink">Đối chiếu đơn với kho</h3>
+        <p className="text-xs text-muted-foreground">
+          Chưa chạy được — kiểm tra đã điền đủ Shop ID ở khối &quot;Khóa kết nối&quot; phía trên chưa.
+        </p>
+      </div>
+    );
+  }
   const { tongBanSao, thieu, tienThieuDaGiao } = ketQua;
   const khop = thieu.length === 0;
 

@@ -2,6 +2,7 @@ import type { SyncLog } from "@prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { hasBronzeBacklog } from "@/lib/bronze/bronze-only";
+import { giaiUrlSyncNow } from "@/lib/n8n/giai-url-sync-now";
 import { ERROR_WINDOW_HOURS, getRecentDataErrorKinds } from "@/lib/queries/sync-health";
 import { KIND_LABEL, SyncLogTable } from "./sync-log-table";
 
@@ -37,7 +38,9 @@ export async function SyncSection({ syncLogs }: { syncLogs: SyncLog[] }) {
   const pancakeEndpoint = appUrl ? `${appUrl}/api/ingest/raw` : "/api/ingest/raw";
   const adsEndpoint = appUrl ? `${appUrl}/api/ingest/ads` : "/api/ingest/ads";
   const maskedSecret = maskIngestSecret(process.env.INGEST_SECRET);
-  const webhookConfigured = Boolean(process.env.N8N_SYNC_WEBHOOK_URL);
+  // CÙNG nguồn giải URL với nút "Đồng bộ ngay" — badge tự soi env riêng thì nói "Chưa cấu hình"
+  // trong khi nút chạy được bằng Setting.n8nBaseUrl (bản clone không đặt env override).
+  const syncNow = await giaiUrlSyncNow();
 
   return (
     <div className="flex flex-col gap-5">
@@ -99,11 +102,13 @@ export async function SyncSection({ syncLogs }: { syncLogs: SyncLog[] }) {
         </p>
 
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-ink">Webhook &quot;Đồng bộ ngay&quot; (N8N_SYNC_WEBHOOK_URL):</span>
-          {webhookConfigured ? (
-            <Badge className="bg-success/15 text-success">Đã cấu hình</Badge>
+          <span className="text-ink">Webhook &quot;Đồng bộ ngay&quot;:</span>
+          {syncNow ? (
+            <Badge className="bg-success/15 text-success">
+              {syncNow.nguon === "env" ? "Đã cấu hình (env override)" : "Đã cấu hình (Kết nối n8n)"}
+            </Badge>
           ) : (
-            <Badge className="bg-warning/15 text-warning">Chưa cấu hình</Badge>
+            <Badge className="bg-warning/15 text-warning">Chưa cấu hình — điền n8n URL ở khối Kết nối n8n</Badge>
           )}
         </div>
       </div>

@@ -96,6 +96,12 @@ export function OrderDetailDrawer({ order }: { order: OrderDetail | null }) {
               {order.channelName}
             </Badge>
           </div>
+          {/* Mã đơn BÊN SÀN để đối chiếu với seller center — `select-all` cho 1 click chọn trọn mã. */}
+          {order.maSan && (
+            <p className="text-xs text-muted-foreground">
+              Mã sàn <span className="font-mono select-all">{order.maSan}</span>
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
             đặt {format(order.orderedAt, "dd/MM HH:mm")}
             {order.statusChangedAt && <> · cập nhật {format(order.statusChangedAt, "dd/MM HH:mm")}</>}

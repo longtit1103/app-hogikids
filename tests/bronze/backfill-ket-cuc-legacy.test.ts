@@ -39,7 +39,7 @@ vi.mock("@/lib/bronze/transform-from-raw", async (importOriginal) => {
 import { POST as ingestRaw } from "@/app/api/ingest/raw/route";
 import { chayBackfillLegacy, khaoSatLegacy } from "@/lib/bronze/backfill-ket-cuc-legacy";
 import { KET_CUC } from "@/lib/bronze/ket-cuc-silver";
-import { SHOP_KHO, SHOP_SHOPEE } from "@/lib/bronze/streams";
+import { SHOP_KHO, SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";

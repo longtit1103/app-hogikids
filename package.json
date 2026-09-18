@@ -8,7 +8,8 @@
     "start": "next start",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "preview": "bash scripts/preview-local.sh"
+    "preview": "bash scripts/preview-local.sh",
+    "setup": "tsx scripts/setup-clone.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

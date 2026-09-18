@@ -176,11 +176,167 @@ model RecurringExpense {
   active      Boolean @default(true)
 }
 
+/// Chiều tiền SUY từ `kind` (hàm thuần `src/lib/cash-movements/cash-movement-kinds.ts`), KHÔNG lưu
+/// cột riêng — không có ca "kind nói vào mà cột nói ra". Thứ tự Ở ĐÂY là thứ tự `ALTER TYPE … ADD
+/// VALUE` (giá trị mới luôn nối vào CUỐI), còn thứ tự HIỂN THỊ do tuple TS quyết (6 VÀO, 4 RA).
+enum CashMovementKind {
+  LOAN_IN // Vay vốn — VÀO
+  CAPITAL_IN // Chủ shop góp vốn — VÀO
+  DIRECT_SALE // Bán trực tiếp ngoài sàn — VÀO (CHỈ dòng tiền, KHÔNG vào P&L — quyết định 02/09)
+  OTHER_IN // Thu khác — VÀO
+  LOAN_REPAY // Trả nợ GỐC vay — RA (lãi vay ghi Expense)
+  CAPITAL_OUT // Rút vốn về túi cá nhân — RA
+  /// Gửi tiết kiệm bắt buộc theo khoản vay — RA. Tiền VẪN của chủ shop, ngân hàng chỉ giữ hộ tới lúc
+  /// tất toán, nên TUYỆT ĐỐI không ghi thành `Expense` (vào P&L = báo lỗ khống + mất dấu tiền lúc NH trả lại).
+  DEPOSIT_OUT
+  /// Ngân hàng trả lại sổ tiết kiệm bắt buộc (cấn trừ lúc tất toán) — VÀO.
+  DEPOSIT_IN
+  /// Gửi tiết kiệm SINH LÃI tự nguyện — RA. Gắn `savingsId` (KHÁC hẳn `DEPOSIT_OUT` gắn `loanId`:
+  /// kia là tiền gửi BẮT BUỘC theo hợp đồng vay, không sinh lãi). Tiền vẫn của shop ⇒ không phải chi phí.
+  SAVINGS_OUT
+  /// Ngân hàng trả lại ĐÚNG PHẦN GỐC sổ tiết kiệm sinh lãi — VÀO. TUYỆT ĐỐI không gồm lãi: lãi đi
+  /// đường `ThuNhap` (ghi lãi vào đây là đếm 2 lần).
+  SAVINGS_IN
+}
+
+/// Khoản tiền ghi tay NGOÀI sàn và NGOÀI Sổ chi phí (vay/góp/rút vốn, trả nợ gốc, bán trực tiếp, thu
+/// khác). Trục DÒNG TIỀN thuần — KHÔNG BAO GIỜ vào P&L (bất biến #1). `amount` luôn DƯƠNG (CHECK
+/// `CashMovement_amount_duong` ở migration + zod ở action), chiều suy từ `kind`. Nhập tay 100% ⇒ không
+/// `source`/`refId`; xoá theo hợp đồng "Xóa dữ liệu giao dịch" (data-admin.ts); rebuild-from-raw KHÔNG đụng.
+/// `kind` LOAN_IN/LOAN_REPAY BẮT BUỘC `loanId` (CHECK `CashMovement_loan_bat_buoc` ở migration + zod ở
+/// action): dòng vay/trả gốc không gắn khoản vay là dư nợ "mồ côi", không bao giờ đối chiếu lại được.
+model CashMovement {
+  id          String           @id @default(cuid())
+  date        DateTime
+  kind        CashMovementKind
+  amount      Int
+  description String           @default("")
+  loanId      String?
+  loan        Loan?            @relation(fields: [loanId], references: [id], onDelete: Restrict)
+  savingsId   String?
+  soTietKiem  SoTietKiem?      @relation(fields: [savingsId], references: [id], onDelete: Restrict)
+  createdAt   DateTime         @default(now())
+
+  @@index([date])
+  @@index([loanId])
+  @@index([savingsId])
+}
+
+/// Hồ sơ khoản vay — CHỈ mô tả (spec §5.1). TUYỆT ĐỐI không tự sinh dòng tiền: gốc đi qua CashMovement
+/// (LOAN_IN/LOAN_REPAY gắn loanId), lãi đi qua Expense danh mục interest. Dư nợ = duNoMoSo + Σ LOAN_IN −
+/// Σ LOAN_REPAY — không có cột dư nợ để lệch với sổ. 1 khoản vay = tối đa 1 LOAN_IN (giải ngân) hoặc 0
+/// (khoản mang sang từ trước ngày mở sổ — tiền đã nằm trong số dư mở sổ nên KHÔNG được ghi là tiền vào).
+/// rebuild-from-raw và deploy/restore.sh KHÔNG đụng bảng này (nhập tay 100%, không có bản gốc Bronze).
+model Loan {
+  id                  String         @id @default(cuid())
+  name                String
+  lender              String         @default("")
+  duNoMoSo            Int            @default(0)
+  startDate           DateTime
+  annualRateBp        Int            @default(0)
+  termMonths          Int?
+  firstDueDate        DateTime?
+  lastDueHandled      DateTime?
+  closedAt            DateTime?
+  note                String         @default("")
+  createdAt           DateTime       @default(now())
+  kind                LoanKind       @default(TERM)
+  /// Lãi CỐ ĐỊNH mỗi kỳ theo số tiền ngân hàng chốt trên hợp đồng (chỉ `BULLET`). NULL = tính theo
+  /// `annualRateBp` như cũ; 0 KHÔNG dùng làm sentinel vì "vay không lãi" là trạng thái hợp lệ.
+  laiCoDinhMoiKy      Int?
+  /// Tiền gửi tiết kiệm bắt buộc mỗi kỳ — dòng tiền RA (`DEPOSIT_OUT`), KHÔNG BAO GIỜ là chi phí.
+  tienGuiBatBuocMoiKy Int            @default(0)
+  movements           CashMovement[]
+  /// Sổ tiết kiệm SINH LÃI khai "vay khoản này rồi mang gửi" — chỉ để SO lãi suất, KHÔNG mang tiền.
+  /// Xoá khoản vay ⇒ `SoTietKiem.loanId` về NULL (onDelete: SetNull), sổ và tiền còn nguyên.
+  soTietKiem          SoTietKiem[]
+}
+
+/// Loại khoản vay — quyết định CÁCH tính lãi/gốc của kỳ, nên khoá vĩnh viễn sau khi tạo.
+enum LoanKind {
+  /// Vay kỳ hạn: có `termMonths` + `firstDueDate`, mỗi kỳ trả lãi trên dư nợ ĐẦU kỳ + một phần gốc.
+  TERM
+  /// Thấu chi: `termMonths` LUÔN NULL (không có lịch trả gốc). `firstDueDate` = ngày thu lãi kỳ đầu,
+  /// TUỲ CHỌN (NULL = ngân hàng chỉ thu lãi lúc tất toán). Lãi tính THEO NGÀY trên dư nợ từng đoạn
+  /// (trả bớt gốc giữa kỳ là giảm lãi ngay), gốc chỉ trả một lần khi tất toán.
+  OVERDRAFT
+  /// Vay trả gốc CUỐI KỲ: có `termMonths` + `firstDueDate` như vay kỳ hạn, nhưng gốc KHÔNG chia đều —
+  /// kỳ 1…n−1 chỉ trả lãi, kỳ n trả trọn gốc. Lãi thường khai CỐ ĐỊNH theo số tiền
+  /// (`laiCoDinhMoiKy`); kèm `tienGuiBatBuocMoiKy` gửi tiết kiệm mỗi kỳ, ngân hàng cấn trừ khi tất toán.
+  BULLET
+}
+
+/// Sổ tiết kiệm ngân hàng CÓ KỲ HẠN, lãi cuối kỳ — hồ sơ thuần, TUYỆT ĐỐI không tự sinh dòng tiền:
+/// gốc đi qua `CashMovement` (SAVINGS_OUT/SAVINGS_IN gắn `savingsId`), lãi đi qua `ThuNhap`. Số tiền
+/// đang gửi KHÔNG có cột — suy từ Σ SAVINGS_OUT − Σ SAVINGS_IN (lưu 2 chỗ là lệch 2 chỗ).
+/// KHÁC HẲN tiền gửi BẮT BUỘC theo hợp đồng vay (`DEPOSIT_OUT`/`DEPOSIT_IN` gắn `loanId`): cặp kia
+/// không sinh lãi, và hai cơ chế sống song song — không migrate dữ liệu qua lại.
+/// Nhập tay 100% ⇒ rebuild-from-raw và deploy/restore.sh KHÔNG đụng bảng này.
+model SoTietKiem {
+  id           String         @id @default(cuid())
+  name         String
+  bank         String         @default("")
+  /// Số tiền gửi (VND). CHECK `SoTietKiem_principal_duong` > 0.
+  principal    Int
+  startDate    DateTime
+  /// Kỳ hạn tính bằng THÁNG. CHECK `SoTietKiem_termMonths_duong` >= 1.
+  termMonths   Int
+  /// LƯU, không tính lại: ngân hàng có thể chốt ngày khác `startDate + termMonths`. Form điền sẵn,
+  /// chủ shop sửa được. CHECK `SoTietKiem_dao_han_sau_ngay_gui` > startDate.
+  maturityDate DateTime
+  /// Lãi %/năm theo basis point (5,2%/năm = 520). CHECK >= 0 — vay không lãi/gửi giữ hộ là hợp lệ.
+  annualRateBp Int
+  loanId       String?
+  loan         Loan?          @relation(fields: [loanId], references: [id], onDelete: SetNull)
+  /// NULL = đang gửi; có giá trị = đã tất toán (rút trước hạn suy ra khi < maturityDate).
+  closedAt     DateTime?
+  note         String         @default("")
+  createdAt    DateTime       @default(now())
+  movements    CashMovement[]
+  thuNhap      ThuNhap[]
+
+  @@index([closedAt])
+  @@index([maturityDate])
+}
+
+/// Sổ THU NHẬP ngoài bán hàng — đối xứng `Expense`. Đây là đường DUY NHẤT đưa thu nhập ngoài bán
+/// hàng vào P&L: `pnl.ts` đọc bảng này và KHÔNG biết sổ tiết kiệm là gì (giữ nguyên hàng rào cách ly
+/// `tests/unit/cash-movements/khong-ro-ri-vao-pnl.test.ts`). Ghi nhận theo TIỀN THẬT: trọn vào ngày
+/// tất toán sổ, không phân bổ đều các tháng.
+model ThuNhap {
+  id          String      @id @default(cuid())
+  /// Ngày ghi nhận = ngày tất toán sổ (giờ VN).
+  date        DateTime
+  kind        ThuNhapKind
+  /// CHECK `ThuNhap_amount_duong` > 0 — chặn ở DB chứ không chỉ zod: `Expense` chỉ chặn ở zod nên
+  /// đường ingest ads đi vòng qua được, bảng mới không lặp lại lỗ hổng đó.
+  amount      Int
+  description String      @default("")
+  savingsId   String?
+  soTietKiem  SoTietKiem? @relation(fields: [savingsId], references: [id], onDelete: Restrict)
+  /// Cổng chống ghi trùng: "TIETKIEM:{savingsId}" (khuôn `Expense.refId` = "LOAN:…").
+  refId       String?     @unique
+  createdAt   DateTime    @default(now())
+
+  @@index([date])
+  @@index([savingsId])
+}
+
+/// Loại thu nhập ngoài bán hàng. v1 chỉ có lãi tiết kiệm — thêm loại mới là thêm DÒNG P&L, phải rà
+/// lại `pnl-line-items.ts` trước.
+enum ThuNhapKind {
+  LAI_TIET_KIEM
+}
+
 enum SyncKind {
   PANCAKE
   META_ADS
   TIKTOK_ADS
   TIKTOK_SHOP // phí/đối soát TikTok Shop Open API — luồng RIÊNG, KHÔNG trộn vào PANCAKE
+  /// Chỉ số marketing TikTok Shop (workflow 02:30). TÁCH khỏi TIKTOK_SHOP có chủ đích: hai
+  /// workflow khác nhau, hai giờ khác nhau. Ghi chung kind thì lượt analytics 02:30 chạy OK sẽ
+  /// "sơn xanh" trạng thái tài chính 02:00 vừa chết — đúng bẫy mà route `raw` đã ghi cho ads.
+  TIKTOK_SHOP_ANALYTICS
   BACKUP
 }
 
@@ -573,6 +729,118 @@ model RawTiktokBusinessInvoice {
   @@index([fetchedAt])
 }
 
+/// Bronze — GMV Max cấp **ITEM** (`/gmv_max/report/get/`, dimensions = campaign × item_group × ngày).
+/// BẢNG RIÊNG, KHÔNG land chung `RawTiktokBusinessReport`: dòng item-level có đủ `campaign_id` +
+/// `stat_time_day` và KHÔNG có `metrics.spend` ⇒ `idExpr` của stream cũ sinh khoá TRÙNG KHÍT dòng
+/// campaign-level, `DISTINCT ON` khi dựng lại sẽ chọn 1 vứt 1 ⇒ chi phí ads dựng lại từ kho thô ra
+/// SỐ SAI (đo P0 25/08: bảng cũ đang có 45.480 dòng).
+/// `shopId` = advertiser_id. `externalId` = `<campaign_id>:<item_group_id>:<ngày>`.
+/// LAND_ONLY: `item_group_id` = `Product.code` — reader đọc thẳng Bronze, KHÔNG vào `Expense`
+/// (chi phí ads vào P&L vẫn là cấp campaign; breakdown item thiếu 0,60% — 825đ/137.180đ).
+model RawTiktokBusinessGmvMaxItem {
+  id          String   @id @default(cuid())
+  shopId      String
+  externalId  String
+  payloadHash String
+  payload     Json
+  fetchedAt   DateTime @default(now())
+  syncLogId   String?
+
+  @@unique([shopId, externalId, payloadHash])
+  @@index([shopId, externalId, fetchedAt])
+  @@index([fetchedAt])
+}
+
+/// Bronze — `/analytics/202509/shop/performance` (granularity 1D). 1 dòng/NGÀY,
+/// `externalId` = `start_date`. LAND_ONLY: số sàn không hạch toán, reader đọc thẳng.
+/// BẤT BIẾN #2: SỐ THAM KHẢO — không chạm `pnl.ts`, không sửa phí sàn, không đối chiếu "lệch" với
+/// đơn Pancake (hai định nghĩa khác nhau).
+model RawTiktokShopAnalyticsShop {
+  id          String   @id @default(cuid())
+  shopId      String
+  externalId  String
+  payloadHash String
+  payload     Json
+  fetchedAt   DateTime @default(now())
+  syncLogId   String?
+
+  @@unique([shopId, externalId, payloadHash])
+  @@index([shopId, externalId, fetchedAt])
+  @@index([fetchedAt])
+}
+
+/// Bronze — `/analytics/202605/shop_products/performance`. Record là TỔNG cả cửa sổ và KHÔNG có
+/// trường ngày ⇒ workflow gọi 1 request/NGÀY rồi bơm `_ngay`; `externalId` = `<_ngay>:<id>`.
+/// `_ngay` là khoá KỸ THUẬT do app bơm (`landRaw`), KHÔNG phải field TikTok trả về.
+model RawTiktokShopAnalyticsProduct {
+  id          String   @id @default(cuid())
+  shopId      String
+  externalId  String
+  payloadHash String
+  payload     Json
+  fetchedAt   DateTime @default(now())
+  syncLogId   String?
+
+  @@unique([shopId, externalId, payloadHash])
+  @@index([shopId, externalId, fetchedAt])
+  @@index([fetchedAt])
+}
+
+/// Bronze — `/analytics/202605/shop_videos/performance`. `externalId` = `<_ngay>:<id>`.
+/// Có record `id = "0"` (TikTok gom "video không xác định") — hợp lệ, đừng lọc bỏ.
+model RawTiktokShopAnalyticsVideo {
+  id          String   @id @default(cuid())
+  shopId      String
+  externalId  String
+  payloadHash String
+  payload     Json
+  fetchedAt   DateTime @default(now())
+  syncLogId   String?
+
+  @@unique([shopId, externalId, payloadHash])
+  @@index([shopId, externalId, fetchedAt])
+  @@index([fetchedAt])
+}
+
+/// Bronze — `/analytics/202509/shop_lives/performance`. Mảng nằm ở `data.live_stream_sessions`
+/// (KHÔNG phải `data.lives` — spec §4.4 đoán sai, đo thật P0 25/08). 1 dòng/PHIÊN,
+/// `externalId` = `id` phiên (record CÓ trường thời gian riêng nên KHÔNG cần `_ngay`).
+model RawTiktokShopAnalyticsLive {
+  id          String   @id @default(cuid())
+  shopId      String
+  externalId  String
+  payloadHash String
+  payload     Json
+  fetchedAt   DateTime @default(now())
+  syncLogId   String?
+
+  @@unique([shopId, externalId, payloadHash])
+  @@index([shopId, externalId, fetchedAt])
+  @@index([fetchedAt])
+}
+
+/// Bronze — `POST /affiliate_seller/202410/orders/search`. Land theo DÒNG SKU, KHÔNG theo đơn:
+/// payload gốc lồng 2 tầng (`data.orders[].skus[]`), workflow làm phẳng mỗi dòng SKU thành một
+/// record + bơm 4 trường cấp đơn (`_don_id`, `_create_time`, `_delivery_time`, `_ngay`).
+/// `externalId` = `<_don_id>:<sku_id>` — mỗi dòng độc lập nên miễn nhiễm ca đơn nhiều SKU vắt
+/// qua 2 trang (land theo đơn thì trang sau ghi đè bản `skus` thiếu, mất dòng không log nào đỏ).
+/// `total_count` của TikTok đếm DÒNG SKU (đo 28/08: page_size 20 trả 19 đơn / 20 dòng).
+/// BẤT BIẾN #2: đơn/GMV/hoa hồng ở đây là SỐ SÀN TỰ NHẬN CÔNG — không chạm `pnl.ts`, không trộn
+/// với hoa hồng THẬT Pancake (`advanced_platform_fee.affiliate_commission`).
+model RawTiktokShopAffiliateOrder {
+  id          String   @id @default(cuid())
+  shopId      String
+  externalId  String
+  payloadHash String
+  payload     Json
+  fetchedAt   DateTime @default(now())
+  syncLogId   String?
+
+  @@unique([shopId, externalId, payloadHash])
+  @@index([shopId, externalId, fetchedAt])
+  @@index([fetchedAt])
+}
+
 /// Báo cáo CHI TIÊU quảng cáo Meta (Facebook Marketing API). `shopId` = ad account id (`act_...`).
 /// `externalId` = `<campaign_id>:<ngày>` — dòng insights không có `id`.
 /// ⚠️ `spend` trong payload là số CHƯA THUẾ. Meta KHÔNG có API hoá đơn cho tài khoản trả thẻ ⇒ VAT khai tay, ĐÃ CHỐT 10% (app nhân khi ghi Expense — payload Bronze giữ nguyên số chưa thuế).
@@ -628,4 +896,64 @@ model RawPancakeWebhookEvent {
   @@unique([shopId, receivedAt, payloadHash])
   @@index([shopId, receivedAt])
   @@index([receivedAt])
+}
+
+/// Bản sao lưu MỖI workflow n8n TRƯỚC khi lượt "Cài / cập nhật workflows" (provisioning từ
+/// /cai-dat) PUT đè bản đang chạy — hiện vật khôi phục được (log server không phải hiện vật:
+/// json-file rotate + xen log Next). Backup ghi KHÔNG thành công ⇒ provisioning BỎ QUA workflow
+/// đó, tuyệt đối không PUT (cổng fail-closed). Retention: provisioning tự tỉa, giữ N lượt gần
+/// nhất mỗi tên workflow.
+model N8nWorkflowBackup {
+  id        String   @id @default(uuid())
+  /// Tên workflow trên n8n tại thời điểm backup (khớp field `name` trong JSON export).
+  name      String
+  /// Nguyên văn JSON bản đang chạy do n8n API trả về (GET /workflows/{id}) — PUT lại là khôi phục.
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@index([name, createdAt])
+}
+
+/// THÙNG RÁC KHÔI PHỤC — ảnh chụp (snapshot) của bản ghi TIỀN vừa bị xoá cứng, cho 5 bảng nhập tay:
+/// `Expense` · `CashMovement` · `ThuNhap` · `Loan` · `SoTietKiem`. Chủ shop xoá nhầm một dòng chi phí
+/// là mất hẳn (không có bản gốc Bronze nào dựng lại được), nên mọi lượt xoá phải chụp ảnh TRƯỚC, TRONG
+/// CÙNG transaction với câu xoá.
+///
+/// VÌ SAO BẢNG RIÊNG chứ không thêm cột `deletedAt` vào 5 bảng kia: soft-delete bằng cột buộc phải sửa
+/// hơn 20 query đọc tiền (pnl.ts · daily-series.ts · cash-flow.ts · so-quy-queries.ts · expense-queries.ts
+/// · cash-movement-queries.ts · /kenh), trong đó 3 chỗ là raw SQL — quên một chỗ là dòng đã xoá vẫn cộng
+/// vào Lãi/Lỗ mà không test nào đỏ. Nó còn phá `Expense.refId @unique` + `ThuNhap.refId @unique` (cổng
+/// chống ghi trùng kỳ vay / lãi tiết kiệm) và phá các cổng chặn xoá Loan/SoTietKiem vốn ĐẾM DÒNG con.
+/// Ở đây xoá vẫn là xoá CỨNG ⇒ 0 query hiện có phải đổi, và dòng trong thùng rác không có đường nào
+/// lọt vào P&L / Sổ quỹ / sổ chi phí.
+///
+/// KHÔNG có FK tới bản ghi gốc (bản ghi đó đã biến mất) — `banGhiId` chỉ là id CŨ, dùng để khôi phục
+/// lại ĐÚNG id đó. Nhập tay 100% ⇒ rebuild-from-raw KHÔNG đụng; "Xoá dữ liệu giao dịch" thì xoá luôn.
+model BanGhiDaXoa {
+  id String @id @default(cuid())
+
+  /// Tên model Prisma của bản ghi gốc: Expense | CashMovement | ThuNhap | Loan | SoTietKiem.
+  bang     String
+  /// Id CŨ của bản ghi gốc — khôi phục dựng lại đúng id này (đường dẫn/ảnh chụp cũ còn trỏ tới nó).
+  banGhiId String
+
+  /// Câu tiếng Việt đọc được ngay trên màn thùng rác, vd "Nhập hàng — 28.999.920 ₫ — 04/09/2026".
+  /// LƯU chứ không dựng lại lúc đọc: danh mục/khoản vay gốc có thể đã bị xoá sau đó.
+  nhan   String
+  /// Số tiền ĐỂ HIỂN THỊ (luôn dương). KHÔNG phải nguồn số cho bất kỳ phép tính tiền nào.
+  soTien Int
+  /// Ngày nghiệp vụ của bản ghi gốc (ngày chi / ngày dòng tiền / ngày bắt đầu) — để sắp xếp + lọc.
+  ngay   DateTime
+
+  /// Ảnh chụp ĐẦY ĐỦ: bản ghi cha + mọi bản ghi con bị xoá kèm (dòng tiền của khoản vay / sổ tiết
+  /// kiệm) + ghi chú khôi phục. Shape ở `src/lib/thung-rac/chup-anh-ban-ghi.ts` — đọc nó trước khi
+  /// đổi. `Json` chứ không TEXT: cần lọc/đọc bằng SQL khi đối chiếu sự cố.
+  anh Json
+
+  xoaLuc      DateTime  @default(now())
+  /// NULL = còn trong thùng rác; có giá trị = đã khôi phục (mục đã khôi phục KHÔNG khôi phục lại).
+  khoiPhucLuc DateTime?
+
+  @@index([xoaLuc])
+  @@index([bang, banGhiId])
 }

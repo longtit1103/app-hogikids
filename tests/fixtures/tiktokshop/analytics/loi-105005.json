@@ -1,0 +1,4 @@
+{
+  "code": 105005,
+  "message": "Access denied. The app is not authorized to access the endpoint because the access scopes granted for the app or the access token do not contain the required access scope for the endpoint. For more details: https://m.tiktok.shop/s/AIu6dbFhs2XW"
+}

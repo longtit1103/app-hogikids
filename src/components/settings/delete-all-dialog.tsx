@@ -24,15 +24,39 @@ import { formatVnd } from "@/lib/format";
 import { BackupButton } from "./backup-button";
 
 /**
+ * Câu định lượng khoản NHẬP TAY sắp mất. Chỉ nêu vế thực sự có phát sinh: shop chưa nhập chi phí nào
+ * mà câu vẫn mở bằng "Đang có 0 khoản chi phí nhập tay (0 ₫)" thì đọc như lỗi số liệu. Nối các vế bằng
+ * ", " và " và " trước vế cuối. Hàm THUẦN để test được bằng chuỗi chính xác.
+ */
+export function moTaKhoanMatTrang(chiPhi: ChiPhiKhongDungLai): string {
+  const ve = [
+    chiPhi.soChiPhi > 0 && `${chiPhi.soChiPhi} khoản chi phí nhập tay (${formatVnd(chiPhi.tongChiPhi)})`,
+    chiPhi.soDinhKy > 0 && `${chiPhi.soDinhKy} chi phí định kỳ`,
+    chiPhi.soKhoanTienKhac > 0 &&
+      `${chiPhi.soKhoanTienKhac} khoản tiền khác ghi tay (${formatVnd(chiPhi.tongKhoanTienKhac)})`,
+    chiPhi.soKhoanVay > 0 && `${chiPhi.soKhoanVay} khoản vay (hồ sơ + dư nợ)`,
+    chiPhi.soSoTietKiem > 0 &&
+      `${chiPhi.soSoTietKiem} sổ tiết kiệm (hồ sơ + ${formatVnd(chiPhi.tongThuNhap)} lãi đã ghi)`,
+  ].filter((v): v is string => typeof v === "string");
+
+  if (ve.length === 0) return "Hiện chưa có khoản chi phí hay khoản tiền khác nhập tay nào.";
+  const cuoi = ve[ve.length - 1];
+  const dau = ve.slice(0, -1);
+  return `Đang có ${dau.length > 0 ? `${dau.join(", ")} và ${cuoi}` : cuoi}.`;
+}
+
+/**
  * "Xóa dữ liệu giao dịch" — confirm 2 bước.
  *
  * - App rỗng (`hasData=false`): chỉ hiện "Không có dữ liệu để xóa" + "Đóng".
  * - Bước 1: liệt kê hậu quả + gợi ý sao lưu (nút phụ "Sao lưu ngay") + "Tiếp tục".
  *   Hai cảnh báo đỏ nằm NGAY dưới danh sách xoá và TRƯỚC câu hướng dẫn dựng
  *   lại, vì chúng là phần dựng lại KHÔNG lấy lại được:
- *     · chi phí NHẬP TAY — LUÔN hiện (không có bản gốc nào trong kho thô để dựng
- *       lại), kèm số dòng và số tiền để thấy độ lớn. Chi tiêu quảng cáo KHÔNG còn
- *       nằm ở đây: kho thô giữ bản gốc báo cáo Meta/TikTok nên dựng lại được;
+ *     · chi phí NHẬP TAY, khoản tiền khác ghi tay (`CashMovement`) và hồ sơ
+ *       khoản vay (`Loan`) — LUÔN hiện
+ *       (không có bản gốc nào trong kho thô để dựng lại), kèm số dòng và số tiền
+ *       để thấy độ lớn. Chi tiêu quảng cáo KHÔNG còn nằm ở đây: kho thô giữ bản
+ *       gốc báo cáo Meta/TikTok nên dựng lại được;
  *     · đơn mồ côi (`donMoCoi.soDon > 0`) — đơn cũ hơn cửa sổ kho thô;
  *     · chi tiêu quảng cáo mồ côi (`adsMoCoi.soDong > 0`) — dòng chi phí mà kho thô
  *       không có bản gốc báo cáo (đêm nào land Bronze hỏng riêng). Đo THẬT chứ
@@ -74,12 +98,7 @@ export function DeleteAllDialog({
   // Định lượng khoản chi phí NHẬP TAY sắp mất (chi tiêu quảng cáo không tính — dựng lại được từ kho
   // thô). Cảnh báo bên dưới là CỐ ĐỊNH (không phụ thuộc số này) vì chi phí nhập tay không bao giờ
   // dựng lại được, nhưng câu chữ phải đọc trơn cả khi shop chưa nhập gì.
-  const moTaChiPhi =
-    chiPhi.soChiPhi === 0 && chiPhi.soDinhKy === 0
-      ? "Hiện chưa có khoản chi phí nhập tay nào."
-      : `Đang có ${chiPhi.soChiPhi} khoản chi phí nhập tay (${formatVnd(chiPhi.tongChiPhi)})` +
-        (chiPhi.soDinhKy > 0 ? ` và ${chiPhi.soDinhKy} chi phí định kỳ` : "") +
-        ".";
+  const moTaChiPhi = moTaKhoanMatTrang(chiPhi);
 
   async function handleDelete() {
     if (!matches) return;
@@ -107,7 +126,7 @@ export function DeleteAllDialog({
       </Button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-h-[85vh] max-w-md overflow-y-auto">
           {!hasData ? (
             <>
               <DialogHeader>
@@ -132,6 +151,12 @@ export function DeleteAllDialog({
                 <ul className="list-disc pl-5 text-muted-foreground">
                   <li>Toàn bộ đơn hàng và dòng hàng trong đơn</li>
                   <li>Toàn bộ chi phí (thường và định kỳ)</li>
+                  <li>Toàn bộ khoản tiền khác ghi tay (vay/góp/rút vốn, trả nợ gốc, bán trực tiếp, thu khác)</li>
+                  <li>Toàn bộ hồ sơ khoản vay (lãi suất, kỳ hạn, dư nợ, lịch trả nợ đã duyệt)</li>
+                  <li>
+                    Toàn bộ sổ tiết kiệm sinh lãi (hồ sơ + lãi đã ghi vào{" "}
+                    <strong className="text-ink">Thu nhập tài chính</strong> của bảng Lãi/Lỗ)
+                  </li>
                   <li>
                     Toàn bộ số liệu <strong className="text-ink">Tiền đã về</strong> (TikTok và
                     Shopee)
@@ -139,8 +164,8 @@ export function DeleteAllDialog({
                   <li>Toàn bộ log đồng bộ (GIỮ lại nhật ký sao lưu)</li>
                 </ul>
                 <p className="text-error">
-                  Chi phí nhập tay KHÔNG dựng lại được từ kho thô — chỉ phục hồi bản sao lưu mới cứu.{" "}
-                  {moTaChiPhi}
+                  Chi phí và khoản tiền khác nhập tay KHÔNG dựng lại được từ kho thô — chỉ phục hồi
+                  bản sao lưu mới cứu. {moTaChiPhi}
                 </p>
                 {donMoCoi.soDon > 0 && (
                   <p className="text-error">

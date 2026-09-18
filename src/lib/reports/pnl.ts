@@ -28,6 +28,20 @@ export interface PnlExpenseInput {
   amount: number;
 }
 
+/**
+ * Một dòng thu nhập ngoài bán hàng trong kỳ (bảng `ThuNhap` — v1 chỉ có lãi sổ tiết kiệm).
+ * CỐ Ý chỉ mang `amount`: P&L không được biết khoản này đến từ sổ nào — nó là thu nhập của cả
+ * shop, không phân bổ kênh. Giữ hình dạng tối thiểu này cũng là điều kiện để hàng rào cách ly
+ * `khong-ro-ri-vao-pnl` không phải nới ra.
+ *
+ * (Cố ý KHÔNG viết đường dẫn đầy đủ của file lưới đó ở đây: lưới quét CHÍNH VĂN BẢN file này tìm
+ * các token trục dòng tiền, nên nhắc tên thư mục của nó là tự làm mình đỏ — đúng tinh thần "kiểm
+ * cái chữ" mà lưới đã khai.)
+ */
+export interface PnlIncomeInput {
+  amount: number;
+}
+
 export interface PnlBreakdown {
   revenue: number;
   platformFee: number;
@@ -42,6 +56,14 @@ export interface PnlBreakdown {
   packaging: number;
   returnBom: number;
   fixed: number;
+  /**
+   * Thu nhập tài chính = Σ `ThuNhap.amount` trong kỳ (lãi sổ tiết kiệm đã NHẬN THẬT).
+   * Là phép CỘNG duy nhất vào `netProfit` ngoài doanh thu bán hàng — ghi TRỌN vào tháng tất toán
+   * sổ (chủ shop chốt 10/09: P&L khớp tiền thật, KHÔNG phân bổ dồn tích các tháng gửi).
+   * Lăng kính kênh ép về 0: lãi tiết kiệm không thuộc kênh bán nào (cùng luật `fixed`/`interest`).
+   */
+  financialIncome: number;
+  interest: number; // lãi vay — chi phí tài chính, dòng riêng, KHÔNG phân bổ kênh
   other: number;
   netProfit: number;
   orderCount: number;
@@ -90,13 +112,28 @@ const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
 //   costPrice = 0 + sku có tên → skuMissingCount (đếm theo SKU, sửa được ở màn Sản phẩm);
 //   còn lại (variantId null, hoặc sku rỗng) → skuUnknownLineCount (đếm theo DÒNG, không sửa được).
 // - Danh mục "purchase" (Nhập hàng) là DÒNG TIỀN — KHÔNG BAO GIỜ vào P&L.
-// - channelId: chỉ đơn của kênh; expense chỉ dòng gắn đúng kênh và ∉ {purchase, fixed} (không phân bổ chi phí chung).
+// - channelId: chỉ đơn của kênh; expense chỉ dòng gắn đúng kênh và ∉ {purchase, fixed, interest}
+//   (không phân bổ chi phí chung). Danh mục "interest" (Lãi vay) VÀO P&L thành dòng riêng, nhưng
+//   KHÔNG phân bổ kênh — cùng luật với "fixed" (là chi phí chung của cả shop, không của kênh nào).
+/**
+ * ĐƠN HỢP LỆ — đơn được tính vào doanh thu/COGS của P&L (bất biến #1).
+ *
+ * Export ra ngoài vì đã có chỗ thứ hai cần đúng luật này: bảng "áp giá vốn sẽ làm lãi tháng nào đổi
+ * bao nhiêu" (`src/lib/gia-von/anh-huong-cogs.ts`). Chép điều kiện sang đó là mở đường cho hai nơi
+ * lệch nhau — mà lệch ở đây nghĩa là màn duyệt hứa một con số, P&L ra một con số khác.
+ */
+export function laDonHopLe(status: OrderStatus): boolean {
+  return status !== "RETURNED" && status !== "CANCELLED";
+}
+
 // Overload: KHÔNG truyền `statusIn` → PnlBreakdown đầy đủ (lăng kính P&L mặc định);
 // CÓ `statusIn` → PnlStatusLensBreakdown (netProfit/returnBomOrderCount bị loại khỏi kiểu).
+// `incomes` CHỈ có ở overload đầu: dưới lăng kính Dòng tiền không có netProfit để cộng vào, nên
+// truyền vào đó là vô nghĩa — chặn ngay ở tầng KIỂU thay vì để nó âm thầm không tác dụng.
 export function calcPnlCore(
   orders: PnlOrderInput[],
   expenses: PnlExpenseInput[],
-  opts?: { channelId?: string }
+  opts?: { channelId?: string; incomes?: PnlIncomeInput[] }
 ): PnlBreakdown;
 export function calcPnlCore(
   orders: PnlOrderInput[],
@@ -106,7 +143,7 @@ export function calcPnlCore(
 export function calcPnlCore(
   orders: PnlOrderInput[],
   expenses: PnlExpenseInput[],
-  opts?: { channelId?: string; statusIn?: OrderStatus[] }
+  opts?: { channelId?: string; statusIn?: OrderStatus[]; incomes?: PnlIncomeInput[] }
 ): PnlBreakdown {
   const ord = opts?.channelId ? orders.filter((o) => o.channelId === opts.channelId) : orders;
   // `statusIn` (ADDITIVE — lăng kính Dòng tiền): khi truyền, CHỈ tính đơn có
@@ -120,10 +157,10 @@ export function calcPnlCore(
   const valid =
     opts?.statusIn !== undefined
       ? ord.filter((o) => opts.statusIn!.includes(o.status))
-      : ord.filter((o) => o.status !== "RETURNED" && o.status !== "CANCELLED");
+      : ord.filter((o) => laDonHopLe(o.status));
   const exp = expenses
     .filter((e) => e.categoryId !== "purchase")
-    .filter((e) => !opts?.channelId || (e.channelId === opts.channelId && e.categoryId !== "fixed"));
+    .filter((e) => !opts?.channelId || (e.channelId === opts.channelId && e.categoryId !== "fixed" && e.categoryId !== "interest"));
   const revenue = sum(valid.map((o) => o.itemsTotal));
   const platformFee = sum(valid.map((o) => o.platformFeeEst));
   // Phí sàn THỰC sàn giữ trên đơn HOÀN/HỦY (returnedFee). Tính trên `ord` (mọi status
@@ -157,8 +194,15 @@ export function calcPnlCore(
       adsBySource[k] = (adsBySource[k] ?? 0) + e.amount;
     }
   const ads = byCat("ads");
-  const KNOWN = ["purchase", "ads", "shipping", "packaging", "return_bom", "fixed"];
+  // Thêm id vào KNOWN mà QUÊN trừ ở netProfit ⇒ danh mục đó biến mất khỏi lợi nhuận trong khi MỌI test
+  // hiện có vẫn xanh — tests/pnl.test.ts "Lãi vay 5tr ⇒ netProfit −5tr" canh đúng ca này.
+  const KNOWN = ["purchase", "ads", "shipping", "packaging", "return_bom", "fixed", "interest"];
   const other = sum(exp.filter((e) => !KNOWN.includes(e.categoryId)).map((e) => e.amount)); // "other" + danh mục tùy chỉnh
+  const interest = byCat("interest"); // lãi vay (spec 260907 §5.4)
+  // Lăng kính kênh ép về 0 NGAY TẠI ĐÂY — giữ MỘT chỗ logic kênh duy nhất (loader chỉ đọc dữ liệu
+  // rồi truyền vào, không tự quyết). Lãi tiết kiệm là thu nhập của cả shop: gán nó cho một kênh
+  // bán là bịa lãi cho kênh đó, y hệt lý do `fixed`/`interest` không phân bổ kênh.
+  const financialIncome = opts?.channelId ? 0 : sum((opts?.incomes ?? []).map((i) => i.amount));
   const netRevenue = revenue - platformFee - voucher;
   const grossProfit = netRevenue - cogs;
   // netProfit CHỈ có nghĩa khi `statusIn` unset (lăng kính P&L mặc định) —
@@ -166,13 +210,19 @@ export function calcPnlCore(
   // `returnBomOrderCount` phía trên. Đã chặn ở KIỂU (overload statusIn trả
   // PnlStatusLensBreakdown không có netProfit) — caller Dòng tiền không đọc
   // được field này lúc compile.
+  //
+  // ⚠️ `financialIncome` là số CỘNG DUY NHẤT trong công thức này. Mọi nơi suy "chi phí vận hành"
+  // bằng HIỆU `grossProfit − netProfit` PHẢI cộng lại khoản này (xem `buildOpexGroup` ở
+  // pnl-line-items.ts), nếu không dòng nhóm tự hụt ĐÚNG BẰNG số lãi mà không test cũ nào đỏ.
   const netProfit =
-    grossProfit -
+    grossProfit +
+    financialIncome -
     ads -
     byCat("shipping") -
     byCat("packaging") -
     byCat("return_bom") -
     byCat("fixed") -
+    interest -
     other -
     returnedOrderFee;
   return {
@@ -189,6 +239,8 @@ export function calcPnlCore(
     packaging: byCat("packaging"),
     returnBom: byCat("return_bom"),
     fixed: byCat("fixed"),
+    financialIncome,
+    interest,
     other,
     netProfit,
     orderCount: valid.length,
@@ -249,7 +301,7 @@ export function toPnlOrderInput(o: PnlOrderRow): PnlOrderInput {
  */
 export async function calcPnl(range: DateRange, opts?: { channelId?: string }): Promise<PnlBreakdown> {
   const to = endOfDay(range.to);
-  const [orders, expenses] = await Promise.all([
+  const [orders, expenses, incomes] = await Promise.all([
     prisma.order.findMany({
       where: {
         orderedAt: { gte: range.from, lte: to },
@@ -261,9 +313,30 @@ export async function calcPnl(range: DateRange, opts?: { channelId?: string }): 
       where: { date: { gte: range.from, lte: to } },
       select: { categoryId: true, adsSource: true, channelId: true, amount: true },
     }),
+    // Thu nhập ngoài bán hàng (lãi sổ tiết kiệm đã nhận). KHÔNG lọc/bỏ theo `channelId` ở đây:
+    // `calcPnlCore` ép về 0 dưới lăng kính kênh — giữ MỘT chỗ logic kênh. Query vẫn chạy khi có
+    // channelId, đổi lại là không có chỗ thứ hai quyết định chuyện kênh; bảng này nhập tay, vài
+    // chục dòng mỗi năm, có index theo `date`.
+    prisma.thuNhap.findMany({
+      where: { date: { gte: range.from, lte: to } },
+      select: { amount: true },
+    }),
   ]);
 
-  return calcPnlCore(orders.map(toPnlOrderInput), expenses, opts);
+  return calcPnlCore(orders.map(toPnlOrderInput), expenses, { ...opts, incomes });
+}
+
+/**
+ * Σ thu nhập tài chính của kỳ — dành cho màn CHỈ cần con số này để chú thích (trang /kenh: biên
+ * ròng từng kênh KHÔNG gồm khoản này). Gọi `calcPnl` chỉ để lấy một số là kéo theo cả query đơn
+ * hàng + chi phí của kỳ. Biên phải `endOfDay(range.to)` khớp mọi query kỳ khác của app.
+ */
+export async function sumThuNhapTaiChinh(range: DateRange): Promise<number> {
+  const agg = await prisma.thuNhap.aggregate({
+    _sum: { amount: true },
+    where: { date: { gte: range.from, lte: endOfDay(range.to) } },
+  });
+  return agg._sum.amount ?? 0;
 }
 
 // Mẫu số "% / doanh thu" toàn app: `pnl-percent-base.ts` — module thuần riêng vì Client Component
@@ -291,7 +364,7 @@ export interface ChannelPnl {
  * kênh), KỂ CẢ kênh đã tắt (`isActive=false`) — trang /kenh vẫn cần thấy chúng.
  * Mỗi kênh = `calcPnl(range, { channelId })` + các tỉ số dẫn xuất.
  *
- * LƯU Ý: Σ netProfit kênh ≠ netProfit toàn shop (fixed + chi phí không gắn kênh
+ * LƯU Ý: Σ netProfit kênh ≠ netProfit toàn shop (fixed + interest + chi phí không gắn kênh
  * KHÔNG phân bổ về kênh — chủ đích, khớp quy tắc lọc chi phí của calcPnlCore).
  */
 export async function computeChannelPnl(range: DateRange): Promise<ChannelPnl[]> {

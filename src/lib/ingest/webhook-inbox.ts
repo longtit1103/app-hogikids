@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK } from "@/lib/bronze/streams";
+import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -13,12 +13,28 @@ import { prisma } from "@/lib/prisma";
  * không có API lấy lại lịch sử sự kiện).
  */
 
-/** Slug trên URL endpoint → shop id Pancake. Whitelist: slug lạ bị từ chối, không đoán. */
-export const SHOP_ID_THEO_SLUG: Readonly<Record<string, string>> = {
-  kho: SHOP_KHO,
-  shopee: SHOP_SHOPEE,
-  tiktok: SHOP_TIKTOK,
-};
+/**
+ * Slug hợp lệ trên URL endpoint — whitelist TĨNH (cấu trúc 3 vai là cố định, chỉ GIÁ TRỊ id nằm
+ * ở cấu hình): slug lạ bị từ chối 400 mà KHÔNG cần đụng DB, còn slug đúng mới resolve ra shop id.
+ */
+export const SHOP_SLUGS = ["kho", "shopee", "tiktok"] as const;
+export type ShopSlug = (typeof SHOP_SLUGS)[number];
+
+export function laShopSlug(s: string): s is ShopSlug {
+  return (SHOP_SLUGS as readonly string[]).includes(s);
+}
+
+/**
+ * Slug → shop id Pancake từ cấu hình `Setting`. THROW khi chưa cấu hình — người gọi ở đường
+ * webhook phải đổi thành 503 (tạm bận, Pancake/n8n còn gửi lại + nhánh ghi file của n8n vẫn giữ
+ * payload), TUYỆT ĐỐI không nuốt thành 200 rỗng.
+ */
+export async function shopIdTheoSlug(slug: ShopSlug): Promise<string> {
+  // boQuaCache: shopId này được GHI vào hộp thư + Bronze — bản cache 60s ngay sau khi đổi id
+  // sẽ sinh dòng mồ côi mang id cũ (xem ghi chú ở layCauHinhShop).
+  const ch = await layCauHinhShop({ boQuaCache: true });
+  return ch[slug];
+}
 
 /** Trần payload 5MB — sự kiện thật ~10–30KB; chặn body khổng lồ trước khi đụng Postgres. */
 export const MAX_WEBHOOK_PAYLOAD = 5_000_000;

@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { CostImportModal } from "@/components/products/cost-import-modal";
 import { ProductGroupTable } from "@/components/products/product-group-table";
 import { ProductKpiCards } from "@/components/products/product-kpi-cards";
@@ -38,7 +40,20 @@ export default async function SanPhamPage({
             {kpi.totalProducts.toLocaleString("vi-VN")} sản phẩm · {kpi.totalVariants.toLocaleString("vi-VN")} SKU
           </p>
         </div>
-        <CostImportModal />
+        <div className="flex flex-wrap items-center gap-2">
+          {/*
+            Đường vào CỐ ĐỊNH cho màn đồng bộ giá vốn. Không dựa vào dải cảnh báo: dải đó im khi
+            "đang khớp" (đúng ý) NHƯNG cũng im ở mức `chua-kiem` — nếu đó là link duy nhất thì màn
+            duyệt bị cô lập, chỉ vào được bằng gõ tay URL.
+          */}
+          <Link
+            href="/san-pham/dong-bo-gia-von"
+            className="rounded-lg border border-hairline px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-surface-soft hover:text-ink"
+          >
+            Đồng bộ giá vốn từ Pancake
+          </Link>
+          <CostImportModal />
+        </div>
       </div>
 
       <p className="text-sm text-muted-foreground">

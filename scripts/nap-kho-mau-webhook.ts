@@ -85,7 +85,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { luuSuKienWebhook, SHOP_ID_THEO_SLUG } = await import("@/lib/ingest/webhook-inbox");
+  const { luuSuKienWebhook, laShopSlug, shopIdTheoSlug } = await import("@/lib/ingest/webhook-inbox");
   const { prisma } = await import("@/lib/prisma");
 
   let them = 0;
@@ -93,11 +93,11 @@ async function main(): Promise<void> {
   const shopLa = new Set<string>();
   try {
     for (const [i, s] of suKien.entries()) {
-      const shopId = SHOP_ID_THEO_SLUG[s.shopSlug];
-      if (!shopId) {
+      if (!laShopSlug(s.shopSlug)) {
         shopLa.add(s.shopSlug);
         continue;
       }
+      const shopId = await shopIdTheoSlug(s.shopSlug);
       const luu = await luuSuKienWebhook({
         shopId,
         payload: s.payload,

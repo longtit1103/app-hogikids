@@ -26,7 +26,7 @@
  *
  * ⚠️ CỜ CÓ HẠN (TTL) — LƯỚI CUỐI, không phải hạn hiệu năng. Đường trả cờ duy nhất là `finally`
  * của `POST /api/restore`; nếu một lệnh pg treo mà không ai bắn timeout thì `finally` không bao
- * giờ tới và cả app kẹt ở chế độ chỉ-đọc TRONG IM LẶNG: 9 workflow n8n nhận 503, sao lưu đêm 503,
+ * giờ tới và cả app kẹt ở chế độ chỉ-đọc TRONG IM LẶNG: 10 workflow n8n nhận 503, sao lưu đêm 503,
  * mọi nút ghi tay lỗi, khoản chi định kỳ lặng lẽ không sinh — chỉ khởi động lại container mới gỡ.
  * Nên cờ lưu kèm mốc bật và tự hết hiệu lực sau `TTL_KHOA_PHUC_HOI_MS`.
  *

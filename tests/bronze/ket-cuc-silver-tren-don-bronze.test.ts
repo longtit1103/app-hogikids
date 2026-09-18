@@ -37,7 +37,7 @@ import {
   KET_CUC,
   KetCucDaXoaTay,
 } from "@/lib/bronze/ket-cuc-silver";
-import { SHOP_KHO, SHOP_SHOPEE } from "@/lib/bronze/streams";
+import { SHOP_KHO, SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";

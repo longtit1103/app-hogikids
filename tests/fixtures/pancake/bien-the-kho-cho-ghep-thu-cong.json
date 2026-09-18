@@ -1,0 +1,16 @@
+[
+  {
+    "sku": "SP-MAU-01",
+    "label": "Phân loại A / Cỡ 1",
+    "productName": "Sản phẩm mẫu A",
+    "productPancakeId": "00000000-0000-4000-8000-00000000000a",
+    "variantPancakeId": "00000000-0000-4000-8000-000000000001"
+  },
+  {
+    "sku": "SP-MAU-02",
+    "label": "Phân loại B / Cỡ 2",
+    "productName": "Sản phẩm mẫu B",
+    "productPancakeId": "00000000-0000-4000-8000-00000000000b",
+    "variantPancakeId": "00000000-0000-4000-8000-000000000002"
+  }
+]

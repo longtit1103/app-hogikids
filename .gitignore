@@ -63,3 +63,49 @@ tests/fixtures/pancake/_raw/probe/
 # File tài chính Shopee/import tải tay (chứa số TK ngân hàng, tên chủ TK) — KHÔNG commit.
 # Chặn xlsx ở thư mục GỐC (fixtures test nằm trong tests/ nên không bị đụng).
 /*.xlsx
+
+# ── File tải tay từ sàn: chặn TOÀN CÂY, không chỉ thư mục gốc ─────────────────
+# Vì sao cần thêm dù đã có `/*.xlsx`: luật đó chỉ neo thư mục gốc. Thao tác tự nhiên khi
+# làm tính năng nhập file là chép một bản THẬT vào `tests/fixtures/` hoặc `plans/` để đo —
+# đúng hai chỗ mà `/*.xlsx` KHÔNG với tới. Đo 20/08: `git check-ignore` xác nhận cả hai
+# đường đó đều lọt.
+#
+# Nội dung của mấy file này: sheet Summary mang SỐ TÀI KHOẢN NGÂN HÀNG + tên chủ tài khoản;
+# sheet dữ liệu mang username người mua, phương thức thanh toán, và NGÂN HÀNG PHÁT HÀNH THẺ
+# của người mua. Lọt vào git là lọt vào mọi bản sao lưu và không gỡ khỏi lịch sử được.
+#
+# CỐ Ý chặn theo TÊN chứ không chặn `*.xlsx` toàn cây: fixture test hợp lệ vẫn phải commit
+# được. Fixture cho mấy nguồn này phải là bản ẩn danh mang tên khác.
+Income*.xlsx
+Income*.xls
+Income*.csv
+Income*.zip
+my_balance*.xlsx
+my_balance*.xls
+my_balance*.csv
+my_balance*.zip
+
+# ── Phòng lỡ tay commit file bí mật (repo có bản snapshot công khai) ───────────
+# Cố ý HẸP: KHÔNG chặn *.sql (là migration), cũng không chặn tên chứa
+# "secret/token/backup" (repo track file như token-expiry.ts, backup/*, ...).
+# Khoá / chứng chỉ riêng
+*.key
+*.p12
+*.pfx
+*.pgp
+*.asc
+*.ppk
+*.keystore
+*.jks
+id_rsa
+id_ed25519
+# direnv (thường chứa secret theo thư mục)
+.envrc
+# Dump / backup DB tải về (KHÔNG commit)
+*.dump
+*.sql.gz
+/backups/
+# Khoá service-account (GCP / GitHub Actions …)
+*service-account*.json
+*serviceaccount*.json
+gha-creds-*.json

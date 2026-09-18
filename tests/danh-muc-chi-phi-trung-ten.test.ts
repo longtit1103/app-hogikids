@@ -9,7 +9,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { createExpenseCategory } from "@/lib/actions/settings-expense-categories";
+import { createExpenseCategory, toggleExpenseCategoryHidden } from "@/lib/actions/settings-expense-categories";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -49,5 +49,35 @@ describe("createExpenseCategory — trùng tên", () => {
 
     const r = await createExpenseCategory("Thuê kho");
     expect(r).toMatchObject({ ok: false, error: "Lỗi khi thêm danh mục" });
+  });
+});
+
+/**
+ * Ẩn một danh mục mà chính app tự ghi vào là tự chặn đường ghi của mình mà không có gì báo:
+ * `validateCategory` (`src/lib/actions/expenses.ts`) từ chối `categoryId` đã ẩn, còn link drill
+ * `?danh_muc=...` của dòng P&L thì dẫn vào bộ lọc rỗng. UI đã disable công tắc, nhưng server là
+ * chỗ chặn thật (không tin client) — nên chặn phải đo ở đây.
+ */
+describe("toggleExpenseCategoryHidden — danh mục app tự ghi vào thì KHÔNG ẩn được", () => {
+  beforeEach(() => {
+    vi.mocked(prisma.expenseCategory.update).mockReset().mockResolvedValue({} as never);
+  });
+
+  it.each([
+    ["other", "Khác — chỗ hứng mọi khoản ghi tự động"],
+    ["interest", "Lãi vay — màn Khoản vay ghi vào khi duyệt kỳ trả nợ"],
+  ])("%s bị chặn, KHÔNG chạm DB (%s)", async (id) => {
+    const r = await toggleExpenseCategoryHidden(id, true);
+    expect(r).toEqual({ ok: false, error: "Danh mục nhận ghi tự động, không thể ẩn" });
+    expect(prisma.expenseCategory.update).not.toHaveBeenCalled();
+  });
+
+  it("danh mục thường vẫn ẩn được (chặn hẹp đúng 2 id, không khoá nhầm cả bảng)", async () => {
+    const r = await toggleExpenseCategoryHidden("fixed", true);
+    expect(r).toEqual({ ok: true, data: undefined });
+    expect(prisma.expenseCategory.update).toHaveBeenCalledWith({
+      where: { id: "fixed" },
+      data: { isHidden: true },
+    });
   });
 });

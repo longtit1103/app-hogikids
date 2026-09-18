@@ -6,7 +6,9 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * KHOÁ DÙNG CHUNG cho các "việc nặng" đụng cùng một tập dữ liệu: xoá dữ liệu giao dịch, dựng lại từ
- * kho thô (nút trong app), `scripts/rebuild-from-raw.ts`, và lượt phục hồi DB (`POST /api/restore`).
+ * kho thô (nút trong app), lượt phục hồi DB (`POST /api/restore`), và các script chạy NGOÀI tiến
+ * trình app: `scripts/rebuild-from-raw.ts`, `scripts/backfill-ket-cuc-legacy.ts`, đường ghi giá vốn
+ * `src/lib/gia-von/ghi-gia-von-theo-pancake.ts` (của `doi-chieu-gia-von-pancake.ts --ghi`).
  *
  * Lượt phục hồi đứng vào hàng việc nặng vì một lý do riêng: cổng drain của nó soi `SyncLog`
  * chỉ đoán sống/chết bằng TUỔI (RUNNING > 15' coi như chết), nên một lượt dựng lại chạy quá 15'

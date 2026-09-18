@@ -24,7 +24,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import { POST as ingestRaw } from "@/app/api/ingest/raw/route";
 import { POST as reconcile } from "@/app/api/ingest/reconcile-orders/route";
 import { QUA_HAN_PHUT } from "@/lib/bronze/doi-soat-don-con-do";
-import { SHOP_SHOPEE } from "@/lib/bronze/streams";
+import { SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";

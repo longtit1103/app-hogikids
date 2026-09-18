@@ -127,6 +127,8 @@ export type ExpenseRow = {
   amount: number;
   source: string;
   recurringId: string | null;
+  /** `LOAN:{loanId}:{yyyy-MM-dd}` = dòng lãi do duyệt kỳ trả nợ sinh ra (hộp xoá nói rõ). */
+  refId: string | null;
 };
 
 function buildOrderBy(sort: ExpenseListParams["sort"]): Prisma.ExpenseOrderByWithRelationInput {
@@ -197,6 +199,7 @@ export async function getExpensesPage(
     amount: e.amount,
     source: e.source,
     recurringId: e.recurringId,
+    refId: e.refId,
   }));
 
   return { rows, count, totalAmount: agg._sum.amount ?? 0 };

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   calcPnlCore,
+  type PnlIncomeInput,
   type PnlExpenseInput,
   type PnlOrderInput,
 } from "@/lib/reports/pnl";
@@ -274,6 +275,64 @@ describe("calcPnlCore — guard số cố định", () => {
     const validWithReturnedFee: PnlOrderInput = { ...baseOrder, returnedFee: 9_999 };
     const r = calcPnlCore([validWithReturnedFee], []);
     expect(r.returnedOrderFee).toBe(0);
+    expect(r.netProfit).toBe(167_500);
+  });
+});
+
+/**
+ * Lãi vay (danh mục `interest`) — chi phí TÀI CHÍNH thật, có dòng riêng ở bảng Lãi/Lỗ
+ * (quyết định chủ shop 07/09, Q6-B). Tiền GỐC vay/trả gốc KHÔNG ở đây (trục dòng tiền).
+ * Hai ca canh dưới đây là hai cách hỏng khác hẳn nhau: quên thêm `interest` vào `KNOWN`
+ * ⇒ nó rơi vào "Khác" (số tổng vẫn đúng, dòng riêng mất); quên trừ ở `netProfit`
+ * ⇒ danh mục biến mất khỏi lợi nhuận mà mọi test cũ vẫn xanh.
+ */
+describe("calcPnlCore — Lãi vay (danh mục interest) là chi phí thật, dòng riêng, KHÔNG phân bổ kênh", () => {
+  const laiVay: PnlExpenseInput = { categoryId: "interest", adsSource: null, channelId: null, amount: 5_000_000 };
+
+  it("toàn shop: interest = 5tr, netProfit giảm ĐÚNG 5tr, other KHÔNG đổi", () => {
+    const r = calcPnlCore([baseOrder], [laiVay]);
+    expect(r.interest).toBe(5_000_000);
+    expect(r.other).toBe(0); // KHÔNG rơi vào "Khác" — interest đã vào KNOWN
+    expect(r.netProfit).toBe(167_500 - 5_000_000);
+  });
+
+  it("lăng kính kênh: lãi vay là chi phí CHUNG như mặt bằng ⇒ interest = 0, netProfit không trừ", () => {
+    const r = calcPnlCore([baseOrder], [{ ...laiVay, channelId: "shopee" }], { channelId: "shopee" });
+    expect(r.interest).toBe(0);
+    expect(r.netProfit).toBe(167_500);
+  });
+});
+
+/**
+ * Thu nhập tài chính (bảng `ThuNhap` — v1 chỉ có lãi sổ tiết kiệm) là phép CỘNG DUY NHẤT vào
+ * `netProfit` ngoài doanh thu bán hàng. Hai cách hỏng khác hẳn nhau: quên cộng vào `netProfit`
+ * ⇒ tháng đáo hạn báo lỗ oan đúng bằng số lãi; quên ép 0 dưới lăng kính kênh ⇒ lãi tiết kiệm bị
+ * gán cho một kênh bán, bịa lãi cho kênh đó (cùng luật `fixed`/`interest`).
+ */
+describe("calcPnlCore — Thu nhập tài chính CỘNG vào lãi ròng, KHÔNG phân bổ kênh", () => {
+  const lai: PnlIncomeInput = { amount: 2_000_000 };
+
+  it("toàn shop: financialIncome = 2tr, netProfit tăng ĐÚNG 2tr", () => {
+    const r = calcPnlCore([baseOrder], [], { incomes: [lai] });
+    expect(r.financialIncome).toBe(2_000_000);
+    expect(r.netProfit).toBe(167_500 + 2_000_000);
+  });
+
+  it("không truyền incomes → financialIncome = 0, netProfit y hệt trước (caller cũ không đổi số)", () => {
+    const r = calcPnlCore([baseOrder], []);
+    expect(r.financialIncome).toBe(0);
+    expect(r.netProfit).toBe(167_500);
+  });
+
+  it("nhiều sổ tất toán cùng kỳ → cộng dồn, không lấy dòng đầu", () => {
+    const r = calcPnlCore([baseOrder], [], { incomes: [{ amount: 1_200_000 }, { amount: 800_000 }] });
+    expect(r.financialIncome).toBe(2_000_000);
+    expect(r.netProfit).toBe(167_500 + 2_000_000);
+  });
+
+  it("lăng kính kênh: lãi tiết kiệm không thuộc kênh bán nào ⇒ financialIncome = 0, netProfit không cộng", () => {
+    const r = calcPnlCore([baseOrder], [], { channelId: "shopee", incomes: [lai] });
+    expect(r.financialIncome).toBe(0);
     expect(r.netProfit).toBe(167_500);
   });
 });

@@ -29,5 +29,11 @@ export default defineConfig({
     // file's cleanup wipe another file's fixtures mid-run. Force file-level
     // sequencing so DB-touching suites never race each other.
     fileParallelism: false,
+    // 15s thay mặc định 5s: đa số suite là test TÍCH HỢP chạy trên DB test THẬT qua Tailscale —
+    // nhiều test land+transform vốn ăn 4–5s, mặc định 5s làm chúng đỏ/xanh theo biên độ mạng
+    // từng đêm (đo 21/08: 4 file lần lượt trượt trần ở các lượt chạy khác nhau, không lượt nào
+    // trùng lượt nào). Đây là ngân sách hạ tầng, không phải nới assertion; test TREO thật vẫn
+    // chết ở 15s.
+    testTimeout: 15_000,
   },
 });

@@ -8,8 +8,9 @@ import { feeBadgeLabel } from "@/components/kenh/channel-format";
 import { ChannelKpiCards } from "@/components/kenh/channel-kpi-cards";
 import { ChannelOrdersTab } from "@/components/kenh/channel-orders-tab";
 import { ChannelRevenueAdsChart } from "@/components/kenh/channel-revenue-ads-chart";
+import { SanPhamBanChayKenh } from "@/components/kenh/san-pham-ban-chay-kenh";
 import { Badge } from "@/components/ui/badge";
-import { clampRangeEndToNow, previousComparableRange, resolveRangeFromParams } from "@/lib/date-range";
+import { clampRangeEndToNow, previousComparableRange, resolveRangeFromParams, serializeDateRange } from "@/lib/date-range";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { slugToStatus } from "@/lib/orders/order-status-meta";
 import { docSoTrang } from "@/lib/pagination";
@@ -17,8 +18,11 @@ import { prisma } from "@/lib/prisma";
 import { getOrderListPage } from "@/lib/queries/orders";
 import { computeChannelRevenueAdsSeries } from "@/lib/reports/daily-series";
 import { calcPnl } from "@/lib/reports/pnl";
+import { computeProductReport } from "@/lib/reports/product-report";
 import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
+
+const TOP_SAN_PHAM_LIMIT = 10;
 
 type SearchParams = {
   tu?: string;
@@ -69,30 +73,32 @@ export default async function KenhChiTietPage({
   const page = docSoTrang(sp.trang);
   const statuses = slugToStatus(sp.trang_thai ?? "");
 
-  const [current, previous, series, orderPage, adsExpenseRecords, categories, activeChannels] = await Promise.all([
-    calcPnl(range, { channelId: id }),
-    calcPnl(previousComparableRange(range, now), { channelId: id }),
-    computeChannelRevenueAdsSeries(range, id),
-    getOrderListPage({
-      channels: [id],
-      from: range.from,
-      to: range.to,
-      page,
-      q: sp.q,
-      statuses: statuses.length ? statuses : undefined,
-    }),
-    prisma.expense.findMany({
-      where: {
-        categoryId: "ads",
-        channelId: id,
-        date: { gte: range.from, lte: endOfDay(range.to) },
-      },
-      orderBy: { date: "desc" },
-      include: { category: true, channel: true },
-    }),
-    prisma.expenseCategory.findMany({ where: { isHidden: false } }),
-    prisma.channel.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
-  ]);
+  const [current, previous, series, topSanPham, orderPage, adsExpenseRecords, categories, activeChannels] =
+    await Promise.all([
+      calcPnl(range, { channelId: id }),
+      calcPnl(previousComparableRange(range, now), { channelId: id }),
+      computeChannelRevenueAdsSeries(range, id),
+      computeProductReport(range, { channelId: id }),
+      getOrderListPage({
+        channels: [id],
+        from: range.from,
+        to: range.to,
+        page,
+        q: sp.q,
+        statuses: statuses.length ? statuses : undefined,
+      }),
+      prisma.expense.findMany({
+        where: {
+          categoryId: "ads",
+          channelId: id,
+          date: { gte: range.from, lte: endOfDay(range.to) },
+        },
+        orderBy: { date: "desc" },
+        include: { category: true, channel: true },
+      }),
+      prisma.expenseCategory.findMany({ where: { isHidden: false } }),
+      prisma.channel.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
+    ]);
 
   const adsExpenseRows: ExpenseRow[] = adsExpenseRecords.map((e) => ({
     id: e.id,
@@ -108,6 +114,7 @@ export default async function KenhChiTietPage({
     amount: e.amount,
     source: e.source,
     recurringId: e.recurringId,
+    refId: e.refId,
   }));
 
   const roas = current.ads > 0 ? current.revenue / current.ads : null;
@@ -132,7 +139,7 @@ export default async function KenhChiTietPage({
     <div className="flex flex-col gap-6">
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
         <Link href="/kenh" className="text-primary hover:underline">
-          Kênh &amp; Marketing
+          Kênh
         </Link>
         <span>/</span>
         <span className="text-ink">{channel.name}</span>
@@ -162,6 +169,12 @@ export default async function KenhChiTietPage({
       <ChannelKpiCards current={current} previous={previous} />
 
       <ChannelRevenueAdsChart points={series} channelColor={channel.color} />
+
+      <SanPhamBanChayKenh
+        rows={topSanPham.slice(0, TOP_SAN_PHAM_LIMIT)}
+        channelId={id}
+        ky={serializeDateRange(range)}
+      />
 
       <div className="rounded-xl border border-hairline bg-canvas p-4">
         <nav className="mb-4 flex gap-1 rounded-lg bg-surface-soft p-1" aria-label="Tab kênh">

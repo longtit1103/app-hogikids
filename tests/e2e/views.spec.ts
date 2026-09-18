@@ -205,6 +205,25 @@ test.describe("Đơn hàng", () => {
             },
           ],
         },
+        // Đơn có `system_id` KHÁC `id` — để test cột "Mã sàn" không mù: mã Pancake (998877)
+        // và mã sàn (id, = mã đơn Shopee) phải là HAI chuỗi khác nhau trên cùng một dòng.
+        {
+          id: "260800E2EMASAN1",
+          system_id: 998877,
+          status: 3,
+          inserted_at: "2026-07-01T11:00:00.000000",
+          order_sources_name: "Shopee",
+          marketplace_id: "-3",
+          total_price: 50000,
+          total_discount: 0,
+          fee_marketplace: 5000,
+          items: [
+            {
+              quantity: 1,
+              variation_info: { display_id: "E2E-DRAWER-SKU", name: "SP Drawer Test", retail_price: 50000 },
+            },
+          ],
+        },
       ],
     });
   });
@@ -216,6 +235,19 @@ test.describe("Đơn hàng", () => {
   test("banner hiển thị thời điểm đồng bộ sau khi ingest", async ({ page }) => {
     await page.goto("/don-hang");
     await expect(page.getByText(/Đồng bộ Pancake lúc/)).toBeVisible();
+  });
+
+  /**
+   * Cột "Mã sàn" + tìm theo mã sàn. Đi qua `?q=` trên URL (không gõ ô tìm) để né debounce.
+   * Neo dòng theo mã Pancake (998877) rồi khẳng định mã sàn ĐẦY ĐỦ xuất hiện cùng dòng —
+   * hai chuỗi khác hẳn nhau nên phép kiểm không thể xanh nhờ trùng cột (bài học e2e mù 22/08).
+   */
+  test('cột "Mã sàn" hiện mã đơn bên sàn, tìm được bằng mã sàn', async ({ page }) => {
+    await page.goto("/don-hang?q=260800E2EMASAN1");
+    await expect(page.getByRole("columnheader", { name: "Mã sàn" })).toBeVisible();
+    const row = page.locator("tbody tr").filter({ hasText: "998877" });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText("260800E2EMASAN1");
   });
 
   test('"?trang_thai=hoan_hang,huy_bom" chỉ hiện 2 trạng thái', async ({ page }) => {

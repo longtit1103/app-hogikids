@@ -30,9 +30,19 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { POST as backupPost } from "@/app/api/backup/route";
 import { importAdsExpenses } from "@/lib/actions/ads-import";
+import { createCashMovement, deleteCashMovement, updateCashMovement } from "@/lib/actions/cash-movements";
 import { updateVariantCost, updateVariantThreshold, updateProductCost, updateProductThreshold, importCostPrices } from "@/lib/actions/cost-price";
 import { deleteAllData, dungLaiTuKhoTho } from "@/lib/actions/data-admin";
+import { ghiChiPhiNhapHang } from "@/lib/actions/chi-phi-nhap-hang";
+import { apGiaVonTheoPancake } from "@/lib/actions/dong-bo-gia-von-pancake";
 import { createExpense, updateExpense, deleteExpense, stopRecurring } from "@/lib/actions/expenses";
+import {
+  ghiKyTraNo,
+  suaKhoanVay,
+  taoKhoanVay,
+  tatToanKhoanVay,
+  xoaKhoanVay,
+} from "@/lib/actions/khoan-vay";
 import { changePassword } from "@/lib/actions/security";
 import { recomputeFeesInRange, updateChannels } from "@/lib/actions/settings-channels";
 import {
@@ -41,10 +51,20 @@ import {
   renameExpenseCategory,
   toggleExpenseCategoryHidden,
 } from "@/lib/actions/settings-expense-categories";
+import { caiWorkflowsN8n, luuKetNoiN8n } from "@/lib/actions/n8n-ket-noi";
+import { doiVaLuuTokenMeta, luuKhoaKetNoi } from "@/lib/actions/settings-khoa-ket-noi";
 import { updateDefaultLowStockThreshold } from "@/lib/actions/settings-low-stock";
 import { updateShopInfo } from "@/lib/actions/settings-shop-info";
 import { importShopeeWallet } from "@/lib/actions/shopee-wallet-import";
+import {
+  suaSoTietKiem,
+  taoSoTietKiem,
+  xoaSoTietKiem,
+} from "@/lib/actions/so-tiet-kiem";
 import { triggerSyncNow } from "@/lib/actions/sync";
+import { khoiPhucBanGhi, xoaVinhVienBanGhi } from "@/lib/actions/thung-rac";
+import { moLaiSoTietKiem, tatToanSoTietKiem } from "@/lib/actions/tat-toan-so-tiet-kiem";
+import { tatToanThauChi } from "@/lib/actions/tat-toan-thau-chi";
 import { LOI_DANG_PHUC_HOI, thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
 import { donKhoaPhucHoi } from "./helpers/khoa-bao-tri-reset";
@@ -63,6 +83,32 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["expenses.updateExpense", () => updateExpense("id-gia", {})],
   ["expenses.deleteExpense", () => deleteExpense("id-gia", "only")],
   ["expenses.stopRecurring", () => stopRecurring("id-gia")],
+  // Khoản tiền khác ghi tay (tab Dòng tiền) — cùng số phận với Expense nhập tay nếu lùi mất giữa lượt phục hồi.
+  ["cash-movements.createCashMovement", () => createCashMovement({})],
+  ["cash-movements.updateCashMovement", () => updateCashMovement("id-gia", {})],
+  ["cash-movements.deleteCashMovement", () => deleteCashMovement("id-gia")],
+  // Khoản vay (tab Dòng tiền, spec 260907): hồ sơ + con dấu kỳ trả — lùi mất giữa lượt phục hồi là ghi trùng lãi/gốc.
+  ["khoan-vay.taoKhoanVay", () => taoKhoanVay({})],
+  ["khoan-vay.suaKhoanVay", () => suaKhoanVay("id-gia", {})],
+  ["khoan-vay.xoaKhoanVay", () => xoaKhoanVay("id-gia")],
+  ["khoan-vay.tatToanKhoanVay", () => tatToanKhoanVay("id-gia")],
+  ["khoan-vay.ghiKyTraNo", () => ghiKyTraNo({})],
+  // Tất toán thấu chi (spec 260908): ghi lãi + TRỌN gốc còn lại rồi đóng khoản — đúng loại lượt ghi
+  // mà một bản backup lùi mất sẽ để lại khoản đã đóng ở nơi này, còn dư nợ ở nơi kia.
+  ["tat-toan-thau-chi.tatToanThauChi", () => tatToanThauChi({})],
+  // Sổ tiết kiệm sinh lãi (spec 260910): GỐC đi `CashMovement` (`SAVINGS_*`), LÃI đi bảng `ThuNhap`
+  // — cả hai đường đều ghi tiền thật, và `tatToanSoTietKiem` còn đóng sổ nên một bản backup lùi mất
+  // sẽ để lại sổ đã đóng ở nơi này còn gốc chưa về quỹ ở nơi kia.
+  ["so-tiet-kiem.taoSoTietKiem", () => taoSoTietKiem({})],
+  ["so-tiet-kiem.suaSoTietKiem", () => suaSoTietKiem({})],
+  ["so-tiet-kiem.xoaSoTietKiem", () => xoaSoTietKiem({})],
+  ["tat-toan-so-tiet-kiem.tatToanSoTietKiem", () => tatToanSoTietKiem({})],
+  ["tat-toan-so-tiet-kiem.moLaiSoTietKiem", () => moLaiSoTietKiem({})],
+  // Thùng rác khôi phục (spec 260917): khôi phục DỰNG LẠI bản ghi tiền với đúng id cũ, xoá vĩnh
+  // viễn thì đốt luôn đường lấy lại — cả hai đều là lượt ghi mà một bản backup lùi mất sẽ để lại
+  // dòng tiền ở nơi này và dòng thùng rác nói ngược lại ở nơi kia.
+  ["thung-rac.khoiPhucBanGhi", () => khoiPhucBanGhi("id-gia")],
+  ["thung-rac.xoaVinhVienBanGhi", () => xoaVinhVienBanGhi("id-gia")],
   ["cost-price.updateVariantCost", () => updateVariantCost("id-gia", 1000)],
   ["cost-price.updateVariantThreshold", () => updateVariantThreshold("id-gia", 5)],
   ["cost-price.updateProductCost", () => updateProductCost("id-gia", 1000)],
@@ -77,6 +123,12 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["settings-expense-categories.toggleExpenseCategoryHidden", () => toggleExpenseCategoryHidden("id-gia", true)],
   ["settings-expense-categories.deleteExpenseCategory", () => deleteExpenseCategory("id-gia")],
   ["settings-low-stock.updateDefaultLowStockThreshold", () => updateDefaultLowStockThreshold(5)],
+  // Khóa kết nối ghi bảng `Setting` — đúng bảng mà lượt phục hồi nạp lại, lùi mất là hỏng lặng.
+  ["settings-khoa-ket-noi.luuKhoaKetNoi", () => luuKhoaKetNoi("pancake", { pancakeApiKeyKho: "khoa-gia" })],
+  ["settings-khoa-ket-noi.doiVaLuuTokenMeta", () => doiVaLuuTokenMeta("token-gia")],
+  // Khối Kết nối n8n: ghi Setting + ghi/kích hoạt workflow bên n8n — lùi giữa lượt phục hồi là hỏng lặng.
+  ["n8n-ket-noi.luuKetNoiN8n", () => luuKetNoiN8n({ n8nBaseUrl: "http://n8n-gia:5678" })],
+  ["n8n-ket-noi.caiWorkflowsN8n", () => caiWorkflowsN8n()],
   ["security.changePassword", () => changePassword(new FormData())],
   ["sync.triggerSyncNow", () => triggerSyncNow()],
   // 3 mục dưới đây do PHÉP QUÉT cuối file lôi ra 18/08: chúng gọi `dangPhucHoi()` từ lâu nhưng
@@ -85,6 +137,12 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   // Guard nằm ngay sau `requireUser()`, TRƯỚC mọi thao tác xoá — gọi trong lúc giữ khoá là an toàn.
   ["data-admin.deleteAllData", () => deleteAllData("ten-shop-sai")],
   ["data-admin.dungLaiTuKhoTho", () => dungLaiTuKhoTho()],
+  // Nút "Áp giá vốn Pancake" — đường ghi `costPrice` thứ hai, song song với CLI. Lùi mất giữa
+  // lượt phục hồi là hỏng lặng đúng kiểu nguy nhất: giá vốn sai thì COGS sai ở MỌI kỳ.
+  ["dong-bo-gia-von-pancake.apGiaVonTheoPancake", () => apGiaVonTheoPancake("theo-pancake", "0:0:0")],
+  // Duyệt chi phí nhập hàng từ phiếu Pancake (spec 260917): mỗi dòng là hàng chục triệu trừ thẳng
+  // vào quỹ. Lùi mất giữa lượt phục hồi là phiếu quay lại danh sách "chờ duyệt" và bị ghi lần hai.
+  ["chi-phi-nhap-hang.ghiChiPhiNhapHang", () => ghiChiPhiNhapHang({})],
 ];
 
 beforeAll(async () => {
@@ -164,6 +222,8 @@ const CHI_DOC: Record<string, string> = {
   "data-admin.demDonMoCoi": "đếm",
   "data-admin.demAdsMoCoi": "đếm",
   "settings-channels.countRecomputableOrders": "đếm số đơn cho dialog, không ghi",
+  "settings-khoa-ket-noi.kiemTraKetNoiNguon": "đọc kho khoá + gọi thử nguồn ngoài, không ghi",
+  "n8n-ket-noi.kiemTraKetNoiN8n": "đọc kho khoá + GET danh sách workflow bên n8n, không ghi",
   "shopee-wallet-import.previewShopeeWalletImport": "đọc file ví + checksum, không ghi",
   "sync.getLatestSync": "đọc mốc đồng bộ gần nhất",
 };

@@ -88,7 +88,7 @@ export function OrderFilters({ channels }: { channels: ChannelOption[] }) {
       <Input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Tìm mã đơn, tên khách…"
+        placeholder="Tìm mã đơn, mã sàn, tên khách…"
         className="w-full max-w-xs"
       />
 

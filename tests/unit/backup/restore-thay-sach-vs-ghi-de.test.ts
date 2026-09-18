@@ -108,7 +108,7 @@ describe("deploy/restore.sh — THAY SẠCH (chạy bằng supabase_admin)", () 
  * `pg_restore --no-owner --no-privileges` xoá cả owner lẫn ACL, nên nếu hậu kỳ chỉ đổi owner
  * bảng/sequence thì: (1) enum + function ở lại `supabase_admin` ⇒ `prisma migrate deploy` bằng role
  * app bị từ chối ở migration đụng enum/function đã tồn tại; (2) role chỉ-đọc của n8n mất quyền đọc
- * bảng `Setting` ⇒ cả 9 workflow chết ở node lấy khoá trong khi app vẫn đăng nhập bình thường.
+ * bảng `Setting` ⇒ cả 10 workflow chết ở node lấy khoá trong khi app vẫn đăng nhập bình thường.
  */
 describe("deploy/restore.sh — hậu kỳ trả owner + cấp lại quyền đọc", () => {
   const sql = sqlHauKy();
@@ -128,10 +128,13 @@ describe("deploy/restore.sh — hậu kỳ trả owner + cấp lại quyền đ�
     expect(sql).toContain("ALTER ROUTINE %I.%I(%s) OWNER TO hogikids");
   });
 
-  it("cấp lại ĐÚNG 2 quyền của role chỉ-đọc n8n (USAGE schema + SELECT bảng Setting)", () => {
+  it("cấp lại ĐÚNG 2 quyền của role chỉ-đọc n8n (USAGE schema + SELECT view SettingN8n)", () => {
     expect(sql).toContain("GRANT USAGE ON SCHEMA %I TO n8n_config_ro");
     expect(sql).toContain("GRANT SELECT ON %I.%I TO n8n_config_ro");
-    expect(sql).toContain("'Setting'");
+    expect(sql).toContain("'SettingN8n'");
+    // Chiều NGƯỢC: không được trôi về cấp SELECT trên BẢNG gốc (mỗi lượt phục hồi sẽ lặng lẽ
+    // mở lại quyền đọc n8nApiKey/n8nDbRoPassword cho n8n).
+    expect(sql).not.toContain("'$schema', 'Setting')");
     // Không được rộng hơn 1 bảng — role này cố ý chỉ đọc kho khoá.
     expect(sql).not.toMatch(/GRANT\s+ALL/i);
     expect(sql).not.toMatch(/ON ALL TABLES/i);

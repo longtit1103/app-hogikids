@@ -68,6 +68,21 @@ test.describe("Chi phí", () => {
     await expect(dialog.getByRole("button", { name: "Lưu" })).toBeDisabled();
   });
 
+  // Ô Ngày xoá trống: trước đây vẫn Lưu được, dòng chi phí rơi về 01/01/1970 mà toast vẫn xanh
+  // (cùng họ lỗi đã vá ở khoản tiền khác — tien-vao-khac.spec).
+  test("Xoá trống ô Ngày → nút Lưu bị khoá", async ({ page }) => {
+    await page.goto("/tai-chinh?tab=so-chi-phi");
+    await page.getByRole("button", { name: "+ Thêm chi phí" }).first().click();
+    const dialog = page.getByRole("dialog");
+
+    await pickSelectOption(page, "Chọn danh mục", "Đóng gói");
+    await dialog.getByPlaceholder("0").fill("350000");
+    await expect(dialog.getByRole("button", { name: "Lưu" })).toBeEnabled();
+
+    await dialog.locator('input[type="date"]').fill("");
+    await expect(dialog.getByRole("button", { name: "Lưu" })).toBeDisabled();
+  });
+
   test("Bật 'Lặp lại hàng tháng' → reload không sinh dòng trùng", async ({ page }) => {
     const desc = `E2E định kỳ ${Date.now()}`;
     await page.goto("/tai-chinh?tab=so-chi-phi");

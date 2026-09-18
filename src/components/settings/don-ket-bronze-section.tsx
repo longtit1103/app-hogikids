@@ -13,12 +13,6 @@ import type { DonCanXem } from "@/lib/bronze/ket-cuc-silver";
  * luôn phản ánh hiện tại và tự tắt khi hết — KHÔNG mượn một cờ toàn cục chỉ hạ được bằng nút bấm.
  */
 
-const TEN_SHOP: Record<string, string> = {
-  "714995134": "Kho Tổng",
-  "1942992175": "Shopee",
-  "100975192": "TikTok",
-};
-
 const NHAN_KET_CUC: Record<string, string> = {
   FAILED_SHAPE: "Payload không map được",
   FAILED_RETRY_LIMIT: "Hỏng lặp lại — đã dừng thử lại",
@@ -52,7 +46,10 @@ export function DonKetBronzeSection({
   oldestPendingAt,
   tongCanXem,
   canXem,
+  tenShop,
 }: {
+  /** Map shop id → tên hiển thị (từ cấu hình `Setting` — page dựng, rỗng khi chưa cấu hình). */
+  tenShop: Record<string, string>;
   /** Số đơn đã land kho thô mà CHƯA dựng xong Sổ (chưa đóng dấu, đã quá hạn). Lượt đêm sẽ nhặt. */
   pendingTotal: number;
   /** Mốc tải về của đơn chưa dựng CŨ NHẤT — để biết việc đã treo bao lâu. */
@@ -104,7 +101,7 @@ export function DonKetBronzeSection({
             >
               <span>
                 {d.silverProcessedAt ? `${lucVN(d.silverProcessedAt)} · ` : ""}
-                {TEN_SHOP[d.shopId] ?? d.shopId} · đơn {d.externalId} ·{" "}
+                {tenShop[d.shopId] ?? d.shopId} · đơn {d.externalId} ·{" "}
                 {NHAN_KET_CUC[d.silverOutcome] ?? d.silverOutcome} —{" "}
                 {d.silverNote ?? "(không có ghi chú)"}
               </span>

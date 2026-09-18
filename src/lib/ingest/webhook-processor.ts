@@ -3,7 +3,9 @@ import { demDaHachToan } from "@/lib/bronze/doi-soat-hach-toan";
 import { locDonChuaDongDau } from "@/lib/bronze/ket-cuc-silver";
 import { giuKhoaLandDon } from "@/lib/bronze/khoa-land-don";
 import { landRaw } from "@/lib/bronze/land-raw";
+import { BRONZE_STREAMS } from "@/lib/bronze/streams";
 import { transformFromRaw, type TransformStats } from "@/lib/bronze/transform-from-raw";
+import { shopIdsChoVai } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
 
 import type { Prisma } from "@prisma/client";
@@ -41,6 +43,7 @@ export type KetCucXuLy =
   | "ton-kho-cu-hon" // sự kiện tồn cũ hơn cái API/webhook đã xác nhận — cố ý không ghi
   | "ton-kho-bo-qua" // sự kiện tồn của shop BÁN — bộ mã biến thể riêng, cố ý bỏ
   | "ton-kho-chua-co-bien-the" // biến thể chưa có trong app — TỰ LÀNH ở lượt API kế tiếp, không báo đỏ
+  | "ton-kho-chua-cau-hinh" // chưa điền Warehouse ID — đã lộ ở khối Khóa kết nối, không tô đỏ từng sự kiện
   | "ton-kho-can-xem" // kho lạ / payload sai shape / giá trị vô lý — PHẢI hiện lên panel
   | "san-pham-bo-qua" // products webhook THIẾU giá vốn+tồn — land sẽ phá dữ liệu, cố ý bỏ
   | "bronze-only" // chế độ BRONZE_ONLY: không được đụng Silver, bỏ qua có ghi chú
@@ -139,6 +142,7 @@ async function xuLyTonKhoRealtime(shopId: string, payload: string): Promise<KetQ
     "cu-hon": "ton-kho-cu-hon",
     "bo-qua": "ton-kho-bo-qua",
     "chua-co-bien-the": "ton-kho-chua-co-bien-the",
+    "chua-cau-hinh": "ton-kho-chua-cau-hinh",
     "can-xem": "ton-kho-can-xem",
   } as const;
   return { processedAs: map[r.ket], note: catNote(r.note) };
@@ -331,6 +335,11 @@ async function xuLyDonHang(shopId: string, payload: string): Promise<KetQuaXuLy>
   const nhacRebuild = "CÓ backlog Bronze — chạy `npx tsx scripts/rebuild-from-raw.ts`";
 
   const envelope = `{"data":[${payload}]}`;
+  // Resolve whitelist shop TRƯỚC khi mở transaction giữ khoá tư vấn — landRaw tự tra `Setting`
+  // bên trong transaction là xin kết nối thứ hai trong lúc mọi đường land đang xếp hàng cùng
+  // khoá (xem ghi chú ở tham số `shopIdsHopLe` của landRaw). boQuaCache vì đường webhook GHI
+  // shopId vào Bronze — cache cũ 60s sau khi đổi id là dòng mồ côi (xem layCauHinhShop).
+  const shopIdsHopLe = await shopIdsChoVai(BRONZE_STREAMS.orders.shops ?? [], { boQuaCache: true });
   const { thuTu, landed, landedIds, seenIds } = await prisma.$transaction(
     async (tx) => {
       await giuKhoaLandDon(tx);
@@ -338,7 +347,7 @@ async function xuLyDonHang(shopId: string, payload: string): Promise<KetQuaXuLy>
       if (thuTuTx.cuHon) {
         return { thuTu: thuTuTx, landed: 0, landedIds: [] as string[], seenIds: [] as string[] };
       }
-      const r = await landRaw("orders", shopId, envelope, undefined, tx);
+      const r = await landRaw("orders", shopId, envelope, undefined, tx, shopIdsHopLe);
       return { thuTu: thuTuTx, landed: r.landed, landedIds: r.landedIds, seenIds: r.seenIds };
     },
     { timeout: TIMEOUT_LAND_MS }

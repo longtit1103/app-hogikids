@@ -18,6 +18,16 @@ import { PrismaClient } from "@prisma/client";
  *
  * TỰ NHẢ KHI MẤT KẾT NỐI — không có đường để lại khoá kẹt: tiến trình test bị `Ctrl-C`/`kill -9`
  * thì Postgres đóng session và nhả khoá luôn, lượt sau chạy được ngay.
+ *
+ * MẶT TRÁI của "tự nhả khi mất kết nối" — KHOÁ TUỘT KHI POOL THAY KẾT NỐI. Đo 2026-08-30 (soi `pg_locks`
+ * từ kết nối riêng, mỗi phút, 8 phút, xem `plans/reports/don-viec-treo-260830-*`): pool của Prisma
+ * (quaint/mobc) mặc định giới hạn TUỔI kết nối 300 giây và kiểm lúc CHECKOUT — kết nối để yên thì
+ * còn nguyên pid suốt 8 phút, nhưng câu lệnh ĐẦU TIÊN sau mốc 300s (kể cả `pg_advisory_unlock` cuối
+ * lượt) nhận kết nối MỚI ⇒ session cũ đóng ⇒ Postgres nhả khoá ⇒ unlock trả false. Tệ hơn: "ping
+ * giữ sống" mỗi 60s (bản vá đầu 30/08) làm khoá mất ĐÚNG phút 5 vì chính cú ping là checkout.
+ * Vá: kéo `max_connection_lifetime` + `max_idle_connection_lifetime` (tham số URL quaint đọc, Prisma
+ * không ghi trong docs — engine 6.19 có chuỗi này, đã đo có tác dụng) lên 24 giờ cho RIÊNG kết nối
+ * giữ khoá; nhịp 60s bên dưới chỉ còn là phép KIỂM "session này còn giữ khoá không".
  */
 
 /** Số khoá tuỳ chọn, phải DUY NHẤT trong toàn hệ (khác `khoa-ghi-chi-tieu-ads.ts`, `khoa-land-don.ts`). */
@@ -25,16 +35,36 @@ export const KHOA_VITEST = 260_818_001;
 /** e2e dùng database RIÊNG (`hogikids_e2e_test`) nhưng vẫn tự tranh với chính nó khi chạy 2 lượt. */
 export const KHOA_PLAYWRIGHT = 260_818_002;
 
-export type KhoaDaGiu = { nha: () => Promise<void> };
+/**
+ * Nhịp TỰ KIỂM: mỗi 60s hỏi `pg_locks` xem session này còn giữ khoá không — tuột lúc nào là kêu ngay
+ * lúc đó, không đợi cuối lượt. Nhịp này KHÔNG phải để "giữ sống": chỉ với tuổi kết nối mặc định 300s,
+ * chính nó là thứ làm mất khoá (đo 30/08) — nó vô hại chỉ vì `motKetNoi()` đã kéo tuổi lên 24 giờ.
+ */
+export const NHIP_TU_KIEM_MS = 60_000;
+
+export type KhoaDaGiu = {
+  nha: () => Promise<void>;
+  /**
+   * Session ĐANG nối có còn giữ khoá không — đọc thẳng `pg_locks` theo `pg_backend_pid()`, KHÔNG suy
+   * từ bộ nhớ app (app "nhớ" là đã giành được, nhưng khoá sống hay chết là chuyện của Postgres).
+   */
+  conGiu: () => Promise<boolean>;
+};
+
+/** Tuổi kết nối giữ khoá — dư cho mọi lượt test (full suite 6–7,5 phút), vẫn hữu hạn để không rò rỉ vĩnh viễn. */
+export const TUOI_KET_NOI_GIAY = 24 * 60 * 60;
 
 /**
- * Ép Prisma dùng ĐÚNG MỘT kết nối. Khoá `pg_advisory_lock` (không phải bản `_xact_`) gắn vào
- * SESSION, mà pool nhiều kết nối thì câu lệnh sau có thể rơi vào session khác và không thấy khoá —
- * tệ hơn là nhả nhầm. Một kết nối ⇒ một session ⇒ khoá sống đúng vòng đời lượt chạy.
+ * Ép Prisma dùng ĐÚNG MỘT kết nối, sống ĐỦ LÂU. Khoá `pg_advisory_lock` (không phải bản `_xact_`)
+ * gắn vào SESSION, mà pool nhiều kết nối thì câu lệnh sau có thể rơi vào session khác và không thấy
+ * khoá — tệ hơn là nhả nhầm. Một kết nối ⇒ một session ⇒ khoá sống đúng vòng đời lượt chạy — VỚI
+ * ĐIỀU KIỆN pool không tự thay kết nối giữa chừng (tuổi mặc định 300s, xem docblock đầu file).
  */
-function motKetNoi(url: string): string {
+export function motKetNoi(url: string): string {
   const u = new URL(url);
   u.searchParams.set("connection_limit", "1");
+  u.searchParams.set("max_connection_lifetime", String(TUOI_KET_NOI_GIAY));
+  u.searchParams.set("max_idle_connection_lifetime", String(TUOI_KET_NOI_GIAY));
   return u.toString();
 }
 
@@ -70,8 +100,50 @@ export async function giuKhoaDocQuyenDbTest(
     );
   }
 
+  // Khoá 64-bit của `pg_advisory_lock(bigint)` nằm trong `pg_locks` dưới dạng (classid = 32 bit cao,
+  // objid = 32 bit thấp, objsubid = 1) — tách ngay trong SQL từ chính số khoá, khỏi tự bit-shift ở JS.
+  // Lọc `pid = pg_backend_pid()`: chỉ khoá do CHÍNH session này giữ mới tính; khoá cùng số nhưng
+  // của session khác (kết nối cũ đã bị pool thay) là bằng chứng tuột, không phải bằng chứng còn.
+  const conGiu = async (): Promise<boolean> => {
+    const [{ conGiu }] = await db.$queryRaw<{ conGiu: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_locks
+        WHERE locktype = 'advisory' AND granted
+          AND classid = ((${khoa}::bigint >> 32) & 4294967295)::oid
+          AND objid = (${khoa}::bigint & 4294967295)::oid
+          AND objsubid = 1
+          AND pid = pg_backend_pid()
+      ) AS "conGiu"
+    `;
+    return conGiu;
+  };
+
+  // Nhịp tự kiểm: chạy trong tiến trình runner suốt lượt. `unref()` để nhịp KHÔNG tự giữ tiến trình
+  // sống — lượt test xong là thoát như cũ. Báo tuột đúng MỘT lần (đủ để người đọc log nghi giẫm dữ
+  // liệu), `nha()` cuối lượt vẫn kêu lần nữa qua `pg_advisory_unlock` trả false.
+  let daBaoTuot = false;
+  const baoTuot = (lyDo: string) => {
+    if (daBaoTuot) return;
+    daBaoTuot = true;
+    console.warn(
+      `[khoá test] Khoá ${ten} ĐÃ TUỘT giữa lượt chạy (${lyDo}) — phần còn lại của lượt này KHÔNG được ` +
+        `bảo vệ chống chạy chồng. Nếu thấy test đỏ lạ, nghi ngay giẫm dữ liệu.`,
+    );
+  };
+  const nhip = setInterval(() => {
+    conGiu().then(
+      (con) => {
+        if (!con) baoTuot("session hiện tại không còn giữ khoá trong pg_locks");
+      },
+      (e: unknown) => baoTuot(`ping kết nối lỗi: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`),
+    );
+  }, NHIP_TU_KIEM_MS);
+  nhip.unref();
+
   return {
+    conGiu,
     nha: async () => {
+      clearInterval(nhip);
       // `pg_advisory_unlock` trả false khi session KHÔNG giữ khoá — nghĩa là khoá đã tuột giữa chừng
       // (kết nối bị pool thu hồi chẳng hạn) và lượt chạy vừa rồi thực ra KHÔNG được bảo vệ. Phải kêu
       // to: một chốt an toàn chết âm thầm còn tệ hơn không có chốt, vì nó tạo cảm giác đã an toàn.

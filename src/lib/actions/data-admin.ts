@@ -29,6 +29,10 @@ import { requireUser } from "@/lib/session";
  * (TikTok/Shopee). Yêu cầu gõ ĐÚNG tên shop (so khớp case-sensitive) để xác
  * nhận; sai → KHÔNG xoá gì.
  *
+ * Xoá kèm: `CashMovement` (khoản tiền khác ghi tay) và `Loan` (hồ sơ khoản
+ * vay) — là giao dịch, xoá cùng `Expense`. Cũng như chi phí nhập tay, kho thô
+ * KHÔNG có bản gốc để dựng lại, nên dialog phải nói rõ số dòng sắp mất.
+ *
  * GIỮ LẠI — cố ý, đừng "dọn" thêm:
  *  - TOÀN BỘ kho thô (Bronze): bản gốc Pancake là đường dựng lại Silver duy
  *    nhất (`dungLaiTuKhoTho`). Xoá kho thô = mất vĩnh viễn, chỉ backup mới cứu.
@@ -90,6 +94,22 @@ export async function deleteAllData(shopNameConfirm: string): Promise<ActionResu
       await tx.order.deleteMany();
       await tx.expense.deleteMany();
       await tx.recurringExpense.deleteMany();
+      // THỨ TỰ CON-TRƯỚC-CHA, KHÔNG được đảo: `ThuNhap.savingsId` và `CashMovement.savingsId` đều FK
+      // `onDelete: Restrict`. Xoá `SoTietKiem` trước là Postgres từ chối ⇒ cả transaction vỡ và nút
+      // "Xoá dữ liệu giao dịch" hỏng VĨNH VIỄN. Bỏ quên `ThuNhap` còn tệ hơn vì hỏng LẶNG: lãi tiết
+      // kiệm sống sót và vẫn cộng vào dòng "Thu nhập tài chính" của P&L sau khi Sổ đã xoá sạch.
+      await tx.thuNhap.deleteMany(); // lãi tiết kiệm — con của SoTietKiem
+      await tx.cashMovement.deleteMany(); // khoản tiền khác ghi tay — con của Loan và SoTietKiem
+      // Hồ sơ sổ tiết kiệm — SAU ThuNhap + CashMovement. Cũng là sổ sách nhập tay: kho thô không có
+      // bản gốc nào để dựng lại.
+      await tx.soTietKiem.deleteMany();
+      // Hồ sơ khoản vay — SAU CashMovement (FK `onDelete: Restrict`, con trước cha). Cùng diện.
+      await tx.loan.deleteMany();
+      // THÙNG RÁC: ảnh chụp của đúng những bảng vừa xoá ở trên. Đây là lệnh "xoá sạch dữ liệu giao
+      // dịch" nên giữ lại thùng rác là để lại một đường khôi phục đúng thứ chủ shop vừa cố ý xoá.
+      // Không FK nào trỏ tới/đi ra từ bảng này ⇒ đặt đâu trong transaction cũng an toàn; đặt ở đây
+      // để đứng cạnh 5 bảng nó chụp.
+      await tx.banGhiDaXoa.deleteMany();
       // TRỪ kind BACKUP — xem khối "GIỮ LẠI" ở đầu file: đó là nguồn trạng thái sao lưu, không phải
       // log giao dịch. Xoá cả bảng thì màn Cài đặt kêu "Chưa sao lưu lần nào" ngay sau lượt xoá.
       await tx.syncLog.deleteMany({ where: { kind: { not: "BACKUP" } } });
@@ -131,6 +151,15 @@ export async function coDuLieuGiaoDich(): Promise<boolean> {
     prisma.order.count(),
     prisma.expense.count(),
     prisma.recurringExpense.count(),
+    prisma.cashMovement.count(),
+    prisma.loan.count(),
+    // Sổ tiết kiệm + lãi đã ghi: thiếu hai bảng này thì dialog báo "Không có dữ liệu để xóa" trong
+    // khi khối Sổ tiết kiệm ở tab Dòng tiền vẫn còn số.
+    prisma.soTietKiem.count(),
+    prisma.thuNhap.count(),
+    // Thùng rác cũng nằm trong danh sách xoá ở trên ⇒ phải đếm, nếu không dialog báo "Không có dữ
+    // liệu để xóa" rồi lượt xoá vẫn âm thầm dọn sạch thùng rác.
+    prisma.banGhiDaXoa.count(),
     prisma.tiktokSettlement.count(),
     prisma.tiktokAdsSettlement.count(),
     prisma.tiktokPayment.count(),
@@ -146,6 +175,16 @@ export type ChiPhiKhongDungLai = {
   tongChiPhi: number;
   /** Số mẫu chi phí định kỳ. KHÔNG cộng vào `tongChiPhi` vì đó là số tiền mỗi THÁNG. */
   soDinhKy: number;
+  /** Số dòng `CashMovement` (khoản tiền khác ghi tay: vay/góp/rút vốn, trả nợ, bán trực tiếp) — cùng diện "mất là mất". */
+  soKhoanTienKhac: number;
+  /** Σ `CashMovement.amount` (độ lớn, không phân chiều — chỉ để nói "sắp mất bao nhiêu dòng tiền đã ghi"). */
+  tongKhoanTienKhac: number;
+  /** Số hồ sơ `Loan` (lãi suất, kỳ hạn, dư nợ mở sổ) — nhập tay 100%, lượt dựng lại KHÔNG đụng tới. */
+  soKhoanVay: number;
+  /** Số hồ sơ `SoTietKiem` (kỳ hạn, lãi suất, ngày đáo hạn) — cùng diện `Loan`. */
+  soSoTietKiem: number;
+  /** Σ `ThuNhap.amount` — lãi tiết kiệm đã ghi, là số ĐÃ VÀO P&L nên mất là lệch lãi ròng kỳ cũ. */
+  tongThuNhap: number;
 };
 
 /**
@@ -157,23 +196,36 @@ export type ChiPhiKhongDungLai = {
  * nên dựng lại được đúng từng đồng ⇒ không thuộc diện cảnh báo này nữa; đếm nó vào đây sẽ thổi
  * phồng con số trên dialog và làm chủ shop sợ một khoản mất không có thật.
  *
+ * `CashMovement` (khoản tiền khác ghi tay) và `Loan` (hồ sơ khoản vay: lãi suất, kỳ hạn, dư nợ mở
+ * sổ, con dấu kỳ đã duyệt) nằm CÙNG diện: nhập tay 100%, kho thô không có bản gốc, lượt dựng lại
+ * KHÔNG đụng tới ⇒ xoá đi là mất hẳn, chỉ bản sao lưu mới cứu.
+ *
  * Đếm động để dialog nói được ĐỘ LỚN của khoản mất, thay vì một câu cảnh báo chung chung.
  */
 export async function demChiPhiKhongDungLai(): Promise<ChiPhiKhongDungLai> {
   await requireUser();
 
-  const [chiPhi, soDinhKy] = await Promise.all([
+  const [chiPhi, soDinhKy, khoanTienKhac, soKhoanVay, soSoTietKiem, thuNhap] = await Promise.all([
     prisma.expense.aggregate({
       where: { source: { not: "ADS_API" } },
       _count: { _all: true },
       _sum: { amount: true },
     }),
     prisma.recurringExpense.count(),
+    prisma.cashMovement.aggregate({ _count: { _all: true }, _sum: { amount: true } }),
+    prisma.loan.count(),
+    prisma.soTietKiem.count(),
+    prisma.thuNhap.aggregate({ _sum: { amount: true } }),
   ]);
   return {
     soChiPhi: chiPhi._count._all,
     tongChiPhi: chiPhi._sum.amount ?? 0,
     soDinhKy,
+    soKhoanTienKhac: khoanTienKhac._count._all,
+    tongKhoanTienKhac: khoanTienKhac._sum.amount ?? 0,
+    soKhoanVay,
+    soSoTietKiem,
+    tongThuNhap: thuNhap._sum.amount ?? 0,
   };
 }
 

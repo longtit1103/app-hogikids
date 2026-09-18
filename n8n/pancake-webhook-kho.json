@@ -1,0 +1,126 @@
+{
+  "name": "pancake-webhook-kho",
+  "nodes": [
+    {
+      "id": "c3303bd3-595b-49ac-93c7-51afcde14f99",
+      "name": "Pancake Webhook Kho",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pancake-pos",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "webhookId": "a9e86a00-a91d-4197-bb06-0ea86a558c0c"
+    },
+    {
+      "id": "1e6bc99b-ac87-40f5-b6e7-78843c2bf1a6",
+      "name": "Ghi file mau",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        540,
+        300
+      ],
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/webhook-samples/kho/{{ $now.toFormat(\"yyyyLLdd-HHmmss\") }}-{{ $execution.id }}.json",
+        "dataPropertyName": "data"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b1a10000-0000-4a10-9c01-784937600001",
+      "name": "Lấy khoá từ bảng Setting",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        540,
+        460
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select key, value from app.\"SettingN8n\"\nwhere key in ('n8nAppUrl', 'n8nIngestSecret')",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "id-credential-cua-instance-goc",
+          "name": "hogikids-config-ro (bảng Setting)"
+        }
+      }
+    },
+    {
+      "id": "c1a10000-0000-4a10-9c01-784937600001",
+      "name": "Bắn về app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        460
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ Object.fromEntries($('Lấy khoá từ bảng Setting').all().map(i => [i.json.key, i.json.value])).n8nAppUrl }}/api/ingest/webhook/kho",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ Object.fromEntries($('Lấy khoá từ bảng Setting').all().map(i => [i.json.key, i.json.value])).n8nIngestSecret }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Pancake Webhook Kho": {
+      "main": [
+        [
+          {
+            "node": "Ghi file mau",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Lấy khoá từ bảng Setting",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Bắn về app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "timezone": "Asia/Ho_Chi_Minh"
+  }
+}

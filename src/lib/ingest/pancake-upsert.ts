@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { dongDauKetCuc, dongDauKetCucBoiLuotTay, KET_CUC, KetCucDaXoaTay } from "@/lib/bronze/ket-cuc-silver";
 import { prisma } from "@/lib/prisma";
 
+import { ghepVariantThuCong } from "./ghep-variant-thu-cong";
 import { laLoiHeThong } from "./loi-he-thong";
 
 import { mapPancakeProduct, type MappedOrder } from "./pancake-mapping";
@@ -196,17 +197,46 @@ export async function upsertOneOrder(
 ): Promise<KetCucGhiDon> {
   try {
     const varIds = [...new Set(mo.items.map((i) => i.variationPancakeId).filter((x): x is string => !!x))];
+    /**
+     * Ghép biến thể THỦ CÔNG — nhánh CUỐI, chỉ xét dòng mà Pancake KHÔNG trả khoá nào
+     * (`variation_id` và `display_id` cùng vắng, ca `one_time_product`). Tính TRƯỚC lượt tra
+     * biến thể để nạp luôn `Variant.pancakeId` cần thiết trong CÙNG một truy vấn — không đẻ truy
+     * vấn thứ hai, và không đổi hành vi của dòng bình thường.
+     * `map` (KHÔNG `filter`) để chỉ số luôn khớp 1-1 với `mo.items`: lệch pha là dán biến thể
+     * sang NHẦM DÒNG của cùng đơn — đơn nhiều dòng mất khoá có thật trong dữ liệu prod.
+     * Phạm vi + căn cứ từng dòng: `ghep-variant-thu-cong.ts`.
+     */
+    const ghepTayTheoDong = mo.items.map((it) =>
+      it.variationPancakeId || it.sku
+        ? undefined
+        : ghepVariantThuCong({
+            pancakeId: mo.pancakeId,
+            productName: it.productName,
+            variantDetail: it.variantDetail,
+          })
+    );
     const skus = [...new Set(mo.items.map((i) => i.sku).filter((s) => s.length > 0))];
+    const varIdsCanTra = [
+      ...new Set([...varIds, ...ghepTayTheoDong.filter((g) => !!g).map((g) => g!.variantPancakeId)]),
+    ];
     const rows =
-      varIds.length || skus.length
+      varIdsCanTra.length || skus.length
         ? await prisma.variant.findMany({
             where: {
               OR: [
-                ...(varIds.length ? [{ pancakeId: { in: varIds } }] : []),
+                ...(varIdsCanTra.length ? [{ pancakeId: { in: varIdsCanTra } }] : []),
                 ...(skus.length ? [{ sku: { in: skus } }] : []),
               ],
             },
-            select: { id: true, pancakeId: true, sku: true, costPrice: true },
+            // `label` + `product.pancakeId` CHỈ để đối chứng bảng ghép tay — không dùng việc gì khác.
+            select: {
+              id: true,
+              pancakeId: true,
+              sku: true,
+              label: true,
+              costPrice: true,
+              product: { select: { pancakeId: true } },
+            },
             // LUẬT CHỌN khi một SKU có NHIỀU biến thể (dữ liệu thật CÓ ca này): ưu tiên bản ĐÃ CÓ
             // giá vốn, hoà thì lấy `id` nhỏ nhất. Không có ORDER BY thì Postgres trả theo thứ tự
             // tuỳ lúc ⇒ COGS của cùng một đơn có thể đổi giữa hai lượt dựng lại mà không ai đụng
@@ -216,6 +246,7 @@ export async function upsertOneOrder(
           })
         : [];
     const byPancakeId = new Map(rows.map((r) => [r.pancakeId, r.id]));
+    const dongVariantTheoPancakeId = new Map(rows.map((r) => [r.pancakeId, r]));
     const bySku = new Map<string, string>();
     for (const r of rows) {
       if (bySku.has(r.sku)) {
@@ -227,15 +258,54 @@ export async function upsertOneOrder(
       }
     }
 
-    const items = mo.items.map((it) => {
+    const items = mo.items.map((it, i) => {
+      const ghepTay = ghepTayTheoDong[i];
+      // ĐỐI CHỨNG NHÃN: UUID còn đó nhưng đã trỏ sang hàng khác thì TỪ CHỐI ghép. Ghép bừa ở đây
+      // là sửa COGS trong im lặng — thà để COGS 0 (đã có cảnh báo bên dưới) còn hơn sai số tiền.
+      const dongVariantTay = ghepTay ? dongVariantTheoPancakeId.get(ghepTay.variantPancakeId) : undefined;
+      // Đối chứng HAI phần: nhãn một mình không đủ (nhiều sản phẩm dùng chung nhãn phân loại),
+      // nên phải khớp thêm sản phẩm chứa biến thể — chép nhầm UUID sang SP khác cùng nhãn sẽ lệch.
+      const doiChungLech =
+        !!dongVariantTay &&
+        (dongVariantTay.label !== ghepTay!.nhanBienThe ||
+          dongVariantTay.product.pancakeId !== ghepTay!.sanPhamPancakeId);
       const variantId =
         (it.variationPancakeId ? byPancakeId.get(it.variationPancakeId) : undefined) ??
         (it.sku ? bySku.get(it.sku) : undefined) ??
+        // Nhánh CUỐI: chỉ chạm tới khi hai khoá Pancake đều trượt (ghepTay chỉ khác undefined khi đó).
+        (dongVariantTay && !doiChungLech ? dongVariantTay.id : undefined) ??
         null;
+      // Ghi sku kho vào chính dòng hàng: `OrderItem.sku` vốn để trống ở ca này (Pancake không trả
+      // display_id). Đây là DẤU VẾT BỀN duy nhất đọc được bằng SQL sau khi log đã trôi, đồng thời
+      // đưa dòng về đúng rổ "sửa được ở màn Sản phẩm" của P&L (pnl.ts phân rổ theo `sku`).
+      // Lấy sku HIỆN HÀNH của biến thể (`dongVariantTay.sku`), KHÔNG lấy `ghepTay.skuKho`: sku bị
+      // lượt ingest products ghi đè mỗi đêm, nên giá trị khai trong bảng có thể đã cũ. Ghi bản cũ
+      // là dấu vết trỏ sang chỗ không còn tồn tại — đúng loại lỗi im lặng mà cả khối này né.
+      // (Khoá CHỌN biến thể vẫn là `Variant.pancakeId`; `skuKho` chỉ còn để người đọc tra tay.)
+      const skuGhi = ghepTay && dongVariantTay && variantId === dongVariantTay.id ? dongVariantTay.sku : it.sku;
+      // Ghép tay LUÔN để lại dấu: khoản này sửa COGS nên không được im lặng sống mãi trong sổ.
+      // Định danh bằng `pancakeId` chứ KHÔNG phải `code` — mã đơn có ca trùng trong cùng kênh.
+      if (ghepTay && variantId) {
+        warnings.push(
+          `Đơn ${mo.pancakeId} (mã ${mo.code}): dòng "${it.productName}" (${it.variantDetail}) ghép biến thể THỦ CÔNG → ${ghepTay.nhanBienThe} [sku hiện hành ${skuGhi}]`
+        );
+      }
+      // Hai ca dưới là BẢNG HỎNG, không phải "Pancake thiếu dữ liệu" — tách ra để người đọc log
+      // biết phải đi sửa bảng chứ không đi tìm dữ liệu Pancake.
+      if (ghepTay && !dongVariantTay) {
+        warnings.push(
+          `Đơn ${mo.pancakeId} (mã ${mo.code}): bảng ghép thủ công trỏ biến thể ${ghepTay.variantPancakeId} nhưng không có biến thể nào mang pancakeId đó — kiểm lại ghep-variant-thu-cong.ts`
+        );
+      }
+      if (doiChungLech) {
+        warnings.push(
+          `Đơn ${mo.pancakeId} (mã ${mo.code}): TỪ CHỐI ghép thủ công — biến thể ${ghepTay!.variantPancakeId} nay mang nhãn "${dongVariantTay!.label}" thuộc sản phẩm ${dongVariantTay!.product.pancakeId}, khai trong bảng là "${ghepTay!.nhanBienThe}" / ${ghepTay!.sanPhamPancakeId}; kiểm lại ghep-variant-thu-cong.ts`
+        );
+      }
       if (!variantId) warnings.push(`Đơn ${mo.code}: item SKU "${it.sku}" không khớp variant`);
       return {
         variantId,
-        sku: it.sku,
+        sku: skuGhi,
         productName: it.productName,
         quantity: it.quantity,
         unitPrice: it.unitPrice,

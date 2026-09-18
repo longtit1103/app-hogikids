@@ -17,6 +17,7 @@ const KIND_LABEL: Record<SyncKind, string> = {
   META_ADS: "Meta Ads",
   TIKTOK_ADS: "TikTok Ads",
   TIKTOK_SHOP: "TikTok Shop (phí/đối soát)",
+  TIKTOK_SHOP_ANALYTICS: "TikTok Shop (chỉ số marketing)",
   BACKUP: "Sao lưu",
 };
 

@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { landRaw } from "@/lib/bronze/land-raw";
-import { SHOP_SHOPEE } from "@/lib/bronze/streams";
+import { SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
 import { prisma } from "@/lib/prisma";
 

@@ -14,6 +14,8 @@ export interface MonthlyTrendRow {
   revenue: number;
   netRevenue: number;
   netProfit: number;
+  /** Thu nhập tài chính của tháng — để cột Biên ròng nói được "số này có gồm khoản nào". */
+  financialIncome: number;
   marginPct: number | null;
   orderCount: number;
   returnBomRatePct: number;
@@ -34,6 +36,7 @@ export async function computeMonthlyTrend(months: 6 | 12): Promise<MonthlyTrendR
         revenue: b.revenue,
         netRevenue: b.netRevenue,
         netProfit: b.netProfit,
+      financialIncome: b.financialIncome,
         marginPct: pnlPercentBase(b) ? (b.netProfit / pnlPercentBase(b)) * 100 : null,
         orderCount: b.orderCount,
         returnBomRatePct: returnDenom ? (b.returnBomOrderCount / returnDenom) * 100 : 0,

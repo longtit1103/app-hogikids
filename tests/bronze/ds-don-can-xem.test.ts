@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { demCanXem, dsDonCanXem } from "@/lib/bronze/ket-cuc-silver";
-import { SHOP_SHOPEE } from "@/lib/bronze/streams";
+import { SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference } from "../helpers/test-db";

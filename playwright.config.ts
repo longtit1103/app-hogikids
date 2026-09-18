@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import { INGEST_SECRET_TEST, SESSION_SECRET_TEST } from "./tests/e2e/test-constants";
@@ -20,6 +21,9 @@ if (existsSync(envPath)) {
 // Guard đầy đủ (đuôi `_test`, khác DATABASE_URL) nằm trong `resolveE2eDatabaseUrl()`,
 // dùng CHUNG với global setup — trước đây chỗ này chỉ kiểm biến có tồn tại.
 const E2E_DATABASE_URL = resolveE2eDatabaseUrl();
+
+/** Thư mục backup cho dev server của e2e — xem ghi chú ở `webServer.env.BACKUP_DIR`. */
+const THU_MUC_BACKUP_E2E = mkdtempSync(path.join(tmpdir(), "hogikids-e2e-backups-"));
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -64,6 +68,10 @@ export default defineConfig({
       // E2E kiểm luồng đầy đủ (raw → Silver → UI). `.env` của máy dev có thể đang bật chế độ
       // chỉ-land → Silver rỗng → e2e đỏ nhầm. Ép tắt.
       BRONZE_ONLY: "",
+      // Nút "Áp giá vốn Pancake" chụp backup giá cũ TRƯỚC khi ghi và TỪ CHỐI ghi nếu chụp hỏng.
+      // Mặc định là `/backups` — đúng cho container prod (có mount), nhưng KHÔNG tồn tại trên máy
+      // dev nên e2e sẽ đỏ ở đúng cổng chặn đó. Trỏ sang thư mục tạm để kiểm được luồng thật.
+      BACKUP_DIR: THU_MUC_BACKUP_E2E,
     },
   },
 });

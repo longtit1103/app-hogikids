@@ -27,6 +27,8 @@ const EMPTY: PnlBreakdown = {
   packaging: 0,
   returnBom: 0,
   fixed: 0,
+  interest: 0,
+  financialIncome: 0,
   other: 0,
   netProfit: 0,
   orderCount: 0,
@@ -46,7 +48,12 @@ const THANG: PnlBreakdown = {
   ads: 5_000_000,
   adsBySource: { META: 3_000_000, TIKTOK_ADS: 2_000_000 },
   fixed: 2_000_000,
-  netProfit: 17_276_673,
+  interest: 1_500_000,
+  // File Excel đi RA NGOÀI app: fixture phải có thu nhập tài chính ≠ 0, nếu không sheet không
+  // chứng minh được dòng nhóm "Chi phí vận hành" và mạch cộng dọc trong file vẫn đúng.
+  financialIncome: 2_000_000,
+  // 24.276.673 + 2.000.000 − 8.500.000 (ads + fixed + interest) = 17.776.673
+  netProfit: 17_776_673,
 };
 const VOUCHER = { shopLineLevel: 14_223_568, marketplaceFunded: 3_835_735 };
 const PHI = [
@@ -72,6 +79,7 @@ describe("buildPnlSheetRows — sheet Excel bảng Lãi/Lỗ", () => {
       "Hoa hồng nền tảng",
       "Phí giao dịch",
       "Meta",
+      "Lãi vay",
       "Chi phí vận hành",
     ]) {
       expect(labels).toContain(phai);
@@ -106,7 +114,10 @@ describe("buildPnlSheetRows — sheet Excel bảng Lãi/Lỗ", () => {
     const tien = (label: string) => Number(rows.find((x) => nhan(x).trim() === label)!["Số tiền (VND)"]);
     expect(tien("Doanh thu") + tien("Phí sàn")).toBe(tien("Thực nhận từ sàn"));
     expect(tien("Thực nhận từ sàn") + tien("COGS")).toBe(tien("LN gộp"));
-    expect(tien("LN gộp") + tien("Chi phí vận hành")).toBe(tien("LN ròng"));
+    expect(tien("LN gộp") + tien("Thu nhập tài chính") + tien("Chi phí vận hành")).toBe(tien("LN ròng"));
+    // Non-vacuity: bỏ dòng thu nhập ra thì phép cộng phải SAI — người nhận file cộng thiếu 1 dòng
+    // là ra số khác, đúng cái sheet này phải chứng minh.
+    expect(tien("LN gộp") + tien("Chi phí vận hành")).not.toBe(tien("LN ròng"));
   });
 
   it("khoản trừ mang dấu âm, khoản thu mang dấu dương", () => {
@@ -151,9 +162,33 @@ describe("buildPnlSheetRows — sheet Excel bảng Lãi/Lỗ", () => {
     expect(String(r["Ghi chú"])).toMatch(/ước/);
   });
 
+  it("dòng 'Lãi vay' mang ghi chú nói rõ tiền GỐC không nằm ở đây", () => {
+    // Người nhận file không có tooltip: thiếu câu này là dễ tưởng dòng Lãi vay đã gồm cả tiền
+    // trả gốc, rồi trừ tiếp phần gốc ở sổ quỹ ⇒ tính lỗ oan đúng bằng khoản gốc.
+    const rows = sheetRows();
+    const r = rows.find((x) => nhan(x).trim() === "Lãi vay")!;
+    expect(Number(r["Số tiền (VND)"])).toBe(-1_500_000);
+    expect(String(r["Ghi chú"])).toContain("GỐC");
+  });
+
   it("dòng có hint (không có note) cũng giữ được lời giải thích", () => {
     const rows = sheetRows();
     const r = rows.find((x) => nhan(x).trim() === "Pancake chưa trả chi tiết")!;
     expect(String(r["Ghi chú"])).toMatch(/chưa báo từng loại/);
+  });
+
+  it("dòng 'Thu nhập tài chính' xuất ra file, mang dấu DƯƠNG và ghi chú giải thích", () => {
+    const rows = sheetRows();
+    const r = rows.find((x) => nhan(x).trim() === "Thu nhập tài chính")!;
+    expect(Number(r["Số tiền (VND)"])).toBe(2_000_000); // dương — là khoản thu, không phải chi
+    expect(String(r["Ghi chú"])).toContain("tất toán");
+  });
+
+  it("dòng 'LN ròng' nói rõ kỳ này có gồm thu nhập tài chính (file không có tooltip)", () => {
+    // Người nhận file không rê chuột được: thiếu câu này là đọc biên ròng như lãi từ bán hàng.
+    const rows = sheetRows();
+    const r = rows.find((x) => nhan(x).trim() === "LN ròng")!;
+    expect(String(r["Ghi chú"])).toContain("thu nhập tài chính");
+    expect(String(r["Ghi chú"])).toContain("2.000.000");
   });
 });

@@ -15,13 +15,18 @@ import { describe, expect, it } from "vitest";
  *
  * Ba quyết định thiết kế của lưới, đều rút từ ca hỏng thật:
  *
+ * 0. **Quét cả `tests/`, không chỉ mã chạy thật.** Raw SQL trong test cũng nằm trong template
+ *    literal, cũng vỡ y hệt. Mở phạm vi kéo theo việc file NÀY tự lọt lưới (nó buộc phải chứa các
+ *    chuỗi trông y như chú thích SQL có backtick) — giải bằng hằng `GACH_SQL` ngay dưới, KHÔNG bằng
+ *    danh sách miễn trừ.
+ *
  * 1. **Tự dò file, KHÔNG khai tay.** Bản đầu khai tay 3 file và thủng ngay 4 file
  *    lúc vừa viết — trong đó `land-raw.ts` (đường land Bronze) rủi ro cao hơn hẳn
  *    mấy file báo cáo đang được canh. Đây đúng lớp lỗi lưới `DUONG_GHI` khai tay
  *    từng giấu 3 lỗ phủ (18/08). Nay quét thư mục, thêm file mới là tự vào lưới.
  *
  * 2. **Bắt cả chú thích CUỐI DÒNG.** Bản đầu chỉ dò `^\s*--`, bỏ lọt kiểu viết đã
- *    có thật trong repo: `land-raw.ts` — `WHERE ... IS NOT NULL   -- ghi chú`.
+ *    có thật trong repo, trong land-raw.ts: WHERE ... IS NOT NULL   -- ghi chú.
  *
  * 3. **KHÔNG cắt khối template rồi tìm backtick trong thân.** Đã thử và thấy nó
  *    bắt hụt đúng ca cần bắt: backtick lạc làm khối bị cắt SỚM nên phần trích ra
@@ -33,11 +38,22 @@ import { describe, expect, it } from "vitest";
  * trước khi chạy bất kỳ file nào — nên vẫn cần DB test sống.
  */
 
+/**
+ * Dấu gạch mở đầu chú thích SQL, viết thành hằng thay vì gõ thẳng.
+ *
+ * Vì sao: lưới nay quét CẢ `tests/`, mà file này buộc phải chứa các chuỗi "trông y như chú thích SQL
+ * có backtick" — đó chính là fixture chứng minh lưới bắt đúng. Gõ thẳng thì lưới nêu chính nó, và
+ * cách chữa duy nhất còn lại là loại file này khỏi phép quét — tức mở một lỗ miễn trừ, thứ lâu dài
+ * sẽ có người khác nhét file của họ vào. Ghép qua hằng thì DÒNG MÃ không còn khớp mẫu, còn CHUỖI lúc
+ * chạy vẫn y nguyên ⇒ fixture giữ nguyên sức nặng, lưới không cần biết đến ngoại lệ nào.
+ */
+const GACH_SQL = "--";
+
 const GOC = resolve(fileURLToPath(import.meta.url), "../..");
-const THU_MUC_QUET = ["src", "scripts"];
+const THU_MUC_QUET = ["src", "scripts", "tests"];
 const BO_QUA = new Set(["node_modules", ".next", "dist", "coverage"]);
 
-/** Dấu hiệu một dòng là chú thích SQL: `-- …` đầu dòng, hoặc `… -- …` cuối dòng. */
+/** Dấu hiệu một dòng là chú thích SQL: dấu gạch đôi ở đầu dòng, hoặc ở cuối dòng sau khoảng trắng. */
 const CO_CHU_THICH_SQL = /^\s*--|\s--\s/m;
 
 /** Mọi file .ts có dùng raw SQL — tự dò, không khai tay. */
@@ -59,7 +75,7 @@ export function timFileCoSql(goc: string = GOC): string[] {
 /**
  * Dòng chú thích SQL có backtick.
  *
- * Nhận cả hai kiểu: `-- ...` đầu dòng, và `... -- ...` cuối dòng. Chỉ tính backtick
+ * Nhận cả hai kiểu: gạch đôi đầu dòng, và gạch đôi cuối dòng. Chỉ tính backtick
  * nằm SAU dấu `--` — backtick trước đó là phần của mã TS (vd mở template literal),
  * hoàn toàn hợp lệ.
  *
@@ -89,7 +105,18 @@ describe("chú thích SQL không được chứa backtick", () => {
   // thứ nó canh" mà chính file này sinh ra để chặn.
   it("tự dò ra được các file có chú thích SQL", () => {
     const coChuThich = file.filter((f) => CO_CHU_THICH_SQL.test(readFileSync(f, "utf8")));
-    expect(coChuThich.length).toBeGreaterThanOrEqual(7);
+    // Ngưỡng 8 có BIÊN ĐỘ 0 — repo đang có đúng 8 file. Nên khi đỏ, người sửa phải phân
+    // biệt được hai ca ngược nhau hoàn toàn, kẻo hạ ngưỡng đúng lúc lưới vừa thủng.
+    expect(
+      coChuThich.length,
+      `Đếm được ${coChuThich.length} file có chú thích SQL, ngưỡng là 8 (repo đang có ĐÚNG 8, biên độ 0).\n` +
+        `Hai ca hoàn toàn khác nhau — đọc kỹ trước khi sửa:\n` +
+        `• Vừa gộp/xoá file, hoặc dời một chú thích SQL lên docblock TS: đúng là còn ít hơn thật ⇒ ` +
+        `hạ ngưỡng xuống con số mới, KÈM lý do.\n` +
+        `• Không đụng gì tới chú thích SQL: LƯỚI VỪA THỦNG (phép dò file hỏng, đổi tên thư mục, ` +
+        `regex sai) ⇒ sửa lưới, TUYỆT ĐỐI đừng hạ ngưỡng.\n` +
+        `Danh sách đang thấy: ${JSON.stringify(coChuThich.map((f) => relative(GOC, f)), null, 2)}`
+    ).toBeGreaterThanOrEqual(8);
 
     const tuongDoi = coChuThich.map((f) => relative(GOC, f));
     // Hai file mốc rủi ro cao nhất: đường land Bronze và lõi đối soát tiền.
@@ -105,17 +132,18 @@ describe("chú thích SQL không được chứa backtick", () => {
       xau,
       `Backtick trong chú thích SQL — bỏ backtick đi, viết tên cột/hàm trần:\n` +
         `${JSON.stringify(xau, null, 2)}\n` +
-        `(Nếu dòng bị nêu là chú thích TS chứ không phải SQL — vd "npm test -- --run" — ` +
-        `thì đổi dấu gạch kép thành "—" để lưới khỏi nhận nhầm.)`
+        `(Nếu dòng bị nêu là chú thích TS chứ không phải SQL: BỎ BACKTICK khỏi dòng đó là xong. ` +
+        `ĐỪNG đổi dấu gạch kép thành "—" khi dòng chứa lệnh shell — vd "npm test ${GACH_SQL} ${GACH_SQL}run" — ` +
+        `đổi thế là hỏng lệnh, chép ra chạy không được.)`
     ).toEqual([]);
   });
 
   it("lưới TỰ ĐỨNG — bắt chú thích ĐẦU DÒNG", () => {
-    expect(timChuThichSqlCoBacktick("  -- lấy `cot` mới nhất")).toHaveLength(1);
+    expect(timChuThichSqlCoBacktick(`  ${GACH_SQL} lấy \`cot\` mới nhất`)).toHaveLength(1);
   });
 
   it("lưới TỰ ĐỨNG — bắt chú thích CUỐI DÒNG (kiểu land-raw.ts đang viết)", () => {
-    expect(timChuThichSqlCoBacktick("    WHERE x IS NOT NULL   -- cần `externalId`")).toHaveLength(1);
+    expect(timChuThichSqlCoBacktick(`    WHERE x IS NOT NULL   ${GACH_SQL} cần \`externalId\``)).toHaveLength(1);
   });
 
   it("không báo oan: chú thích TS, SQL sạch, và toán tử giảm của JS", () => {

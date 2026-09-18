@@ -37,8 +37,6 @@ import { mapPancakeOrder, type MapOrderCtx } from "@/lib/ingest/pancake-mapping"
 import { pancakeOrderSchema } from "@/lib/ingest/pancake-schemas";
 import { upsertOneOrder, type UpsertStats } from "@/lib/ingest/pancake-upsert";
 
-const SHOP_KHO = "714995134";
-const SHOP_SHOPEE = "1942992175";
 const KENH_SHOPEE = "shopee";
 
 /**
@@ -59,6 +57,10 @@ function maSanTuIdMirror(externalId: string): string | null {
 
 async function main(): Promise<void> {
   console.log(GHI ? "=== CHẾ ĐỘ GHI THẬT ===" : "=== CHẠY THỬ (không ghi) — thêm --ghi để ghi thật ===\n");
+
+  // Shop id từ cấu hình `Setting` — script đọc cùng nguồn với đường ingest, không giữ bản hằng riêng.
+  const { layCauHinhShop } = await import("@/lib/ket-noi/cau-hinh-shop");
+  const { kho: SHOP_KHO, shopee: SHOP_SHOPEE } = await layCauHinhShop();
 
   const channels = await prisma.channel.findMany({
     select: { id: true, platformFeePct: true, paymentFeePct: true },
