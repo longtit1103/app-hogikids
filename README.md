@@ -1,4 +1,4 @@
-# das-hogikids
+# app-hogikids
 
 Ứng dụng nội bộ **theo dõi sức khoẻ kinh doanh** cho một shop bán lẻ online: đồng bộ dữ liệu vận hành từ **Pancake POS** (+ TikTok Shop, Meta/TikTok Ads), bổ sung giá vốn và chi phí, rồi tính lãi/lỗ (P&L) theo kênh.
 

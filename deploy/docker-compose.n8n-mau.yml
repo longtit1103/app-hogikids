@@ -1,4 +1,4 @@
-# Compose MẪU dựng n8n cho bản clone das-hogikids — đủ những thứ mà 10 workflow của app cần.
+# Compose MẪU dựng n8n cho bản clone app-hogikids — đủ những thứ mà 10 workflow của app cần.
 # Dùng: sao chép về máy chạy n8n → `mkdir -p webhook-samples && sudo chown 1000:1000 webhook-samples`
 #       → `docker compose -f docker-compose.n8n-mau.yml up -d` → mở UI tạo tài khoản
 #       → Settings → n8n API → tạo API key → dán vào app tại /cai-dat › "Kết nối n8n".
