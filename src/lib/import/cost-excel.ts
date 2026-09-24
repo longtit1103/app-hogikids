@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 
-import { parseVnInt } from "./xlsx-shared";
+import { kiemTranSoDong, parseVnInt, TRAN_DOC_SHEET } from "./xlsx-shared";
 
 /** 1 dòng giá vốn đã chuẩn hoá để import. `lowStockThreshold=null` → giữ nguyên ngưỡng hiện tại. */
 export type CostImportRow = { sku: string; costPrice: number; lowStockThreshold: number | null };
@@ -19,9 +19,13 @@ const norm = (s: string) =>
 
 /** Đọc workbook (sheet đầu) → headers (dòng 1) + rows (object theo header). Dùng client (dynamic import) + test node. */
 export function parseCostWorkbook(buf: ArrayBuffer): { headers: string[]; rows: Record<string, string | number>[] } {
-  const wb = XLSX.read(buf, { type: "array" });
+  // Cùng trần với `readSheetRows` — file này KHÔNG đi qua đó (nó cần `sheet_to_json` hai dạng khác
+  // nhau) nên phải tự áp, kẻo đường nhập giá vốn thành đường duy nhất không có trần. Chạy phía
+  // trình duyệt nên bán kính thiệt hại nhỏ hơn, nhưng vẫn treo máy chủ shop.
+  const wb = XLSX.read(buf, { type: "array", sheetRows: TRAN_DOC_SHEET });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   if (!sheet) return { headers: [], rows: [] };
+  kiemTranSoDong(sheet);
   const aoa = XLSX.utils.sheet_to_json<(string | number)[]>(sheet, { header: 1, defval: "" });
   const headers = (aoa[0] ?? []).map((h) => String(h).trim()).filter((h) => h !== "");
   const rows = XLSX.utils.sheet_to_json<Record<string, string | number>>(sheet, { defval: "" });

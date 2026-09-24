@@ -43,7 +43,7 @@ export const CASH_MOVEMENT_KIND_META: Record<CashMovementKind, CashMovementKindM
   DIRECT_SALE: {
     label: "Bán trực tiếp",
     direction: "IN",
-    hint: "Thu tiền bán ngoài sàn. Chỉ ghi dòng tiền — muốn tính vào Lãi/Lỗ thì lên đơn ở Pancake POS.",
+    hint: "Thu tiền bán KHÔNG lên đơn Pancake. Đơn lên ở màn Bán hàng Pancake đã TỰ vào quỹ — ghi thêm ở đây là đếm tiền 2 lần.",
   },
   DEPOSIT_IN: {
     label: "Nhận lại tiền gửi",

@@ -122,6 +122,65 @@ describe("POST /api/ingest/ads", () => {
     expect(log!.status).toBe("ERROR");
   });
 
+  it("1 dòng ngày ngoài biên [2000-01-01, hôm nay VN] → BỎ đúng dòng đó + cảnh báo, dòng hợp lệ VẪN ghi (không đỏ cả lô)", async () => {
+    // n8n gửi chi tiêu theo chunk 500 dòng trộn nhiều ngày/chiến dịch, THỬ LẠI khi gặp 5xx rồi ném lại
+    // từ đầu — đỏ cả lô vì MỘT dòng ngày hỏng sẽ làm mất chi phí ads của CẢ lượt đêm đó (lãi ròng báo
+    // cao lên trong im lặng), trái luật "ghi số trước, kêu lỗi sau". Dòng hỏng bị bỏ + cảnh báo; các
+    // dòng còn lại của lô vẫn vào sổ. Nhưng nhật ký đồng bộ phải ERROR (HTTP vẫn 200): OK + cảnh báo
+    // thì không ai thấy — n8n chỉ đọc `rowsUpserted`, badge /cai-dat xanh, banner chỉ bật với ERROR.
+    const res = await adsPost(
+      makeReq("http://t/api/ingest/ads", {
+        source: "META",
+        rows: [
+          { date: "2026-07-11", campaignId: "HOPLE", spendExVat: 10000, vatRate: 0.1 },
+          { date: "1970-01-01", campaignId: "EPOCH", spendExVat: 20000, vatRate: 0.1 },
+        ],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      ok: boolean;
+      loiSauKhiGhi?: string;
+      stats: { rowsUpserted: number; rowsSkipped: number; warnings: string[] };
+    };
+    expect(json.ok).toBe(true);
+    expect(json.loiSauKhiGhi).toMatch(/Bỏ 1\/2 dòng/);
+    expect(json.stats.rowsUpserted).toBe(1);
+    expect(json.stats.rowsSkipped).toBe(1);
+    expect(json.stats.warnings.join(" ")).toMatch(/1970-01-01.*ngoài khoảng/);
+
+    const hople = await prisma.expense.findUnique({ where: { refId: "META:2026-07-11:HOPLE" } });
+    expect(hople).not.toBeNull();
+    expect(hople!.amount).toBe(11000); // 10000 × 1,1
+    expect(await prisma.expense.findUnique({ where: { refId: "META:1970-01-01:EPOCH" } })).toBeNull();
+
+    const log = await prisma.syncLog.findFirst({ where: { kind: "META_ADS" }, orderBy: { startedAt: "desc" } });
+    expect(log!.status).toBe("ERROR");
+    expect(log!.error).toMatch(/Bỏ 1\/2 dòng.*ĐÃ ghi/);
+    expect((log!.stats as { rowsSkipped: number }).rowsSkipped).toBe(1);
+  });
+
+  it("CẢ lô ngày hỏng → 200, 0 dòng ghi, nhật ký ERROR (không được ra OK với 0 dòng)", async () => {
+    const res = await adsPost(
+      makeReq("http://t/api/ingest/ads", {
+        source: "META",
+        rows: [
+          { date: "1970-01-01", campaignId: "EPOCH1", spendExVat: 20000, vatRate: 0.1 },
+          { date: "2026-02-30", campaignId: "KHONGCO", spendExVat: 30000, vatRate: 0.1 },
+        ],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { stats: { rowsUpserted: number; rowsSkipped: number } };
+    expect(json.stats.rowsUpserted).toBe(0);
+    expect(json.stats.rowsSkipped).toBe(2);
+    expect(await prisma.expense.count({ where: { refId: { in: ["META:1970-01-01:EPOCH1", "META:2026-02-30:KHONGCO"] } } })).toBe(0);
+
+    const log = await prisma.syncLog.findFirst({ where: { kind: "META_ADS" }, orderBy: { startedAt: "desc" } });
+    expect(log!.status).toBe("ERROR");
+    expect(log!.error).toMatch(/Bỏ 2\/2 dòng/);
+  });
+
   it("thiếu vatRate → 400 (không mặc định 0, tránh ghi thiếu VAT âm thầm)", async () => {
     const res = await adsPost(
       makeReq("http://t/api/ingest/ads", {

@@ -78,9 +78,11 @@ async function main(): Promise<void> {
   });
 
   // Đẩy thẳng vào KHO TOKEN của app — workflow n8n đọc từ đó, KHÔNG phải nạp lại workflow mỗi lần
-  // đổi token. Không có APP_URL/INGEST_SECRET thì bỏ qua (chỉ ghi .env), nhưng nói rõ là phải nạp tay.
+  // đổi token. Không có APP_URL/secret thì bỏ qua (chỉ ghi .env), nhưng nói rõ là phải nạp tay.
+  // Bearer là `TOKEN_VAULT_SECRET` từ 21/09/2026 (mục M-02 — kho token có khoá riêng); rơi về
+  // `INGEST_SECRET` chỉ để script cũ còn chạy trong lượt chuyển, gỡ cùng lúc với cầu ở app.
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL;
-  const ingestSecret = process.env.INGEST_SECRET;
+  const ingestSecret = process.env.TOKEN_VAULT_SECRET ?? process.env.INGEST_SECRET;
   let dayVaoApp = false;
   if (appUrl && ingestSecret) {
     try {

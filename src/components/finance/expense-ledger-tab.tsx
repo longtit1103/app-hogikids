@@ -60,8 +60,8 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
   // query sổ chi phí (range "Tùy chọn" có thể là tháng quá khứ/đa tháng).
   await ensureRecurringExpensesForMonths(monthStartsInRange(range));
 
-  const [categories, channels, mocPhieuNhap] = await Promise.all([
-    prisma.expenseCategory.findMany({ where: { isHidden: false } }),
+  const [categoriesAll, channels, mocPhieuNhap] = await Promise.all([
+    prisma.expenseCategory.findMany(),
     prisma.channel.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
     // Chỉ ĐỌC 3 ô `Setting` do lượt đêm chốt — KHÔNG đếm ở đây (phép đếm phải quét trọn Bronze).
     prisma.setting.findMany({
@@ -80,7 +80,12 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
     mocPhieuNhap.find((s) => s.key === KEY_MOC_KIEM_PHIEU_NHAP)?.value,
   );
 
-  const categoryIdSet = new Set(categories.map((c) => c.id));
+  // Dropdown "Thêm chi phí" + bảng chỉ nên thấy danh mục ĐANG HIỆN…
+  const categories = categoriesAll.filter((c) => !c.isHidden);
+  // …nhưng tập id HỢP LỆ nhận từ URL phải gồm CẢ danh mục đã ẩn: dòng "Khác" của bảng Lãi/Lỗ vẫn
+  // cộng chi phí thuộc danh mục ẩn, nên link drill của nó mang đúng id đó sang đây. Đối chiếu với
+  // tập chỉ-hiện là id bị loại THẦM, rồi bộ lọc bốc hơi (xem chú thích ở `categoryIds` dưới).
+  const categoryIdSet = new Set(categoriesAll.map((c) => c.id));
   const categoryIds = (sp.danh_muc ?? "")
     .split(",")
     .map((id) => id.trim())
@@ -103,7 +108,10 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
     sumPlatformFeeEst(range),
     getExpensesPage({
       range,
-      categoryIds: categoryIds.length ? categoryIds : undefined,
+      // CÓ `danh_muc` trên URL thì LUÔN truyền mảng — kể cả rỗng (id rác/danh mục vừa bị xoá) để
+      // sổ ra 0 dòng. Lùi về `undefined` khi rỗng là bỏ lọc: sổ liệt kê MỌI khoản chi trong kỳ
+      // trong khi thanh công cụ vẫn hiện badge "Danh mục · 1" — sai mà trông như đúng.
+      categoryIds: sp.danh_muc ? categoryIds : undefined,
       channelId,
       sources: sources.length ? sources : undefined,
       q: sp.q,

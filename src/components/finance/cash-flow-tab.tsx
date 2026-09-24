@@ -5,13 +5,16 @@ import type { DoiSoatTienVe } from "@/lib/reports/doi-soat-tien-ve";
 import type { DoiSoatShopee } from "@/lib/reports/doi-soat-tien-ve-shopee";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
+import type { DoiChieuSoDuChot } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
 import { cn } from "@/lib/utils";
 
 import { CashMovementSection } from "./cash-movement-section";
+import { demKhoanVayCoKyCho } from "./dem-khoan-vay-co-ky-cho";
 import { DoiSoatSection } from "./doi-soat-section";
 import { KhoanVaySection } from "./khoan-vay-section";
 import { ShopeeImportButton } from "./shopee-import-button";
+import { SoDuChotThangCard } from "./so-du-chot-thang-card";
 import { SoQuyCard, type TietKiemQuy } from "./so-quy-card";
 import { SoTietKiemSection } from "./so-tiet-kiem-section";
 
@@ -90,6 +93,7 @@ export function CashFlowTab({
   doiSoatShopee,
   movements,
   soQuy,
+  doiChieu,
   loans,
   tietKiem,
   soTietKiem,
@@ -104,6 +108,8 @@ export function CashFlowTab({
   movements: CashMovementRow[];
   /** 4 số sổ quỹ + quỹ tới hôm nay + cảnh báo dữ liệu (`tinhSoQuyThang`). */
   soQuy: SoQuyThangDayDu;
+  /** Bản chốt số dư THẬT tháng đang xem đối chiếu với cuối kỳ sổ — hàng rào bắt sai cộng dồn. */
+  doiChieu: DoiChieuSoDuChot;
   loans: KhoanVayRow[];
   /** Tiền đang gửi ở sổ tiết kiệm sinh lãi — chỉ truyền tiếp cho thẻ Quỹ. */
   tietKiem: TietKiemQuy | null;
@@ -130,7 +136,7 @@ export function CashFlowTab({
 
   // Số KHOẢN VAY có kỳ tới hạn chưa ghi (mỗi khoản tối đa 1 kỳ chờ) — thẻ Quỹ nhắc một dòng, khối
   // Khoản vay mới là chỗ duyệt. Cùng phép đếm với banner shell (`demKhoanVayCoKyChoDuyet`).
-  const soKhoanVayCoKyCho = loans.filter((l) => l.kyCho !== null && l.closedAt === null).length;
+  const soKhoanVayCoKyCho = demKhoanVayCoKyCho(loans);
 
   return (
     <div className="flex flex-col gap-4">
@@ -141,6 +147,8 @@ export function CashFlowTab({
         loans={loans}
         tietKiem={tietKiem}
       />
+
+      <SoDuChotThangCard doiChieu={doiChieu} isCurrentMonth={isCurrentMonth} />
 
       <KhoanVaySection loans={loans} />
 

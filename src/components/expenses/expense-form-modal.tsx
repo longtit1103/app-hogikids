@@ -15,6 +15,8 @@ import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { formatVnd } from "@/lib/format";
 
 const NONE = "__none__"; // sentinel: Select không nhận value="" cho "Không gắn kênh"
+// Danh mục Lãi vay — server (`src/lib/actions/expenses.ts`) chặn MỌI dòng danh mục này mang kênh.
+const DANH_MUC_LAI_VAY = "interest";
 const QUERY_DATE_FORMAT = "yyyy-MM-dd";
 
 const ADS_SOURCE_OPTIONS: { value: string; label: string }[] = [
@@ -220,6 +222,15 @@ export function ExpenseFormModal({
     }
   }
 
+  // Dòng lãi vay theo kỳ (`refId` `LOAN:…`): server khoá ngày + danh mục, mở số tiền. Khoá luôn 2 ô
+  // ở đây để chủ shop thấy trước khi bấm Lưu, thay vì nhận câu lỗi đỏ sau khi đã gõ.
+  const khoaTheoKyVay = isEdit && Boolean(expense?.refId?.startsWith("LOAN:"));
+  // Lãi vay KHÔNG phân bổ kênh (bất biến #1): server chặn MỌI dòng danh mục này mang kênh, cả tạo
+  // mới lẫn sửa — dòng theo kỳ ở trên đã khoá danh mục = Lãi vay nên cờ này bao trùm luôn nó. Chỉ
+  // KHOÁ ô chứ không xoá state `channelId`: chủ shop lỡ chọn Lãi vay rồi đổi lại danh mục khác thì
+  // kênh vừa chọn vẫn còn. Lúc gửi thì ép null — dòng lỡ mang kênh từ trước tự gỡ ở lượt Lưu này.
+  const khoaKenhLaiVay = categoryId === DANH_MUC_LAI_VAY;
+
   async function handleSubmit() {
     // Ô Ngày trống ⇒ Invalid Date ⇒ server nhận null. Nút Lưu đã khoá (canSave) nên bình thường không tới
     // đây; nếu ai đó nới canSave sau này thì vẫn chặn và NÓI RÕ thay vì im lặng.
@@ -234,7 +245,7 @@ export function ExpenseFormModal({
       categoryId,
       adsSource: categoryId === "ads" ? adsSource : undefined,
       amount,
-      channelId,
+      channelId: khoaKenhLaiVay ? null : channelId,
       description,
       ...(isEdit ? {} : { recurringMonthly }),
     };
@@ -266,9 +277,6 @@ export function ExpenseFormModal({
     Boolean(date) && Boolean(categoryId) && amount > 0 && (categoryId !== "ads" || Boolean(adsSource)) && !saving;
   const showRecurringToggle = !isEdit && categoryId !== "ads";
   const showStopRecurring = isEdit && Boolean(expense?.recurringId);
-  // Dòng lãi vay theo kỳ (`refId` `LOAN:…`): server khoá ngày + danh mục, mở số tiền. Khoá luôn 2 ô
-  // ở đây để chủ shop thấy trước khi bấm Lưu, thay vì nhận câu lỗi đỏ sau khi đã gõ.
-  const khoaTheoKyVay = isEdit && Boolean(expense?.refId?.startsWith("LOAN:"));
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -284,7 +292,10 @@ export function ExpenseFormModal({
               value={date}
               max={todayStr}
               disabled={khoaTheoKyVay}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => {
+                setDate(e.target.value);
+                setFieldErrors((prev) => ({ ...prev, date: "" }));
+              }}
             />
             <p className="text-xs text-muted-foreground">
               {khoaTheoKyVay
@@ -329,6 +340,15 @@ export function ExpenseFormModal({
             </Field>
           )}
 
+          {categoryId === "ads" && (
+            // Ads trả bằng thẻ tín dụng đã vào sổ theo từng ngày chạy (tự về mỗi đêm / import) — ghi thêm
+            // khoản THANH TOÁN SAO KÊ thẻ ở đây là chi phí quảng cáo bị tính HAI LẦN (lãi hụt, quỹ tụt đôi).
+            <p className="text-xs text-warning" data-testid="expense-canh-bao-the-tin-dung">
+              KHÔNG ghi khoản thanh toán sao kê thẻ tín dụng ở đây — chi phí quảng cáo đã được ghi theo từng
+              ngày chạy; ghi thêm là tính hai lần.
+            </p>
+          )}
+
           {categoryId === "shipping" && (
             <p className="text-xs text-muted-foreground">
               Nhập tổng phí ship shop chịu theo kỳ — app không theo dõi ship per đơn
@@ -351,7 +371,11 @@ export function ExpenseFormModal({
           </Field>
 
           <Field label="Kênh" error={fieldErrors.channelId}>
-            <Select value={channelId ?? NONE} onValueChange={handleChannelChange} disabled={preset?.lockChannel}>
+            <Select
+              value={khoaKenhLaiVay ? NONE : (channelId ?? NONE)}
+              onValueChange={handleChannelChange}
+              disabled={preset?.lockChannel || khoaKenhLaiVay}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Chọn kênh" />
               </SelectTrigger>
@@ -364,6 +388,11 @@ export function ExpenseFormModal({
                 ))}
               </SelectContent>
             </Select>
+            {khoaKenhLaiVay && (
+              <p className="text-xs text-muted-foreground">
+                Lãi vay không phân bổ theo kênh bán — luôn để trống kênh.
+              </p>
+            )}
           </Field>
 
           <Field label="Ghi chú" error={fieldErrors.description}>

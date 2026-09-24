@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
+import { laChuyenHuong } from "@/lib/n8n/kiem-dich-den-n8n";
 import { N8N_RO_ROLE } from "@/lib/n8n/role-doc-kho-khoa";
 import { prisma } from "@/lib/prisma";
 
@@ -204,8 +205,17 @@ async function probeEndToEnd(client: N8nClient, syncNowSecret: string): Promise<
     const res = await fetch(`${client.base}/webhook/${SYNC_NOW_WEBHOOK_PATH}`, {
       method: "POST",
       headers: { [SYNC_NOW_AUTH_HEADER]: syncNowSecret },
+      // Request này mang SECRET ở header ⇒ tuyệt đối không đi theo chuyển hướng: chặng sau redirect
+      // là đích mà phép kiểm địa chỉ lúc gọi không với tới được.
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     });
+    if (laChuyenHuong(res.status)) {
+      return {
+        ok: false,
+        thongDiep: `n8n URL trả chuyển hướng (HTTP ${res.status}) — đã DỪNG, không đi theo. Kiểm tra lại địa chỉ n8n.`,
+      };
+    }
     if (!res.ok) return { ok: false, thongDiep: `Kích webhook Đồng bộ ngay bị từ chối (HTTP ${res.status}).` };
   } catch {
     return { ok: false, thongDiep: "Không kích được webhook Đồng bộ ngay — kiểm tra n8n URL / workflow active." };

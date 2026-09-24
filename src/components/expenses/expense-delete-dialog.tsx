@@ -102,6 +102,17 @@ export function ExpenseDeleteDialog({ open, onOpenChange, expense }: ExpenseDele
               />
               Xóa và dừng lặp lại
             </label>
+            {mode === "only" && (
+              // `ensureRecurringExpenses` sinh lại dòng cho tháng đang render nếu mẫu còn `active`
+              // (xem chú thích đầu `ensure-recurring-expenses.ts`) — "Chỉ xóa khoản này" không tắt mẫu
+              // nên dòng tự quay lại ở lần mở trang sau. `ExpenseRow` (props dialog này) KHÔNG mang
+              // theo `RecurringExpense.active` nên không lọc riêng theo mẫu còn bật hay đã dừng — hiện
+              // cảnh báo mọi lần chọn "only" trên khoản định kỳ (không thêm prop/query mới chỉ cho ca này).
+              <p className="text-sm text-warning" data-testid="expense-xoa-canh-bao-dinh-ky-quay-lai">
+                Khoản định kỳ còn bật sẽ tự sinh lại dòng này ở lần mở trang sau. Muốn bỏ hẳn: chọn
+                &quot;Xóa và dừng lặp lại&quot;. Chỉ muốn đổi số tiền tháng này: bấm Sửa thay vì xoá.
+              </p>
+            )}
           </div>
         )}
 

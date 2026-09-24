@@ -43,6 +43,17 @@ const tocGuard = (schema: string, fx: string): number =>
 const sqlGuard = (schema: string, fx: string): number =>
   runGuard('assert_sql_only_schema "$2" "$3"', [schema, fixture(fx)]);
 
+/** Như `sqlGuard` nhưng với SQL nội tuyến — cho các ca ngắn không đáng đẻ thêm file fixture. */
+function sqlInline(sql: string, schema = "app"): number {
+  const p = path.join(os.tmpdir(), `hogikids-inline-${process.pid}-${Math.random().toString(36).slice(2)}.sql`);
+  writeFileSync(p, sql);
+  try {
+    return runGuard('assert_sql_only_schema "$2" "$3"', [schema, p]);
+  } finally {
+    rmSync(p, { force: true });
+  }
+}
+
 describe("restore.sh assert_toc_only_schema (shell TOC guard)", () => {
   it("chấp nhận TOC chỉ có object schema app", () => {
     expect(tocGuard("app", "toc-app-only.txt")).toBe(0);
@@ -154,5 +165,54 @@ describe("restore.sh assert_sql_only_schema (shell plain-SQL guard)", () => {
   // restore ⇒ không phải vector. Giữ đối xứng với twin TS.
   it("(f) KHÔNG false-positive: set_config nằm trong thân function ($$…$$)", () => {
     expect(sqlGuard("app", "sql-set-config-than-ham.sql")).toBe(0);
+  });
+
+  // --- (i) `COPY … FROM/TO PROGRAM`: chạy lệnh hệ điều hành dưới quyền server. Ở ĐƯỜNG NÀY nó
+  // nặng hơn hẳn bản app — `restore.sh` nạp bằng `-U supabase_admin` (SUPERUSER THẬT), mà
+  // `COPY … PROGRAM` đòi đúng quyền đó. Check (g) không bắt được: dạng SQL thuần không có `\`.
+  // 🔴 Bash GIỮ trap RETURN sau khi hàm đặt nó trả về ⇒ nó bắn THÊM một lần nữa lúc hàm KHÁC trả
+  // về, khi `norm`/`normf` đã ra khỏi tầm; `set -u` biến đó thành `unbound variable` và script kết
+  // thúc bằng LỖI ngay sau dòng "✓ Phục hồi xong". Đo thật trong DR diễn tập 23/09.
+  // Test cũ không chạm tới vì nó chỉ gọi guard rồi thoát — phải có một hàm trả về SAU đó mới lộ.
+  it("trap dọn file tạm tự gỡ — hàm trả về SAU guard không nổ `unbound variable`", () => {
+    const out = execFileSync(
+      "bash",
+      [
+        "-c",
+        'source "$1"; assert_sql_only_schema "$2" "$3"; sau(){ :; }; sau; echo XONG',
+        "bash",
+        RESTORE_SH,
+        "app",
+        fixture("sql-app-only.sql"),
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    expect(out).toContain("XONG");
+  });
+
+  it("(i) từ chối COPY … FROM PROGRAM", () => {
+    expect(sqlGuard("app", "sql-copy-from-program.sql")).not.toBe(0);
+  });
+  it("(i) từ chối COPY … TO PROGRAM (chiều rò dữ liệu ra)", () => {
+    expect(sqlGuard("app", "sql-copy-to-program.sql")).not.toBe(0);
+  });
+  it("(i) CHẤP NHẬN dump có chữ 'program' ở tên cột, dữ liệu COPY và literal", () => {
+    expect(sqlGuard("app", "sql-copy-stdin-chua-chu-program.sql")).toBe(0);
+  });
+
+  // --- (j) câu lệnh ĐẶC QUYỀN.
+  it("(j) từ chối ALTER ROLE", () => {
+    expect(sqlGuard("app", "sql-cau-lenh-dac-quyen.sql")).not.toBe(0);
+  });
+  it("(j) từ chối SECURITY DEFINER", () => {
+    expect(sqlGuard("app", "sql-security-definer.sql")).not.toBe(0);
+  });
+  it.each([
+    ["CREATE EXTENSION", "CREATE EXTENSION pg_stat_statements;\n"],
+    ["CREATE ROLE", "CREATE ROLE ke_tan_cong LOGIN SUPERUSER;\n"],
+    ["ALTER SYSTEM", "ALTER SYSTEM SET archive_command = 'sh -c id';\n"],
+    ["CREATE LANGUAGE", "CREATE TRUSTED PROCEDURAL LANGUAGE plperlu;\n"],
+  ])("(j) từ chối %s", (_ten, sql) => {
+    expect(sqlInline(sql)).not.toBe(0);
   });
 });

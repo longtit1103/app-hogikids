@@ -2,6 +2,7 @@ import { format } from "date-fns";
 
 import { chanRouteKhiDangPhucHoi, dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { runPgDump } from "@/lib/backup/run-pg-dump";
+import { chanRequestKhacOrigin } from "@/lib/chan-request-khac-origin";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUserId } from "@/lib/session";
 
@@ -22,11 +23,17 @@ import { getAuthenticatedUserId } from "@/lib/session";
  * `{error}` — KHÔNG bao giờ trả file rỗng âm thầm (bản backup hỏng nguy hiểm), và
  * KHÔNG được để lượt lỗi này biến mất khỏi nguồn trạng thái duy nhất.
  */
-export async function POST(): Promise<Response> {
+export async function POST(request: Request): Promise<Response> {
   const userId = await getAuthenticatedUserId();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Lớp thứ hai sau cookie `sameSite=lax`: cửa sổ "Lax-allowing-unsafe" 2 phút của Chrome vẫn gửi
+  // cookie kèm POST top-level cross-site ⇒ trang lạ ép được máy chủ chạy pg_dump. Xem lý do đầy
+  // đủ ở `chanRequestKhacOrigin`.
+  const khacOrigin = chanRequestKhacOrigin(request);
+  if (khacOrigin) return khacOrigin;
 
   // Lý do KHÔNG phải dòng SyncLog bên dưới, mà là chính FILE trả về: bấm nút lúc
   // `pg_restore --clean` đã drop được một nửa object thì `pg_dump` vẫn CHẠY XONG trên phần schema

@@ -18,21 +18,21 @@ import { requireUser } from "@/lib/session";
 const channelConfigSchema = z
   .array(
     z.object({
-      id: z.enum(["shopee", "tiktok", "facebook", "website"]),
+      id: z.enum(["shopee", "tiktok", "facebook", "website", "direct"]),
       isActive: z.boolean(),
       platformFeePct: z.number().min(0).max(100),
       paymentFeePct: z.number().min(0).max(100),
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Màu không hợp lệ"),
     }),
   )
-  .length(4)
+  .length(5)
   .refine((a) => a.some((c) => c.isActive), "Phải có ít nhất 1 kênh hoạt động");
 
 /** Làm tròn % về 2 chữ số thập phân (nhập tay có thể ra 3.333…). */
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
- * Lưu cấu hình 4 kênh (bật/tắt, phí sàn %, phí thanh toán %, màu). TUYỆT ĐỐI
+ * Lưu cấu hình 5 kênh (bật/tắt, phí sàn %, phí thanh toán %, màu). TUYỆT ĐỐI
  * KHÔNG đụng vào đơn đã có — % chỉ là tham số dự phòng cho đơn Facebook/Website;
  * đơn Shopee/TikTok luôn giữ phí THẬT từ Pancake. Muốn áp % mới cho đơn cũ
  * (chỉ FB/Website) phải bấm "Tính lại phí kỳ này" (recomputeFeesInRange).

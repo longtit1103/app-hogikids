@@ -1,6 +1,7 @@
 import { format } from "date-fns";
 
 import { formatVnd } from "@/lib/format";
+import { nhanCuoiKySoQuy } from "@/lib/so-quy/cong-thuc-so-quy";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
 
@@ -125,10 +126,8 @@ export function SoQuyCard({
   // đáo hạn cụ thể — nói cả hai để chủ shop biết bao giờ tiền quay lại và về bao nhiêu.
   const dongTietKiem = dongTietKiemDangGui(tietKiem);
   const { soChiPhi, sanTruVi } = soQuy.adsTiktok;
-  // Tháng hiện tại: số TO là quỹ tới HÔM NAY, còn ô "Cuối kỳ" là quỹ tới CUỐI THÁNG. Hai số lệch
-  // nhau khi có khoản ghi ngày sau hôm nay (chi phí định kỳ, kỳ trả nợ duyệt trước) — không nói ra
-  // thì chủ shop cộng bốn ô lại thấy khác số to và tưởng app tính sai.
-  const cuoiKyDuKien = isCurrentMonth && soQuy.cuoiKy !== soQuy.quyHomNay;
+  // Tháng hiện tại "Cuối kỳ" có thể là số DỰ KIẾN hết tháng — luật dùng chung với tab Sổ quỹ.
+  const cuoiKy = nhanCuoiKySoQuy(soQuy, isCurrentMonth);
 
   return (
     <div className="rounded-xl border border-hairline p-4">
@@ -144,9 +143,9 @@ export function SoQuyCard({
         <ONho nhan="Thu" tien={soQuy.thu} />
         <ONho nhan="Chi" tien={soQuy.chi} dau="−" />
         <ONho
-          nhan={cuoiKyDuKien ? "Cuối kỳ (dự kiến hết tháng)" : "Cuối kỳ"}
+          nhan={cuoiKy.nhan}
           tien={soQuy.cuoiKy}
-          ghiChu={cuoiKyDuKien ? "đã tính khoản ghi ngày sau hôm nay" : undefined}
+          ghiChu={cuoiKy.ghiChu}
         />
       </div>
 

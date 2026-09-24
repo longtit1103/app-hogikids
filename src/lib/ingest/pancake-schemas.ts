@@ -133,6 +133,18 @@ export const pancakeOrderSchema = z
      * `nullish` vì không phải shape nào cũng có; vắng thì phép kiểm tự bỏ qua đơn đó.
      */
     cod: money.nullish(),
+    /**
+     * Đơn bán TẠI SHOP (màn "Bán hàng" Pancake) — một trong 3 dấu nhận kênh `direct`. `.catch`: shape
+     * lạ chỉ làm đơn không được nhận là bán trực tiếp (về `website` + cảnh báo), KHÔNG reject cả đơn.
+     */
+    received_at_shop: z.boolean().nullish().catch(undefined),
+    // Các khoản khách ĐÃ TRẢ — chỉ đọc cho kênh `direct` → `Order.paidAtShop` (Sổ quỹ). `.catch(0)`:
+    // shape lạ ⇒ tổng hụt ⇒ cảnh báo "đã trả ≠ phải trả" ở mapping, KHÔNG reject đơn (mất doanh thu).
+    transfer_money: money.catch(0),
+    cash: money.catch(0),
+    charged_by_card: money.catch(0),
+    charged_by_momo: money.catch(0),
+    charged_by_qrpay: money.catch(0),
     advanced_platform_fee: pancakeAdvancedPlatformFeeSchema.nullish(),
     customer: z.object({ name: z.string().nullish() }).passthrough().nullish(),
     items: z.array(pancakeOrderItemSchema).default([]),

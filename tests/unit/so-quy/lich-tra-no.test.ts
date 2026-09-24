@@ -243,7 +243,7 @@ describe("lich-tra-no — thấu chi (lãi theo ngày)", () => {
 });
 
 /**
- * BULLET (trả gốc cuối kỳ) — ca THẬT chủ shop (plan `260910-1015-vay-goc-cuoi-ky-tien-gui-bat-buoc`):
+ * BULLET (trả gốc cuối kỳ) — ca THẬT chủ shop (khoản vay có tiền gửi tiết kiệm bắt buộc):
  * 200tr giải ngân 12/05/2026, 36 kỳ, kỳ đầu 10/06/2026, lãi CỐ ĐỊNH 1.121.096đ MỌI kỳ (không phụ
  * thuộc số ngày/dư nợ), tiền gửi tiết kiệm bắt buộc 300.000đ MỌI kỳ. Số LITERAL tính tay theo giấy
  * báo ngân hàng — KHÔNG suy lại bằng chính hàm `deXuatKy` đang kiểm.

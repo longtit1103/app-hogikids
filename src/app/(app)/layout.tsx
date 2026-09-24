@@ -18,6 +18,7 @@ import { countMissingCostVariants, hasLowStockVariants } from "@/lib/queries/var
 import { getRecentDataErrorKinds } from "@/lib/queries/sync-health";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { docCanhBaoSapCan } from "@/lib/so-quy/du-bao-quy-queries";
 import { demKhoanVayCoKyChoDuyet } from "@/lib/so-quy/khoan-vay-queries";
 
 /**
@@ -37,6 +38,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     mocGiaVon,
     soKhoanVayCoKyCho,
     mocPhieuNhap,
+    canhBaoSapCanQuy,
   ] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { shopName: true } }),
     countMissingCostVariants(),
@@ -69,6 +71,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       },
       select: { key: true, value: true },
     }),
+    // Dự báo quỹ sắp cạn: layout đọc ở MỌI trang nên `docCanhBaoSapCan` tự bắt lỗi bên trong và trả
+    // null khi hỏng (xem doc-comment của hàm) — layout không cần bọc thêm, chỉ cần biết nó KHÔNG BAO
+    // GIỜ reject để không kéo sập `Promise.all` chung với các nguồn khác.
+    docCanhBaoSapCan(),
   ]);
 
   const lechGiaVon = trangThaiLechGiaVon(
@@ -93,6 +99,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         lechGiaVon={lechGiaVon}
         soKhoanVayCoKyCho={soKhoanVayCoKyCho}
         phieuNhapChuaGhi={phieuNhapChuaGhi}
+        canhBaoSapCanQuy={canhBaoSapCanQuy}
       >
         {children}
       </ShellChrome>

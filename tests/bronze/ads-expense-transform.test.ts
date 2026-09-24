@@ -150,6 +150,30 @@ describe("dựng lại chi tiêu Meta từ kho thô", () => {
     expect(await prisma.expense.count()).toBe(0);
   });
 
+  it("kho thô mang 1 dòng ngày ngoài biên → bỏ ĐÚNG dòng đó + cảnh báo, dòng hợp lệ vẫn dựng lại", async () => {
+    // Cùng biên với `/api/ingest/ads` (`prepareAdsExpenseRow`), nhưng lượt dựng lại là đường phục
+    // hồi: ném cả lượt là mất luôn phần đã dựng, nên chỉ bỏ dòng hỏng. Ghi thẳng bảng thô để lách
+    // cửa sổ ngày của `landRaw` — mô phỏng dòng đã nằm sẵn trong kho từ trước khi có cổng.
+    await landRaw("meta/report", ACT, insights(dongMeta("23851", "2026-05-20", "120000")));
+    await prisma.rawMetaAdsReport.create({
+      data: {
+        shopId: ACT,
+        externalId: "99999:1970-01-01",
+        payloadHash: "h-epoch",
+        payload: JSON.parse(dongMeta("99999", "1970-01-01", "50000")),
+      },
+    });
+
+    const w: string[] = [];
+    const stats = await dungLai("meta/report", w);
+
+    expect(stats.adsExpensesUpserted).toBe(1);
+    expect(stats.skipped).toBe(1);
+    expect(w.join(" ")).toMatch(/1970-01-01.*99999.*ngoài khoảng/);
+    expect(await prisma.expense.count()).toBe(1);
+    expect(await prisma.expense.count({ where: { refId: "META:2026-05-20:23851" } })).toBe(1);
+  });
+
   /**
    * Workflow n8n DỪNG hẳn khi ad account đổi tiền tệ (spend 1.500 USD ghi thành 1.650đ = hụt
    * ~26.000 lần). Lượt dựng lại đọc thẳng kho thô nên phải tự giữ lấy guard đó.

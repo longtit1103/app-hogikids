@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
-import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
+import { requireTokenVaultSecret } from "@/lib/ingest/token-vault-auth";
 import { prisma } from "@/lib/prisma";
 import {
   KEY_META_ACCESS_TOKEN,
@@ -26,7 +26,8 @@ import {
  * còn sống cả tháng. Reset đồng hồ data access = user vào Graph API Explorer cấp quyền LẠI.
  * (Đo thật 2026-07-14: token còn 60 ngày nhưng data access chỉ còn 9 ngày.)
  *
- * Cả GET lẫn POST đều yêu cầu bearer `INGEST_SECRET` — token KHÔNG BAO GIỜ lộ ra UI.
+ * Cả GET lẫn POST đều yêu cầu bearer `TOKEN_VAULT_SECRET` (tách khỏi `INGEST_SECRET` 21/09/2026,
+ * mục M-02) — token KHÔNG BAO GIỜ lộ ra UI.
  */
 
 const tokenBodySchema = z.object({
@@ -37,7 +38,7 @@ const tokenBodySchema = z.object({
 });
 
 export async function POST(req: Request): Promise<Response> {
-  const unauthorized = requireIngestSecret(req);
+  const unauthorized = requireTokenVaultSecret(req);
   if (unauthorized) return unauthorized;
 
   // POST này KHÔNG phải n8n mà là `scripts/meta-ads-lay-token.ts` chạy tay. Nhận 200 rồi bị lượt
@@ -74,7 +75,7 @@ export async function POST(req: Request): Promise<Response> {
 }
 
 export async function GET(req: Request): Promise<Response> {
-  const unauthorized = requireIngestSecret(req);
+  const unauthorized = requireTokenVaultSecret(req);
   if (unauthorized) return unauthorized;
 
   const rows = await prisma.setting.findMany({

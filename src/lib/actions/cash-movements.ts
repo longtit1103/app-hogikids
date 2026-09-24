@@ -142,7 +142,13 @@ class LoiKhoanVay extends Error {
  * async function).
  */
 function loiGhi(e: unknown): { error: string; field?: string } {
-  if (e instanceof LoiKhoanVay) return { error: e.message, field: e.field };
+  // `"id"` KHÔNG phải ô nhập nào trên form. Trả kèm `field` thì modal rẽ vào nhánh `setFieldErrors`
+  // (`cash-movement-form-modal.tsx`) — nó chỉ render 6 khoá date/kind/loanId/savingsId/amount/
+  // description, nên câu báo rơi vào khoá không ai đọc: chủ shop bấm Lưu, bị từ chối, mà KHÔNG có
+  // toast, không dòng đỏ, không đóng dialog ⇒ tưởng đã lưu. Bỏ `field` để rơi về `toast.error`.
+  if (e instanceof LoiKhoanVay) {
+    return e.field === "id" ? { error: e.message } : { error: e.message, field: e.field };
+  }
   // Trục SỔ TIẾT KIỆM dùng `LoiHopDong` (lớp dùng chung với `so-tiet-kiem.ts`) thay vì đẻ thêm một
   // lớp song song: mọi lượt ném `LoiHopDong` trong file này đều thuộc trục đó, nên thiếu `field`
   // thì tô ô "Sổ tiết kiệm" là đúng ô, không phải đoán.
@@ -251,6 +257,44 @@ async function docLaiTrongTx(
     );
   }
   return row;
+}
+
+/**
+ * Ghi bản sửa KÈM HÀNG RÀO cha: câu UPDATE chỉ khớp khi dòng VẪN đang gắn đúng khoản vay / sổ tiết
+ * kiệm của bản đọc ngoài transaction.
+ *
+ * Vì sao cần: khoá `FOR UPDATE` phía trên giành theo `loanId`/`savingsId` đọc NGOÀI transaction. Nếu
+ * giữa lượt đọc đó và lượt giành khoá có một lượt sửa khác chuyển dòng sang cha KHÁC, ta đang khoá
+ * nhầm cha — cha mới không bị khoá, không `chanDuNoAm`/`chanTienGuiAm`/`chanSoDuTietKiemAm` nào chạm
+ * tới nó, và dư nợ / số đang gửi của nó lệch IM LẶNG. Đường XOÁ đã có hàng rào này (`docLaiTrongTx`);
+ * đây là bản soi gương cho đường SỬA.
+ *
+ * Dùng `updateMany` thay vì đọc-rồi-ghi: điều kiện nằm TRONG chính câu ghi nên không còn khe giữa
+ * phép kiểm và phép ghi. Rẻ hơn `docLaiTrongTx` một round-trip vì đường SỬA không phải chụp thùng rác.
+ *
+ * `count === 0` gộp hai ca "dòng không còn" và "cha đã đổi" — cùng một cách xử lý cho chủ shop là mở
+ * lại trang, nên không tách thông điệp.
+ *
+ * ⚠️ Kẹp theo `truoc.*`, TUYỆT ĐỐI không theo `data.*`: `transform` của `cashMovementSchema` đã đặt
+ * lại `loanId`/`savingsId` theo `kind`, nên `data.*` là giá trị MỚI muốn ghi — lấy nó làm điều kiện
+ * thì hàng rào tự khớp chính mình và mất tác dụng.
+ */
+async function ghiCoHangRaoCha(
+  db: Prisma.TransactionClient,
+  id: string,
+  truoc: { loanId: string | null; savingsId: string | null },
+  data: CashMovementData
+): Promise<void> {
+  const { count } = await db.cashMovement.updateMany({
+    where: { id, loanId: truoc.loanId, savingsId: truoc.savingsId },
+    data,
+  });
+  if (count === 0) {
+    throw new LoiKhoanVay(
+      "Khoản tiền này vừa được sửa sang mục khác — mở lại trang rồi sửa lại",
+      "id"
+    );
+  }
 }
 
 /**
@@ -374,8 +418,9 @@ export async function updateCashMovement(id: string, input: unknown): Promise<Ac
     );
 
     if (khoanVayCanKiem.length === 0 && soCanKiem.length === 0) {
-      // `update` ném P2025 khi id không có — không cần findUnique trước (một round-trip ít hơn).
-      await prisma.cashMovement.update({ where: { id }, data });
+      // Vẫn phải có hàng rào: dòng đang trơn có thể vừa được gắn vào một khoản vay / sổ ở lượt khác,
+      // mà nhánh này KHÔNG giành khoá cha nào — ghi đè thẳng sẽ gỡ dòng khỏi cha đó không ai hay.
+      await ghiCoHangRaoCha(prisma, id, truoc, data);
       revalidatePath("/tai-chinh");
     } else {
       await prisma.$transaction(
@@ -398,7 +443,7 @@ export async function updateCashMovement(id: string, input: unknown): Promise<Ac
             await kiemSoTietKiem(tx, { ...data, savingsId: data.savingsId }, id);
           }
 
-          await tx.cashMovement.update({ where: { id }, data });
+          await ghiCoHangRaoCha(tx, id, truoc, data);
 
           for (const khoan of khoanVayCanKiem) {
             await chanDuNoAm(tx, khoan);

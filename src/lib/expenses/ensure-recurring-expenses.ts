@@ -115,7 +115,10 @@ async function runEnsureRecurringExpenses(month: Date): Promise<number> {
             date: target,
             categoryId: r.categoryId,
             description: r.description,
-            channelId: r.channelId,
+            // Lãi vay (`interest`) KHÔNG phân bổ kênh (bất biến #1) — `createExpense` đã chặn dựng mẫu
+            // Lãi vay mang kênh, nhưng mẫu dựng TRƯỚC cổng đó (và không có action nào sửa được mẫu)
+            // vẫn mang kênh cũ. Gỡ ngay tại chỗ sinh để mỗi tháng không đẻ thêm dòng làm mọc kênh rỗng.
+            channelId: r.categoryId === "interest" ? null : r.channelId,
             amount: r.amount,
             source: "RECURRING",
             recurringId: r.id,

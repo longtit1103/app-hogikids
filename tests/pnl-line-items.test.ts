@@ -28,6 +28,7 @@ const EMPTY: PnlBreakdown = {
   interest: 0,
   financialIncome: 0,
   other: 0,
+  otherCategoryIds: [],
   netProfit: 0,
   orderCount: 0,
   returnBomOrderCount: 0,
@@ -615,5 +616,26 @@ describe("buildPnlLineItems — mạch giảm giá đầu bảng", () => {
     expect(m.get("listPrice")!.value).toBe(B.revenue);
     expect(m.get("sellerDiscount")!.value).toBe(0);
     expect(m.get("netOfDiscount")!.value).toBe(B.revenue);
+  });
+});
+
+/**
+ * Link drill của dòng "Khác" phải mang ĐÚNG tập danh mục đang cộng vào nó. Trước bản vá href kẹp
+ * cứng `danh_muc=other`, mà đầu nhận (`expense-ledger-tab.tsx`) khớp id CHÍNH XÁC ⇒ khoản ở danh
+ * mục tự tạo cộng vào tổng nhưng bấm vào ra sổ trống: số đúng mà không lần ra được từ đâu.
+ */
+describe("buildPnlLineItems — link drill dòng Khác theo đúng tập danh mục", () => {
+  const TU_TAO = "0e840f5a-e6b9-42a5-ab46-a94e57a4fd42";
+  const hrefKhac = (b: PnlBreakdown) =>
+    buildPnlLineItems(b).find((i) => i.id === "other")!.href;
+
+  it("có danh mục tự tạo ⇒ href liệt kê ĐỦ id, ngăn bằng dấu phẩy", () => {
+    expect(hrefKhac({ ...EMPTY, other: 4_000_000, otherCategoryIds: [TU_TAO, "other"] })).toBe(
+      `/tai-chinh?tab=so-chi-phi&danh_muc=${TU_TAO},other`
+    );
+  });
+
+  it("tập rỗng ⇒ lùi về 'other' để link vẫn dẫn tới sổ chi phí", () => {
+    expect(hrefKhac(EMPTY)).toBe("/tai-chinh?tab=so-chi-phi&danh_muc=other");
   });
 });

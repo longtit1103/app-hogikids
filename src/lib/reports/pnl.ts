@@ -65,6 +65,12 @@ export interface PnlBreakdown {
   financialIncome: number;
   interest: number; // lãi vay — chi phí tài chính, dòng riêng, KHÔNG phân bổ kênh
   other: number;
+  /**
+   * Các `categoryId` THỰC SỰ có phát sinh trong kỳ mà rơi vào dòng "Khác" (ngoài `KNOWN`) — gồm cả
+   * `"other"` lẫn danh mục chủ shop tự tạo. CHỈ dùng dựng link drill cho đúng tập đang cộng; KHÔNG
+   * tham gia một vế tiền nào. Rỗng khi kỳ không có khoản nào thuộc nhóm này.
+   */
+  otherCategoryIds: string[];
   netProfit: number;
   orderCount: number;
   returnBomOrderCount: number;
@@ -197,7 +203,18 @@ export function calcPnlCore(
   // Thêm id vào KNOWN mà QUÊN trừ ở netProfit ⇒ danh mục đó biến mất khỏi lợi nhuận trong khi MỌI test
   // hiện có vẫn xanh — tests/pnl.test.ts "Lãi vay 5tr ⇒ netProfit −5tr" canh đúng ca này.
   const KNOWN = ["purchase", "ads", "shipping", "packaging", "return_bom", "fixed", "interest"];
-  const other = sum(exp.filter((e) => !KNOWN.includes(e.categoryId)).map((e) => e.amount)); // "other" + danh mục tùy chỉnh
+  // MỘT vị từ, dùng cho CẢ số tiền lẫn tập id: viết hai lần thì sửa một chỗ quên chỗ kia ⇒ link
+  // mang tập KHÁC với tập đang cộng, đúng lớp lỗi đoạn này sinh ra để diệt.
+  const expKhac = exp.filter((e) => !KNOWN.includes(e.categoryId)); // "other" + danh mục tùy chỉnh
+  const other = sum(expKhac.map((e) => e.amount));
+  // Dòng "Khác" gộp MỌI danh mục ngoài KNOWN, gồm cả danh mục chủ shop TỰ TẠO ở /cai-dat. Link drill
+  // phải mang ĐÚNG tập id đang cộng vào dòng: kẹp cứng `danh_muc=other` thì bấm vào ra sổ trống
+  // trong khi bảng vẫn cộng tiền — số đúng mà không lần ra được nó từ đâu.
+  //
+  // ⚠️ Dưới lăng kính KÊNH, `exp` đã lọc theo kênh ⇒ tập này là id của RIÊNG kênh đó, trong khi sổ
+  // chi phí không lọc kênh. Hôm nay vô hại (bảng P&L chỉ dựng từ breakdown KHÔNG kênh); ai render
+  // bảng theo kênh sau này phải mang thêm `kenh=` vào href, nếu không Σ sổ > dòng cha.
+  const otherCategoryIds = [...new Set(expKhac.map((e) => e.categoryId))].sort();
   const interest = byCat("interest"); // lãi vay (spec 260907 §5.4)
   // Lăng kính kênh ép về 0 NGAY TẠI ĐÂY — giữ MỘT chỗ logic kênh duy nhất (loader chỉ đọc dữ liệu
   // rồi truyền vào, không tự quyết). Lãi tiết kiệm là thu nhập của cả shop: gán nó cho một kênh
@@ -242,6 +259,7 @@ export function calcPnlCore(
     financialIncome,
     interest,
     other,
+    otherCategoryIds,
     netProfit,
     orderCount: valid.length,
     returnBomOrderCount: ord.length - valid.length,

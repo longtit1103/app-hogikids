@@ -13,9 +13,12 @@ services:
       - ./uploads:/app/public/uploads # logo shop BỀN qua rebuild, KHÔNG lưu DB (C6)
     restart: unless-stopped
     # Trần RAM 3g: minipc chạy CHUNG với Postgres + n8n nên app không được ăn hết RAM máy.
-    # Đặt thấp hơn (vd 1-2g) SẼ giết tiến trình restore giữa lúc bung nén — dump gzip cho
-    # phép bung tới 2GiB trước khi chặn bomb (src/lib/backup/run-restore.ts:18-21), cộng
-    # RAM nền của Next.js thì 2g là quá sát; 3g còn dư đệm để restore không bị OOM-kill.
+    # Bước ngốn RAM nhất là KIỂM NỘI DUNG file phục hồi: đo 22/09/2026, `assertPlainSqlOnlySchema`
+    # dùng RAM gấp ~43 lần kích thước SQL phẳng (nó giữ 4-5 bản soi phái sinh cùng lúc). Vì thế
+    # trần bung nén của đường .sql.gz đã hạ xuống 24 MiB (MAX_UNZIPPED_BYTES, xem bảng số đo trong
+    # src/lib/backup/run-restore.ts) ⇒ đỉnh dự kiến ~1 GiB, cộng RAM nền Next.js vẫn nằm gọn trong
+    # 3g. Lưu ý lịch sử: comment cũ ở đây viện dẫn con số 2GiB của hằng đó làm cơ sở cho 3g — con
+    # số ấy là TRẦN GIẢ (tiến trình chết từ ~45 MiB), nên lập luận cũ sai; giữ 3g vì lý do mới.
     mem_limit: 3g
     networks: [supabase_default]   # supabase-db VÀ hogikids-n8n ĐỀU ở supabase_default (đã verify) → app gọi cả hai bằng tên; chỉ cần 1 mạng
 # depends_on KHÔNG bắt buộc: supabase-db + hogikids-n8n thuộc stack Supabase/n8n; app chỉ attach external network supabase_default.

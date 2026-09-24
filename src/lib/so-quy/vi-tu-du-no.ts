@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { formatVnd } from "@/lib/format";
 
 /**
- * VỊ TỪ DƯ NỢ DUY NHẤT (spec §5.2), dùng chung cho MỌI đường ghi chạm dòng gốc vay:
+ * VỊ TỪ DƯ NỢ DUY NHẤT, dùng chung cho MỌI đường ghi chạm dòng gốc vay:
  * `ghiKyTraNo` · `createCashMovement` · `updateCashMovement` · `deleteCashMovement`.
  *
  * Luật: sau khi ghi/sửa/xoá, `duNoMoSo + Σ LOAN_IN − Σ LOAN_REPAY` TOÀN THỜI GIAN của khoản đó phải
@@ -30,7 +30,7 @@ const KIND_TIEN_GUI = ["DEPOSIT_OUT", "DEPOSIT_IN"] as const;
  * Vì sao bắt buộc: `chanDuNoAm` cộng lại tổng từ bảng `CashMovement`, mà transaction ở isolation
  * mặc định (ReadCommitted) KHÔNG thấy dòng chưa commit của lượt song song. Hai lượt trả gốc 150tr
  * cùng lúc trên khoản dư nợ 200tr vì thế đều thấy "còn đủ" và CẢ HAI ghi được ⇒ dư nợ −100tr. Đo
- * thật trên DB test (review phase 3). Serializable một phía cũng không cứu: SSI chỉ bắt khi CẢ HAI
+ * thật trên DB test. Serializable một phía cũng không cứu: SSI chỉ bắt khi CẢ HAI
  * phía Serializable, nên `ghiKyTraNo` chạy cùng một dòng "Trả nợ gốc" ghi tay vẫn lọt.
  *
  * `FOR UPDATE` giữ dòng `Loan` tới khi transaction commit, nên lượt thứ hai phải CHỜ rồi mới đọc —

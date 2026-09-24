@@ -71,6 +71,28 @@ async function taoDonSan(channelId: string, code: string): Promise<void> {
   });
 }
 
+/**
+ * Đơn TẠO TAY trong shop sàn: Pancake không khai `marketplace_id` nên app xếp kênh `website`, chứ
+ * KHÔNG phải `shopee`/`tiktok`. Bản sao trong kho vẫn mang `AF<shopId sàn>O…` như mọi đơn khác.
+ * Dựng cả dòng kho thô của ĐƠN GỐC (khoá thật là SHOP BÁN + `system_id`, không phải kênh app).
+ */
+async function taoDonTaoTayTrongShopSan(opts: {
+  shopSan: string;
+  code: string;
+  channelId: string;
+}): Promise<void> {
+  const pancakeId = `GOC-${opts.channelId}-${opts.code}`;
+  await prisma.rawPancakeOrder.create({
+    data: {
+      shopId: opts.shopSan,
+      externalId: pancakeId,
+      payloadHash: `goc-${opts.shopSan}-${opts.code}`,
+      payload: { id: pancakeId, system_id: opts.code, status_name: "delivered", inserted_at: NGAY },
+    },
+  });
+  await taoDonSan(opts.channelId, opts.code);
+}
+
 describe("doiChieuDonKhoVsSan", () => {
   it("mọi bản sao đều có đơn gốc → không báo thiếu", async () => {
     await taoBanSaoKho({ shopSan: SHOP_SHOPEE, code: "10", status: "delivered", cod: 230_000 });
@@ -112,6 +134,49 @@ describe("doiChieuDonKhoVsSan", () => {
     const kq = await doiChieuDonKhoVsSan();
     expect(kq.thieu).toHaveLength(1);
     expect(kq.thieu[0].kenh).toBe("shopee");
+  });
+
+  // Ca THẬT trên prod 21/09: hai đơn tạo tay trong shop TikTok (mã 776, 777 — Pancake để trống
+  // `marketplace_id`) vào Sổ dưới kênh `website`, nhưng bản sao kho vẫn là `AF<shopTikTok>O…` nên
+  // phép so theo (kênh app, mã) báo "thiếu 2 đơn" trong khi tiền KHÔNG hề mất. Khoá đúng là
+  // (SHOP BÁN, `system_id`) — kênh chỉ là PHÂN LOẠI của app, không phải nơi đơn sinh ra.
+  it("đơn tạo tay trong shop sàn (app xếp kênh `website`) KHÔNG bị báo thiếu", async () => {
+    await taoBanSaoKho({ shopSan: SHOP_TIKTOK, code: "776", status: "delivered", cod: 410_000 });
+    await taoDonTaoTayTrongShopSan({ shopSan: SHOP_TIKTOK, code: "776", channelId: "website" });
+
+    const kq = await doiChieuDonKhoVsSan();
+    expect(kq.thieu).toHaveLength(0);
+    expect(kq.tienThieuDaGiao).toBe(0);
+  });
+
+  // Hàng rào cho chính lớp kiểm trên: nới theo SHOP, tuyệt đối không nới theo mã đơn trần —
+  // `code` trùng nhau giữa hai shop (đo prod: mã 102/105/106… có ở CẢ shopee lẫn tiktok).
+  it("đơn gốc nằm ở shop KHÁC ⇒ VẪN báo thiếu (không nới theo mã đơn trần)", async () => {
+    await taoBanSaoKho({ shopSan: SHOP_TIKTOK, code: "776", status: "delivered", cod: 410_000 });
+    await taoDonTaoTayTrongShopSan({ shopSan: SHOP_SHOPEE, code: "776", channelId: "website" });
+
+    const kq = await doiChieuDonKhoVsSan();
+    expect(kq.thieu).toHaveLength(1);
+    expect(kq.thieu[0]).toMatchObject({ kenh: "tiktok", code: "776" });
+  });
+
+  // Dòng kho thô của đơn gốc CÓ, nhưng đơn chưa lên Sổ ⇒ vẫn là thiếu thật. Không có vế này thì
+  // lớp kiểm mới hoá ra sơn xanh cho mọi đơn đã land Bronze mà kẹt chưa dựng Silver.
+  it("gốc đã land Bronze nhưng CHƯA vào Sổ ⇒ vẫn báo thiếu", async () => {
+    await taoBanSaoKho({ shopSan: SHOP_TIKTOK, code: "778", status: "delivered", cod: 300_000 });
+    await prisma.rawPancakeOrder.create({
+      data: {
+        shopId: SHOP_TIKTOK,
+        externalId: "GOC-chua-vao-so",
+        payloadHash: "goc-chua-vao-so",
+        payload: { id: "GOC-chua-vao-so", system_id: "778", status_name: "delivered", inserted_at: NGAY },
+      },
+    });
+
+    const kq = await doiChieuDonKhoVsSan();
+    expect(kq.thieu).toHaveLength(1);
+    expect(kq.thieu[0].code).toBe("778");
+    expect(kq.tienThieuDaGiao).toBe(300_000);
   });
 
   it("bỏ qua bản sao của shop lạ thay vì đoán kênh", async () => {

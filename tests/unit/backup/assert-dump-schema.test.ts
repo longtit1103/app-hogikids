@@ -462,4 +462,74 @@ describe("assertPlainSqlOnlySchema", () => {
       assertPlainSqlOnlySchema(fixture("sql-set-config-than-ham.sql"), "app"),
     ).not.toThrow();
   });
+
+  // --- (i) `COPY … FROM/TO PROGRAM` — CHẠY LỆNH ở tầng SQL. Guard (g) chỉ bắt meta-command có dấu
+  // `\`; dạng SQL thuần không có `\` nào nên trước bản vá 22/09/2026 nó lọt sạch, và TOC của bản
+  // `.dump` tương đương cũng hợp lệ (chỉ schema app) ⇒ guard TOC cũng mù.
+  it("(i) từ chối COPY … FROM PROGRAM", () => {
+    expect(() => assertPlainSqlOnlySchema(fixture("sql-copy-from-program.sql"), "app")).toThrow(
+      /FROM\/TO PROGRAM/,
+    );
+  });
+  it("(i) từ chối COPY … TO PROGRAM (chiều rò dữ liệu ra)", () => {
+    expect(() => assertPlainSqlOnlySchema(fixture("sql-copy-to-program.sql"), "app")).toThrow(
+      /FROM\/TO PROGRAM/,
+    );
+  });
+  it("(i) bắt được cả khi nằm trong DO $$…$$ (khối này CHẠY THẬT lúc restore)", () => {
+    expect(() =>
+      assertPlainSqlOnlySchema("DO $$ BEGIN COPY app.t FROM PROGRAM 'id'; END $$;\n", "app"),
+    ).toThrow(/FROM\/TO PROGRAM/);
+  });
+  // 🔴 Lệch song sinh ĐO ĐƯỢC 22/09: `stripSqlComments` không theo dõi dollar-quote, nên `/*` trong
+  // thân `$$…$$` nuốt mọi câu tới `*/` — bản soi giữ-dollar khi đó chỉ còn `SELECT $$   $$;` trong
+  // khi psql vẫn chạy trọn. Bản bash bắt được (lexer theo dõi `dtag`); TS phải soi THÊM bản đã bỏ
+  // dollar-quote mới hết mù.
+  it("(i) không né được bằng `/*` giấu trong thân dollar-quote (lệch song sinh)", () => {
+    expect(() =>
+      assertPlainSqlOnlySchema(fixture("sql-dollar-quote-che-comment-program.sql"), "app"),
+    ).toThrow(/FROM\/TO PROGRAM/);
+  });
+  it("(i) không né được bằng comment chèn giữa token (FROM/* x */PROGRAM)", () => {
+    expect(() =>
+      assertPlainSqlOnlySchema("COPY app.t FROM/* x */PROGRAM 'id';\n", "app"),
+    ).toThrow(/FROM\/TO PROGRAM/);
+  });
+  // CHỐNG VÁ QUÁ TAY — đây mới là chiều nguy hiểm: từ chối oan nghĩa là chủ shop mất đường phục
+  // hồi đúng lúc cần nhất (bài học `total_discount` âm). Chữ "program" ở tên cột / dữ liệu COPY /
+  // literal là thứ một dump THẬT hoàn toàn có thể chứa.
+  it("(i) CHẤP NHẬN dump có chữ 'program' ở tên cột, dữ liệu COPY và literal", () => {
+    expect(() =>
+      assertPlainSqlOnlySchema(fixture("sql-copy-stdin-chua-chu-program.sql"), "app"),
+    ).not.toThrow();
+  });
+
+  // --- (j) câu lệnh ĐẶC QUYỀN. Dump schema-scoped không phát ra; ở đường bash chúng chạy bằng
+  // `psql -U supabase_admin` (superuser THẬT) nên đều thành công.
+  it("(j) từ chối ALTER ROLE (fixture dùng chung với twin shell)", () => {
+    expect(() => assertPlainSqlOnlySchema(fixture("sql-cau-lenh-dac-quyen.sql"), "app")).toThrow(
+      /đặc quyền/i,
+    );
+  });
+  it("(j) từ chối SECURITY DEFINER — hàm nằm gọn trong schema đích nên (a)/(b)/(e) đều cho qua", () => {
+    expect(() => assertPlainSqlOnlySchema(fixture("sql-security-definer.sql"), "app")).toThrow(
+      /đặc quyền/i,
+    );
+  });
+  it.each([
+    ["CREATE EXTENSION", "CREATE EXTENSION pg_stat_statements;\n"],
+    ["CREATE ROLE", "CREATE ROLE ke_tan_cong LOGIN SUPERUSER;\n"],
+    ["DROP USER", "DROP USER hogikids;\n"],
+    ["ALTER SYSTEM", "ALTER SYSTEM SET archive_command = 'sh -c \"id\"';\n"],
+    ["CREATE LANGUAGE", "CREATE TRUSTED PROCEDURAL LANGUAGE plperlu;\n"],
+  ])("(j) từ chối %s", (_ten, sql) => {
+    expect(() => assertPlainSqlOnlySchema(sql, "app")).toThrow(/đặc quyền/i);
+  });
+  // CHỐNG VÁ QUÁ TAY: mệnh đề `LANGUAGE plpgsql` đứng cuối MỌI `CREATE FUNCTION` — bắt nhầm nó là
+  // từ chối gần như mọi dump có hàm.
+  it("(j) CHẤP NHẬN mệnh đề LANGUAGE plpgsql cuối CREATE FUNCTION", () => {
+    expect(() =>
+      assertPlainSqlOnlySchema(fixture("sql-set-config-than-ham.sql"), "app"),
+    ).not.toThrow();
+  });
 });

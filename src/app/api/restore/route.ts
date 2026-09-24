@@ -21,6 +21,7 @@ import {
 import { runPgDump } from "@/lib/backup/run-pg-dump";
 import { assertNotArchive, detectRestoreFormat, gunzipHead, runRestore } from "@/lib/backup/run-restore";
 import { thuHoiMoiPhienCoHan } from "@/lib/backup/thu-hoi-phien-co-han";
+import { chanRequestKhacOrigin } from "@/lib/chan-request-khac-origin";
 import { coLuotDangChay } from "@/lib/ingest/sync-log";
 import { getAuthenticatedUserId } from "@/lib/session";
 
@@ -43,6 +44,21 @@ const CANH_BAO_MAT_KHOA_SAU_NAP =
 // Backup .sql.gz/.dump thật hiện < vài MB; backup > 200MB thì nới có chủ đích
 // (lưu ý Cloudflare tunnel cap ~100MB/request đứng trước).
 const MAX_UPLOAD_BYTES = 200 * 1024 * 1024; // 200MB
+
+/**
+ * Trần cho TOÀN BỘ thân request (phong bì multipart), kiểm trên `Content-Length` TRƯỚC `formData()`.
+ *
+ * Vì sao cần dù đã có `MAX_UPLOAD_BYTES`: cap kia đọc `file.size`, tức chỉ có số ĐO ĐƯỢC **sau khi**
+ * `request.formData()` đã phân tích trọn thân request — mà đó chính là bước tốn RAM/đĩa. Cap sau
+ * chặn được việc bung bytes vào RAM ở `arrayBuffer()`, KHÔNG chặn được việc nhận và parse phong bì.
+ *
+ * Cộng thêm 1MB cho phần khung multipart (boundary + header từng part): phong bì luôn LỚN HƠN file,
+ * nên nếu kẹp đúng 200MB thì một file đúng 200MB hợp lệ sẽ bị từ chối oan.
+ *
+ * ⚠️ `Content-Length` có thể VẮNG (chunked) hoặc bịa — nên đây là lớp THỨ NHẤT, không thay thế
+ * `MAX_UPLOAD_BYTES`. Thiếu header thì đi tiếp và để cap kia gác.
+ */
+const MAX_UPLOAD_ENVELOPE_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024;
 
 /**
  * Tên lượt phục hồi trong khoá việc nặng — hiện nguyên văn trong câu 409 của lượt xoá dữ liệu /
@@ -85,6 +101,20 @@ export async function POST(request: Request): Promise<Response> {
   const userId = await getAuthenticatedUserId();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Next KHÔNG tự so Origin/Host cho Route Handler (chỉ cho Server Action) — route phá huỷ nhất
+  // của app phải tự gác. Xem lý do đầy đủ ở `chanRequestKhacOrigin`.
+  const khacOrigin = chanRequestKhacOrigin(request);
+  if (khacOrigin) return khacOrigin;
+
+  // Chặn theo `Content-Length` TRƯỚC khi chạm thân request — xem `MAX_UPLOAD_ENVELOPE_BYTES`.
+  const khaiDoDai = Number(request.headers.get("content-length"));
+  if (Number.isFinite(khaiDoDai) && khaiDoDai > MAX_UPLOAD_ENVELOPE_BYTES) {
+    return Response.json(
+      { error: "File backup quá lớn (tối đa 200MB) — từ chối phục hồi." },
+      { status: 413 },
+    );
   }
 
   // Đọc file tải lên → Buffer.

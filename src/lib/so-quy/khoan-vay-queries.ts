@@ -13,7 +13,7 @@ import {
 } from "@/lib/so-quy/lich-tra-no";
 
 /**
- * Đọc bảng khoản vay + kỳ trả nợ chờ duyệt (spec §5.2). Dư nợ KHÔNG lưu cột riêng: luôn suy lại từ
+ * Đọc bảng khoản vay + kỳ trả nợ chờ duyệt. Dư nợ KHÔNG lưu cột riêng: luôn suy lại từ
  * `duNoMoSo + Σ LOAN_IN − Σ LOAN_REPAY` của chính các dòng `CashMovement` gắn `loanId` — không có
  * chỗ nào để số dư nợ lệch với sổ.
  *
@@ -195,7 +195,7 @@ export type KhoanVayRow = LoanRecord & {
    */
   laiTamTinh: number | null;
   kyCho: DeXuatKy | null;
-  /** Đã có lần trả gốc nào chưa — chặn sửa/xoá ở action (phase 3). */
+  /** Đã có lần trả gốc nào chưa — chặn sửa/xoá ở action. */
   coTraGoc: boolean;
   /**
    * Tiền gửi tiết kiệm bắt buộc ngân hàng ĐANG GIỮ (Σ DEPOSIT_OUT − Σ DEPOSIT_IN). KHÔNG đụng dư nợ

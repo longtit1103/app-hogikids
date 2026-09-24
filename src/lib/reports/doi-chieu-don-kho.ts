@@ -64,7 +64,8 @@ export async function doiChieuDonKhoVsSan(): Promise<KetQuaDoiChieuKho> {
       WHERE "shopId" = ${kho} AND "externalId" ~ '^AF[0-9]+O'
       ORDER BY "externalId", "fetchedAt" DESC
     ), tach AS (
-      SELECT CASE substring("externalId" from '^AF([0-9]+)O')
+      SELECT substring("externalId" from '^AF([0-9]+)O')        AS shop_ban,
+             CASE substring("externalId" from '^AF([0-9]+)O')
                WHEN ${shopee} THEN 'shopee'
                WHEN ${tiktok} THEN 'tiktok'
                ELSE NULL END                                   AS kenh,
@@ -81,6 +82,27 @@ export async function doiChieuDonKhoVsSan(): Promise<KetQuaDoiChieuKho> {
     WHERE t.kenh IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM "Order" o WHERE o."channelId" = t.kenh AND o.code = t.code
+      )
+      -- LỚP 2 — chỉ chạy cho số ít dòng trượt lớp 1 (correlated subquery), nên rẻ dù quét thẳng
+      -- kho thô của shop bán (đo prod: <= 2.252 dòng/shop).
+      --
+      -- Vì sao cần: channelId là PHÂN LOẠI CỦA APP, không phải nơi đơn sinh ra. Đơn TẠO TAY trong
+      -- shop sàn được Pancake để trống marketplace_id ⇒ app xếp kênh website, trong khi bản sao kho
+      -- vẫn mang AF<shopId sàn>O... ⇒ lớp 1 kết luận "thiếu đơn" cho đơn ĐANG NẰM TRONG SỔ. Ca thật
+      -- prod 21/09: mã 776 + 777 shop TikTok, 410.000đ + 559.000đ, cả hai COMPLETED trong Sổ mà
+      -- panel vẫn báo đỏ "Thiếu 2 đơn".
+      --
+      -- Khoá ĐÚNG là (SHOP BÁN, system_id), vì đuôi sau chữ O của bản sao chính là system_id — số
+      -- thứ tự THEO SHOP của đơn gốc (đo prod: 777/779 đơn có code khác pancakeId).
+      -- TUYỆT ĐỐI KHÔNG nới thành so mã đơn trần: code TRÙNG nhau giữa hai shop (đo prod: 102, 105,
+      -- 106... có ở CẢ shopee lẫn tiktok) ⇒ nới thế là che mất đơn thiếu thật của shop kia.
+      -- Vẫn đòi có dòng trong Order: gốc đã land Bronze mà kẹt chưa dựng Silver vẫn là THIẾU.
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "RawPancakeOrder" r
+        JOIN "Order" o2 ON o2."pancakeId" = r."externalId"
+        WHERE r."shopId" = t.shop_ban
+          AND r.payload->>'system_id' = t.code
       )
   `;
 

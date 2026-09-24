@@ -26,6 +26,13 @@ const ADS_API_LOCKED_ERROR = "Dòng ads tự động từ API — xem log ở C�
  */
 const TIEN_TO_REF_KY_VAY = "LOAN:";
 
+/**
+ * Danh mục Lãi vay. Chuỗi trần như mọi nơi khác trong repo (`khoan-vay.ts`, `tat-toan-thau-chi.ts`,
+ * `pnl.ts`) — id danh mục hệ thống là hợp đồng seed, không đổi. Hằng CỤC BỘ vì file `"use server"`
+ * chỉ được export hàm async.
+ */
+const DANH_MUC_LAI_VAY = "interest";
+
 const baseExpenseFields = {
   date: ngayGhiTaySchema, // chặn cả ô Ngày trống (null ⇒ 1970) lẫn ngày tương lai — xem module
   categoryId: z.string().min(1, "Chọn danh mục"),
@@ -64,6 +71,26 @@ const updateExpenseSchema = z
   .object(baseExpenseFields)
   .refine(requireAdsSource, { message: "Chọn nguồn ads", path: ["adsSource"] });
 
+/**
+ * Lãi vay KHÔNG phân bổ kênh (bất biến #1, cùng luật `fixed`) — cổng DÙNG CHUNG cho tạo mới lẫn sửa,
+ * áp MỌI dòng danh mục `interest` (nhập tay lẫn dòng do duyệt kỳ/tất toán sinh ra), không riêng
+ * dòng `LOAN:`. `pnl.ts` đã loại `interest` khỏi lăng kính kênh nên gắn kênh không lệch tiền, nhưng
+ * làm mọc kênh rỗng ở `/kenh` và dashboard — khoá riêng dòng `LOAN:` thì dòng "Lãi vay" chủ shop
+ * nhập tay vẫn đẻ ra đúng triệu chứng đó.
+ * Chặn MỌI kênh khác null (không so với kênh đang có): dòng nào lỡ mang kênh từ trước thì lượt sửa
+ * kế tiếp tự gỡ, thay vì bị đóng băng ở chỗ sai. Ở `createExpense` cổng phải đứng TRƯỚC nhánh
+ * `recurringMonthly`: mẫu `RecurringExpense` mang kênh sẽ sinh lại dòng sai mỗi tháng.
+ */
+function chanKenhChoLaiVay(d: { categoryId: string; channelId: string | null }): ActionResult | null {
+  if (d.categoryId !== DANH_MUC_LAI_VAY || d.channelId === null) return null;
+  return {
+    ok: false,
+    field: "channelId",
+    code: "LAI_VAY_KHONG_GAN_KENH",
+    error: "Lãi vay không phân bổ theo kênh bán — để trống ô Kênh.",
+  };
+}
+
 /** Danh mục phải tồn tại + chưa bị ẩn. */
 async function validateCategory(categoryId: string): Promise<string | null> {
   const category = await prisma.expenseCategory.findUnique({ where: { id: categoryId } });
@@ -96,6 +123,8 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
   if (categoryError) return { ok: false, error: categoryError, field: "categoryId" };
   const channelError = await validateChannel(data.channelId);
   if (channelError) return { ok: false, error: channelError, field: "channelId" };
+  const kenhLaiVay = chanKenhChoLaiVay(data);
+  if (kenhLaiVay) return kenhLaiVay;
 
   try {
     if (data.recurringMonthly) {
@@ -196,7 +225,8 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
     }
   }
 
-  // Dòng lãi vay theo kỳ: KHOÁ ngày + danh mục, để MỞ số tiền/mô tả/kênh.
+  // Dòng lãi vay theo kỳ: KHOÁ ngày + danh mục, để MỞ số tiền/mô tả. Kênh (luôn trống) do cổng
+  // chung `chanKenhChoLaiVay` ngay dưới đảm nhận — danh mục đã khoá = `interest` nên cổng đó bao trùm.
   // Con dấu `Loan.lastDueHandled` không lùi ở bất kỳ đâu, nên dời ngày là tách kỳ lãi khỏi tháng
   // P&L của nó mà không còn đường duyệt lại; đổi danh mục là mất dòng "Lãi vay" riêng trong bảng
   // Lãi/Lỗ (bất biến #1). Ngược lại, số tiền PHẢI mở: đó là đường duy nhất chủ shop tự chữa được
@@ -224,6 +254,8 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
       };
     }
   }
+  const kenhLaiVay = chanKenhChoLaiVay(data);
+  if (kenhLaiVay) return kenhLaiVay;
 
   try {
     await prisma.expense.update({

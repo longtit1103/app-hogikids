@@ -3,7 +3,7 @@ import { differenceInCalendarDays, startOfDay } from "date-fns";
 import { duNoTai, laiTheoNgay, type KhoanVayLich, type TraGoc } from "@/lib/so-quy/lich-tra-no";
 
 /**
- * Đề xuất TẤT TOÁN thấu chi (spec thấu chi §4). THUẦN, không Prisma — tách khỏi `lich-tra-no.ts`
+ * Đề xuất TẤT TOÁN thấu chi. THUẦN, không Prisma — tách khỏi `lich-tra-no.ts`
  * vì đây là một luồng riêng (đóng khoản), không phải lịch kỳ; phụ thuộc MỘT CHIỀU vào lịch kỳ nên
  * không có vòng import.
  *

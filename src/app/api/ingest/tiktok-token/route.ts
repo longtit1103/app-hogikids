@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
-import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
+import { requireTokenVaultSecret } from "@/lib/ingest/token-vault-auth";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -17,7 +17,8 @@ import { prisma } from "@/lib/prisma";
  * ⇒ n8n POST token mới về đây NGAY sau khi refresh, TRƯỚC khi bắn bất kỳ request dữ liệu nào;
  *    GET để nạp token đang dùng ở đầu mỗi lần chạy (kể cả chạy tay).
  *
- * Cả GET lẫn POST đều yêu cầu bearer `INGEST_SECRET` — token KHÔNG BAO GIỜ lộ ra UI.
+ * Cả GET lẫn POST đều yêu cầu bearer `TOKEN_VAULT_SECRET` (tách khỏi `INGEST_SECRET` 21/09/2026,
+ * mục M-02) — token KHÔNG BAO GIỜ lộ ra UI.
  */
 
 const KEY_ACCESS_TOKEN = "tiktokShopAccessToken";
@@ -60,7 +61,7 @@ const tokenBodySchema = z.object({
 });
 
 export async function POST(req: Request): Promise<Response> {
-  const unauthorized = requireIngestSecret(req);
+  const unauthorized = requireTokenVaultSecret(req);
   if (unauthorized) return unauthorized;
 
   // 503 KHÔNG cứu được token nếu chặn ở ĐÂY: workflow đã refresh xong trước khi POST, và TikTok xoay
@@ -109,7 +110,7 @@ export async function POST(req: Request): Promise<Response> {
 }
 
 export async function GET(req: Request): Promise<Response> {
-  const unauthorized = requireIngestSecret(req);
+  const unauthorized = requireTokenVaultSecret(req);
   if (unauthorized) return unauthorized;
 
   // GET là ĐỌC, nhưng nó là bước ĐẦU của một chuỗi ghi không thể làm nguyên tử: đọc token → refresh

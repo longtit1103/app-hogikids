@@ -336,3 +336,42 @@ describe("calcPnlCore — Thu nhập tài chính CỘNG vào lãi ròng, KHÔNG 
     expect(r.netProfit).toBe(167_500);
   });
 });
+
+/**
+ * Dòng "Khác" gộp MỌI danh mục ngoài `KNOWN`. `otherCategoryIds` là tập id ĐANG cộng vào dòng đó —
+ * nguồn dựng link drill. Kẹp cứng `danh_muc=other` thì khoản ở danh mục chủ shop tự tạo vẫn vào
+ * tổng mà bấm vào ra sổ trống (đo prod 23/09: 1 danh mục tự tạo, 2 khoản, 3.550.000đ).
+ */
+describe("calcPnlCore — otherCategoryIds nuôi link drill dòng Khác", () => {
+  const TU_TAO = "0e840f5a-e6b9-42a5-ab46-a94e57a4fd42";
+
+  it("gom cả 'other' lẫn danh mục tự tạo — và KHÔNG đổi một vế tiền nào", () => {
+    const expenses: PnlExpenseInput[] = [
+      { categoryId: TU_TAO, adsSource: null, channelId: null, amount: 3_550_000 },
+      { categoryId: "other", adsSource: null, channelId: null, amount: 450_000 },
+      { categoryId: "fixed", adsSource: null, channelId: null, amount: 1_000_000 },
+    ];
+    const r = calcPnlCore([baseOrder], expenses);
+    expect(r.otherCategoryIds).toEqual([TU_TAO, "other"]);
+    // Dòng "Khác" vẫn cộng đủ cả hai; `fixed` không bị hút sang.
+    expect(r.other).toBe(4_000_000);
+    expect(r.fixed).toBe(1_000_000);
+  });
+
+  it("kỳ không có khoản nào ngoài KNOWN ⇒ rỗng, KHÔNG bịa ra 'other'", () => {
+    const r = calcPnlCore(
+      [baseOrder],
+      [{ categoryId: "ads", adsSource: "META", channelId: null, amount: 100_000 }]
+    );
+    expect(r.otherCategoryIds).toEqual([]);
+    expect(r.other).toBe(0);
+  });
+
+  it("nhiều khoản cùng danh mục ⇒ id xuất hiện ĐÚNG một lần", () => {
+    const r = calcPnlCore([baseOrder], [
+      { categoryId: TU_TAO, adsSource: null, channelId: null, amount: 1_000 },
+      { categoryId: TU_TAO, adsSource: null, channelId: null, amount: 2_000 },
+    ]);
+    expect(r.otherCategoryIds).toEqual([TU_TAO]);
+  });
+});

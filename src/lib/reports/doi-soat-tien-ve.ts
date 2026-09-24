@@ -1,5 +1,5 @@
 import type { OrderStatus } from "@prisma/client";
-import { endOfDay } from "date-fns";
+import { differenceInCalendarDays, endOfDay, startOfDay } from "date-fns";
 
 import type { DateRange } from "@/lib/date-range";
 import { isProvisionalPlatformFee } from "@/lib/orders/provisional-fee";
@@ -106,6 +106,45 @@ export type DonHoanConTien = {
   choGiaoDichDao: boolean;
 };
 
+/**
+ * Đơn HỢP LỆ (không hoàn/hủy) mà sàn ĐÃ có giao dịch quyết toán cho đơn nhưng Σ
+ * `revenue_amount` ≤ 0 — sàn CHƯA ghi đồng doanh thu nào (có khi còn thu ngược phí).
+ * App vẫn cộng doanh thu vào P&L vì Pancake để trạng thái delivered/còn hiệu lực.
+ *
+ * Đo prod 2026-09-18: 2 đơn/561.000đ, cả hai `COMPLETED`, đặt 08/04/2026 — một đơn
+ * chỉ có 1 dòng ghi PHÍ (chưa từng ghi doanh thu), một đơn bán rồi bị đảo ngược sạch.
+ * Ca `PENDING` cũng có thể xảy ra (sàn chưa quyết toán xong) nên KHÔNG lọc theo
+ * status ngoài loại `RETURNED`/`CANCELLED` — chỉ cần ĐÃ có giao dịch mà doanh thu ≤ 0.
+ *
+ * ⚠️ CHỈ CẢNH BÁO — CHỈ ĐỌC. Đơn thuộc nhóm này VẪN đi tiếp vào nhánh so lệch phía
+ * trên như bình thường (không rẽ nhánh, không đổi `khop`/`lech`/`danhSachLech`/
+ * `tongDelta`). App KHÔNG tự sửa P&L, KHÔNG tự sửa trạng thái đơn.
+ */
+export type DonSanChuaGhiDoanhThu = {
+  id: string;
+  code: string;
+  pancakeId: string;
+  status: OrderStatus;
+  /**
+   * = `itemsTotal` — doanh thu GỘP app đang cộng vào P&L cho đơn này. CỐ Ý không phải
+   * "thực nhận" (`itemsTotal − discount − platformFeeEst`): tên cảnh báo nói "doanh
+   * thu", và bất biến #1 định nghĩa doanh thu gộp = Σ itemsTotal đơn hợp lệ — đây
+   * đúng con số đang thực sự chảy vào `pnl.ts`.
+   */
+  doanhThuApp: number;
+  /** Σ settlement_amount sàn đã trả — có thể âm nếu sàn chỉ thu ngược phí. */
+  sanTra: number;
+  soGiaoDich: number;
+  /** Số ngày từ NGÀY ĐẶT (`orderedAt`) tới hôm nay, giờ VN. */
+  tuoiNgay: number;
+  /**
+   * Đơn ĐẶT còn trong `CUA_SO_CHO_QUYET_TOAN_NGAY` ngày ⇒ sàn có thể chưa kịp ghi
+   * nhận/đảo xong, chưa kết luận được là bất thường. Tái dùng đúng cửa sổ + đúng mốc
+   * (NGÀY ĐẶT) với `qua_cua_so` ở trên — không dựng cửa sổ riêng.
+   */
+  conTrongCuaSoCho: boolean;
+};
+
 export type DoiSoatTienVe = {
   /** Đơn khớp TỪNG ĐỒNG. */
   khop: number;
@@ -131,6 +170,14 @@ export type DoiSoatTienVe = {
    * mất nghĩa.
    */
   tongTienVeDonHoan: number;
+  /**
+   * Đơn HỢP LỆ mà sàn ĐÃ có giao dịch nhưng CHƯA ghi đồng doanh thu nào. Danh sách
+   * BỔ SUNG, độc lập với `danhSachLech` — cùng một đơn có thể vừa nằm ở đây vừa nằm
+   * ở `danhSachLech` (nhóm này không rẽ nhánh, xem chú thích `DonSanChuaGhiDoanhThu`).
+   */
+  sanChuaGhiDoanhThu: DonSanChuaGhiDoanhThu[];
+  /** Σ `doanhThuApp` của nhóm trên — tổng doanh thu app đang tính mà sàn chưa ghi nhận. */
+  tongDoanhThuSanChuaGhi: number;
 };
 
 type Hang = {
@@ -146,6 +193,8 @@ type Hang = {
   doanh_thu_san: bigint | null;
   so_gd: number | null;
   qua_cua_so: boolean;
+  /** Ngày đặt — cần riêng (không suy được từ `qua_cua_so`) để tính tuổi đơn theo NGÀY, không chỉ cờ nhị phân. */
+  ordered_at: Date;
 };
 
 /**
@@ -157,7 +206,10 @@ type Hang = {
  */
 export async function doiSoatTienVe(range: DateRange): Promise<DoiSoatTienVe> {
   const to = endOfDay(range.to);
-  const moc = new Date(Date.now() - CUA_SO_CHO_QUYET_TOAN_NGAY * 24 * 60 * 60 * 1000);
+  // Chốt MỘT mốc "bây giờ" cho cả cửa sổ chờ lẫn tuổi đơn — tránh lệch vài mili-giây
+  // giữa hai phép tính trong cùng một lượt gọi.
+  const now = new Date();
+  const moc = new Date(now.getTime() - CUA_SO_CHO_QUYET_TOAN_NGAY * 24 * 60 * 60 * 1000);
 
   const rows = await prisma.$queryRaw<Hang[]>`
     WITH moi_nhat AS (
@@ -206,6 +258,7 @@ export async function doiSoatTienVe(range: DateRange): Promise<DoiSoatTienVe> {
       txn.san_tra                                                AS san_tra,
       txn.doanh_thu_san                                          AS doanh_thu_san,
       txn.so_gd                                                  AS so_gd,
+      o."orderedAt"                                              AS ordered_at,
       -- MỘT cờ duy nhất, neo NGÀY ĐẶT — dùng cho cả hai nhánh.
       --
       -- Quy tắc chủ shop chốt 2026-08-19: ĐỒNG HỒ KHÔNG ĐƯỢC RESET BỞI MỘT LƯỢT SỬA
@@ -238,6 +291,7 @@ export async function doiSoatTienVe(range: DateRange): Promise<DoiSoatTienVe> {
   let dangCho = 0;
   const danhSachLech: DonLech[] = [];
   const hoanConTien: DonHoanConTien[] = [];
+  const sanChuaGhiDoanhThu: DonSanChuaGhiDoanhThu[] = [];
 
   for (const r of rows) {
     // ── Nhánh đơn HOÀN/HỦY ──────────────────────────────────────────────────
@@ -275,6 +329,26 @@ export async function doiSoatTienVe(range: DateRange): Promise<DoiSoatTienVe> {
       continue;
     }
 
+    // ── Nhóm BỔ SUNG: sàn ĐÃ có giao dịch cho đơn nhưng CHƯA ghi đồng doanh thu nào ──
+    // KHÔNG rẽ nhánh (không `continue`) — đơn vẫn đi tiếp xuống phần so lệch bình
+    // thường ngay dưới, y hệt trước khi có nhóm này. Đây chỉ là một danh sách quan
+    // sát THÊM, không đổi khop/lech/danhSachLech/tongDelta.
+    const soGiaoDich = Number(r.so_gd ?? 0);
+    const doanhThuSan = Number(r.doanh_thu_san ?? 0);
+    if (soGiaoDich > 0 && doanhThuSan <= 0) {
+      sanChuaGhiDoanhThu.push({
+        id: r.id,
+        code: r.code,
+        pancakeId: r.pancake_id,
+        status: r.status,
+        doanhThuApp: Number(r.items_total),
+        sanTra: Number(r.san_tra),
+        soGiaoDich,
+        tuoiNgay: differenceInCalendarDays(startOfDay(now), startOfDay(r.ordered_at)),
+        conTrongCuaSoCho: !r.qua_cua_so,
+      });
+    }
+
     // Đã có số sàn thì SO NGAY, bất kể tuổi đơn.
     const thucNhanApp = Number(r.thuc_nhan);
     const sanTra = Number(r.san_tra);
@@ -308,6 +382,12 @@ export async function doiSoatTienVe(range: DateRange): Promise<DoiSoatTienVe> {
   hoanConTien.sort(
     (a, b) => Number(a.choGiaoDichDao) - Number(b.choGiaoDichDao) || b.sanTra - a.sanTra
   );
+  // Đơn ĐÃ quá cửa sổ chờ (cần kiểm tra) lên trước đơn còn trong cửa sổ (còn chờ
+  // sàn) — cùng luật sắp xếp với `hoanConTien`. Trong mỗi nhóm, tuổi đơn cao xếp
+  // trước vì đó là dấu hiệu bất thường rõ hơn.
+  sanChuaGhiDoanhThu.sort(
+    (a, b) => Number(a.conTrongCuaSoCho) - Number(b.conTrongCuaSoCho) || b.tuoiNgay - a.tuoiNgay
+  );
 
   return {
     khop,
@@ -322,5 +402,7 @@ export async function doiSoatTienVe(range: DateRange): Promise<DoiSoatTienVe> {
     // CHỈ cộng phần dương: một đơn hoàn có net âm (sàn đã đảo xong) không được kéo
     // tổng xuống, che mất tiền thật đang treo ở đơn khác.
     tongTienVeDonHoan: hoanConTien.reduce((s, d) => s + Math.max(0, d.sanTra), 0),
+    sanChuaGhiDoanhThu,
+    tongDoanhThuSanChuaGhi: sanChuaGhiDoanhThu.reduce((s, d) => s + d.doanhThuApp, 0),
   };
 }

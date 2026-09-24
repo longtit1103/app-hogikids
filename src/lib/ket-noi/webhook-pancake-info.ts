@@ -2,6 +2,8 @@ import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { WEBHOOK_PANCAKE_PATH } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
 import { prisma } from "@/lib/prisma";
 
+import type { Prisma } from "@prisma/client";
+
 /**
  * Webhook Pancake trong khối "Khóa kết nối": chặng Pancake → n8n KHÔNG có khóa nào để điền
  * (bảo mật nằm ở chặng n8n → app bằng bearer hạ tầng), nên phần cấu hình duy nhất thuộc về
@@ -53,12 +55,29 @@ function lucVN(d: Date): string {
   });
 }
 
+/**
+ * Bộ lọc "sự kiện CHỨNG MINH webhook còn sống". Export để test khoá được đúng phép lọc này thay vì
+ * chép lại điều kiện (chép là để nó trôi lệch).
+ *
+ * - `source=webhook`: dòng nạp bù (file/db-cu) là quá khứ, tính vào đây làm webhook chết trông như
+ *   còn sống.
+ * - Loại `ping-thu` vì CÙNG lý do: ping chỉ chứng minh chặng tay-người → n8n → app thông, KHÔNG
+ *   chứng minh Pancake còn bắn về. Trước 21/09 ping rơi vào `khong-nhan-dien` nên ít ra còn tô đỏ;
+ *   nay nó im lặng, để nó làm tươi mốc này thì một lượt bắn thử che được đúng thứ checklist xoay
+ *   path dặn phải chờ ("chờ thấy dữ liệu về path mới rồi MỚI tắt path cũ").
+ * - Viết OR thay vì `not` trần vì `processedAs` NULLABLE: đo thật trên DB test, `{ not: "ping-thu" }`
+ *   trả 0 cho dòng NULL còn dạng OR trả 1. NULL ở đây nghĩa là GHI KẾT CỤC THẤT BẠI — sự kiện có
+ *   thật, phải được tính.
+ */
+export const LOC_SU_KIEN_CHUNG_MINH_CON_SONG = {
+  source: "webhook",
+  OR: [{ processedAs: null }, { processedAs: { not: "ping-thu" } }],
+} satisfies Prisma.RawPancakeWebhookEventWhereInput;
+
 export async function docTrangThaiWebhookPancake(bayGio: Date = new Date()): Promise<TrangThaiWebhookShop[]> {
-  // CHỈ source=webhook: dòng nạp bù (file/db-cu) là quá khứ, tính vào đây sẽ làm webhook chết
-  // trông như còn sống.
   const moc = await prisma.rawPancakeWebhookEvent.groupBy({
     by: ["shopId"],
-    where: { source: "webhook" },
+    where: LOC_SU_KIEN_CHUNG_MINH_CON_SONG,
     _max: { receivedAt: true },
   });
   const theoShop = new Map(moc.map((m) => [m.shopId, m._max.receivedAt]));

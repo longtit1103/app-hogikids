@@ -1,3 +1,4 @@
+import { WEBHOOK_PANCAKE_PATH } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
 import { expect, test, type Page } from "@playwright/test";
 import { format } from "date-fns";
 
@@ -309,7 +310,14 @@ test.describe("Cài đặt", () => {
 
       // Khối webhook nằm trong thân thẻ Pancake: đủ URL để dán lại vào Pancake khi mất cấu hình.
       await expect(khoi.getByText("Webhook (sự kiện realtime từ Pancake)")).toBeVisible();
-      await expect(khoi.getByText("https://n8n.example.com/webhook/pancake-pos-hogikids1")).toBeVisible();
+      // URL suy TỪ NGUỒN SỰ THẬT (`WEBHOOK_PANCAKE_PATH`, rút từ chính file workflow n8n) chứ
+      // không ghi cứng: path webhook bị xoay khi cần (lần gần nhất 21/09 sau audit bảo mật), và
+      // mỗi bản sao path trong repo là thêm một cửa để nó rò ra bản public. Vẫn khẳng định URL
+      // ĐẦY ĐỦ chứ không phải mẩu chuỗi ngắn — mẩu ngắn thì trang nào cũng "thấy", thành phép
+      // kiểm mù.
+      await expect(
+        khoi.getByText(`https://n8n.example.com/webhook/${WEBHOOK_PANCAKE_PATH.shopee}`)
+      ).toBeVisible();
 
       // Lưu một khóa bí mật của thẻ Pancake — nút "Lưu khóa" chỉ mở khi có ô đã gõ.
       const nutLuu = thePancake.getByRole("button", { name: "Lưu khóa" });

@@ -106,6 +106,21 @@ describe("getExpensesPage", () => {
     expect(rows[0].source).toBe("ADS_API");
   });
 
+  /**
+   * Mảng RỖNG nghĩa là "có yêu cầu lọc mà không id nào hợp lệ" ⇒ phải ra 0 dòng. Trước đây gộp với
+   * `undefined` (`length > 0`) nên bộ lọc tự bốc hơi: link drill mang id danh mục ĐÃ ẨN sang sổ,
+   * đầu nhận loại thầm id đó rồi sổ liệt kê MỌI khoản chi trong kỳ — sai mà trông như đúng.
+   */
+  it("categoryIds rỗng → 0 dòng; undefined → không lọc (hai nghĩa KHÁC nhau)", async () => {
+    await seedExpensesAndOrders();
+    const rong = await getExpensesPage({ range: RANGE, categoryIds: [], sort: "date_desc", page: 1 });
+    expect(rong.count).toBe(0);
+    expect(rong.totalAmount).toBe(0);
+
+    const khongLoc = await getExpensesPage({ range: RANGE, sort: "date_desc", page: 1 });
+    expect(khongLoc.count).toBeGreaterThan(0);
+  });
+
   it("channelId='none' → chỉ chi phí không gắn kênh", async () => {
     await seedExpensesAndOrders();
     // Thêm 1 chi phí gắn kênh shopee để phân biệt.

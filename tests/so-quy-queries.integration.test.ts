@@ -72,6 +72,16 @@ async function seedFixture(): Promise<void> {
         settlementValue: 77_000_000,
         amountValue: 77_000_000,
       },
+      // TRONG kỳ nhưng KHÔNG trả thành công ⇒ tiền chưa về bank, KHÔNG được cộng. Thiếu ca này thì
+      // bỏ lọc `status: "PAID"` ở bộ lọc chung vẫn xanh (mọi lệnh trong kỳ đều PAID sẵn).
+      {
+        paymentId: "sq-pay-failed-t10",
+        shopId: "100975192",
+        status: "FAILED",
+        paidTime: new Date(2026, 9, 6),
+        settlementValue: 99_000_000,
+        amountValue: 99_000_000,
+      },
     ],
   });
 
@@ -364,6 +374,45 @@ async function seedKhoanVay(): Promise<{ giaiNganNgay: Date; kyDau: Date }> {
   });
   return { giaiNganNgay, kyDau };
 }
+
+describe("tinhSoQuyThang — đơn bán trực tiếp", () => {
+  /** Một đơn tối thiểu — chỉ các cột Sổ quỹ đọc + cột bắt buộc. */
+  const don = (pancakeId: string, channelId: string, status: "COMPLETED" | "RETURNED" | "PENDING", orderedAt: Date, paidAtShop: number) => ({
+    pancakeId,
+    code: pancakeId,
+    channelId,
+    status,
+    orderedAt,
+    itemsTotal: 999_000_000, // CỐ Ý lệch số đã trả: quỹ phải đọc paidAtShop, KHÔNG đọc doanh thu
+    paidAtShop,
+    syncedAt: new Date(),
+  });
+
+  it("chỉ cộng paidAtShop của đơn direct COMPLETED trong kỳ; đơn sàn/hoàn/chưa giao/khác tháng không vào", async () => {
+    await prisma.cashMovement.create({
+      data: { date: new Date(2026, 9, 1), kind: "CAPITAL_IN", amount: 1_000_000, description: "Mở sổ" },
+    });
+    await prisma.order.createMany({
+      data: [
+        don("bt-1", "direct", "COMPLETED", new Date(2026, 9, 21, 12, 51), 410_000),
+        don("bt-2", "direct", "COMPLETED", new Date(2026, 9, 21, 12, 55), 520_000),
+        don("bt-hoan", "direct", "RETURNED", new Date(2026, 9, 22), 300_000),
+        don("bt-cho", "direct", "PENDING", new Date(2026, 9, 23), 200_000),
+        don("bt-t11", "direct", "COMPLETED", new Date(2026, 10, 1, 0, 30), 100_000),
+        // Đơn sàn lỡ mang paidAtShop (không bao giờ xảy ra qua mapping) vẫn KHÔNG được vào quỹ.
+        don("san-1", "tiktok", "COMPLETED", new Date(2026, 9, 21), 777_000),
+      ],
+    });
+
+    const t10 = await tinhSoQuyThang(T10);
+    expect(t10.thu).toBe(1_000_000 + 930_000);
+    expect(t10.cuoiKy).toBe(1_930_000);
+
+    const t11 = await tinhSoQuyThang(T11);
+    expect(t11.dauKy).toBe(t10.cuoiKy);
+    expect(t11.thu).toBe(100_000);
+  });
+});
 
 describe("listKhoanVay / demKhoanVayCoKyChoDuyet", () => {
   it("dư nợ suy từ sổ; khoản còn hiệu lực xếp TRƯỚC khoản đã tất toán", async () => {

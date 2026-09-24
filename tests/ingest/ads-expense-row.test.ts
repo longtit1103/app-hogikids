@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { prepareAdsExpenseRow } from "@/lib/ingest/ads-expense-row";
+import { chuanBiDongAdsHoacBoQua, prepareAdsExpenseRow } from "@/lib/ingest/ads-expense-row";
 
 /**
  * Unit test THUẦN (không DB) ghim CÔNG THỨC CHUNG của một dòng chi tiêu quảng cáo — dùng cho cả
@@ -47,5 +47,61 @@ describe("prepareAdsExpenseRow", () => {
 
   it("thiếu tên chiến dịch → mô tả rơi về mã chiến dịch (không để dòng chi phí trống tên)", () => {
     expect(prepareAdsExpenseRow("META", row({ campaignName: "" })).description).toBe("C1");
+  });
+
+  /**
+   * Cửa MÁY phải đi CÙNG biên ngày với cửa FILE (`ads-csv.ts`): `[2000-01-01, hôm nay giờ VN]`.
+   * Ngày hỏng lọt vào là `Expense` nằm ở năm không range báo cáo nào phủ — tiền vào sổ mà không ai thấy.
+   */
+  describe("biên ngày [2000-01-01, hôm nay giờ VN]", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("mép dưới 2000-01-01 → nhận", () => {
+      expect(prepareAdsExpenseRow("META", row({ date: "2000-01-01" })).dateKey).toBe("2000-01-01");
+    });
+
+    // Đồng hồ ghim CHUỖI HẰNG (không suy từ `khoaNgayVnHomNay()`) — mù với lỗi "quên +7h" nếu suy
+    // ngược lại từ chính hàm đang bảo vệ. UTC 17:30Z hôm trước = 00:30 giờ VN hôm sau.
+    it("mép trên HÔM NAY giờ VN — đồng hồ ghim 2026-09-23T17:30:00Z (00:30 giờ VN 24/09) → 2026-09-24 nhận", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-09-23T17:30:00.000Z"));
+      expect(prepareAdsExpenseRow("META", row({ date: "2026-09-24" })).dateKey).toBe("2026-09-24");
+    });
+
+    it.each([
+      ["1970-01-01 (epoch 0 — phép tính ngày hỏng kinh điển)", "1970-01-01"],
+      ["1999-12-31 (sát mép dưới)", "1999-12-31"],
+      ["2126-08-19 (năm tương lai xa)", "2126-08-19"],
+      ["năm 5 chữ số — so chuỗi sẽ cho lọt nếu không kiểm khuôn", "20107-01-29"],
+    ])("%s → THROW, không trả dòng nào để ghi", (_nhan, date) => {
+      expect(() => prepareAdsExpenseRow("META", row({ date }))).toThrow(/ngoài khoảng/);
+    });
+
+    it("NGÀY MAI giờ VN — đồng hồ ghim 2026-09-23T17:30:00Z (hôm nay VN = 2026-09-24) → 2026-09-25 THROW", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-09-23T17:30:00.000Z"));
+      expect(() => prepareAdsExpenseRow("TIKTOK_ADS", row({ date: "2026-09-25" }))).toThrow(/ngoài khoảng/);
+    });
+  });
+
+  describe("chuanBiDongAdsHoacBoQua — bỏ ĐÚNG dòng hỏng, không ném, chỉ cảnh báo", () => {
+    it("dòng hợp lệ → trả object đã chuẩn bị, KHÔNG đẩy cảnh báo nào", () => {
+      const warnings: string[] = [];
+      const r = chuanBiDongAdsHoacBoQua("META", row(), warnings);
+      expect(r).not.toBeNull();
+      expect(r!.refId).toBe("META:2026-07-01:C1");
+      expect(warnings).toHaveLength(0);
+    });
+
+    it("dòng ngày ngoài biên (1970-01-01) → trả null, KHÔNG ném, đúng 1 cảnh báo nêu rõ ngày + lý do", () => {
+      const warnings: string[] = [];
+      const r = chuanBiDongAdsHoacBoQua("META", row({ date: "1970-01-01" }), warnings);
+      expect(r).toBeNull();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("1970-01-01");
+      expect(warnings[0]).toMatch(/ngoài khoảng/);
+    });
   });
 });

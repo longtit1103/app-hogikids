@@ -6,9 +6,10 @@ import {
   tinhQuyTuTong,
   TONG_RONG,
   type TongNguon,
+  nhanCuoiKySoQuy,
 } from "@/lib/so-quy/cong-thuc-so-quy";
 
-// Fixture spec §6 (đơn vị đồng): góp 100tr + vay 200tr = vào 300tr · rút vốn 10tr · TikTok PAID 30tr ·
+// Fixture mẫu (đơn vị đồng): góp 100tr + vay 200tr = vào 300tr · rút vốn 10tr · TikTok PAID 30tr ·
 // Shopee WITHDRAWAL −5tr · chi phí 2tr (ads TikTok) + 1tr (ads Meta) + 40tr (Nhập hàng) = 43tr ·
 // TiktokAdsSettlement −1,5tr ⇒ QUY = 300 − 10 + 30 + 5 − 43 + 1,5 = 283,5tr.
 const T: TongNguon = {
@@ -19,13 +20,14 @@ const T: TongNguon = {
   chiPhi: 43_000_000,
   adsTiktokViCoDau: -1_500_000,
   thuNhap: 0,
+  banTrucTiep: 0,
 };
 
-/** Cùng fixture §6 nhưng CÓ 8,5tr lãi sổ tiết kiệm đã nhận trong kỳ (bảng `ThuNhap`). */
+/** Cùng fixture mẫu nhưng CÓ 8,5tr lãi sổ tiết kiệm đã nhận trong kỳ (bảng `ThuNhap`). */
 const T_CO_LAI: TongNguon = { ...T, thuNhap: 8_500_000 };
 
 describe("tinhQuyTuTong", () => {
-  it("fixture spec ⇒ 283.500.000", () => expect(tinhQuyTuTong(T)).toBe(283_500_000));
+  it("fixture mẫu ⇒ 283.500.000", () => expect(tinhQuyTuTong(T)).toBe(283_500_000));
 
   // KHÔNG viết `-10_000_000 + 10_000_000`: TS gộp thành hằng 0 ngay lúc biên dịch nên phép kiểm
   // "rút rồi đảo rút tự triệt tiêu" thành vô nghĩa. Kiểm từng dấu riêng — dấu là thứ dễ sai.
@@ -38,6 +40,12 @@ describe("tinhQuyTuTong", () => {
     expect(tinhQuyTuTong({ ...TONG_RONG, chiPhi: 2_000_000, adsTiktokViCoDau: -1_500_000 })).toBe(
       -500_000
     ));
+
+  it("tiền khách trả tại shop (bán trực tiếp) CỘNG vào quỹ, xếp vế THU", () => {
+    const t = { ...TONG_RONG, banTrucTiep: 930_000 };
+    expect(tinhQuyTuTong(t)).toBe(930_000);
+    expect(thuChiTuTong(t)).toEqual({ thu: 930_000, chi: 0 });
+  });
 
   it("thu − chi ≡ số dư", () => {
     const { thu, chi } = thuChiTuTong(T);
@@ -71,7 +79,7 @@ describe("nguồn thu nhập ngoài bán hàng (ThuNhap)", () => {
     expect(tinhQuyTuTong({ ...TONG_RONG, thuNhap: 8_500_000 })).toBe(8_500_000);
   });
 
-  it("fixture spec + lãi 8,5tr ⇒ 292.000.000", () => {
+  it("fixture mẫu + lãi 8,5tr ⇒ 292.000.000", () => {
     expect(tinhQuyTuTong(T_CO_LAI)).toBe(292_000_000);
   });
 
@@ -90,5 +98,31 @@ describe("nguồn thu nhập ngoài bán hàng (ThuNhap)", () => {
     );
     expect(r.dauKy + r.thu - r.chi).toBe(r.cuoiKy);
     expect(r.cuoiKy).toBe(342_000_000); // 50tr đầu kỳ + 292tr trong kỳ
+  });
+});
+
+/**
+ * Nhãn "Cuối kỳ" dùng chung cho thẻ Quỹ và tab Sổ quỹ. Ca quan trọng là ca nhãn PHẢI đổi: tháng đang
+ * chạy mà có khoản ghi ngày sau hôm nay — bỏ vế so hai số hoặc gắn cứng nhãn là ca này đỏ.
+ */
+describe("nhanCuoiKySoQuy", () => {
+  it("tháng hiện tại, cuối kỳ ≠ quỹ hôm nay ⇒ nhãn DỰ KIẾN hết tháng + ghi chú", () => {
+    expect(nhanCuoiKySoQuy({ cuoiKy: 90_000_000, quyHomNay: 100_000_000 }, true)).toEqual({
+      duKien: true,
+      nhan: "Cuối kỳ (dự kiến hết tháng)",
+      ghiChu: "đã tính khoản ghi ngày sau hôm nay",
+    });
+  });
+
+  it("tháng hiện tại nhưng hai số bằng nhau ⇒ nhãn trơn", () => {
+    expect(nhanCuoiKySoQuy({ cuoiKy: 100_000_000, quyHomNay: 100_000_000 }, true)).toEqual({
+      duKien: false,
+      nhan: "Cuối kỳ",
+      ghiChu: undefined,
+    });
+  });
+
+  it("tháng đã qua dù hai số khác nhau ⇒ nhãn trơn (quỹ hôm nay không liên quan kỳ cũ)", () => {
+    expect(nhanCuoiKySoQuy({ cuoiKy: 90_000_000, quyHomNay: 100_000_000 }, false).duKien).toBe(false);
   });
 });

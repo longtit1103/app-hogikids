@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { format, parse } from "date-fns";
 
 import type { TrangThaiLechGiaVon } from "@/lib/gia-von/trang-thai-lech-gia-von";
 import { cauNhacPhieuNhap, type TrangThaiPhieuNhap } from "@/lib/nhap-hang/trang-thai-phieu-nhap";
+import type { CanhBaoSapCan } from "@/lib/so-quy/du-bao-quy-types";
 
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
@@ -24,6 +26,7 @@ export function ShellChrome({
   lechGiaVon,
   soKhoanVayCoKyCho,
   phieuNhapChuaGhi,
+  canhBaoSapCanQuy,
   children,
 }: {
   shopName: string;
@@ -46,6 +49,8 @@ export function ShellChrome({
    * (`nhap-hang/trang-thai-phieu-nhap.ts`, cùng hàm thuần với giá vốn).
    */
   phieuNhapChuaGhi: TrangThaiPhieuNhap;
+  /** Dự báo quỹ 30 ngày chạm ngưỡng tối thiểu — null = không chạm hoặc chưa mở sổ (`docCanhBaoSapCan`). */
+  canhBaoSapCanQuy: CanhBaoSapCan;
   children: React.ReactNode;
 }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -216,6 +221,26 @@ export function ShellChrome({
                 </span>
               )}
               <span className="text-muted-foreground">Nhấn để xem danh sách và duyệt →</span>
+            </Link>
+          )}
+          {/*
+            NHẮC VIỆC quỹ sắp cạn — cùng hạng vàng "có việc chờ bạn xem", KHÔNG phải "hệ đang hỏng".
+            `docCanhBaoSapCan()` (lib) tự bắt lỗi và trả null khi hỏng nên layout không cần bọc thêm ở
+            đây — null cũng là trạng thái bình thường "không chạm ngưỡng trong 30 ngày tới".
+          */}
+          {canhBaoSapCanQuy && (
+            <Link
+              href="/tai-chinh?tab=so-quy"
+              className="flex flex-col gap-0.5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-ink shadow-sm transition hover:bg-warning/15"
+              data-testid="banner-du-bao-quy-sap-can"
+            >
+              {/* Chưa đặt ngưỡng (= 0) thì "chạm" nghĩa là quỹ dự báo ÂM — nói thẳng như vậy; câu chi tiết
+                  hơn (quỹ đã dưới mức ngay hôm nay…) nằm ở khối cảnh báo tab Sổ quỹ. */}
+              <span className="font-semibold">
+                {canhBaoSapCanQuy.nguongDaDat ? "Dự báo quỹ chạm mức tối thiểu ngày " : "Dự báo quỹ ÂM ngày "}
+                {format(parse(canhBaoSapCanQuy.ngay, "yyyy-MM-dd", new Date()), "dd/MM")} — xem Sổ quỹ
+              </span>
+              <span className="text-muted-foreground">Nhấn để xem chi tiết →</span>
             </Link>
           )}
           </div>

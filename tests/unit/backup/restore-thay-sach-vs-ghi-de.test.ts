@@ -85,12 +85,32 @@ describe("deploy/restore.sh — THAY SẠCH (chạy bằng supabase_admin)", () 
     expect(sh).toMatch(/drop_schema_dich "\$DB" "\$SCHEMA"/);
   });
 
-  it("nhánh custom gọi dọn schema TRƯỚC pg_restore — `--clean` không dọn nổi object sinh sau backup", () => {
+  it("nhánh custom gọi dọn schema TRƯỚC lệnh NẠP — `--clean` không dọn nổi object sinh sau backup", () => {
     const dau = sh.indexOf('if [[ "$fmt" == "custom" ]]');
-    const cuoi = sh.indexOf("else", dau);
+    // Cắt ở `else` thụt ĐÚNG 2 dấu cách = else của chính nhánh custom. Từ 22/09/2026 bên trong
+    // nhánh còn một `if/else` thụt 4 dấu cách (cờ BO_QUA_KIEM_NOI_DUNG_DUMP) — bắt `else` đầu tiên
+    // sẽ cắt cụt nhánh và làm test đỏ giả.
+    const cuoi = sh.indexOf("\n  else\n", dau);
+    expect(cuoi).toBeGreaterThan(dau);
     const nhanhCustom = sh.slice(dau, cuoi);
+    // Neo vào ĐÚNG lệnh NẠP (`-U supabase_admin -d`), KHÔNG neo vào `pg_restore` đầu tiên: từ
+    // 22/09/2026 nhánh này còn một lượt `pg_restore … -f -` để BUNG dump ra SQL phẳng đem soi, và
+    // lượt bung đó CỐ Ý đứng trước bước dọn (mọi bước kiểm phải xong trước khi có gì bị phá huỷ).
+    const iNap = nhanhCustom.indexOf("-U supabase_admin -d");
+    expect(iNap).toBeGreaterThan(-1);
     expect(nhanhCustom.indexOf("drop_schema_dich")).toBeGreaterThan(-1);
-    expect(nhanhCustom.indexOf("drop_schema_dich")).toBeLessThan(nhanhCustom.indexOf("pg_restore --clean"));
+    expect(nhanhCustom.indexOf("drop_schema_dich")).toBeLessThan(iNap);
+  });
+
+  it("nhánh custom soi NỘI DUNG dump TRƯỚC khi dọn schema — không phá rồi mới kiểm", () => {
+    const dau = sh.indexOf('if [[ "$fmt" == "custom" ]]');
+    const nhanhCustom = sh.slice(dau, sh.indexOf("\n  else\n", dau));
+    const iSoi = nhanhCustom.indexOf('assert_sql_only_schema "$SCHEMA" "$sql_bung"');
+    const iDon = nhanhCustom.indexOf("drop_schema_dich");
+    // TOC chỉ nói dump đụng object nào, không nói câu lệnh là gì: một .dump có TOC hợp lệ vẫn có
+    // thể chứa `COPY … FROM PROGRAM`. Đường này nạp bằng superuser THẬT nên đó là lệnh chạy được.
+    expect(iSoi).toBeGreaterThan(-1);
+    expect(iSoi).toBeLessThan(iDon);
   });
 
   it("KHÔNG tạo lại schema khi dump tự tạo — psql sẽ chết ở 'đã tồn tại' ngay sau khi vừa xoá", () => {

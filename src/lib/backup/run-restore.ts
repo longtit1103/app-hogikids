@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { constants as zlibConstants, gunzip, gunzipSync } from "node:zlib";
 
-import { N8N_RO_ROLE, N8N_SETTING_VIEW } from "@/lib/n8n/role-doc-kho-khoa";
+import { KEY_N8N_DUOC_DOC, N8N_RO_ROLE, N8N_SETTING_VIEW } from "@/lib/n8n/role-doc-kho-khoa";
 
 import { assertDumpOnlySchema } from "./assert-dump-schema";
 import { assertPlainSqlOnlySchema } from "./assert-plain-sql-only-schema";
@@ -26,10 +26,54 @@ const gunzipAsync = promisify(gunzip);
 // psql/pg_restore stdout khi nạp có thể dài (danh sách lệnh) — nới maxBuffer.
 const MAX_RESTORE_STDOUT = 64 * 1024 * 1024; // 64MB
 
-// Trần bung nén TOÀN PHẦN cho đường plain-gzip (chống gzip-bomb OOM). Dump .sql
-// của app hiện chỉ vài MB; 2GiB dư dả cho tăng trưởng nhưng vẫn chặn bomb nở
-// hàng chục GB vào RAM.
-const MAX_UNZIPPED_BYTES = 2 * 1024 * 1024 * 1024; // 2GiB
+/**
+ * Trần bung nén TOÀN PHẦN cho đường plain-gzip. Ràng buộc KHÔNG phải gzip-bomb, cũng KHÔNG phải trần
+ * chuỗi V8 — mà là RAM mà chính `assertPlainSqlOnlySchema` ngốn khi soi.
+ *
+ * ĐO THẬT 22/09/2026 (node v25.8.2, file SQL dạng dump thật: DDL + một khối COPY lớn, chạy trọn
+ * `assertPlainSqlOnlySchema`). Cột "heap 1536" mô phỏng container: `mem_limit: 3g` + Node tự chọn
+ * old-space theo cgroup ⇒ ≈1,5 GiB.
+ *
+ *   SQL phẳng | RSS đỉnh | hệ số | heap 1536 MiB
+ *    5,1 MiB  |  339 MiB |  66×  | OK
+ *   20,5 MiB  |  958 MiB |  47×  | OK
+ *   25,7 MiB  | 1111 MiB |  43×  | OK
+ *   41,0 MiB  | 1736 MiB |  42×  | OK          ← file lớn nhất còn sống
+ *   45,0 MiB  |     —    |   —   | CHẾT        ← FATAL: JavaScript heap out of memory
+ *   51,3 MiB  | 2159 MiB |  42×  | CHẾT
+ *  102,6 MiB  | 3614 MiB |  35×  | CHẾT (chết cả ở heap 2048)
+ *
+ * Guard giữ 4–5 bản soi phái sinh của cùng một văn bản (`noCopy`, `scanSys`, `scan`, `fScan`,
+ * `gScan`, `ijScan`) cộng mảng dòng ⇒ hệ số ~42–66×. Không phải GC lười: ép
+ * `--max-old-space-size` thì chết thật.
+ *
+ * TRẦN CŨ 2GiB LÀ TRẦN GIẢ, lệch ~50–100 lần so với trần THẬT — file 45 MiB đã đủ giết tiến trình
+ * app GIỮA LÚC PHỤC HỒI, trong khi hằng nói "còn 2GiB nữa mới chặn". (Trần chuỗi V8 512 MiB —
+ * `buffer.constants.MAX_STRING_LENGTH = 536.870.888`, đo cùng ngày — cũng cao hơn trần thật ~12 lần,
+ * nên nó KHÔNG phải ràng buộc cần quan tâm.)
+ *
+ * CHỌN 24 MiB: dưới mốc-còn-sống 41 MiB khoảng 1,7×, chừa chỗ cho RAM nền của Next.js (phép đo trên
+ * chạy trong tiến trình tsx trần, RSS nền chỉ 56 MiB — trong container con số đó lớn hơn nhiều).
+ * Đỉnh dự kiến ≈ 24 × 43 ≈ 1,03 GiB.
+ *
+ * VƯỢT TRẦN THÌ TỪ CHỐI, KHÔNG PHẢI HỎNG: đây là đổi một cú OOM-kill câm giữa lượt phục hồi lấy một
+ * câu từ chối rõ ràng CÓ LỐI THOÁT — `deploy/restore.sh` trên host. ĐO THẬT 23/09/2026 trên chính
+ * dump prod: nó soi 621,4 MiB SQL phẳng trong 3,5 s với RSS đỉnh 111 MiB (0,18× — vì awk BỎ payload
+ * COPY, thứ chiếm gần trọn file), và trọn lượt phục hồi vào DB nháp hết 24 s. Nó vốn đã là đường
+ * chính thức cho file lớn (>~100MB, giới hạn Cloudflare). Nới hằng này lên mà không đo lại = mở
+ * lại đúng cú OOM đó.
+ *
+ * 🔴 HỆ QUẢ ĐÃ ĐO, ĐỪNG TƯỞNG LÀ HỒI QUY: SQL phẳng của dump prod là **621,4 MiB** ⇒ một file
+ * `.sql.gz` của dữ liệu thật KHÔNG BAO GIỜ qua được trần này — và cũng không bao giờ qua nổi trần
+ * chuỗi V8 512 MiB dù có nới. Đường `.sql.gz` trong app đã VÔ DỤNG với dữ liệu cỡ prod từ trước bản
+ * vá; khác biệt là trước đây nó OOM-kill câm, nay nó từ chối và chỉ sang `deploy/restore.sh`.
+ * Đường `.dump` custom của app KHÔNG dính trần này (nó chỉ soi TOC, không bung ra chuỗi).
+ */
+const MAX_UNZIPPED_BYTES = 24 * 1024 * 1024; // 24 MiB — xem bảng số đo ở trên
+/** Mốc file lớn nhất ĐO ĐƯỢC còn sống ở heap 1536 MiB. Test chốt trần phải nằm dưới mốc này. */
+export const MOC_SQL_CON_SONG_DO_DUOC_BYTES = 41 * 1024 * 1024;
+/** Trần đang áp — `export` để test chốt được, không cho ai nới lại lên mức 2GiB cũ. */
+export const TRAN_BUNG_NEN_BYTES = MAX_UNZIPPED_BYTES;
 
 /** Số byte đầu (sau giải nén) đủ cho detectRestoreFormat/assertNotArchive. */
 const HEAD_BYTES = 512;
@@ -331,13 +375,24 @@ async function donSchemaChoDumpPlain(dbUrl: string, schema: string, sql: string)
  *  - `to_regclass`: nạp bản dump quá cũ (chưa có bảng `Setting`) ⇒ bỏ qua câu cấp quyền đó thay vì
  *    làm hỏng cả bước.
  */
-export function sqlCapQuyenDocN8n(schema: string): string {
-  // Từ 2026-08-21 role đọc VIEW "${N8N_SETTING_VIEW}" thay bảng "Setting" gốc — view loại 2 khoá
-  // hạ tầng (n8nApiKey/n8nDbRoPassword) khỏi tầm mắt n8n (xem role-doc-kho-khoa.ts).
+export function sqlKhoiPhucDuongDocN8n(schema: string): string {
+  // Từ 2026-08-21 role đọc VIEW "${N8N_SETTING_VIEW}" thay bảng "Setting" gốc.
+  //
+  // DỰNG LẠI ĐỊNH NGHĨA VIEW (thêm 21/09/2026) — không chỉ cấp quyền: định nghĩa view nằm TRONG
+  // dump. Nạp một bản backup tạo trước 21/09 là view quay về bản FAIL-OPEN cũ (`key NOT IN (…)`,
+  // phơi 43/45 key gồm cả kho token Meta/TikTok) — và không gì phát hiện được: phần cấp quyền vẫn
+  // chạy, ô cảnh báo ở /cai-dat chỉ đo QUYỀN chứ không bao giờ đọc ĐỊNH NGHĨA view. Câu dưới ép
+  // view về đúng allowlist hiện hành sau MỌI lượt phục hồi.
+  const dsKey = KEY_N8N_DUOC_DOC.map((k) => `'${k}'`).join(", ");
   return `DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${N8N_RO_ROLE}') THEN
     EXECUTE 'GRANT USAGE ON SCHEMA "${schema}" TO ${N8N_RO_ROLE}';
+    IF to_regclass('"${schema}"."Setting"') IS NOT NULL THEN
+      EXECUTE $q$CREATE OR REPLACE VIEW "${schema}"."${N8N_SETTING_VIEW}" AS
+        SELECT key, value FROM "${schema}"."Setting" WHERE key IN (${dsKey})$q$;
+      EXECUTE 'ALTER VIEW "${schema}"."${N8N_SETTING_VIEW}" SET (security_barrier = true)';
+    END IF;
     IF to_regclass('"${schema}"."${N8N_SETTING_VIEW}"') IS NOT NULL THEN
       EXECUTE 'GRANT SELECT ON "${schema}"."${N8N_SETTING_VIEW}" TO ${N8N_RO_ROLE}';
     END IF;
@@ -358,14 +413,14 @@ $$;`;
 async function capLaiQuyenDocChoN8n(dbUrl: string, schema: string): Promise<void> {
   const { cmd, args, env } = restoreArgsFromUrl(dbUrl, "plain-gzip"); // nhánh này = psql
   try {
-    await runPgClient(cmd, [...args, "-c", sqlCapQuyenDocN8n(schema)], env, HAN_NHANH);
+    await runPgClient(cmd, [...args, "-c", sqlKhoiPhucDuongDocN8n(schema)], env, HAN_NHANH);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(
       `Phục hồi xong nhưng KHÔNG cấp lại được quyền đọc cho ${N8N_RO_ROLE} (${message}). ` +
         `Workflow n8n sẽ chết ở node lấy khoá cho tới khi chạy tay 2 câu: ` +
         `GRANT USAGE ON SCHEMA "${schema}" TO ${N8N_RO_ROLE}; ` +
-        `GRANT SELECT ON "${schema}"."Setting" TO ${N8N_RO_ROLE};`,
+        `GRANT SELECT ON "${schema}"."${N8N_SETTING_VIEW}" TO ${N8N_RO_ROLE};`,
     );
   }
 }
@@ -454,7 +509,7 @@ export async function runRestore(
   }
 
   // (3) plain-gzip (.sql.gz): gunzip HEAD bounded → assertNotArchive → bung full
-  // (có trần chống gzip-bomb) → assertPlainSqlOnlySchema TRƯỚC mọi thao tác DB.
+  // (có trần, xem MAX_UNZIPPED_BYTES) → assertPlainSqlOnlySchema TRƯỚC mọi thao tác DB.
   // Nếu bất kỳ guard nào throw (TAR toàn-server / không-SQL / CREATE SCHEMA khác
   // đích) → propagate, DB NGUYÊN VẸN (chưa chạy DROP SCHEMA).
   assertNotArchive(gunzipHead(fileBuf)); // throw ở đây = KHÔNG đụng DB, CHƯA bung full.
@@ -462,9 +517,17 @@ export async function runRestore(
   try {
     unzipped = await gunzipAsync(fileBuf, { maxOutputLength: MAX_UNZIPPED_BYTES });
   } catch (err) {
-    // Vượt trần = nghi gzip-bomb → message tiếng Việt rõ thay vì ERR_BUFFER_TOO_LARGE.
+    // Vượt trần → message tiếng Việt rõ thay vì ERR_BUFFER_TOO_LARGE. KHÔNG gọi đây là
+    // "gzip-bomb": trần nay đặt theo RAM mà bước KIỂM NỘI DUNG ngốn (~43× kích thước SQL, đo
+    // 22/09), nên một dump THẬT nhưng to cũng chạm trần — câu báo phải chỉ lối thoát, không
+    // buộc tội người dùng. (Bomb thật vẫn bị chặn: nó vượt trần từ lâu trước mức đó.)
     if ((err as NodeJS.ErrnoException).code === "ERR_BUFFER_TOO_LARGE") {
-      throw new Error("File .sql.gz bung nén vượt trần 2GiB — nghi gzip-bomb, từ chối phục hồi.");
+      throw new Error(
+        `File .sql.gz bung ra lớn hơn trần ${Math.round(MAX_UNZIPPED_BYTES / 1024 / 1024)}MB — ` +
+          `bước kiểm nội dung cần RAM gấp khoảng 43 lần kích thước SQL, vượt trần là tiến trình app ` +
+          `bị giết giữa lượt phục hồi. Hãy phục hồi bằng "deploy/restore.sh" chạy trên máy chủ ` +
+          `(đường đó soi bằng awk/grep, tốn RAM khoảng 2-7 lần kích thước thay vì 43 lần).`,
+      );
     }
     throw err;
   }

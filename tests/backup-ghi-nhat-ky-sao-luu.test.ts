@@ -63,9 +63,20 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+/**
+ * Request rỗng cho route. Từ `POST(request)` (thêm 2026-09-20 cùng cổng `chanRequestKhacOrigin`)
+ * thì route ĐỌC header, gọi `POST()` không đối số sẽ ném TypeError trước cả nhánh nghiệp vụ.
+ * CỐ Ý không đặt `Origin`: cổng fail-open khi vắng header đó (curl/cron), nên các khẳng định dưới
+ * đây vẫn đo đúng nghiệp vụ chứ không vô tình đo cổng CSRF. Cổng đó có suite riêng
+ * (`tests/chan-request-khac-origin.test.ts`).
+ */
+function req(): Request {
+  return new Request("http://localhost/api/backup", { method: "POST" });
+}
+
 describe("POST /api/backup — ghi nhật ký sao lưu", () => {
   it("dump OK → 200 kèm file, và sinh ĐÚNG 1 dòng SyncLog BACKUP status OK có sizeBytes", async () => {
-    const res = await POST();
+    const res = await POST(req());
 
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Disposition")).toMatch(/attachment; filename="hogikids-.*\.dump"/);
@@ -83,7 +94,7 @@ describe("POST /api/backup — ghi nhật ký sao lưu", () => {
   it("dump LỖI → 500, và vẫn sinh dòng SyncLog BACKUP status ERROR kèm nội dung lỗi", async () => {
     vi.mocked(runPgDump).mockRejectedValue(new Error("pg_dump: connection to server failed"));
 
-    const res = await POST();
+    const res = await POST(req());
 
     expect(res.status).toBe(500);
     expect((await res.json()).error).toBe("pg_dump: connection to server failed");
@@ -106,7 +117,7 @@ describe("POST /api/backup — ghi nhật ký sao lưu", () => {
         return DUMP;
       });
 
-      const res = await POST();
+      const res = await POST(req());
 
       // File vẫn trả về cho người bấm nút — chỉ dòng log bị bỏ, đó là đánh đổi cố ý.
       expect(res.status).toBe(200);
@@ -119,7 +130,7 @@ describe("POST /api/backup — ghi nhật ký sao lưu", () => {
         throw new Error("pg_dump chết giữa lượt phục hồi");
       });
 
-      const res = await POST();
+      const res = await POST(req());
 
       expect(res.status).toBe(500);
       expect(await docLogBackup()).toHaveLength(0);
@@ -138,7 +149,7 @@ describe("docTrangThaiSaoLuu", () => {
   });
 
   it("bấm Sao lưu ngay xong → màn Cài đặt thấy 'ok' kèm dung lượng file (vòng ghi→đọc khép kín)", async () => {
-    expect((await POST()).status).toBe(200);
+    expect((await POST(req())).status).toBe(200);
 
     const trangThai = await docTrangThaiSaoLuu();
     expect(trangThai.muc).toBe("ok");

@@ -272,6 +272,7 @@ export function CashMovementFormModal({
               max={todayStr}
               onChange={(e) => {
                 setDate(e.target.value);
+                setFieldErrors((prev) => ({ ...prev, date: "" }));
                 // Đổi ngày ⇒ câu hỏi cũ hết hiệu lực, bắt xác nhận lại từ đầu.
                 setHoiTruocD0(false);
               }}

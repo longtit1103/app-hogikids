@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
  * này và chạy pass). Push lại mỗi lần vừa thừa vừa chậm.
  *
  * Cung cấp:
- *  - seedReference(): upsert 4 kênh + 8 danh mục chi phí hệ thống (dữ liệu
+ *  - seedReference(): upsert 5 kênh + 8 danh mục chi phí hệ thống (dữ liệu
  *    tham chiếu, tồn tại suốt vòng đời suite; gọi 1 lần trong beforeAll).
  *  - truncateBusinessTables(): xoá các bảng nghiệp vụ theo thứ tự an toàn FK
  *    (gọi trong beforeEach để mỗi test khởi đầu sạch); GIỮ lại Channel +
@@ -23,6 +23,7 @@ const CHANNELS = [
   { id: "tiktok", name: "TikTok Shop", color: "#141413", platformFeePct: 6, paymentFeePct: 2, sortOrder: 2 },
   { id: "facebook", name: "Facebook/Instagram", color: "#5db8a6", platformFeePct: 0, paymentFeePct: 0, sortOrder: 3 },
   { id: "website", name: "Website/Khác", color: "#e8a55a", platformFeePct: 0, paymentFeePct: 0, sortOrder: 4 },
+  { id: "direct", name: "Bán trực tiếp", color: "#6a8fd8", platformFeePct: 0, paymentFeePct: 0, sortOrder: 5 },
 ];
 
 const EXPENSE_CATEGORIES = [
@@ -89,6 +90,9 @@ export async function truncateBusinessTables(): Promise<void> {
   // Thùng rác khôi phục — không FK nào cả hai chiều, xoá độc lập. Bỏ sót thì ảnh chụp của suite
   // trước sống sang suite sau và mọi phép đếm dòng thùng rác đều lệch.
   await prisma.banGhiDaXoa.deleteMany();
+  // Bản chốt số dư cuối tháng — không FK, xoá độc lập. Sót là bản chốt của suite trước sống sang suite
+  // sau và phép "lưu lại cùng tháng ⇒ vẫn 1 dòng" xanh giả.
+  await prisma.soDuChotThang.deleteMany();
   await prisma.variant.deleteMany();
   await prisma.product.deleteMany();
   // Silver "tiền đã về" TikTok (Phase 2) + ví Shopee (Phase 3) — không FK, xoá độc lập.

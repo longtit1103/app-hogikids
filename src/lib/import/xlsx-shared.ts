@@ -10,6 +10,46 @@ import * as XLSX from "xlsx";
  */
 
 /**
+ * Trần số dòng cho mọi file import đi qua `readSheetRows`.
+ *
+ * Vì sao cần dù Server Action đã bị `bodySizeLimit: 3mb` chặn: một file .xlsx ≤3MB **nén** vẫn bung
+ * ra hàng triệu dòng (xlsx là ZIP). Trần byte không nói gì về số dòng sau khi giải nén.
+ *
+ * Con số lấy từ SỐ ĐO prod 22/09, không phải ước lượng: `RawShopeeWalletTxn` **77 dòng** tổng từ
+ * trước tới nay, `Expense` **13.529 dòng** tích luỹ nhiều tháng. 200.000 là dư hơn 4 bậc độ lớn so
+ * với file thật — nó chặn ca ác ý, KHÔNG cản việc chủ shop làm hằng tháng.
+ */
+export const MAX_SHEET_ROWS = 200_000;
+
+/** Ném khi workbook vượt `MAX_SHEET_ROWS`. Có kiểu riêng để caller phân biệt với "file hỏng". */
+export class LoiFileQuaNhieuDong extends Error {
+  constructor(readonly soDong: number) {
+    super(
+      `File có ${soDong.toLocaleString("vi-VN")} dòng, vượt trần ${MAX_SHEET_ROWS.toLocaleString("vi-VN")} dòng — từ chối để khỏi treo máy chủ.`,
+    );
+    this.name = "LoiFileQuaNhieuDong";
+  }
+}
+
+/**
+ * Số dòng tối đa truyền cho `sheetRows` của `XLSX.read`. `+1` để phân biệt "đúng trần" với "vượt trần".
+ * PHẢI truyền vào chính `XLSX.read` — xem lý do ở `readSheetRows`.
+ */
+export const TRAN_DOC_SHEET = MAX_SHEET_ROWS + 1;
+
+/**
+ * Ném nếu sheet vượt trần. Đọc `!fullref` trước: sheetjs CHỈ đặt khoá này khi `sheetRows` thật sự
+ * cắt bớt, và nó giữ vùng THẬT — nhờ vậy báo được đúng số dòng mà không phải nạp hết file.
+ */
+export function kiemTranSoDong(sheet: XLSX.WorkSheet): void {
+  const refThat = sheet["!fullref"] ?? sheet["!ref"];
+  if (!refThat) return;
+  const vung = XLSX.utils.decode_range(refThat);
+  const soDong = vung.e.r - vung.s.r + 1;
+  if (soDong > MAX_SHEET_ROWS) throw new LoiFileQuaNhieuDong(soDong);
+}
+
+/**
  * Giải mã bytes → chuỗi. Nhận diện BOM UTF-16 LE/BE; còn lại coi là UTF-8
  * (TextDecoder mặc định tự nuốt BOM UTF-8). File Ads Manager hay xuất UTF-16.
  */
@@ -31,12 +71,28 @@ function decodeText(bytes: Uint8Array): string {
 export function readSheetRows(buf: ArrayBuffer): (string | number | Date)[][] {
   const bytes = new Uint8Array(buf);
   const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b; // "PK" → .xlsx
+  // 🔴 Trần phải ép NGAY TRONG `XLSX.read` bằng `sheetRows`, KHÔNG phải kiểm sau.
+  // `XLSX.read` dựng TOÀN BỘ object ô trước khi trả về, nên mọi phép kiểm đặt sau nó đều là kiểm
+  // MUỘN: thiệt hại bộ nhớ/CPU đã xảy ra rồi. Bản vá đầu của đợt này mắc đúng lỗi đó — kiểm `!ref`
+  // sau `XLSX.read` — nên vô hiệu với chính ca tấn công cần chặn.
+  // Đo thật 22/09 (xlsx 0.20.3, file 300.000 dòng): `sheetRows` cắt đúng, và `!fullref` vẫn báo
+  // vùng THẬT (`A1:B300001`) trong khi `!ref` là vùng đã cắt (`A1:B200001`) ⇒ vẫn báo được số dòng
+  // thật cho người dùng mà không phải nạp hết.
   const wb = isZip
-    ? XLSX.read(buf, { type: "array", cellDates: true })
-    : XLSX.read(decodeText(bytes), { type: "string", raw: true });
+    ? XLSX.read(buf, { type: "array", cellDates: true, sheetRows: TRAN_DOC_SHEET })
+    : XLSX.read(decodeText(bytes), { type: "string", raw: true, sheetRows: TRAN_DOC_SHEET });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   if (!sheet) return [];
-  return XLSX.utils.sheet_to_json<(string | number | Date)[]>(sheet, { header: 1, defval: "" });
+  kiemTranSoDong(sheet);
+
+  const aoa = XLSX.utils.sheet_to_json<(string | number | Date)[]>(sheet, { header: 1, defval: "" });
+
+  // ⚠️ Nhánh CSV KHÔNG đặt `!fullref` khi bị cắt (đo thật 22/09) ⇒ nếu chỉ dựa vào khối trên thì một
+  // CSV quá dài sẽ bị CẮT CÂM: nhập thiếu tiền mà không ai biết — tệ hơn hẳn việc từ chối thẳng.
+  // Chạm đúng trần nghĩa là còn dòng phía sau bị bỏ ⇒ từ chối.
+  if (aoa.length >= TRAN_DOC_SHEET) throw new LoiFileQuaNhieuDong(aoa.length);
+
+  return aoa;
 }
 
 /**

@@ -5,6 +5,7 @@ import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 
 import { KhoanVayAddButton } from "./khoan-vay-add-button";
 import { KhoanVayTable } from "./khoan-vay-table";
+import { LichTraNoDuKienCard } from "./lich-tra-no-du-kien-card";
 import { KyTraNoCard } from "./ky-tra-no-card";
 
 /**
@@ -13,8 +14,14 @@ import { KyTraNoCard } from "./ky-tra-no-card";
  *
  * Dưới bảng là các thẻ kỳ trả nợ CHỜ DUYỆT — mỗi khoản còn hiệu lực tối đa một thẻ, vì kỳ được duyệt
  * tuần tự từng cái một (con dấu `lastDueHandled` đơn điệu). Server component thuần hiển thị.
+ *
+ * Cuối khối là bảng DỰ KIẾN N kỳ tới (chỉ đọc, không ghi được) — đặt SAU thẻ chờ duyệt để thứ bấm
+ * được nằm trên thứ chỉ để xem.
  */
 export function KhoanVaySection({ loans }: { loans: KhoanVayRow[] }) {
+  // Một mốc thời gian DUY NHẤT cho cả khối: gọi `new Date()` ở nhiều chỗ thì hai thẻ có thể rơi hai
+  // bên nửa đêm và nói hai chuyện khác nhau về cùng một kỳ.
+  const homNay = new Date();
   const kyCho = loans.filter(
     (l): l is KhoanVayRow & { kyCho: DeXuatKy } => l.kyCho !== null && l.closedAt === null
   );
@@ -47,6 +54,7 @@ export function KhoanVaySection({ loans }: { loans: KhoanVayRow[] }) {
       {kyCho.map((loan) => (
         <KyTraNoCard key={`${loan.id}:${format(loan.kyCho.denNgay, "yyyy-MM-dd")}`} loan={loan} />
       ))}
+      <LichTraNoDuKienCard loans={loans} homNay={homNay} />
     </div>
   );
 }

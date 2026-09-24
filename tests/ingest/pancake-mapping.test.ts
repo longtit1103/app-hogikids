@@ -348,17 +348,18 @@ describe("mapStatus", () => {
 });
 
 describe("mapChannel", () => {
+  const nguon = (order_sources_name: string | null) => ({ order_sources_name, marketplace_id: null });
   it("nhận diện kênh", () => {
     const w: string[] = [];
-    expect(mapChannel("Shopee", w)).toBe("shopee");
-    expect(mapChannel("Tiktok", w)).toBe("tiktok");
-    expect(mapChannel("Facebook", w)).toBe("facebook");
+    expect(mapChannel(nguon("Shopee"), w)).toBe("shopee");
+    expect(mapChannel(nguon("Tiktok"), w)).toBe("tiktok");
+    expect(mapChannel(nguon("Facebook"), w)).toBe("facebook");
     expect(w).toHaveLength(0);
   });
   it("nguồn lạ/rỗng → website + warning", () => {
     const w: string[] = [];
-    expect(mapChannel("Zalo", w)).toBe("website");
-    expect(mapChannel(null, w)).toBe("website");
+    expect(mapChannel(nguon("Zalo"), w)).toBe("website");
+    expect(mapChannel(nguon(null), w)).toBe("website");
     expect(w).toHaveLength(2);
   });
 });

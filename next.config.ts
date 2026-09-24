@@ -31,6 +31,49 @@ const nextConfig: NextConfig = {
     // sharp ^0.35.3, KHÔNG phải nhờ cờ này.
     unoptimized: true,
   },
+
+  // `X-Powered-By: Next.js` mặc định BẬT. Nó không mở cửa nào, nhưng là thứ nói thẳng cho máy quét
+  // biết cần thử bộ CVE nào — mà app này vừa dính một CVE critical của chính Next (16.3.1,
+  // GHSA-2xp9-vwfh-vxw4). Tắt đi: không mất gì, bớt một chỉ dẫn miễn phí cho kẻ dò.
+  poweredByHeader: false,
+
+  /**
+   * Security header toàn cục. App là bảng điều khiển tài chính phơi công khai qua Cloudflare
+   * Tunnel, trước bản vá này KHÔNG có một header phòng thủ nào (chỉ `nosniff` đặt tay ở 3 route
+   * phục vụ bytes).
+   *
+   * Vì sao vẫn đáng thêm dù đã có `sameSite=lax`: cookie lax chặn được clickjacking THEO HỆ QUẢ
+   * (iframe cross-site không mang cookie ⇒ trang nhúng chỉ hiện màn đăng nhập), nhưng đó là hiệu
+   * ứng phụ của một cơ chế sinh ra cho việc khác. Đổi một thuộc tính cookie là mất luôn lớp chắn
+   * mà không ai nhận ra. `X-Frame-Options: DENY` nói thẳng điều mình muốn.
+   *
+   * HAI thứ CỐ Ý KHÔNG đặt ở đây:
+   *  - **HSTS** — origin chỉ nghe `127.0.0.1:3000`, TLS do Cloudflare terminate ở edge. Header
+   *    HSTS phát từ Next không bao giờ tới trình duyệt qua đường HTTP trần, nên đặt ở đây là
+   *    trang trí. Chỗ đúng là Cloudflare → SSL/TLS → Edge Certificates. Và đặt `max-age` +
+   *    `includeSubDomains` thôi, KHÔNG `preload`: preload gần như không gỡ được và ghim cứng cho
+   *    MỌI subdomain của `example.com` — dựng một subdomain HTTP sau này là gãy.
+   *  - **CSP** — Next inline bootstrap script nên CSP đúng phải đi qua nonce ở middleware. Làm vội
+   *    bằng `'unsafe-inline'` là mua một header không bảo vệ gì; làm đúng thì phải kèm Playwright
+   *    smoke vì CSP sai làm TRẮNG TRANG. Tách thành lượt riêng.
+   */
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          // Cấm nhúng vào iframe ở MỌI nơi — app không có ca nhúng hợp lệ nào.
+          { key: "X-Frame-Options", value: "DENY" },
+          // Cấm trình duyệt đoán lại Content-Type (đã đặt tay ở /api/uploads + 2 route export;
+          // đây là lớp phủ toàn cục cho mọi route còn lại).
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // App không dùng 3 quyền này — khai tường minh để một thư viện bên thứ ba cũng không xin được.
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

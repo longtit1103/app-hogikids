@@ -9,7 +9,7 @@ export type ExportSheet = { name: string; rows: Record<string, string | number>[
  * nào của app dài tới mức đó, nhưng cắt cho chắc thay vì để thư viện ném lỗi).
  */
 export async function exportTabToExcel(
-  tab: "pnl" | "san-pham" | "xu-huong",
+  tab: "pnl" | "san-pham" | "xu-huong" | "so-quy",
   sheets: ExportSheet[],
   ky: string
 ): Promise<void> {

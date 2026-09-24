@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { endOfDay, startOfDay, subDays } from "date-fns";
 
 import { isInflow } from "@/lib/cash-movements/cash-movement-kinds";
@@ -9,46 +10,73 @@ import {
   type SoQuyThang,
   type TongNguon,
 } from "@/lib/so-quy/cong-thuc-so-quy";
+import { tongTienBanTrucTiep } from "@/lib/so-quy/tien-ban-truc-tiep";
 
 /**
- * Đọc số cho thẻ "Quỹ còn lại" (spec §5.2). Trục DÒNG TIỀN thuần: chỉ đọc tiền ĐÃ VÀO/RA THẬT —
+ * Đọc số cho thẻ "Quỹ còn lại". Trục DÒNG TIỀN thuần: chỉ đọc tiền ĐÃ VÀO/RA THẬT —
  * ghi tay, TikTok về bank, Shopee rút ví, Sổ chi phí, ads TikTok sàn trừ ví, sổ thu nhập (lãi tiết
- * kiệm đã nhận).
+ * kiệm đã nhận), tiền khách trả tại shop (đơn bán trực tiếp).
  *
- * TUYỆT ĐỐI KHÔNG chạm bảng đơn hàng, không đọc tiền DỰ KIẾN (số thu theo đơn đã giao) và không đọc
- * net sàn chốt còn nằm trong ví — cộng chúng cùng tiền đã về là đếm 2 lần. Lưới
+ * KHÔNG đọc tiền DỰ KIẾN (số thu theo đơn đã giao) và không đọc net sàn chốt còn nằm trong ví — cộng
+ * chúng cùng tiền đã về là đếm 2 lần. Ngoại lệ DUY NHẤT chạm bảng đơn là `tien-ban-truc-tiep.ts`
+ * (đúng cột tiền khách đã trả, đúng kênh bán trực tiếp). Lưới
  * `tests/unit/so-quy/khong-dung-tien-du-kien.test.ts` đọc chính mã nguồn thư mục này để canh.
  */
 
+/** Khoảng ngày đã chuẩn hoá biên (đầu ngày → cuối ngày giờ VN); thiếu `gte` ⇒ không chặn dưới. */
+export type KhoangNgayQuy = { gte?: Date; lte: Date };
+
 /** Biên kỳ: `tu = null` ⇒ không chặn dưới (dùng cho lượt đếm toàn lịch sử). */
-function bien(tu: Date | null, den: Date) {
+export function bien(tu: Date | null, den: Date): KhoangNgayQuy {
   return tu === null ? { lte: endOfDay(den) } : { gte: startOfDay(tu), lte: endOfDay(den) };
 }
 
-/** 6 lượt đọc song song → 7 con số của `TongNguon`. Kỳ rỗng (tu > den) là hợp lệ: mọi số 0. */
+/**
+ * Bộ lọc `where` DUY NHẤT của 6 nguồn tiền đọc từ bảng riêng (nguồn thứ 7 — đơn bán trực tiếp — có
+ * bộ lọc chung riêng ở `tien-ban-truc-tiep.ts`). Mọi lượt đọc tiền quỹ — tổng của thẻ "Quỹ còn lại"
+ * (`docTongNguon`) lẫn từng dòng của Sổ quỹ dòng chạy — PHẢI lấy `where` từ đây: mỗi bên tự viết là
+ * sớm muộn trôi nhau (thêm/bớt một điều kiện ở một bên), và bảng chi tiết cộng ra số khác thẻ.
+ *
+ * Mỗi nguồn neo đúng CỘT NGÀY tiền thật vào/ra: đổi sang cột khác (vd ngày đồng bộ) là tiền nhảy kỳ.
+ */
+export function boLocNguonQuy(khoang: KhoangNgayQuy) {
+  return {
+    /** Ghi tay — mọi loại; chiều vào/ra suy từ `kind` lúc cộng, không lọc ở đây. */
+    ghiTay: { date: khoang } satisfies Prisma.CashMovementWhereInput,
+    /** TikTok chuyển về bank: CHỈ lệnh đã trả, theo mốc trả. */
+    tiktokVeBank: { status: "PAID", paidTime: khoang } satisfies Prisma.TiktokPaymentWhereInput,
+    /** Ví Shopee: CHỈ lệnh rút (có dấu — dòng đảo lệnh rút mang dương), theo mốc giao dịch ví. */
+    shopeeRutVi: { type: "WITHDRAWAL", txnTime: khoang } satisfies Prisma.ShopeeSettlementWhereInput,
+    /** Sổ chi phí — MỌI danh mục (kể cả Nhập hàng: tiền thật ra khỏi quỹ dù không vào Lãi/Lỗ), mọi nguồn. */
+    chiPhi: { date: khoang } satisfies Prisma.ExpenseWhereInput,
+    /** Ads TikTok sàn trừ thẳng vào ví, theo mốc tạo lệnh. */
+    adsTiktokTruVi: { orderCreateTime: khoang } satisfies Prisma.TiktokAdsSettlementWhereInput,
+    /** Thu nhập tài chính đã nhận, theo ngày tiền về. */
+    thuNhap: { date: khoang } satisfies Prisma.ThuNhapWhereInput,
+  };
+}
+
+/** 7 lượt đọc song song → 8 con số của `TongNguon`. Kỳ rỗng (tu > den) là hợp lệ: mọi số 0. */
 export async function docTongNguon(tu: Date | null, den: Date): Promise<TongNguon> {
   if (tu !== null && startOfDay(tu) > endOfDay(den)) return { ...TONG_RONG };
   const khoang = bien(tu, den);
+  const loc = boLocNguonQuy(khoang);
 
-  const [ghiTay, tiktok, shopee, chiPhi, adsVi, thuNhap] = await Promise.all([
-    prisma.cashMovement.groupBy({ by: ["kind"], where: { date: khoang }, _sum: { amount: true } }),
-    prisma.tiktokPayment.aggregate({
-      where: { status: "PAID", paidTime: khoang },
-      _sum: { settlementValue: true },
-    }),
-    prisma.shopeeSettlement.aggregate({
-      where: { type: "WITHDRAWAL", txnTime: khoang },
-      _sum: { amount: true },
-    }),
-    prisma.expense.aggregate({ where: { date: khoang }, _sum: { amount: true } }),
+  const [ghiTay, tiktok, shopee, chiPhi, adsVi, thuNhap, banTrucTiep] = await Promise.all([
+    prisma.cashMovement.groupBy({ by: ["kind"], where: loc.ghiTay, _sum: { amount: true } }),
+    prisma.tiktokPayment.aggregate({ where: loc.tiktokVeBank, _sum: { settlementValue: true } }),
+    prisma.shopeeSettlement.aggregate({ where: loc.shopeeRutVi, _sum: { amount: true } }),
+    prisma.expense.aggregate({ where: loc.chiPhi, _sum: { amount: true } }),
     prisma.tiktokAdsSettlement.aggregate({
-      where: { orderCreateTime: khoang },
+      where: loc.adsTiktokTruVi,
       _sum: { settlementAmount: true },
     }),
-    // Thu nhập ngoài bán hàng (v1: lãi sổ tiết kiệm). Tiền THẬT đã về tài khoản đúng ngày `date` —
-    // KHÔNG phải số dự kiến, nên đường đọc này hợp lệ với lưới canh thư mục. Lọc cùng `khoang` với
-    // 5 nguồn trên: sai biên kỳ ở đây là lãi nhảy tháng, ĐẦU KỲ(N+1) lệch CUỐI KỲ(N).
-    prisma.thuNhap.aggregate({ where: { date: khoang }, _sum: { amount: true } }),
+    // Thu nhập ngoài bán hàng (hiện chỉ lãi sổ tiết kiệm). Tiền THẬT đã về tài khoản đúng ngày `date`
+    // — KHÔNG phải số dự kiến, nên đường đọc này hợp lệ với lưới canh thư mục. Cùng `khoang` với các
+    // nguồn trên: sai biên kỳ ở đây là lãi nhảy tháng, ĐẦU KỲ(N+1) lệch CUỐI KỲ(N).
+    prisma.thuNhap.aggregate({ where: loc.thuNhap, _sum: { amount: true } }),
+    // Cùng `khoang` với các nguồn trên — lệch biên là tiền bán nhảy tháng, ĐẦU KỲ(N+1) ≠ CUỐI KỲ(N).
+    tongTienBanTrucTiep(khoang),
   ]);
 
   // Chiều vào/ra SUY từ `kind` (một định nghĩa duy nhất ở cash-movement-kinds) — không cột riêng.
@@ -68,6 +96,7 @@ export async function docTongNguon(tu: Date | null, den: Date): Promise<TongNguo
     chiPhi: chiPhi._sum.amount ?? 0,
     adsTiktokViCoDau: adsVi._sum.settlementAmount ?? 0,
     thuNhap: thuNhap._sum.amount ?? 0,
+    banTrucTiep,
   };
 }
 
@@ -135,8 +164,9 @@ async function docAdsTiktok(
       where: { categoryId: "ads", adsSource: "TIKTOK_ADS", date: khoang },
       _sum: { amount: true },
     }),
+    // Cùng bộ lọc với phần quỹ cộng lại — so hai số ads chỉ có nghĩa khi đọc đúng tập mà quỹ cộng.
     prisma.tiktokAdsSettlement.aggregate({
-      where: { orderCreateTime: khoang },
+      where: boLocNguonQuy(khoang).adsTiktokTruVi,
       _sum: { settlementAmount: true },
     }),
   ]);

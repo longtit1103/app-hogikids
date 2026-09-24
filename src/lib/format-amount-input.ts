@@ -15,3 +15,17 @@ export function parseAmountInput(raw: string): number {
 export function formatAmountInput(amount: number): string {
   return amount ? new Intl.NumberFormat("vi-VN").format(amount) : "";
 }
+
+/**
+ * Ô số dư NGÂN HÀNG của bản chốt cuối tháng: như `parseAmountInput` nhưng GIỮ dấu trừ đầu chuỗi —
+ * thấu chi làm số dư bank âm là hợp lệ. Nhận cả "-" ASCII lẫn "−" (U+2212) vì `formatVnd` in dấu
+ * trừ dài và chủ shop có thể dán lại từ màn hình. Chỉ ô này dùng; các ô tiền khác vẫn không âm.
+ */
+export function parseSignedAmountInput(raw: string): number {
+  const am = /^\s*[-−]/.test(raw);
+  const n = parseAmountInput(raw);
+  // "-" gõ dở hoặc "-0" ⇒ trả 0 thật, KHÔNG phải -0: `Object.is(-0, 0)` là false và `formatVnd(-0)` in
+  // "-0 ₫" — cả test lẫn màn hình đều lộ dấu trừ của một số không.
+  if (n === 0) return 0;
+  return am ? -n : n;
+}

@@ -1,3 +1,4 @@
+import { lyDoTuChoiDichN8n } from "@/lib/n8n/kiem-dich-den-n8n";
 import { SYNC_NOW_WEBHOOK_PATH } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
 import { prisma } from "@/lib/prisma";
 
@@ -14,15 +15,27 @@ export type NguonSyncNow = "env" | "setting";
 
 export async function giaiUrlSyncNow(): Promise<{ url: string; nguon: NguonSyncNow } | null> {
   const tuEnv = (process.env.N8N_SYNC_WEBHOOK_URL ?? "").trim();
-  if (tuEnv) return { url: tuEnv, nguon: "env" };
+  // Env là override tường minh của người vận hành nên KHÔNG kiểm dải — nhưng vẫn gác denylist
+  // link-local/metadata, vì đó là đích không bao giờ hợp lệ dù ai đặt.
+  if (tuEnv) {
+    const lyDo = lyDoTuChoiDichN8n(tuEnv);
+    // ⚠️ Caller dịch `null` thành "Chưa cấu hình kết nối n8n — điền n8n URL ở Cài đặt", tức NÓI SAI
+    // lý do cho ca này: người vận hành sẽ đi mò trong `/cai-dat` trong khi lỗi nằm ở `.env`. Chưa
+    // tách được lý do lên UI (đổi hợp đồng trả về đụng cả badge trạng thái) nên tối thiểu phải để
+    // lại một dòng ở log máy chủ, đừng im lặng.
+    if (lyDo) {
+      console.error(`[giaiUrlSyncNow] N8N_SYNC_WEBHOOK_URL bị từ chối: ${lyDo}`);
+      return null;
+    }
+    return { url: tuEnv, nguon: "env" };
+  }
 
   const row = await prisma.setting.findUnique({ where: { key: "n8nBaseUrl" } });
   const base = row?.value.trim().replace(/\/+$/, "") ?? "";
   if (!base) return null;
-  try {
-    const u = new URL(base);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-  } catch {
+  const lyDoSetting = lyDoTuChoiDichN8n(base);
+  if (lyDoSetting) {
+    console.error(`[giaiUrlSyncNow] Setting.n8nBaseUrl bị từ chối: ${lyDoSetting}`);
     return null;
   }
   return { url: `${base}/webhook/${SYNC_NOW_WEBHOOK_PATH}`, nguon: "setting" };

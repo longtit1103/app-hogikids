@@ -30,6 +30,7 @@ const EMPTY: PnlBreakdown = {
   interest: 0,
   financialIncome: 0,
   other: 0,
+  otherCategoryIds: [],
   netProfit: 0,
   orderCount: 0,
   returnBomOrderCount: 0,

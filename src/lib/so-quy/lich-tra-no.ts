@@ -1,7 +1,9 @@
 import { addMonths, differenceInCalendarDays, endOfDay, startOfDay } from "date-fns";
 
+import { gocDeXuatKep, tienGuiSeNhanLai, tongChuyenNganHang } from "@/lib/so-quy/tien-ky-tra-no";
+
 /**
- * Lịch kỳ trả + đề xuất lãi/gốc (spec §5.2). THUẦN, không Prisma. Mọi mốc `startOfDay` giờ VN TRƯỚC
+ * Lịch kỳ trả + đề xuất lãi/gốc. THUẦN, không Prisma. Mọi mốc `startOfDay` giờ VN TRƯỚC
  * khi đếm ngày — lệch giờ một tí là lệch nguyên một ngày lãi.
  *
  * Lãi/gốc chỉ là ĐỀ XUẤT: chủ shop sửa được trước khi bấm ghi. Vay KỲ HẠN tính lãi trên dư nợ ĐẦU kỳ
@@ -29,8 +31,8 @@ export type KhoanVayLich = {
   /** Số tiền dòng LOAN_IN duy nhất của khoản; 0 nếu khoản mang sang. */
   giaiNgan: number;
   /**
-   * NGÀY của chính dòng LOAN_IN (null khi `giaiNgan = 0`). Cố ý TÁCH khỏi `startDate`: dư nợ theo
-   * spec §5.2 đếm theo ngày của DÒNG TIỀN, còn `startDate` chỉ là due_0 để đếm ngày kỳ 1 và chủ shop
+   * NGÀY của chính dòng LOAN_IN (null khi `giaiNgan = 0`). Cố ý TÁCH khỏi `startDate`: dư nợ
+   * đếm theo ngày của DÒNG TIỀN, còn `startDate` chỉ là due_0 để đếm ngày kỳ 1 và chủ shop
    * sửa được. Lấy `startDate` làm mốc giải ngân là cộng tiền vay vào dư nợ trước ngày nó thật sự về.
    */
   giaiNganNgay: Date | null;
@@ -291,4 +293,109 @@ export function soKyChoTheoLich(
     },
     homNay
   );
+}
+
+/** Một kỳ trong bảng DỰ KIẾN — `DeXuatKy` cộng các số chỉ có nghĩa khi xếp thành chuỗi. */
+export type KyDuKien = DeXuatKy & {
+  /** Gốc thực trả — `DeXuatKy.goc` KẸP về dư nợ thật còn lại (`gocDeXuatKep`). Dùng số NÀY để hiển thị. */
+  gocThuc: number;
+  /** Dư nợ gốc SAU khi trả kỳ này. Bằng dư nợ trước kỳ kế tiếp theo xây dựng. */
+  duNoSauKy: number;
+  /** TIỀN THẬT chuyển ngân hàng — qua `tongChuyenNganHang`, đã trừ phần sổ tiết kiệm cấn ở kỳ cuối. */
+  tongChuyen: number;
+  /** Phần ngân hàng trả lại ngay sau kỳ này (chỉ kỳ cuối, khoản có tiền gửi bắt buộc). */
+  hoanTienGui: number;
+  /** Kỳ ĐÃ tới hạn mà chưa đóng dấu. Nhiều kỳ có thể quá hạn cùng lúc (khoản khai lùi ngày). */
+  quaHan: boolean;
+  /** Kỳ quá hạn ĐẦU TIÊN — đúng cái `kyChoDuyet` trả về, tức thẻ ghi sổ đang hiện CHÍNH NÓ. */
+  dangChoDuyet: boolean;
+};
+
+/**
+ * `soKy` kỳ SẮP TỚI của một khoản vay — bảng DỰ KIẾN để chủ shop liệu dòng tiền, KHÔNG phải số phải
+ * nộp thật (ngân hàng thu theo giấy báo) và KHÔNG có đường nào ghi sổ từ đây: `kyChoDuyet` vẫn là lối
+ * ghi DUY NHẤT.
+ *
+ * 🔴 BA CHỖ DỄ SAI, đều đã có tiền lệ trong repo nên không được viết lại công thức:
+ *
+ * 1. **Dư nợ phải mô phỏng dây chuyền.** `deXuatKy` tính `duNoDauKy` từ `traGoc` THẬT. Gọi cho k, k+1,
+ *    k+2 với CÙNG `traGoc` thì dư nợ đứng yên ⇒ lãi kỳ sau sai, và sai DỒN. Test sẵn có đã nói ra
+ *    ("kỳ 2 sau khi trả gốc kỳ 1 … dư nợ 183.333.333"). Nên mỗi vòng NẠP khoản trả vừa dự kiến vào
+ *    một BẢN SAO của `traGoc`.
+ * 2. **Gốc phải kẹp về dư nợ THẬT** (`gocDeXuatKep`) — chủ shop trả bớt gốc bằng tay giữa kỳ thì dòng
+ *    đó nằm SAU mốc đầu kỳ nên `deXuatKy` không thấy, và bảng sẽ hứa trả nhiều hơn số còn nợ.
+ * 3. **Tiền thật chuyển ngân hàng đi qua `tongChuyenNganHang`** — kỳ cuối ngân hàng CẤN sổ tiết kiệm
+ *    đang giữ vào số phải nộp. Tự cộng `lãi + gốc + tiền gửi` là in ra con số thứ hai lệch với thẻ ghi
+ *    sổ ngay bên cạnh, đúng sự cố mà `tien-ky-tra-no.ts` được lập ra để diệt.
+ *
+ * Bắt đầu từ kỳ chưa đóng dấu đầu tiên — kể cả kỳ ĐÃ quá hạn. Bỏ kỳ đó đi thì "Σ N kỳ tới" hụt đúng
+ * kỳ gần nhất, tức sai ở chỗ chủ shop cần chính xác nhất.
+ *
+ * THUẦN: không DB, không đọc đồng hồ (nhận `homNay`), KHÔNG đụng mảng `traGoc` của caller.
+ */
+export function duKienNKy(args: {
+  lich: KhoanVayLich;
+  traGoc: TraGoc[];
+  lastDueHandled: Date | null;
+  homNay: Date;
+  soKy: number;
+  /** Dư nợ gốc THẬT hôm nay (`KhoanVayRow.duNo`) — gốc bảng dự kiến kẹp theo số này, không theo lịch. */
+  duNoHienTai: number;
+  /** Σ `DEPOSIT_OUT` − `DEPOSIT_IN` hôm nay — phần ngân hàng sẽ cấn lại ở kỳ cuối. */
+  tienGuiDangGiu: number;
+  /** Khoản đã tất toán ⇒ không còn nghĩa vụ nào, trả rỗng. Cổng ở ĐÂY chứ không chỉ ở call-site. */
+  closedAt: Date | null;
+}): KyDuKien[] {
+  const { lich: l, traGoc, lastDueHandled, homNay, soKy, closedAt } = args;
+  if (closedAt !== null || !coLich(l) || soKy <= 0) return [];
+  const conDau = lastDueHandled === null ? null : startOfDay(lastDueHandled);
+  const han = endOfDay(homNay);
+  const tran = soKyToiDa(l);
+  // Bản sao: caller truyền thẳng `loan.traGoc` dùng cho cả thẻ kỳ chờ duyệt và hộp tất toán — ghi vào
+  // mảng đó là hai nơi kia đọc phải khoản trả GIẢ.
+  const mo = [...traGoc];
+  const ra: KyDuKien[] = [];
+  // Hai số chạy theo chuỗi: dư nợ thật còn lại, và Σ tiền gửi ngân hàng đang giữ tại thời điểm mỗi kỳ.
+  let duNoConLai = Math.max(0, args.duNoHienTai);
+  let tienGuiGiu = args.tienGuiDangGiu;
+
+  for (let k = 1; k <= tran && ra.length < soKy; k++) {
+    const due = ngayTraKy(l, k);
+    if (conDau !== null && due <= conDau) continue; // kỳ đã đóng dấu — bỏ qua, không phải dừng
+    const dx = deXuatKy(l, mo, k, lastDueHandled);
+    // Cùng vị từ "hết nghĩa vụ" với `kyChoDuyet`: dư nợ 0 KHÔNG đủ để dừng, vì BULLET khai lãi cố
+    // định và tiền gửi bắt buộc đều độc lập dư nợ.
+    if (dx.duNoDauKy <= 0 && dx.lai <= 0 && dx.tienGui <= 0) break;
+
+    const gocThuc = gocDeXuatKep({ gocDeXuat: dx.goc, duNoHienTai: duNoConLai });
+    const hoanTienGui = tienGuiSeNhanLai({
+      termMonths: l.termMonths,
+      tienGuiDangGiu: tienGuiGiu,
+      kyThuMay: k,
+      tienGuiKyNay: dx.tienGui,
+    });
+    const quaHan = due <= han;
+    ra.push({
+      ...dx,
+      gocThuc,
+      duNoSauKy: duNoConLai - gocThuc,
+      tongChuyen: tongChuyenNganHang({
+        lai: dx.lai,
+        goc: gocThuc,
+        tienGui: dx.tienGui,
+        tienGuiSeNhanLai: hoanTienGui,
+      }),
+      hoanTienGui,
+      quaHan,
+      // Chỉ kỳ quá hạn ĐẦU TIÊN mới là kỳ thẻ ghi sổ đang hiện — khoản khai lùi ngày có 2–3 kỳ quá
+      // hạn nhưng `kyChoDuyet` chỉ trả đúng một cái.
+      dangChoDuyet: quaHan && !ra.some((x) => x.quaHan),
+    });
+
+    duNoConLai -= gocThuc;
+    tienGuiGiu += dx.tienGui - hoanTienGui;
+    // Khoản trả gốc GIẢ của chính kỳ vừa dự kiến ⇒ kỳ kế thấy dư nợ đã giảm khi tính LÃI.
+    if (gocThuc > 0) mo.push({ ngay: dx.denNgay, soTien: gocThuc });
+  }
+  return ra;
 }

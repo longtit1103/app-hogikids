@@ -1,3 +1,5 @@
+import { laNgayChiTieuAdsHopLy, NGAY_CHI_TIEU_ADS_SOM_NHAT } from "@/lib/ingest/ngay-chi-tieu-ads-hop-ly";
+
 import { normHeader, parseVnInt, readSheetRows } from "./xlsx-shared";
 
 /**
@@ -28,6 +30,12 @@ const COLUMN_ALIASES: Record<AdsPreset, { date: string[]; name: string[]; amount
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
+/** "yyyy-MM-dd" → "dd/MM/yyyy" — CHỈ để hiển thị lý do lỗi cho người, không dùng để so sánh/lưu. */
+function isoParaDmy(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
 /**
  * Ngày (y, m, d) có THẬT trên lịch không.
  *
@@ -50,19 +58,6 @@ function findColumn(header: (string | number | Date)[], aliases: string[]): numb
     if (wanted.includes(normalized[i])) return i;
   }
   return -1;
-}
-
-/** Ngày sớm nhất một ô trong file ads được phép mang. Trước mốc này là lỗi đọc ô, không phải dữ liệu thật. */
-const NGAY_SOM_NHAT = "2000-01-01";
-
-/**
- * Khoá ngày "hôm nay" theo giờ VN.
- *
- * VN = UTC+7 CỐ ĐỊNH (không có DST) nên cộng 7 giờ rồi lấy phần ngày của ISO là đúng biên ngày VN —
- * bất biến #3, không lệ thuộc TZ của máy chạy test/CI.
- */
-function khoaNgayVnHomNay(): string {
-  return new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 /** Đọc ô ngày thô → "yyyy-MM-dd" (VN) hoặc null. Nhận Date (xlsx), serial số, hoặc chuỗi. */
@@ -106,6 +101,8 @@ function docKhoaNgay(value: unknown): string | null {
  * range báo cáo nào phủ: tiền vào sổ mà không ai thấy, cũng không có dòng lỗi nào để chủ shop sửa file.
  * Biên trên khớp đường nhập tay (`ngay-ghi-tay-schema.ts` cũng chặn tương lai).
  *
+ * Biên + phép kiểm khuôn nằm ở `laNgayChiTieuAdsHopLy` — DÙNG CHUNG với cửa máy (`prepareAdsExpenseRow`).
+ *
  * ⚠️ PHẢI kiểm KHUÔN khoá trước khi so chuỗi. So chuỗi chỉ tương đương so thứ tự ngày khi năm đúng
  * 4 chữ số, mà `docKhoaNgay` KHÔNG pad phần năm (`pad2` chỉ áp cho tháng/ngày) — serial Excel lớn cho
  * ra năm 5-6 chữ số và khi đó so chuỗi cho kết quả NGƯỢC: `"20107-01-29"` (serial 6.650.000) đứng
@@ -114,11 +111,26 @@ function docKhoaNgay(value: unknown): string | null {
  * server action ⇒ CẢ FILE bị từ chối kèm câu "không đọc được file" thay vì chỉ ra đúng dòng sai.
  * Đo thật: dải lọt là 6.610.891–6.705.853 và 72.354.541–73.304.171 — đúng tầm số tiền VND đời thường
  * (6,6 triệu · 72 triệu), tức ca "số tiền lạc sang cột ngày" mà cổng này sinh ra để bắt.
+ *
+ * Trả kèm PHÂN LOẠI lý do (không chỉ `null`) để `parseAdsFile` báo đúng câu cho chủ shop sửa file:
+ * ô sai khuôn/không đọc được (chuỗi rác, ngày không có thật, hoặc năm không đúng 4 chữ số — ca
+ * "số tiền lạc sang cột ngày" ở trên) và ô đọc được nhưng NGOÀI khoảng hợp lệ (thường là serial Excel
+ * nhỏ đọc ra 1899/190x, hoặc ngày tương lai) là HAI nguyên nhân khác nhau, cần câu sửa khác nhau.
  */
-function parseDateCell(value: unknown): string | null {
+type KetQuaParseNgay =
+  | { hopLe: true; khoa: string }
+  | { hopLe: false; ngoaiKhoang: false }
+  | { hopLe: false; ngoaiKhoang: true; khoa: string };
+
+function parseDateCell(value: unknown): KetQuaParseNgay {
   const khoa = docKhoaNgay(value);
-  if (khoa === null || !/^\d{4}-\d{2}-\d{2}$/.test(khoa)) return null;
-  return khoa >= NGAY_SOM_NHAT && khoa <= khoaNgayVnHomNay() ? khoa : null;
+  if (khoa === null) return { hopLe: false, ngoaiKhoang: false };
+  if (laNgayChiTieuAdsHopLy(khoa)) return { hopLe: true, khoa };
+  // Đọc được (docKhoaNgay đã xác nhận ngày có thật trên lịch) nhưng bị `laNgayChiTieuAdsHopLy` từ
+  // chối — phân biệt NGOÀI KHOẢNG (khuôn 4-2-2 chữ số đúng, chỉ lệch biên ngày) với SAI KHUÔN (năm
+  // không đúng 4 chữ số, xem chú thích phía trên).
+  const dungKhuon = /^\d{4}-\d{2}-\d{2}$/.test(khoa);
+  return dungKhuon ? { hopLe: false, ngoaiKhoang: true, khoa } : { hopLe: false, ngoaiKhoang: false };
 }
 
 /**
@@ -158,11 +170,18 @@ export function parseAdsFile(
     const isBlank = raw.every((c) => c === "" || c == null);
     if (isBlank) continue;
 
-    const dateStr = parseDateCell(raw[dateCol]);
-    if (!dateStr) {
-      errors.push({ line, reason: "Thiếu hoặc sai định dạng ngày" });
+    const ngay = parseDateCell(raw[dateCol]);
+    if (!ngay.hopLe) {
+      errors.push({
+        line,
+        reason: ngay.ngoaiKhoang
+          ? `Ngày ngoài khoảng ${isoParaDmy(NGAY_CHI_TIEU_ADS_SOM_NHAT)} → hôm nay — ô có thể đang là ` +
+            `số serial Excel hoặc ngày tương lai (đọc được: ${isoParaDmy(ngay.khoa)})`
+          : "Thiếu hoặc sai định dạng ngày",
+      });
       continue;
     }
+    const dateStr = ngay.khoa;
     const amount = parseVnInt(raw[amountCol]);
     if (amount === null) {
       errors.push({ line, reason: "Thiếu hoặc sai số tiền" });

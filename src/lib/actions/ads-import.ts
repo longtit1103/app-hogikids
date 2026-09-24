@@ -7,6 +7,7 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { dangDungLaiTuKhoTho, dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { parseAdsFile, type AdsPreset, type ParsedAdsRow } from "@/lib/import/ads-csv";
 import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
+import { LoiFileQuaNhieuDong } from "@/lib/import/xlsx-shared";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 
@@ -159,7 +160,9 @@ function docFileAds(
 ): { ok: true; rows: ParsedAdsRow[]; errors: { line: number; reason: string }[] } | { ok: false; error: string } {
   try {
     return { ok: true, ...parseAdsFile(buf, preset) };
-  } catch {
+  } catch (err) {
+    // Vượt trần số dòng là ca KHÁC HẲN "file hỏng" — nói đúng lý do (xem `LoiFileQuaNhieuDong`).
+    if (err instanceof LoiFileQuaNhieuDong) return { ok: false, error: err.message };
     return { ok: false, error: "Không đọc được file — file hỏng hoặc không phải CSV/XLSX xuất từ Ads Manager" };
   }
 }

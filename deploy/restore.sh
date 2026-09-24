@@ -56,9 +56,25 @@ OWNER_ROLE=hogikids
 # app vẫn đăng nhập bình thường (ingest/ads/webhook tắt câm, không có báo động).
 N8N_RO_ROLE=n8n_config_ro
 
+# VIEW mà role trên được SELECT — KHÔNG phải bảng `Setting` gốc (đổi 2026-08-21). Bản song sinh của
+# `N8N_SETTING_VIEW` trong src/lib/n8n/role-doc-kho-khoa.ts.
+N8N_SETTING_VIEW=SettingN8n
+
+# Allowlist key n8n ĐƯỢC ĐỌC qua view trên — BẢN SONG SINH của `KEY_N8N_DUOC_DOC`
+# (src/lib/n8n/role-doc-kho-khoa.ts). Test đọc chéo ép hai bên khớp tuyệt đối:
+# tests/unit/backup/key-n8n-twin-shell-vs-ts.test.ts.
+#
+# VÌ SAO BẢN BASH PHẢI CÓ DANH SÁCH NÀY (đo 22/09/2026): ĐỊNH NGHĨA view nằm TRONG dump. Trước bản
+# vá này, `restore.sh` chỉ `GRANT USAGE` + `GRANT SELECT` chứ KHÔNG dựng lại định nghĩa view
+# (bản TS có, bản bash không) ⇒ phục hồi bằng đường DR
+# một bản backup tạo TRƯỚC 21/09 sẽ đưa view về bản FAIL-OPEN cũ (`key NOT IN (…)`), phơi lại 43/45
+# key cho role n8n — gồm cả kho token Meta/TikTok. Và im lặng tuyệt đối: ô cảnh báo ở /cai-dat chỉ
+# đo QUYỀN, không bao giờ đọc ĐỊNH NGHĨA view. Đường DR là đúng đường dùng khi thảm hoạ thật.
+KEY_N8N_DUOC_DOC="n8nAppUrl n8nIngestSecret n8nTokenVaultSecret pancakeApiKeyKho pancakeApiKeyShopee pancakeApiKeyTiktok pancakeShopIdKho pancakeShopIdShopee pancakeShopIdTiktok metaAdsAccountId metaAdsManualDays tiktokShopAppKey tiktokShopAppSecret tiktokShopCipher tiktokShopShopId tiktokShopManualDays tiktokShopAnalyticsManualDays tiktokShopAffiliateManualDays tiktokBusinessAppId tiktokBusinessAppSecret tiktokBusinessToken tiktokBusinessManualDays"
+
 # Schema HỆ THỐNG Supabase self-host — đồng bộ với SUPABASE_SYSTEM_SCHEMAS trong
-# src/lib/backup/assert-plain-sql-only-schema.ts (bản twin TS). Sửa một bên PHẢI sửa bên kia:
-# hiện chỉ có parity theo phán quyết trên fixture, KHÔNG có test nào so hai DANH SÁCH.
+# src/lib/backup/assert-plain-sql-only-schema.ts (bản twin TS). Sửa một bên PHẢI sửa bên kia;
+# tests/unit/backup/system-schemas-twin-shell-vs-ts.test.ts so hai DANH SÁCH, đỏ ngay khi lệch.
 SYSTEM_SCHEMAS="auth storage vault realtime graphql extensions supabase_functions _realtime pgbouncer net cron pgsodium supabase_migrations"
 
 # ---------------------------------------------------------------------------
@@ -169,6 +185,9 @@ assert_toc_only_schema() {
 #     nạp bản `.dump` custom (có `pg_restore -n` chốt cứng), KHÔNG nới guard.
 #   • Khối COPY KHÔNG có dòng `\.` kết ⇒ trả lại nguyên văn payload (fail-closed), không để lệnh
 #     giấu sau một khối COPY dở dang lọt khỏi bản soi.
+#   ⚠️ LỐI THOÁT ĐỔI TỪ 22/09/2026: câu "gặp từ-chối-oan thì nạp bản `.dump` custom" KHÔNG CÒN ĐÚNG
+#     — nhánh custom nay cũng chạy chính hàm này. Lối thoát bây giờ là `BO_QUA_KIEM_NOI_DUNG_DUMP=1`
+#     cho nhánh custom (in cảnh báo, giữ guard TOC + `pg_restore -n`); xem khối gọi trong `main`.
 # ---------------------------------------------------------------------------
 normalize_sql_statements() {
   awk -v mask="${2:-1}" -v nodollar="${3:-0}" '
@@ -222,7 +241,7 @@ normalize_sql_statements() {
     { sub(/\r$/, "", $0) }                        # bo CR: moc STDIN;$ / \.$ khong khop \r (file CRLF)
 
     incopy {                                       # trong khoi COPY: gom payload cho toi moc "\."
-      if ($0 ~ /^\\\.[ \t]*$/) { incopy = 0; ncopy = 0 }
+      if ($0 ~ /^\\\.[ \t]*$/) { incopy = 0; ncopy = 0; delete copybuf }
       else copybuf[++ncopy] = $0
       next
     }
@@ -249,7 +268,7 @@ normalize_sql_statements() {
 }
 
 assert_sql_only_schema() {
-  local schema=$1 sqlfile=$2 sys verb_re sys_re pat schema_ddl foreign norm normf
+  local schema=$1 sqlfile=$2 sys verb_re sys_re pat schema_ddl foreign norm normf dac_quyen
 
   # (a) CREATE/DROP/ALTER SCHEMA nhắm tên ≠ $schema → nghi dump full-DB / đè schema
   # hệ thống. Bắt các dòng schema-DDL trước (thường rất ít), rồi loại các dòng nhắm
@@ -271,9 +290,20 @@ assert_sql_only_schema() {
   # HAI bản: `$norm` CHE chuỗi nháy đơn (dữ liệu không bị soi nhầm là câu lệnh) cho (b)/(e)/(g);
   # `$normf` GIỮ NGUYÊN literal cho (f) — che nháy sẽ biến cả `set_config('search_path','auth',…)`
   # lẫn dạng hợp lệ `set_config('search_path','',…)` thành cùng một chuỗi, mất sạch tín hiệu.
-  norm=$(mktemp "${TMPDIR:-/tmp}/hogikids-norm.XXXXXX.sql")
-  normf=$(mktemp "${TMPDIR:-/tmp}/hogikids-normf.XXXXXX.sql")
-  trap 'rm -f "$norm" "$normf"' RETURN
+  # Khuôn mktemp phải KẾT THÚC bằng các chữ X, KHÔNG có đuôi `.sql` phía sau. Đo 22/09/2026 trên
+  # macOS (BSD mktemp): khuôn `tên.XXXXXX.sql` trả về TÊN LITERAL `tên.XXXXXX.sql`, và lần gọi thứ
+  # hai chết `mkstemp failed: File exists` ⇒ hai lượt chạy song song (vitest chạy nhiều file test
+  # cùng lúc, mỗi file `source` script này) giẫm lên nhau, và một file sót lại làm hỏng mọi lượt
+  # sau. GNU mktemp (minipc/CI) chịu được khuôn đó nên lỗi này CHỈ hiện ở máy dev — đúng loại lệch
+  # môi trường mà bản song sinh bash phải tránh.
+  norm=$(mktemp "${TMPDIR:-/tmp}/hogikids-norm-XXXXXX")
+  normf=$(mktemp "${TMPDIR:-/tmp}/hogikids-normf-XXXXXX")
+  # Trap TỰ GỠ và đọc biến có giá trị mặc định. Bash giữ trap RETURN sau khi hàm này trả về, nên nó
+  # còn bắn thêm một lần nữa lúc `main` return — khi đó `norm`/`normf` đã ra khỏi tầm và `set -u`
+  # biến nó thành `unbound variable`, làm script kết thúc bằng lỗi NGAY SAU dòng "✓ Phục hồi xong".
+  # Đo thật trong DR diễn tập 23/09: lỗi này chỉ lộ khi có hàm KHÁC trả về sau đó, nên trước 22/09
+  # nó nằm im (nhánh custom chưa gọi hàm này) và không test nào chạm tới.
+  trap 'rm -f "${norm:-}" "${normf:-}"; trap - RETURN' RETURN
   # exit 2 = chuỗi nháy trải nhiều dòng ngoài khối COPY (xem normalize_sql_statements).
   if ! normalize_sql_statements "$sqlfile" 1 > "$norm"; then
     echo "Lỗi: SQL có chuỗi nháy TRẢI QUA XUỐNG DÒNG ngoài khối COPY — pg_dump plain THẬT không phát ra dạng này — TỪ CHỐI (chuỗi đa dòng che được mốc COPY giả, làm guard mù cả một vùng file)." >&2
@@ -399,6 +429,30 @@ assert_sql_only_schema() {
     echo "Lỗi: SQL chứa meta-command psql ($meta) — psql thực thi lệnh \\… khi nạp file và KHÔNG tắt được; pg_dump plain THẬT chỉ phát ra dòng \\. kết thúc COPY — TỪ CHỐI." >&2
     return 1
   fi
+
+  # (i) `COPY … FROM PROGRAM 'cmd'` / `COPY … TO PROGRAM 'cmd'` — đối xứng guard (i) của twin TS.
+  # Đường CHẠY LỆNH ở TẦNG SQL: check (g) chỉ bắt META-COMMAND (`\copy … TO PROGRAM`, có dấu `\`),
+  # còn dạng SQL thuần không có `\` nào nên lọt sạch. Ở đường này nó NẶNG HƠN bản app: câu lệnh
+  # chạy bằng `-U supabase_admin` (superuser THẬT), mà `COPY … PROGRAM` đòi đúng quyền đó.
+  # Neo vào FROM|TO (không cấm mọi chữ "PROGRAM"): cú pháp PostgreSQL chỉ đặt từ khoá này ngay sau
+  # FROM/TO của câu COPY ⇒ không bỏ lọt, mà dump hợp lệ của DB có cột tên `program` không bị oan.
+  # POSIX class, KHÔNG dùng `\b`: `\b` là mở rộng GNU, BSD grep (macOS — nơi restore-sh-guard.test.ts
+  # chạy) hành xử khác ⇒ đúng lớp lệch song sinh mà file này phải tránh.
+  if grep -iEq '(^|[^[:alnum:]_])(FROM|TO)[[:space:]]+PROGRAM([^[:alnum:]_]|$)' "$norm"; then
+    echo "Lỗi: SQL chứa COPY … FROM/TO PROGRAM — đây là đường CHẠY LỆNH trên máy chủ; pg_dump plain THẬT chỉ dùng COPY … FROM stdin — TỪ CHỐI (nghi file bị chỉnh sửa)." >&2
+    return 1
+  fi
+
+  # (j) Câu lệnh ĐẶC QUYỀN — đối xứng guard (j) của twin TS. Dump schema-scoped (`pg_dump -n`)
+  # không sinh ra chúng; chúng chỉ có trong dump full-DB hoặc file chế tác. Lớp BỔ SUNG cho
+  # (a)/(b)/(e), không phải lớp duy nhất.
+  # `CREATE … LANGUAGE` neo `CREATE` liền trước để KHÔNG bắt nhầm mệnh đề `LANGUAGE plpgsql` cuối
+  # mọi `CREATE FUNCTION`.
+  dac_quyen='(^|[^[:alnum:]_])(CREATE[[:space:]]+EXTENSION|(CREATE|ALTER|DROP)[[:space:]]+(ROLE|USER)|ALTER[[:space:]]+SYSTEM|CREATE[[:space:]]+(OR[[:space:]]+REPLACE[[:space:]]+)?(TRUSTED[[:space:]]+)?(PROCEDURAL[[:space:]]+)?LANGUAGE|SECURITY[[:space:]]+DEFINER)([^[:alnum:]_]|$)'
+  if grep -iEq "$dac_quyen" "$norm"; then
+    echo "Lỗi: SQL chứa câu lệnh đặc quyền (CREATE EXTENSION / CREATE|ALTER|DROP ROLE / ALTER SYSTEM / CREATE LANGUAGE / SECURITY DEFINER) — dump schema-scoped KHÔNG BAO GIỜ phát ra câu này — TỪ CHỐI (nghi dump full-DB hoặc file chế tác)." >&2
+    return 1
+  fi
   return 0
 }
 
@@ -446,7 +500,9 @@ drop_schema_dich() {
 # rộng hơn. `GRANT CONNECT` cấp database KHÔNG mất nên không cấp lại ở đây.
 # ---------------------------------------------------------------------------
 reassign_owner_scoped() {
-  local db=$1 schema=$2
+  local db=$1 schema=$2 k key_in=""
+  # Danh sách key → literal SQL `'a', 'b', …` cho mệnh đề IN của định nghĩa view.
+  for k in $KEY_N8N_DUOC_DOC; do key_in="${key_in:+$key_in, }'$k'"; done
   echo ">> Trả quyền sở hữu schema '$schema' về role '$OWNER_ROLE' + cấp lại quyền đọc cho '$N8N_RO_ROLE'..." >&2
   docker exec "$CONTAINER" psql -U supabase_admin -d "$db" -v ON_ERROR_STOP=1 -c "
 ALTER SCHEMA \"$schema\" OWNER TO $OWNER_ROLE;
@@ -488,17 +544,49 @@ BEGIN
     EXECUTE format('ALTER ROUTINE %I.%I(%s) OWNER TO $OWNER_ROLE', '$schema', r.proname, r.args);
   END LOOP;
 END
-\$\$;
+\$\$;"
+
+  # KHỐI 2 — cấp lại đường đọc của n8n, chạy bằng MỘT lệnh psql RIÊNG.
+  #
+  # VÌ SAO TÁCH (đo 22/09/2026): `psql -c "a; b"` gửi cả chuỗi như MỘT query ⇒ MỘT transaction ngầm.
+  # Khối 1 ở trên chỉ trả quyền sở hữu (không thể lỗi trong thực tế); khối 2 nay chứa DDL THẬT
+  # (`CREATE OR REPLACE VIEW`) có thể lỗi thật — view cũ khác số/tên cột thì Postgres ném
+  # `cannot change name of view column`, còn nếu `SettingN8n` lại là BẢNG thì `… is not a view`.
+  # Để chung một lệnh nghĩa là một lỗi hình dạng view sẽ ROLLBACK luôn cả phần trả quyền sở hữu ⇒
+  # app chết sau DR và `prisma migrate deploy` bị từ chối hàng loạt, trong khi dữ liệu đã nạp xong.
+  docker exec "$CONTAINER" psql -U supabase_admin -d "$db" -v ON_ERROR_STOP=1 -c "
 DO \$\$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$N8N_RO_ROLE') THEN
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO $N8N_RO_ROLE', '$schema');
     -- Tu 2026-08-21: role doc VIEW SettingN8n thay bang Setting goc (view loai 2 khoa ha tang
     -- n8nApiKey/n8nDbRoPassword — xem src/lib/n8n/role-doc-kho-khoa.ts, phai khop hang N8N_SETTING_VIEW).
-    IF to_regclass(format('%I.%I', '$schema', 'SettingN8n')) IS NULL THEN
-      RAISE NOTICE 'Khong thay view %.\"SettingN8n\" — bo qua GRANT SELECT (ban dump qua cu?).', '$schema';
+    --
+    -- DUNG LAI DINH NGHIA VIEW (them 22/09/2026), khong chi cap quyen: dinh nghia view nam TRONG
+    -- dump, nen nap mot ban backup tao truoc 21/09 la view quay ve ban FAIL-OPEN cu (key NOT IN
+    -- (...), phoi 43/45 key gom ca kho token Meta/TikTok) — va khong gi phat hien duoc. Cau duoi
+    -- ep view ve dung allowlist hien hanh sau MOI luot phuc hoi. Doi xung voi ham
+    -- sqlKhoiPhucDuongDocN8n() trong src/lib/backup/run-restore.ts.
+    -- KHONG dung dau backtick trong khoi SQL nay: ca chuoi nam trong dau nhay KEP cua bash nen
+    -- backtick la command-substitution — no NUOT noi dung comment (do that 22/09) va la duong
+    -- chay lenh neu ai do dan vao day mot doan co bien.
+    IF to_regclass(format('%I.%I', '$schema', 'Setting')) IS NOT NULL THEN
+      EXECUTE \$q\$CREATE OR REPLACE VIEW \"$schema\".\"$N8N_SETTING_VIEW\" AS
+        SELECT key, value FROM \"$schema\".\"Setting\" WHERE key IN ($key_in)\$q\$;
+      EXECUTE 'ALTER VIEW \"$schema\".\"$N8N_SETTING_VIEW\" SET (security_barrier = true)';
+      -- TRA OWNER cho view. Vong lap doi owner o KHOI 1 duyet pg_class TAI THOI DIEM DO, ma view
+      -- nay duoc dung SAU do ⇒ neu ban dump khong chua view (dung ca ban backup cu ma khoi nay
+      -- sinh ra de xu ly), no o lai owner supabase_admin. Do that DR dien tap 23/09: buoc (g) cua
+      -- runbook DR (prisma migrate deploy, chay bang role app) khi do chet voi
+      -- loi ERROR: must be owner of view SettingN8n — dung loai loi ma vong lap owner sinh ra de chan.
+      -- (Trong khoi nay TUYET DOI khong go dau backtick lan dau nhay kep tran: ca chuoi nam trong
+      --  dau nhay KEP cua bash, backtick = chay lenh, nhay kep = DONG chuoi som. Do ca hai 23/09.)
+      EXECUTE format('ALTER VIEW %I.%I OWNER TO $OWNER_ROLE', '$schema', '$N8N_SETTING_VIEW');
+    END IF;
+    IF to_regclass(format('%I.%I', '$schema', '$N8N_SETTING_VIEW')) IS NULL THEN
+      RAISE NOTICE 'Khong thay view %.\"$N8N_SETTING_VIEW\" — bo qua GRANT SELECT (ban dump qua cu?).', '$schema';
     ELSE
-      EXECUTE format('GRANT SELECT ON %I.%I TO $N8N_RO_ROLE', '$schema', 'SettingN8n');
+      EXECUTE format('GRANT SELECT ON %I.%I TO $N8N_RO_ROLE', '$schema', '$N8N_SETTING_VIEW');
     END IF;
   ELSE
     RAISE NOTICE 'Chua co role $N8N_RO_ROLE — bo qua cap quyen doc. Workflow n8n se chet o node lay khoa cho toi khi tao role (xem runbook DR muc 11, buoc tao role $N8N_RO_ROLE).';
@@ -571,6 +659,71 @@ main() {
       echo "Lỗi: dump chứa object NGOÀI schema '$SCHEMA' — TỪ CHỐI (nghi dump full-DB / hệ thống Supabase)." >&2
       exit 1
     }
+
+    # --- SOI NỘI DUNG, KHÔNG CHỈ TOC (thêm 22/09/2026) -------------------
+    # TOC chỉ nói dump ĐỤNG NHỮNG OBJECT NÀO, không nói câu lệnh bên trong LÀ GÌ. Một .dump chế
+    # tác có TOC hoàn toàn hợp lệ (entry TABLE DATA, namespace đúng) nhưng bên trong chứa
+    # `COPY … FROM PROGRAM '<lenh OS>'` thì lọt sạch qua assert_toc_only_schema.
+    #
+    # ĐƯỜNG NÀY LÀ ĐƯỜNG KHAI THÁC THẬT, không phải đường app: lệnh nạp dưới đây chạy
+    # `-U supabase_admin` = SUPERUSER THẬT, mà `COPY … FROM PROGRAM` đòi đúng quyền đó. Đo
+    # 22/09/2026 trên prod: role app (`hogikids`) KHÔNG superuser và KHÔNG thuộc
+    # `pg_execute_server_program` ⇒ qua app câu đó bị chính Postgres từ chối; qua đây thì không.
+    #
+    # `pg_restore` KHÔNG có `-d` thì KHÔNG mở kết nối DB — nó chỉ dịch archive thành SQL phẳng ra
+    # `-f -`. Bộ cờ phải TRÙNG bộ cờ chọn-lọc của lệnh nạp bên dưới (nhất là `-n "$SCHEMA"`):
+    # bung mà thiếu `-n` thì văn bản soi có entry ngoài schema mà lệnh nạp vốn sẽ bỏ qua ⇒ guard
+    # (a)/(e) TỪ CHỐI OAN chính bản dump HỢP LỆ — lỗi nguy hiểm nhất của đường DR.
+    # Ghi ra FILE rồi mới soi (không pipe): `assert_sql_only_schema` nhận ĐƯỜNG DẪN và chạy awk
+    # trên FILE, không nhận stdin.
+    # SỐ ĐO THẬT trên minipc 23/09/2026, dump prod `hogikids-20260923-0400.dump`:
+    #   dump `-Fc`        56,6 MiB (59.338.339 B)
+    #   bung ra SQL phẳng 621,4 MiB (651.537.972 B) · 327.155 dòng · 45 khối COPY · 1,45 s
+    #   assert_sql_only_schema  3,5-3,6 s · RSS đỉnh 111 MiB (0,18× kích thước file)
+    #   trọn lượt restore.sh vào DB nháp: 24 s, mã thoát 0
+    # RSS thấp vì `normalize_sql_statements` BỎ payload COPY — mà payload chiếm gần trọn 621 MiB:
+    # bản chuẩn hoá `$norm` chỉ còn 57 KB / 488 dòng, nên 13 lượt grep chạy trên file tí hon.
+    # ⚠️ ĐỪNG nói "awk đọc theo dòng nên bộ nhớ không phụ thuộc kích thước": chi phí phụ thuộc HÌNH
+    # DẠNG file, không phải kích thước. Với SQL dạng TOÀN CÂU LỆNH (dump `--inserts`, không có khối
+    # COPY) `buf` gom cả file rồi mới `split` ⇒ đo được 7,3× RSS và thời gian BẬC HAI (2MB → 14,6s,
+    # 4MB → 77,1s). Dump của hệ thống này luôn COPY-nặng nên rơi vào cột 0,18×.
+    #
+    # 🔴 LỐI THOÁT CÓ CHỦ ĐÍCH — `BO_QUA_KIEM_NOI_DUNG_DUMP=1`.
+    # Bước soi này chạy TRỌN bộ guard của đường plain, gồm cả (h) "chuỗi nháy trải nhiều dòng". Đo
+    # 22/09/2026: một dump HỢP LỆ có `COMMENT ON … IS 'nhiều\ndòng'` — thứ Supabase Studio ghi mỗi
+    # khi ai đó điền ô "Description" — bị (h) TỪ CHỐI. Trước bản vá, đường `.dump` nhận nó (chỉ soi
+    # TOC) và chính vì vậy nó ĐANG được ghi khắp code là "lối thoát khi guard plain từ chối oan".
+    # Siết mà không chừa cửa nghĩa là chủ shop mất ĐƯỜNG PHỤC HỒI CUỐI CÙNG, đúng lúc thảm hoạ.
+    # ⇒ Mặc định vẫn CHẶT; cửa mở phải GÕ TAY và in rõ đang mất lớp nào.
+    # Rủi ro còn lại CÓ TRẦN: guard TOC vẫn chạy, và lệnh nạp vẫn `pg_restore -n "$SCHEMA"` — chốt
+    # cứng chỉ nạp object trong schema đích. Thứ mất đi là chặn NỘI DUNG (PROGRAM / đặc quyền /
+    # meta-command), tức đúng phần chỉ có ý nghĩa với file KHÔNG do hệ thống này tạo ra.
+    if [[ "${BO_QUA_KIEM_NOI_DUNG_DUMP:-}" == "1" ]]; then
+      echo "!!! BỎ QUA kiểm nội dung dump (BO_QUA_KIEM_NOI_DUNG_DUMP=1)." >&2
+      echo "    CÒN: guard TOC + nạp bằng 'pg_restore -n $SCHEMA' (chỉ đụng schema đích)." >&2
+      echo "    MẤT: chặn COPY … FROM/TO PROGRAM, câu lệnh đặc quyền, meta-command psql." >&2
+      echo "    CHỈ dùng cho bản backup do CHÍNH hệ thống này tạo ra và bạn tin nguồn gốc." >&2
+    else
+      echo ">> Bung dump ra SQL phẳng để soi NỘI DUNG (không chỉ TOC)..." >&2
+      local sql_bung
+      sql_bung=$(mktemp "${TMPDIR:-/tmp}/hogikids-bung-XXXXXX")
+      trap 'rm -f "$sql_bung"' EXIT
+      docker exec -i "$CONTAINER" pg_restore --clean --if-exists --exit-on-error \
+        --no-owner --no-privileges -n "$SCHEMA" -f - < "$F" > "$sql_bung" || {
+        echo "Lỗi: không bung được '$F' ra SQL phẳng (pg_restore -f -) — file có thể hỏng. TỪ CHỐI." >&2
+        exit 1
+      }
+      echo ">> Kiểm nội dung SQL bung từ dump (chỉ cho phép schema '$SCHEMA')..." >&2
+      assert_sql_only_schema "$SCHEMA" "$sql_bung" || {
+        echo "" >&2
+        echo "    Nếu đây là bản backup do CHÍNH hệ thống này tạo ra và bạn tin nó, chạy lại:" >&2
+        echo "      BO_QUA_KIEM_NOI_DUNG_DUMP=1 bash deploy/restore.sh $F $DB $SCHEMA" >&2
+        echo "    (guard TOC + 'pg_restore -n $SCHEMA' vẫn chạy — xem runbook DR.)" >&2
+        exit 1
+      }
+      rm -f "$sql_bung"
+      trap - EXIT
+    fi
     # Dọn schema TRƯỚC khi nạp — `--clean` KHÔNG đủ: nó chỉ drop object CÓ trong TOC, nên bảng/cột
     # sinh ra SAU thời điểm sao lưu (migration mới) sống sót và trộn vào bản vừa phục hồi. Đo thật
     # 29/07: restore một dump 1 bảng vào schema đang có thêm bảng lạ ⇒ bảng lạ VẪN CÒN; thêm bước
@@ -617,7 +770,7 @@ main() {
     # Giải nén TOÀN BỘ ra file tạm (grep trên FILE an toàn với pipefail; nạp bằng
     # chính file này, không gunzip lại). Trap dọn file tạm ở mọi lối thoát.
     local sql_tmp
-    sql_tmp=$(mktemp "${TMPDIR:-/tmp}/hogikids-restore.XXXXXX.sql")
+    sql_tmp=$(mktemp "${TMPDIR:-/tmp}/hogikids-restore-XXXXXX")
     trap 'rm -f "$sql_tmp"' EXIT
     gunzip -c "$F" > "$sql_tmp"
 

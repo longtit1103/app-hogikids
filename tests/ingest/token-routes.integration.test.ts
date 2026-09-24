@@ -1,8 +1,15 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-// INGEST_SECRET phải set TRƯỚC khi gọi handler (requireIngestSecret đọc process.env lúc chạy).
-const SECRET = "test-ingest-secret";
-process.env.INGEST_SECRET = SECRET;
+// Secret phải set TRƯỚC khi gọi handler (cổng bearer đọc `process.env` lúc chạy).
+// Từ 21/09/2026 hai route này dùng bearer RIÊNG `TOKEN_VAULT_SECRET`, KHÔNG còn `INGEST_SECRET`
+// (mục M-02: khoá ingest nằm trong mọi workflow n8n và lọt `ps aux`, nó chỉ nên cho BƠM dữ liệu
+// chứ không cho RÚT token OAuth 4 nền tảng ra nguyên văn). Giữ luôn `INGEST_SECRET` với giá trị
+// KHÁC để ca "khoá cũ không còn mở được cửa này" đo được đúng điều nó nói.
+const SECRET = "test-token-vault-secret";
+const SECRET_INGEST_CU = "test-ingest-secret";
+process.env.TOKEN_VAULT_SECRET = SECRET;
+process.env.INGEST_SECRET = SECRET_INGEST_CU;
+delete process.env.TOKEN_VAULT_FALLBACK_INGEST;
 
 import { GET as metaGet, POST as metaPost } from "@/app/api/ingest/meta-token/route";
 import { GET as tiktokGet, POST as tiktokPost } from "@/app/api/ingest/tiktok-token/route";
@@ -76,6 +83,35 @@ describe("route /api/ingest/tiktok-token", () => {
   it("GET thiếu bearer → 401", async () => {
     const res = await tiktokGet(getReq("http://t/api/ingest/tiktok-token", null));
     expect(res.status).toBe(401);
+  });
+
+  it("bearer là INGEST_SECRET → 401: khoá ingest KHÔNG còn mở được kho token (M-02)", async () => {
+    // Ca này là toàn bộ điểm của việc tách secret. Mất nó thì ai đọc được khoá ingest — nó nằm
+    // trong 11 workflow n8n và trong `ps aux` mỗi lượt script chạy tay — vẫn GET ra access token
+    // LẪN refresh token của TikTok Shop.
+    const res = await tiktokGet(getReq("http://t/api/ingest/tiktok-token", SECRET_INGEST_CU));
+    expect(res.status).toBe(401);
+    const resPost = await tiktokPost(
+      jsonReq(
+        "http://t/api/ingest/tiktok-token",
+        { accessToken: "a", refreshToken: "r", accessTokenExpireAt: Math.floor(Date.now() / 1000) + 3600 },
+        SECRET_INGEST_CU,
+      ),
+    );
+    expect(resPost.status).toBe(401);
+  });
+
+  it("bearer INGEST_SECRET qua được KHI VÀ CHỈ KHI cầu tương thích đang mở", async () => {
+    process.env.TOKEN_VAULT_FALLBACK_INGEST = "1";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const res = await tiktokGet(getReq("http://t/api/ingest/tiktok-token", SECRET_INGEST_CU));
+      expect(res.status).toBe(200);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      delete process.env.TOKEN_VAULT_FALLBACK_INGEST;
+    }
   });
 
   it("POST lưu → GET đọc lại khứ hồi đúng", async () => {

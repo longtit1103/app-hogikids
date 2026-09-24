@@ -158,6 +158,12 @@ export async function upsertOneProduct(
  * - Upsert đơn + xoá-tạo-lại items trong CÙNG `$transaction` → chạy lại không nhân đôi.
  * - `raw` được lưu nguyên vào `Order.raw` (tham chiếu; nguồn sự thật vẫn là bảng Bronze).
  */
+/** `shop_id` trong payload Pancake (số hoặc chuỗi) → chuỗi; vắng ⇒ null (không kiểm cổng trùng shop). */
+function shopCuaPayload(raw: unknown): string | null {
+  const v = (raw as { shop_id?: unknown } | null)?.shop_id;
+  return typeof v === "number" || (typeof v === "string" && v.trim() !== "") ? String(v).trim() : null;
+}
+
 export async function upsertOneOrder(
   mo: MappedOrder,
   raw: unknown,
@@ -325,6 +331,7 @@ export async function upsertOneOrder(
       discount: mo.discount,
       platformFeeEst: mo.platformFeeEst,
       returnedFee: mo.returnedFee,
+      paidAtShop: mo.paidAtShop,
       syncedAt: now(),
       raw: (raw ?? Prisma.JsonNull) as Prisma.InputJsonValue,
       rawFetchedAt: mocNguon ?? null,
@@ -339,6 +346,9 @@ export async function upsertOneOrder(
      */
     // "chan" = precondition (kênh, mã) phát hiện đơn khác NGAY TRONG transaction → không ghi gì.
     let donKhacCungKenhMa: string | null = null;
+    // "chan" vì `pancakeId` đang thuộc đơn của SHOP KHÁC — xem cổng ngay đầu transaction.
+    let shopDangGiu: string | null = null;
+    const shopMoi = shopCuaPayload(raw);
     const ghiMotLuot = (): Promise<boolean | "chan"> =>
       prisma.$transaction(async (tx) => {
         // KHOÁ TƯ VẤN theo (kênh, mã) cho MỌI lượt ghi đơn: hai transaction khác `pancakeId` nhưng
@@ -349,6 +359,17 @@ export async function upsertOneOrder(
         // transaction kết thúc. `$executeRaw` chứ KHÔNG `$queryRaw` — hàm trả `void`, `$queryRaw`
         // ném "Failed to deserialize column" (cùng lý do với `khoa-ghi-chi-tieu-ads.ts`).
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`don:${mo.channelId}|${mo.code}`}, 0))`;
+        // CỔNG TRÙNG ID GIỮA SHOP: đơn tạo trong Pancake (không qua sàn — bán trực tiếp, tạo tay) có
+        // `id` = số thứ tự RIÊNG từng shop, nên shop A và shop B đều có thể có đơn "776". Không chặn
+        // thì `updateMany where pancakeId` ghi đè IM LẶNG đơn của shop kia — mất cả doanh thu lẫn
+        // tiền Sổ quỹ. Đơn sàn mang mã sàn (duy nhất toàn cục) nên không bao giờ vướng cổng này.
+        if (shopMoi !== null) {
+          const [dang] = await tx.$queryRaw<{ shop: string | null }[]>`SELECT raw->>'shop_id' AS shop FROM "Order" WHERE "pancakeId" = ${mo.pancakeId}`;
+          if (dang?.shop != null && dang.shop !== shopMoi) {
+            shopDangGiu = dang.shop;
+            return "chan";
+          }
+        }
         if (opts?.chanKhiCoDonKhacCungKenhMa) {
           const khac = await tx.order.findFirst({
             where: { channelId: mo.channelId, code: mo.code, NOT: { pancakeId: mo.pancakeId } },
@@ -425,7 +446,9 @@ export async function upsertOneOrder(
       // Không phải lỗi dữ liệu (`skipped`) cũng không phải bản cũ (`ordersSkippedStale`) — đơn bị
       // CHẶN CHỦ ĐÍCH vì đơn khác cùng (kênh, mã) đã tồn tại (thường là đơn gốc vừa quay lại).
       warnings.push(
-        `Bỏ qua đơn ${mo.pancakeId}: đã có đơn khác cùng (${mo.channelId}, mã ${mo.code}) — pancakeId ${donKhacCungKenhMa}`
+        shopDangGiu !== null
+          ? `Bỏ qua đơn ${mo.pancakeId} shop ${shopMoi}: mã này ĐANG thuộc đơn của shop ${shopDangGiu} — Pancake đánh số riêng từng shop, ghi vào là đè mất đơn kia; đơn mới CHƯA vào Sổ, cần xử lý tay`
+          : `Bỏ qua đơn ${mo.pancakeId}: đã có đơn khác cùng (${mo.channelId}, mã ${mo.code}) — pancakeId ${donKhacCungKenhMa}`
       );
       stats.boQuaCoChuDich++;
       return "CHAN";

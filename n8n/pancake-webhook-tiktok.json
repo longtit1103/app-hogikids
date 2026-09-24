@@ -12,7 +12,7 @@
       ],
       "parameters": {
         "httpMethod": "POST",
-        "path": "pancake-pos-hogikids2",
+        "path": "duong-dan-webhook-tiktok",
         "responseMode": "onReceived",
         "options": {
           "rawBody": true

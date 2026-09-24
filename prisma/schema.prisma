@@ -18,7 +18,7 @@ model User {
 }
 
 model Channel {
-  id             String    @id // "shopee" | "tiktok" | "facebook" | "website"
+  id             String    @id // "shopee" | "tiktok" | "facebook" | "website" | "direct" (bán trực tiếp — màn "Bán hàng" Pancake)
   name           String
   color          String
   isActive       Boolean   @default(true)
@@ -105,6 +105,10 @@ model Order {
   /// bảo vệ tiền nhận ra: lượt dựng lại KHÔNG tái tạo được chúng (luật mirror loại), và phép đếm
   /// "đơn kẹt" phải trừ chúng ra, nếu không app sẽ khuyên chủ shop xoá đúng phần doanh thu thật.
   backfilledFromMirror Boolean     @default(false)
+  /// Tiền khách ĐÃ TRẢ tại shop (Σ chuyển khoản + tiền mặt + thẻ + MoMo + QR của Pancake) — CHỈ kênh
+  /// `direct` (bán trực tiếp), kênh khác luôn 0. Là tiền THẬT đã về ⇒ Sổ quỹ cộng cột này cho đơn
+  /// COMPLETED (`src/lib/so-quy/tien-ban-truc-tiep.ts`). KHÔNG vào P&L (P&L đọc itemsTotal/discount).
+  paidAtShop           Int         @default(0)
 
   @@index([orderedAt])
   @@index([channelId, orderedAt])
@@ -299,6 +303,23 @@ model SoTietKiem {
   @@index([maturityDate])
 }
 
+/// Chốt số dư THẬT cuối tháng (bank + tiền mặt) do chủ shop gõ tay từ app ngân hàng + đếm két —
+/// HÀNG RÀO bắt sai cộng dồn sổ quỹ (sổ quỹ chỉ CỘNG DỒN 6 nguồn, không có phép SO nào khác).
+/// KHÔNG phải nguồn tiền: không cộng vào quỹ, KHÔNG BAO GIỜ vào Lãi/Lỗ — lưới
+/// `tests/unit/cash-movements/khong-ro-ri-vao-pnl.test.ts`. Một tháng đúng một dòng.
+model SoDuChotThang {
+  id        String   @id @default(cuid())
+  /// Ngày ĐẦU tháng 00:00 giờ VN (`startOfMonth`). @unique ⇒ lưu lại cùng tháng là SỬA ĐÈ, không đẻ dòng mới.
+  thang     DateTime @unique
+  /// Số dư tài khoản ngân hàng cuối tháng (VND). CHO PHÉP ÂM: thấu chi làm bank âm là hợp lệ.
+  soDuBank  Int
+  /// Tiền mặt trong két (VND). CHECK `SoDuChotThang_tienMat_khong_am` >= 0 (ngoài Prisma, trong migration).
+  tienMat   Int
+  note      String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// Sổ THU NHẬP ngoài bán hàng — đối xứng `Expense`. Đây là đường DUY NHẤT đưa thu nhập ngoài bán
 /// hàng vào P&L: `pnl.ts` đọc bảng này và KHÔNG biết sổ tiết kiệm là gì (giữ nguyên hàng rào cách ly
 /// `tests/unit/cash-movements/khong-ro-ri-vao-pnl.test.ts`). Ghi nhận theo TIỀN THẬT: trọn vào ngày
@@ -373,7 +394,10 @@ model Setting {
 // keys — token OAuth xoay vòng (ghi qua route kho token, KHÔNG sửa tay):
 //   tiktokShop{AccessToken,RefreshToken,AccessTokenExpireAt,TokenSavedAt}, metaAds{AccessToken,
 //   TokenExpireAt,DataAccessExpireAt,TokenSavedAt}
-// keys — khoá tĩnh cho workflow n8n (đọc bằng node Postgres, role n8n_config_ro chỉ SELECT bảng này):
+// keys — khoá tĩnh cho workflow n8n (đọc bằng node Postgres qua VIEW "SettingN8n", KHÔNG phải bảng
+//   này: từ 21/09/2026 view là ALLOWLIST fail-closed, chỉ trả đúng các key workflow cần — danh sách
+//   ở src/lib/n8n/role-doc-kho-khoa.ts. Thêm key cho workflow thì phải thêm vào đó, kẻo node lấy
+//   khoá đọc thiếu dòng và workflow chết câm; có test chặn):
 //   n8nAppUrl, n8nIngestSecret, tiktokShop{AppKey,AppSecret,Cipher,ShopId},
 //   tiktokShopManualDays (tuỳ chọn — cửa sổ ngày cho lượt chạy tay của tiktokshop-nightly)
 
@@ -883,10 +907,13 @@ model RawPancakeWebhookEvent {
   /// Đường vào: `webhook` (n8n bắn thẳng) | `file` (nạp bù từ file mẫu pha 1) | `db-cu`
   /// (nạp bù từ bảng `webhook_raw_events` của hệ trước 2026-06).
   source        String   @default("webhook")
-  /// KẾT CỤC xử lý pha 2 (payload gốc không bao giờ sửa): `don-hang` | `don-hang-cu-hon` |
-  /// `don-hang-can-xem` | `ton-kho-bo-qua` | `san-pham-bo-qua` | `bronze-only` |
-  /// `khong-nhan-dien` | `loi`. Nguồn giá trị: `KetCucXuLy` ở `src/lib/ingest/webhook-processor.ts`.
-  /// NULL = dòng trước pha 2 / nạp bù (không replay — snapshot cũ đè bản API mới là hỏng Silver).
+  /// KẾT CỤC xử lý pha 2 (payload gốc không bao giờ sửa). NGUỒN GIÁ TRỊ DUY NHẤT là union
+  /// `KetCucXuLy` ở `src/lib/ingest/webhook-processor.ts` — đọc ở đó, đừng chép danh sách ra đây:
+  /// bản chép trong file này từng thiếu 6 giá trị suốt 2 tháng (mọi kết cục `ton-kho*` và
+  /// `truoc-pha-2`) vì mỗi lượt thêm nhánh lại quên đồng bộ một trong hai chỗ.
+  /// NULL = GHI KẾT CỤC THẤT BẠI (bất thường thật, panel /cai-dat tô đỏ). Nghĩa cũ "dòng trước pha 2
+  /// / nạp bù" đã hết hiệu lực từ 2026-07-27: migration `20260727110000` backfill nhóm đó thành
+  /// `truoc-pha-2` chính vì NULL mang hai nghĩa làm panel báo đỏ 19 dòng hoàn toàn bình thường.
   processedAs   String?
   /// Chi tiết cho ca cần người xem (sự kiện lạ, lỗi xử lý) — hiển thị ở /cai-dat để bắt lỗi vào fix.
   processedNote String?

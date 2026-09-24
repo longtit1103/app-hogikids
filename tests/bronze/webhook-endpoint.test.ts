@@ -91,6 +91,18 @@ describe("POST /api/ingest/webhook/:shop", () => {
     expect(dong?.processedAs).toBe("san-pham-bo-qua");
   });
 
+  it("ping thử: 200, hộp thư giữ NGUYÊN XI payload, kết cục `ping-thu` (vẫn ĐẾM, thôi tô đỏ)", async () => {
+    const res = await post("shopee", `{"test":true}`);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, processedAs: "ping-thu" });
+    // Hộp thư BẤT BIẾN vẫn là bất biến với ping: nhận là ghi, payload không bị đụng.
+    const dong = await prisma.rawPancakeWebhookEvent.findFirst();
+    expect(dong?.payload).toBe(`{"test":true}`);
+    expect(dong?.processedAs).toBe("ping-thu");
+    expect(await prisma.order.count()).toBe(0);
+  });
+
   it("sai bearer → 401 và KHÔNG ghi gì vào hộp thư", async () => {
     const res = await post("tiktok", DON("X-401"), "sai-secret");
 

@@ -40,6 +40,21 @@ export function KetNoiN8nSection({ trangThai }: { trangThai: TrangThaiKetNoiN8n 
   const dirty = Object.values(values).some((v) => v.trim() !== "");
   useUnsavedGuard(dirty);
 
+  /**
+   * Host của địa phương ĐÃ LƯU — hiện cạnh nút Cài để người bấm thấy đúng nơi secret sắp đi tới.
+   * Lấy từ giá trị đã lưu (`trangThai`), KHÔNG phải ô đang gõ: nút Cài cũng dùng giá trị đã lưu,
+   * hiện giá trị đang gõ ở đây là nói dối về đích thật.
+   */
+  const hostDich = (() => {
+    const luu = trangThai?.n8nBaseUrl?.trim();
+    if (!luu) return null;
+    try {
+      return new URL(luu).host;
+    } catch {
+      return luu;
+    }
+  })();
+
   async function handleSave() {
     if (!dirty) return;
     setSaving(true);
@@ -181,9 +196,19 @@ export function KetNoiN8nSection({ trangThai }: { trangThai: TrangThaiKetNoiN8n 
           </Button>
         </div>
         <p className="text-right text-xs text-muted-foreground">
-          {dirty
-            ? "Bấm Lưu trước — nút Cài dùng giá trị ĐÃ LƯU, không phải giá trị đang gõ."
-            : "Nút Cài sẽ gửi khóa DB chỉ-đọc + khóa webhook tới đúng địa chỉ n8n phía trên — kiểm tra lại URL trước khi bấm."}
+          {dirty ? (
+            "Bấm Lưu trước — nút Cài dùng giá trị ĐÃ LƯU, không phải giá trị đang gõ."
+          ) : (
+            <>
+              Nút Cài sẽ gửi khóa DB chỉ-đọc + khóa webhook tới{" "}
+              {/* Nêu ĐÍCH THẬT chứ không nhắc chung chung "kiểm tra lại URL": người ta không đọc lại
+                  ô mình vừa gõ, nhưng có đọc một cái tên host in đậm ngay cạnh nút bấm. */}
+              <span className="font-medium text-ink" data-testid="host-dich-n8n">
+                {hostDich ?? "(chưa cấu hình)"}
+              </span>
+              {" — kiểm tra đúng máy chủ n8n của shop trước khi bấm."}
+            </>
+          )}
         </p>
 
         {ketQuaKiemTra ? (

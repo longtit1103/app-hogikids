@@ -1,5 +1,6 @@
 import type { OrderStatus, ProductStatus } from "@prisma/client";
 
+import { KENH_BAN_TRUC_TIEP } from "@/lib/channels/kenh-ban-truc-tiep";
 import { usesRealPlatformFee } from "@/lib/channels/real-fee-channels";
 import type { PancakeOrder, PancakeProduct } from "./pancake-schemas";
 import { suyVoucherSanTuCod } from "./suy-voucher-san-tu-cod";
@@ -77,17 +78,52 @@ export function isAffiliateMirror(
 }
 
 // ---- Channel ---------------------------------------------------------------
-// Hiện: Shopee + TikTok (đơn gốc). Facebook/website mở rộng sau.
-export function mapChannel(rawSource: string | null | undefined, warnings: string[]): string {
+// Shopee + TikTok (đơn gốc) · bán trực tiếp (màn "Bán hàng" Pancake) · Facebook/website mở rộng sau.
+export function mapChannel(
+  raw: Pick<PancakeOrder, "order_sources_name" | "marketplace_id" | "received_at_shop">,
+  warnings: string[],
+): string {
+  const rawSource = raw.order_sources_name;
   const s = (rawSource ?? "").toLowerCase();
   if (s.includes("shopee")) return "shopee";
   if (s.includes("tiktok")) return "tiktok";
   if (s.includes("face") || s.includes("insta") || s.includes("messenger") || s.includes("pancake")) {
     return "facebook";
   }
+  // Bán trực tiếp: đủ CẢ BA dấu — không nguồn, không sàn, nhận tại shop. Thiếu một dấu thì KHÔNG
+  // đoán (vd đơn tạo tay trong shop sàn để ship đi) — về `website` + cảnh báo như trước.
+  if (!s.trim() && raw.marketplace_id == null && raw.received_at_shop === true) {
+    return KENH_BAN_TRUC_TIEP;
+  }
   if (!s) warnings.push(`Đơn không có nguồn → website`);
   else warnings.push(`Nguồn đơn lạ "${rawSource}" → website`);
   return "website";
+}
+
+/**
+ * Σ các khoản khách đã trả tại shop (chuyển khoản + tiền mặt + thẻ + MoMo + QR). Không dùng
+ * `prepaid`: hai đơn đo được chỉ có chuyển khoản nên chưa biết `prepaid` có gồm tiền mặt hay không —
+ * cộng từng khoản có tên là cách không phải đoán. Điểm thưởng (`prepaid_by_point`) KHÔNG phải tiền.
+ *
+ * CỔNG NGỮ NGHĨA: đơn đã giao mà số đã trả ≠ số phải trả (`itemsTotal − discount + ship`) ⇒ cảnh báo
+ * — khách nợ, trả thiếu, hoặc Pancake thêm/đổi khoản thanh toán app chưa biết. Không tự sửa số.
+ */
+function tinhTienDaTraTaiShop(
+  raw: PancakeOrder,
+  tienHangRong: number,
+  status: OrderStatus,
+  warnings: string[],
+): number {
+  const daTra = [raw.transfer_money, raw.cash, raw.charged_by_card, raw.charged_by_momo, raw.charged_by_qrpay]
+    .map((v) => Math.max(0, round(v ?? 0)))
+    .reduce((a, b) => a + b, 0);
+  const phaiTra = tienHangRong + Math.max(0, round(raw.shipping_fee));
+  if (status === "COMPLETED" && daTra !== phaiTra) {
+    warnings.push(
+      `Đơn bán trực tiếp ${raw.id}: khách đã trả ${daTra} ≠ phải trả ${phaiTra} (tiền hàng ròng + ship) — Sổ quỹ ghi đúng số ĐÃ TRẢ; kiểm công nợ hoặc khoản thanh toán mới của Pancake`,
+    );
+  }
+  return daTra;
 }
 
 /** Ước tính phí sàn theo % (DỰ PHÒNG cho kênh chưa có phí thật — FB/website). Shopee/TikTok dùng fee_marketplace thật. */
@@ -199,6 +235,7 @@ export type MappedOrder = {
   discount: number; // voucher mức đơn
   platformFeeEst: number; // = fee_marketplace THẬT (marketplace) | ước tính % (khác)
   returnedFee: number; // = advanced_platform_fee.returned_fee (clamp ≥0) — phí sàn thực giữ trên đơn hoàn/hủy, 0 khi vắng/chưa đối soát
+  paidAtShop: number; // tiền khách đã trả tại shop — CHỈ kênh `direct`, kênh khác 0 (Sổ quỹ, KHÔNG vào P&L)
   items: MappedOrderItem[];
   warnings: string[];
 };
@@ -229,7 +266,7 @@ export type MapOrderCtx = {
 // ---- Order mapping ---------------------------------------------------------
 export function mapPancakeOrder(raw: PancakeOrder, ctx: MapOrderCtx): MappedOrder {
   const warnings: string[] = [];
-  const channelId = mapChannel(raw.order_sources_name, warnings);
+  const channelId = mapChannel(raw, warnings);
   const status = mapStatus(raw.status, warnings, raw.status_name);
 
   const items = raw.items ?? [];
@@ -305,6 +342,10 @@ export function mapPancakeOrder(raw: PancakeOrder, ctx: MapOrderCtx): MappedOrde
   // Phí sàn THỰC sàn giữ trên đơn hoàn/hủy (Pancake, UI-verified). Vắng/null → 0. Clamp ≥0.
   const returnedFee = Math.max(0, round(raw.advanced_platform_fee?.returned_fee ?? 0));
 
+  // Tiền khách ĐÃ TRẢ tại shop — chỉ kênh bán trực tiếp (Sổ quỹ đọc cột này). Kênh sàn = 0: tiền sàn
+  // về quỹ qua đường khác (TikTok về bank / rút ví Shopee), điền ở đây là đếm 2 lần.
+  const paidAtShop = channelId === KENH_BAN_TRUC_TIEP ? tinhTienDaTraTaiShop(raw, itemsTotal - discount, status, warnings) : 0;
+
   const mappedItems: MappedOrderItem[] = items.map((it, i) => {
     const vi = it.variation_info;
     const sku = vi?.display_id ?? "";
@@ -333,6 +374,7 @@ export function mapPancakeOrder(raw: PancakeOrder, ctx: MapOrderCtx): MappedOrde
     discount,
     platformFeeEst,
     returnedFee,
+    paidAtShop,
     items: mappedItems,
     warnings,
   };

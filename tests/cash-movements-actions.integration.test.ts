@@ -1,5 +1,5 @@
 import { addDays, format } from "date-fns";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCashMovement, deleteCashMovement, updateCashMovement } from "@/lib/actions/cash-movements";
 import { prisma } from "@/lib/prisma";
@@ -805,5 +805,120 @@ describe("dòng tiền sổ tiết kiệm sinh lãi", () => {
       })
     ).rejects.toThrow();
     expect(await prisma.cashMovement.count()).toBe(0);
+  });
+});
+
+/**
+ * Hàng rào cha cho bản đọc NGOÀI transaction — phủ CẢ đường SỬA (thiếu, nay vá) lẫn đường XOÁ
+ * (`docLaiTrongTx` có sẵn nhưng chưa test nào khoá).
+ *
+ * Cả hai action đọc `loanId`/`savingsId` một lượt NGOÀI transaction rồi mới giành khoá `FOR UPDATE`
+ * THEO ĐÚNG bản đọc đó. Nếu giữa hai mốc có lượt khác chuyển dòng sang cha KHÁC thì ta khoá nhầm
+ * cha: cha thật không bị khoá, không cổng `chanDuNoAm`/`chanSoDuTietKiemAm` nào chạm tới nó, dư nợ
+ * lệch IM LẶNG.
+ *
+ * Đua thật không tái hiện ổn định được (cửa sổ = 1 round-trip Prisma), nên dựng ĐÚNG trạng thái đó
+ * một cách tất định: ép riêng lượt `findUnique` ĐẦU TIÊN trả bản CŨ, còn DB giữ bản thật. Gỡ hàng
+ * rào ⇒ câu ghi/xoá đi tiếp và test đỏ.
+ */
+describe("hàng rào cha khi bản đọc ngoài transaction đã cũ", () => {
+  let loanId = "";
+
+  beforeEach(async () => {
+    const loan = await prisma.loan.create({
+      data: {
+        name: "Vay kiểm hàng rào",
+        startDate: new Date("2026-07-10T00:00:00+07:00"),
+        annualRateBp: 1050,
+        termMonths: 12,
+        firstDueDate: new Date("2026-08-10T00:00:00+07:00"),
+      },
+    });
+    loanId = loan.id;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Ép đúng lượt đọc `truoc` trả về bản cũ; các lượt findUnique sau đó chạy thật. */
+  const epDocCu = (cu: { loanId: string | null; savingsId: string | null }) =>
+    vi
+      .spyOn(prisma.cashMovement, "findUnique")
+      .mockImplementationOnce((async () => cu) as never);
+
+  it("SỬA — dòng vừa bị lượt khác GẮN vào khoản vay ⇒ từ chối, không gỡ lén khỏi khoản đó", async () => {
+    // DB: dòng đang thuộc khoản vay. Bản đọc của ta: còn thấy dòng trơn ⇒ nhánh "không cha",
+    // KHÔNG giành khoá nào. Ghi đè thẳng sẽ cắt dòng khỏi khoản vay mà không ai hay.
+    expect(
+      (await createCashMovement(
+        hopLe({ kind: "LOAN_IN", amount: 200_000_000, description: "Giải ngân", loanId })
+      )).ok
+    ).toBe(true);
+    const dong = await prisma.cashMovement.findFirstOrThrow({ where: { kind: "LOAN_IN" } });
+
+    epDocCu({ loanId: null, savingsId: null });
+    const res = await updateCashMovement(
+      dong.id,
+      hopLe({ kind: "CAPITAL_IN", amount: 1_000_000, description: "Ghi đè lén" })
+    );
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toContain("vừa được sửa sang mục khác");
+      // KHÔNG kèm `field`: "id" không phải ô nhập nào, modal chỉ render 6 khoá — kèm field là câu
+      // báo rơi vào khoá không ai đọc, chủ shop bấm Lưu mà tuyệt đối im lặng.
+      expect(res.field).toBeUndefined();
+    }
+    const sau = await prisma.cashMovement.findUniqueOrThrow({ where: { id: dong.id } });
+    expect(sau).toMatchObject({ kind: "LOAN_IN", loanId, amount: 200_000_000 });
+  });
+
+  it("SỬA — bản đọc cũ trỏ NHẦM sang khoản vay ⇒ từ chối trước khi hậu kiểm cộng nhầm sổ", async () => {
+    expect(
+      (await createCashMovement(
+        hopLe({ kind: "LOAN_IN", amount: 200_000_000, description: "Giải ngân", loanId })
+      )).ok
+    ).toBe(true);
+    // Dòng TRƠN, không dính khoản vay nào.
+    expect((await createCashMovement(hopLe({ description: "Góp vốn" }))).ok).toBe(true);
+    const tron = await prisma.cashMovement.findFirstOrThrow({ where: { kind: "CAPITAL_IN" } });
+
+    epDocCu({ loanId, savingsId: null });
+    const res = await updateCashMovement(
+      tron.id,
+      hopLe({ kind: "LOAN_REPAY", amount: 1_000_000, description: "Trả gốc", loanId })
+    );
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toContain("vừa được sửa sang mục khác");
+      // KHÔNG kèm `field`: "id" không phải ô nhập nào, modal chỉ render 6 khoá — kèm field là câu
+      // báo rơi vào khoá không ai đọc, chủ shop bấm Lưu mà tuyệt đối im lặng.
+      expect(res.field).toBeUndefined();
+    }
+    const sau = await prisma.cashMovement.findUniqueOrThrow({ where: { id: tron.id } });
+    expect(sau).toMatchObject({ kind: "CAPITAL_IN", loanId: null });
+  });
+
+  it("XOÁ — bản đọc cũ thấy dòng trơn trong khi dòng đã thuộc khoản vay ⇒ từ chối, dòng còn nguyên", async () => {
+    expect(
+      (await createCashMovement(
+        hopLe({ kind: "LOAN_IN", amount: 200_000_000, description: "Giải ngân", loanId })
+      )).ok
+    ).toBe(true);
+    const dong = await prisma.cashMovement.findFirstOrThrow({ where: { kind: "LOAN_IN" } });
+
+    epDocCu({ loanId: null, savingsId: null });
+    const res = await deleteCashMovement(dong.id);
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toContain("vừa được sửa sang mục khác");
+      // KHÔNG kèm `field`: "id" không phải ô nhập nào, modal chỉ render 6 khoá — kèm field là câu
+      // báo rơi vào khoá không ai đọc, chủ shop bấm Lưu mà tuyệt đối im lặng.
+      expect(res.field).toBeUndefined();
+    }
+    expect(await prisma.cashMovement.count({ where: { id: dong.id } })).toBe(1);
   });
 });

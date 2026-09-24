@@ -56,7 +56,7 @@ export type TrangThaiQuyenN8n =
  *    và người ta học cách phớt lờ nó. Dùng đúng quy ước đuôi `_test` mà guard chống-xoá-nhầm-DB đã
  *    dùng (`tests/setup.ts`), không đoán theo `NODE_ENV`.
  *  - **Role không tồn tại.** Cụm chưa từng dựng role (máy dev dựng Postgres riêng) thì không có
- *    quyền nào để mất. Cùng lý do mà `sqlCapQuyenDocN8n` bỏ qua im lặng khi thiếu role.
+ *    quyền nào để mất. Cùng lý do mà `sqlKhoiPhucDuongDocN8n` bỏ qua im lặng khi thiếu role.
  */
 export function phanLoaiQuyenN8n(tho: QuyenN8nThô): TrangThaiQuyenN8n {
   if (tho.database.endsWith("_test")) {
@@ -122,7 +122,7 @@ export async function docQuyenDocN8n(): Promise<TrangThaiQuyenN8n> {
 /**
  * Hai câu SQL cấp lại quyền, để chủ shop chép chạy tay.
  *
- * CỐ Ý viết thẳng ở đây thay vì dùng lại `sqlCapQuyenDocN8n` của đường phục hồi: câu kia bọc trong
+ * CỐ Ý viết thẳng ở đây thay vì dùng lại `sqlKhoiPhucDuongDocN8n` của đường phục hồi: câu kia bọc trong
  * khối `DO $$ ... $$` với hai cửa `pg_roles`/`to_regclass` để lượt restore không gãy giữa chừng —
  * dán khối đó cho người chạy tay thì họ không thấy được câu nào bị bỏ qua và vì sao. Hai câu trần
  * dưới đây chạy là biết ngay kết quả.

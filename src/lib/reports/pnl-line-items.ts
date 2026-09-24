@@ -299,7 +299,15 @@ function buildOpexGroup(b: PnlBreakdown, adsChildren: PnlLineItem[]): PnlLineIte
     child("interest", EXPENSE_CATEGORY_LABEL.interest, b.interest, "/tai-chinh?tab=so-chi-phi&danh_muc=interest", {
       hint: "Tiền lãi trả cho khoản vay — là chi phí thật. Tiền GỐC vay/trả gốc không nằm ở đây (chỉ ở quỹ, tab Dòng tiền).",
     }),
-    child("other", EXPENSE_CATEGORY_LABEL.other, b.other, "/tai-chinh?tab=so-chi-phi&danh_muc=other"),
+    // Đầu nhận (`expense-ledger-tab.tsx`) khớp id CHÍNH XÁC, đọc được danh sách ngăn bằng dấu phẩy,
+    // và nhận cả id của danh mục ĐÃ ẨN — cả ba vế đều cần, thiếu vế cuối thì id bị loại thầm rồi bộ
+    // lọc bốc hơi. Rỗng ⇒ giữ `other` để link vẫn dẫn tới đúng sổ (dòng khi đó = 0).
+    child(
+      "other",
+      EXPENSE_CATEGORY_LABEL.other,
+      b.other,
+      `/tai-chinh?tab=so-chi-phi&danh_muc=${(b.otherCategoryIds.length > 0 ? b.otherCategoryIds : ["other"]).join(",")}`
+    ),
   ];
 }
 

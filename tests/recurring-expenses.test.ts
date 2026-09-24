@@ -108,6 +108,21 @@ describe("ensureRecurringExpenses", () => {
     expect(expense!.amount).toBe(500_000);
     expect(expense!.channelId).toBe("shopee");
   });
+
+  it("mẫu Lãi vay lỡ mang kênh (dựng trước cổng chặn) → dòng sinh ra KHÔNG gắn kênh", async () => {
+    // Lãi vay không phân bổ kênh (bất biến #1). Ghi thẳng bảng để mô phỏng mẫu cũ lọt trước cổng
+    // `createExpense` — không action nào sửa được mẫu, nên chỗ sinh phải tự gỡ.
+    const r = await prisma.recurringExpense.create({
+      data: { categoryId: "interest", amount: 900_000, dayOfMonth: 5, description: "Lãi vay tay", channelId: "shopee" },
+    });
+
+    await ensureRecurringExpenses(pastMonth);
+
+    const expense = await prisma.expense.findFirst({ where: { recurringId: r.id } });
+    expect(expense).not.toBeNull();
+    expect(expense!.categoryId).toBe("interest");
+    expect(expense!.channelId).toBeNull();
+  });
 });
 
 describe("ensureRecurringExpensesForMonths", () => {

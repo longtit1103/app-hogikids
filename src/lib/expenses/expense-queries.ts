@@ -158,7 +158,9 @@ export async function getExpensesPage(
     date: { gte: p.range.from, lte: endOfDay(p.range.to) },
   };
 
-  if (p.categoryIds && p.categoryIds.length > 0) {
+  // `undefined` = KHÔNG lọc danh mục. Mảng RỖNG = có yêu cầu lọc nhưng không id nào hợp lệ ⇒ phải
+  // ra 0 dòng. Gộp hai ca lại (`length > 0`) là để bộ lọc tự bốc hơi đúng lúc nó cần chặt nhất.
+  if (p.categoryIds) {
     where.categoryId = { in: p.categoryIds };
   }
   if (p.channelId === "none") {

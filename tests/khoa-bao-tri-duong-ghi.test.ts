@@ -63,6 +63,8 @@ import {
 } from "@/lib/actions/so-tiet-kiem";
 import { triggerSyncNow } from "@/lib/actions/sync";
 import { khoiPhucBanGhi, xoaVinhVienBanGhi } from "@/lib/actions/thung-rac";
+import { luuSoDuChotThang, xoaSoDuChotThang } from "@/lib/actions/so-du-chot-thang";
+import { datQuyToiThieu } from "@/lib/actions/so-quy-quy-toi-thieu";
 import { moLaiSoTietKiem, tatToanSoTietKiem } from "@/lib/actions/tat-toan-so-tiet-kiem";
 import { tatToanThauChi } from "@/lib/actions/tat-toan-thau-chi";
 import { LOI_DANG_PHUC_HOI, thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
@@ -104,6 +106,12 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["so-tiet-kiem.xoaSoTietKiem", () => xoaSoTietKiem({})],
   ["tat-toan-so-tiet-kiem.tatToanSoTietKiem", () => tatToanSoTietKiem({})],
   ["tat-toan-so-tiet-kiem.moLaiSoTietKiem", () => moLaiSoTietKiem({})],
+  // Bản chốt số dư cuối tháng (S6 #1): không phải nguồn tiền nhưng vẫn là lượt GHI — một bản backup
+  // lùi mất sẽ để chủ shop thấy "đã chốt" ở màn hình trong khi DB không còn dòng đó.
+  ["so-du-chot-thang.luuSoDuChotThang", () => luuSoDuChotThang({})],
+  ["so-du-chot-thang.xoaSoDuChotThang", () => xoaSoDuChotThang({})],
+  // Quỹ tối thiểu (bảng Setting) — ghi lúc đang phục hồi là giá trị mới bị bản dump đè mất, im lặng.
+  ["so-quy-quy-toi-thieu.datQuyToiThieu", () => datQuyToiThieu({})],
   // Thùng rác khôi phục (spec 260917): khôi phục DỰNG LẠI bản ghi tiền với đúng id cũ, xoá vĩnh
   // viễn thì đốt luôn đường lấy lại — cả hai đều là lượt ghi mà một bản backup lùi mất sẽ để lại
   // dòng tiền ở nơi này và dòng thùng rác nói ngược lại ở nơi kia.
@@ -199,7 +207,9 @@ describe("đang phục hồi → mọi đường ghi nhập tay bị từ chối
 
     // Cố ý KHÔNG mock `runPgDump`: guard nằm TRƯỚC lời gọi đó, nên ai đảo thứ tự sẽ thấy test đỏ
     // ngay bằng lỗi thiếu binary thay vì lặng lẽ trả một file dump thiếu dữ liệu.
-    const res = await backupPost();
+    // Request rỗng, KHÔNG có `Origin`: cổng `chanRequestKhacOrigin` fail-open khi vắng header
+    // đó, nên ca này vẫn đo đúng cổng khoá bảo trì chứ không vô tình đo cổng CSRF.
+    const res = await backupPost(new Request("http://localhost/api/backup", { method: "POST" }));
 
     expect(res.status).toBe(503);
     expect(res.headers.get("Retry-After")).toBe("60");

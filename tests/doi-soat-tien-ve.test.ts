@@ -496,3 +496,127 @@ describe("doiSoatTienVe — đối soát tiền về cấp đơn (TikTok)", () =
     expect(r.danhSachLech[0].delta).toBe(-1);
   });
 });
+
+describe("doiSoatTienVe — nhóm BỔ SUNG 'sàn chưa ghi doanh thu' (chủ shop chốt 2026-09-03)", () => {
+  it("(a) đơn COMPLETED có giao dịch nhưng revenue = 0 ⇒ vào nhóm, tuổi đơn đúng", async () => {
+    // Ca thật đo prod 2026-09-18: 583439857821976265 — 1 dòng chỉ ghi PHÍ, chưa từng
+    // ghi doanh thu.
+    await taoDon({
+      pancakeId: "SD1", code: "SD1", status: "COMPLETED", itemsTotal: 241_000,
+      orderedAt: DA_QUA_CUA_SO,
+    });
+    await taoGiaoDich({ orderId: "SD1", externalId: "gd-sd1", settlement: -7_087, revenue: 0 });
+
+    const r = await doiSoatTienVe(RANGE);
+
+    expect(r.sanChuaGhiDoanhThu).toHaveLength(1);
+    const d = r.sanChuaGhiDoanhThu[0];
+    expect(d.code).toBe("SD1");
+    expect(d.doanhThuApp).toBe(241_000);
+    expect(d.sanTra).toBe(-7_087);
+    expect(d.soGiaoDich).toBe(1);
+    expect(d.tuoiNgay).toBe(CUA_SO_CHO_QUYET_TOAN_NGAY + 10);
+    expect(d.conTrongCuaSoCho).toBe(false);
+    expect(r.tongDoanhThuSanChuaGhi).toBe(241_000);
+  });
+
+  it("(b) đơn sàn ĐÃ ghi doanh thu dương ⇒ không vào nhóm", async () => {
+    await taoDon({ pancakeId: "SD2", code: "SD2", status: "COMPLETED", itemsTotal: 300_000 });
+    await taoGiaoDich({ orderId: "SD2", externalId: "gd-sd2", settlement: 300_000, revenue: 300_000 });
+
+    const r = await doiSoatTienVe(RANGE);
+
+    expect(r.sanChuaGhiDoanhThu).toHaveLength(0);
+  });
+
+  it("(c) đơn không có giao dịch quyết toán nào ⇒ không vào nhóm", async () => {
+    await taoDon({ pancakeId: "SD3", code: "SD3", status: "COMPLETED", itemsTotal: 300_000 });
+
+    const r = await doiSoatTienVe(RANGE);
+
+    expect(r.sanChuaGhiDoanhThu).toHaveLength(0);
+  });
+
+  it("(d) đơn RETURNED revenue 0 ⇒ không vào nhóm (dù vẫn lọt lưới 'hoàn còn tiền' riêng)", async () => {
+    // Hai lưới độc lập: RETURNED/CANCELLED bị loại khỏi lưới NÀY hoàn toàn (bởi vì app
+    // cố ý không tính "doanh thu đang tính" cho đơn hoàn/hủy), nhưng vẫn được lưới
+    // `hoanConTien` soi riêng. "Loại khỏi lưới A" không được hiểu nhầm thành "loại
+    // khỏi mọi lưới".
+    await taoDon({ pancakeId: "SD4", code: "SD4", status: "RETURNED", itemsTotal: 300_000 });
+    await taoGiaoDich({ orderId: "SD4", externalId: "gd-sd4", settlement: 100_000, revenue: 0 });
+
+    const r = await doiSoatTienVe(RANGE);
+
+    expect(r.sanChuaGhiDoanhThu).toHaveLength(0);
+    expect(r.hoanConTien).toHaveLength(1);
+  });
+
+  it("(e) đơn PENDING revenue 0 ⇒ vẫn vào nhóm — ca PENDING chưa quyết toán xong", async () => {
+    await taoDon({ pancakeId: "SD5", code: "SD5", status: "PENDING", itemsTotal: 460_000 });
+    await taoGiaoDich({ orderId: "SD5", externalId: "gd-sd5", settlement: -3_671, revenue: 0 });
+
+    const r = await doiSoatTienVe(RANGE);
+
+    expect(r.sanChuaGhiDoanhThu).toHaveLength(1);
+    expect(r.sanChuaGhiDoanhThu[0].status).toBe("PENDING");
+  });
+
+  it("(f) đơn vừa LỆCH vừa thuộc nhóm mới: khop/lech/tongDelta/danhSachLech KHÔNG đổi", async () => {
+    // Hai ca thật đo prod 2026-09-18 (583439857821976265 + 583442948484400557): cả
+    // hai đều LỆCH bình thường ở nhánh so sánh hiện có VÀ đều rơi vào nhóm cảnh báo
+    // mới. Nhóm mới là BỔ SUNG — không được rẽ nhánh làm hụt danh sách lệch cũ.
+    await taoDon({ pancakeId: "SD6", code: "SD6", status: "COMPLETED", itemsTotal: 241_000 });
+    await taoGiaoDich({ orderId: "SD6", externalId: "gd-sd6", settlement: -7_087, revenue: 0 });
+
+    // Đơn "bán rồi đảo ngược sạch": 2 dòng, net doanh thu = 0.
+    await taoDon({ pancakeId: "SD7", code: "SD7", status: "COMPLETED", itemsTotal: 320_000 });
+    await taoGiaoDich({ orderId: "SD7", externalId: "gd-sd7a", settlement: 320_000, revenue: 320_000 });
+    await taoGiaoDich({ orderId: "SD7", externalId: "gd-sd7b", settlement: -327_087, revenue: -320_000 });
+
+    const r = await doiSoatTienVe(RANGE);
+
+    expect(r.khop).toBe(0);
+    expect(r.lech).toBe(2);
+    expect(r.tongDelta).toBe(-575_174); // −248.087 + −327.087
+    expect(r.danhSachLech.map((d) => d.code).sort()).toEqual(["SD6", "SD7"]);
+    expect(r.danhSachLech.find((d) => d.code === "SD6")!.delta).toBe(-248_087);
+    expect(r.danhSachLech.find((d) => d.code === "SD7")!.delta).toBe(-327_087);
+    // Cùng hai đơn đó cũng có mặt ở nhóm cảnh báo mới — chứng minh KHÔNG rẽ nhánh.
+    expect(r.sanChuaGhiDoanhThu.map((d) => d.code).sort()).toEqual(["SD6", "SD7"]);
+  });
+
+  it("(g) đơn ĐẶT còn trong cửa sổ chờ ⇒ conTrongCuaSoCho = true, tuổi đơn đúng", async () => {
+    await taoDon({
+      pancakeId: "SD8", code: "SD8", status: "PENDING", itemsTotal: 300_000,
+      orderedAt: CON_TRONG_CUA_SO,
+    });
+    await taoGiaoDich({ orderId: "SD8", externalId: "gd-sd8", settlement: 0, revenue: 0 });
+
+    const r = await doiSoatTienVe(RANGE);
+
+    expect(r.sanChuaGhiDoanhThu).toHaveLength(1);
+    expect(r.sanChuaGhiDoanhThu[0].conTrongCuaSoCho).toBe(true);
+    expect(r.sanChuaGhiDoanhThu[0].tuoiNgay).toBe(3);
+  });
+
+  it("sắp xếp: đơn quá cửa sổ trước đơn còn trong cửa sổ, trong mỗi nhóm tuổi cao trước", async () => {
+    await taoDon({
+      pancakeId: "SO1", code: "SO1", status: "COMPLETED", itemsTotal: 100_000,
+      orderedAt: CON_TRONG_CUA_SO,
+    });
+    await taoGiaoDich({ orderId: "SO1", externalId: "gd-so1", settlement: 0, revenue: 0 });
+
+    const cuHon = new Date(Date.now() - (CUA_SO_CHO_QUYET_TOAN_NGAY + 50) * 86_400_000);
+    await taoDon({ pancakeId: "SO2", code: "SO2", status: "COMPLETED", itemsTotal: 100_000, orderedAt: cuHon });
+    await taoGiaoDich({ orderId: "SO2", externalId: "gd-so2", settlement: 0, revenue: 0 });
+
+    await taoDon({ pancakeId: "SO3", code: "SO3", status: "COMPLETED", itemsTotal: 100_000, orderedAt: DA_QUA_CUA_SO });
+    await taoGiaoDich({ orderId: "SO3", externalId: "gd-so3", settlement: 0, revenue: 0 });
+
+    const r = await doiSoatTienVe(RANGE);
+
+    // SO2 (60 ngày) và SO3 (40 ngày) đều đã QUA cửa sổ ⇒ lên trước, SO2 tuổi cao hơn
+    // nên đứng trước SO3. SO1 còn TRONG cửa sổ ⇒ xuống cuối dù tuổi không liên quan.
+    expect(r.sanChuaGhiDoanhThu.map((d) => d.code)).toEqual(["SO2", "SO3", "SO1"]);
+  });
+});

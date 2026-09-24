@@ -1,9 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
-import {
-  prepareAdsExpenseRow,
-  type AdsSource,
-} from "@/lib/ingest/ads-expense-row";
+import { chuanBiDongAdsHoacBoQua, type AdsSource } from "@/lib/ingest/ads-expense-row";
 import {
   napSoChiTieuAds,
   upsertOneAdsExpense,
@@ -88,7 +85,12 @@ async function ghiChiTieuAds(
   stats: TransformStats,
   warnings: string[],
 ): Promise<void> {
-  const prepared = prepareAdsExpenseRow(source, { ...row, vatRate });
+  // Ngày ngoài biên hợp lý: bỏ ĐÚNG dòng này kèm cảnh báo — cùng luật với `/api/ingest/ads`.
+  const prepared = chuanBiDongAdsHoacBoQua(source, { ...row, vatRate }, warnings);
+  if (prepared === null) {
+    stats.skipped++;
+    return;
+  }
   if (seen.has(prepared.refId)) {
     stats.skipped++;
     warnings.push(

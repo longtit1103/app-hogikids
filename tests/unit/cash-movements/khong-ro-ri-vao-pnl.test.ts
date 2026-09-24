@@ -37,7 +37,12 @@ const GOC = path.resolve(__dirname, "../../..");
 // thẳng bằng delegate Prisma không lộ chữ nào của ba token trên, mà đó lại là đường rò rỉ NGẮN NHẤT.
 // Khuôn `prisma\.loan\b` đang chạy sẵn cho trục khoản vay.
 const CAM =
-  /cash-movements|cashMovement|so-quy|khoan-vay|prisma\.loan\b|DEPOSIT_OUT|DEPOSIT_IN|SAVINGS_OUT|SAVINGS_IN|lib\/tiet-kiem|prisma\.soTietKiem\b/i;
+  // `paidAtShop` (23/09): tiền khách trả tại shop của đơn bán trực tiếp — nguồn Sổ quỹ, KHÔNG phải doanh
+  // thu (P&L đã đọc itemsTotal/discount của chính đơn đó). Đọc thêm cột này ở P&L là đếm 2 lần.
+  // `soDuChot|prisma\.soDuChotThang` (23/09, S6 #1): bản chốt số dư THẬT cuối tháng là thước đo của trục
+  // dòng tiền — cùng luật với `CashMovement`, không bao giờ vào Lãi/Lỗ. Token có tiền tố `soDu` cố ý:
+  // `chot` trần khớp chữ "chốt" tiếng Việt có sẵn khắp comment P&L, lưới sẽ đỏ oan.
+  /cash-movements|cashMovement|so-quy|khoan-vay|prisma\.loan\b|DEPOSIT_OUT|DEPOSIT_IN|SAVINGS_OUT|SAVINGS_IN|lib\/tiet-kiem|prisma\.soTietKiem\b|soDuChot|prisma\.soDuChotThang\b|paidAtShop/i;
 
 const FILE_CAM = [
   "src/lib/reports/pnl.ts",
@@ -101,6 +106,10 @@ describe("khoản tiền khác (CashMovement) không rò rỉ vào P&L", () => {
     expect('import { tinhSoQuyThang } from "@/lib/so-quy/so-quy-queries";').toMatch(CAM);
     expect("await prisma.loan.findMany({})").toMatch(CAM);
     expect('from "@/lib/so-quy/khoan-vay-queries"').toMatch(CAM);
+    // Bản chốt số dư cuối tháng — cả delegate Prisma lẫn tên hàm/kiểu đều phải bị bắt.
+    expect("await prisma.soDuChotThang.findUnique({})").toMatch(CAM);
+    expect("const dc = await doiChieuSoDuChot(range, soQuy);").toMatch(CAM);
+    expect("// chốt số ở đây rồi in ra").not.toMatch(CAM);
     expect("const cashOut = 1; // tiền chi thật").not.toMatch(CAM);
     expect("// quy tắc lọc đơn hợp lệ").not.toMatch(CAM);
   });

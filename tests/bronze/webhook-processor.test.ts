@@ -4,7 +4,11 @@ import { clearBronzeBacklog, hasBronzeBacklog, markBronzeBacklog } from "@/lib/b
 import { landRaw } from "@/lib/bronze/land-raw";
 import { SHOP_KHO, SHOP_SHOPEE, SHOP_TIKTOK } from "../helpers/shop-ids-fixture";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
-import { sniffLoaiSuKien, xuLySuKienWebhook } from "@/lib/ingest/webhook-processor";
+import {
+  KET_CUC_CAN_XEM,
+  sniffLoaiSuKien,
+  xuLySuKienWebhook,
+} from "@/lib/ingest/webhook-processor";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
@@ -120,7 +124,19 @@ describe("sniffLoaiSuKien", () => {
   });
 
   it("JSON object hợp lệ nhưng thiếu `type` → type=null, KHÔNG ném lỗi", () => {
-    expect(sniffLoaiSuKien(`{"id":"X"}`)).toEqual({ laJsonObject: true, type: null });
+    expect(sniffLoaiSuKien(`{"id":"X"}`)).toEqual({
+      laJsonObject: true,
+      type: null,
+      laPingThu: false,
+    });
+  });
+
+  it("`{\"test\":true}` trần → laPingThu=true (đúng shape ping thử đã đo trên prod)", () => {
+    expect(sniffLoaiSuKien(`{"test":true}`)).toEqual({
+      laJsonObject: true,
+      type: null,
+      laPingThu: true,
+    });
   });
 });
 
@@ -432,6 +448,38 @@ describe("xuLySuKienWebhook — loại cố ý bỏ qua và loại lạ", () => 
     const kq = await xuLySuKienWebhook({ shopId: SHOP_SHOPEE, payload: "<html>lỗi 502</html>" });
 
     expect(kq.processedAs).toBe("khong-nhan-dien");
+  });
+
+  it("ping thử `{\"test\":true}` → `ping-thu`, KHÔNG tô đỏ panel (kết cục ngoài KET_CUC_CAN_XEM)", async () => {
+    const kq = await xuLySuKienWebhook({ shopId: SHOP_SHOPEE, payload: `{"test":true}` });
+
+    expect(kq.processedAs).toBe("ping-thu");
+    expect(KET_CUC_CAN_XEM).not.toContain("ping-thu");
+  });
+
+  it("ping thử KHÔNG đụng dữ liệu: không land Bronze, không đẻ variant", async () => {
+    const kq = await xuLySuKienWebhook({ shopId: SHOP_KHO, payload: `{"test":true}` });
+
+    expect(kq.processedAs).toBe("ping-thu");
+    expect(await prisma.rawPancakeOrder.count()).toBe(0);
+    expect(await prisma.variant.count()).toBe(0);
+  });
+
+  // Cổng CỐ Ý HẸP — mọi ca dưới đây vẫn phải ĐỎ trên panel. Khẳng định phải là "kết cục NẰM TRONG
+  // KET_CUC_CAN_XEM", KHÔNG phải "khác chuỗi ping-thu": ai đó thêm một kết cục XANH khác cho payload
+  // lạ thì phép so chuỗi vẫn xanh trong khi panel đã thôi tô đỏ — đúng ca lưới này sinh ra để chặn.
+  // Nới cổng chỉ được làm khi đo được payload thật: nhận diện rộng ở đây nghĩa là một loại sự kiện
+  // Pancake mới đi qua mà không ai thấy.
+  it.each([
+    [`{"test":true,"id":"X"}`, "còn khoá khác ngoài `test`"],
+    [`{"test":"true"}`, "`test` là chuỗi, không phải boolean"],
+    [`{"test":false}`, "`test` = false"],
+    [`{"type":"orders","test":true}`, "có `type` thật — đi nhánh nghiệp vụ rồi hỏng ở đó, vẫn phải đỏ"],
+  ])("KHÔNG nhận nhầm là ping thử, vẫn phải ĐỎ: %s (%s)", async (payload) => {
+    const kq = await xuLySuKienWebhook({ shopId: SHOP_SHOPEE, payload });
+
+    expect(kq.processedAs).not.toBe("ping-thu");
+    expect(KET_CUC_CAN_XEM).toContain(kq.processedAs);
   });
 
   it("BRONZE_ONLY: đơn LAND nhưng KHÔNG dựng Silver, và bật cờ backlog để buộc rebuild", async () => {

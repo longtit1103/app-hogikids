@@ -15,10 +15,13 @@ const NGAY_VI_COI_LA_CU = 15;
 export function SoQuyCanhBao({
   soQuy,
   soKhoanVayCoKyCho,
+  hrefKhoanVay = "#khoan-vay",
 }: {
   soQuy: SoQuyThangDayDu;
   /** Số KHOẢN VAY còn hiệu lực đang có kỳ chờ duyệt (tối đa 1 kỳ/khoản) — page tính từ `listKhoanVay()`. */
   soKhoanVayCoKyCho: number;
+  /** Đích của dòng "khoản vay có kỳ chưa ghi" — mặc định neo khối Khoản vay trên CÙNG trang (tab Dòng tiền). */
+  hrefKhoanVay?: string;
 }) {
   const c = soQuy.canhBao;
   const viCu =
@@ -60,7 +63,7 @@ export function SoQuyCanhBao({
         <p>⚠️ sàn trừ ví ads TikTok nhiều hơn ads đã ghi Sổ chi phí — quỹ đang tính dư</p>
       )}
       {soKhoanVayCoKyCho > 0 && (
-        <Link href="#khoan-vay" className="underline underline-offset-2">
+        <Link href={hrefKhoanVay} className="underline underline-offset-2">
           ⚠️ {soKhoanVayCoKyCho} khoản vay có kỳ trả nợ chưa ghi
         </Link>
       )}

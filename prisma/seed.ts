@@ -44,6 +44,8 @@ const CHANNELS = [
   { id: "tiktok", name: "TikTok Shop", color: "#141413", platformFeePct: 6, paymentFeePct: 2, sortOrder: 2 },
   { id: "facebook", name: "Facebook/Instagram", color: "#5db8a6", platformFeePct: 0, paymentFeePct: 0, sortOrder: 3 },
   { id: "website", name: "Website/Khác", color: "#e8a55a", platformFeePct: 0, paymentFeePct: 0, sortOrder: 4 },
+  // Đơn lên từ màn "Bán hàng" Pancake (khách trả tại shop). Máy đang chạy nhận kênh này qua migration.
+  { id: "direct", name: "Bán trực tiếp", color: "#6a8fd8", platformFeePct: 0, paymentFeePct: 0, sortOrder: 5 },
 ] as const;
 
 const EXPENSE_CATEGORIES = [

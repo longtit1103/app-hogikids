@@ -31,6 +31,7 @@ const NHAN_KET_CUC: Record<string, string> = {
   "san-pham-bo-qua": "Sản phẩm (bỏ qua — lấy từ API)",
   "bronze-only": "BRONZE_ONLY (tạm dừng Silver)",
   "truoc-pha-2": "Nhận trước khi app xử lý webhook (chỉ lưu)",
+  "ping-thu": "Ping thử đường truyền (không phải sự kiện Pancake)",
   "khong-nhan-dien": "KHÔNG NHẬN DIỆN",
   loi: "LỖI XỬ LÝ",
 };

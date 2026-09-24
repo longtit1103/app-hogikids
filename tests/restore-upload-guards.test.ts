@@ -22,6 +22,12 @@ import { POST } from "@/app/api/restore/route";
 function requestWithFile(file: unknown): Request {
   return {
     formData: async () => ({ get: (key: string) => (key === "file" ? file : null) }),
+    // `headers` RỖNG nhưng PHẢI có: từ 2026-09-20 route gọi `chanRequestKhacOrigin(request)` ngay
+    // sau cổng phiên, tức nó ĐỌC header trước khi tới các guard upload mà suite này đo. Thiếu
+    // trường này thì mọi ca ở đây chết bằng TypeError chứ không phải bằng khẳng định của chính nó.
+    // Rỗng = không có `Origin` = cổng fail-open ⇒ suite vẫn đo đúng guard upload, không vô tình đo
+    // cổng CSRF (cổng đó có suite riêng `tests/chan-request-khac-origin.test.ts`).
+    headers: new Headers(),
   } as unknown as Request;
 }
 
@@ -31,6 +37,53 @@ function fileWithFakeSize(content: Buffer, size: number): File {
   Object.defineProperty(f, "size", { value: size });
   return f;
 }
+
+/**
+ * Request giả có `Content-Length` — dùng cho lớp guard THỨ NHẤT, chặn TRƯỚC `formData()`.
+ * `formData` ném nếu bị gọi: đó chính là điều cần chốt — vượt trần thì không được chạm thân request.
+ */
+function requestWithContentLength(len: string): Request {
+  return {
+    formData: async () => {
+      throw new Error("formData() KHÔNG được gọi khi Content-Length đã vượt trần");
+    },
+    headers: new Headers({ "content-length": len }),
+  } as unknown as Request;
+}
+
+describe("POST /api/restore — guard Content-Length (chặn TRƯỚC khi đọc thân request)", () => {
+  it("Content-Length vượt trần → 413 mà KHÔNG gọi formData()", async () => {
+    // Cap `file.size` cũ chỉ đo được SAU khi `formData()` đã phân tích trọn thân request — tức sau
+    // đúng bước tốn RAM/đĩa. Lớp này chặn từ header.
+    const res = await POST(requestWithContentLength(String(201 * 1024 * 1024 + 1)));
+
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("quá lớn");
+  });
+
+  it("thiếu Content-Length → đi tiếp, để cap `file.size` gác (không fail-closed oan)", async () => {
+    // Thân chunked không có header này. Từ chối luôn ở đây là cắt nhầm request hợp lệ.
+    const nhoHopLe = fileWithFakeSize(Buffer.from("hello"), 1024);
+    const res = await POST(requestWithFile(nhoHopLe));
+
+    // `toBe(400)` chứ KHÔNG phải `not.toBe(413)`: khẳng định phủ định cũng xanh khi route chết ở
+    // 401/500 trước đó, tức không chứng minh được là đã ĐI QUA guard. 400 = tới được bước nhận diện
+    // định dạng (nội dung "hello" không phải gzip/dump).
+    expect(res.status).toBe(400);
+  });
+
+  it("Content-Length bịa dạng không phải số → đi tiếp, không ném", async () => {
+    const nhoHopLe = fileWithFakeSize(Buffer.from("hello"), 1024);
+    const req = {
+      formData: async () => ({ get: (k: string) => (k === "file" ? nhoHopLe : null) }),
+      headers: new Headers({ "content-length": "khong-phai-so" }),
+    } as unknown as Request;
+    const res = await POST(req);
+
+    expect(res.status).toBe(400); // đi qua guard, chết ở bước nhận diện định dạng — xem ca trên
+  });
+});
 
 describe("POST /api/restore — guard upload (SEC-H1, không cần DB)", () => {
   it("file quá 200MB → 413, KHÔNG đọc bytes vào RAM", async () => {

@@ -48,6 +48,7 @@ export type KetCucXuLy =
   | "san-pham-bo-qua" // products webhook THIẾU giá vốn+tồn — land sẽ phá dữ liệu, cố ý bỏ
   | "bronze-only" // chế độ BRONZE_ONLY: không được đụng Silver, bỏ qua có ghi chú
   | "truoc-pha-2" // dòng nhận TRƯỚC khi pha 2 sống (hộp thư chỉ lưu) + dòng nạp bù — không xử lý
+  | "ping-thu" // ping kiểm tra đường truyền, không phải sự kiện nghiệp vụ — KHÔNG tô đỏ
   | "khong-nhan-dien" // loại sự kiện app chưa có nhánh xử lý — PHẢI hiện lên panel
   | "loi"; // xử lý ném lỗi — payload vẫn nguyên trong hộp thư
 
@@ -71,19 +72,34 @@ export function catNote(note: string | undefined): string | undefined {
 }
 
 /**
- * Đọc field `type` để định tuyến. JSON.parse ở đây CHỈ đọc `type` (chuỗi ngắn) — object đã parse
- * TUYỆT ĐỐI không dùng để land (int64 bị làm tròn khi re-serialize); land luôn đi bằng TEXT gốc.
+ * Đọc field `type` để định tuyến, kèm dấu nhận diện ping thử. JSON.parse ở đây CHỈ đọc khoá mức 1
+ * (chuỗi/boolean ngắn) — object đã parse TUYỆT ĐỐI không dùng để land (int64 bị làm tròn khi
+ * re-serialize); land luôn đi bằng TEXT gốc.
  */
-export function sniffLoaiSuKien(payload: string): { laJsonObject: boolean; type: string | null } {
+export function sniffLoaiSuKien(payload: string): {
+  laJsonObject: boolean;
+  type: string | null;
+  laPingThu: boolean;
+} {
   try {
     const o: unknown = JSON.parse(payload);
     if (o === null || typeof o !== "object" || Array.isArray(o)) {
-      return { laJsonObject: false, type: null };
+      return { laJsonObject: false, type: null, laPingThu: false };
     }
-    const type = (o as Record<string, unknown>).type;
-    return { laJsonObject: true, type: typeof type === "string" ? type : null };
+    const obj = o as Record<string, unknown>;
+    const type = obj.type;
+    const khoa = Object.keys(obj);
+    return {
+      laJsonObject: true,
+      type: typeof type === "string" ? type : null,
+      // CỐ Ý HẸP — đúng shape đã đo trên prod (`{"test":true}`, 13 byte): object có ĐÚNG MỘT khoá
+      // `test` mang boolean `true`. Nới rộng (cho thêm khoá phụ, nhận `"true"` chuỗi…) chỉ được làm
+      // khi đo được payload thật, vì nhận diện rộng ở đây nghĩa là một loại sự kiện Pancake MỚI đi
+      // qua mà không ai thấy — đúng cái panel /cai-dat sinh ra để chặn.
+      laPingThu: khoa.length === 1 && khoa[0] === "test" && obj.test === true,
+    };
   } catch {
-    return { laJsonObject: false, type: null };
+    return { laJsonObject: false, type: null, laPingThu: false };
   }
 }
 
@@ -97,7 +113,7 @@ export async function xuLySuKienWebhook(args: {
 }): Promise<KetQuaXuLy> {
   const { shopId, payload } = args;
   try {
-    const { laJsonObject, type } = sniffLoaiSuKien(payload);
+    const { laJsonObject, type, laPingThu } = sniffLoaiSuKien(payload);
     if (!laJsonObject) {
       return { processedAs: "khong-nhan-dien", note: "payload không phải JSON object" };
     }
@@ -111,6 +127,16 @@ export async function xuLySuKienWebhook(args: {
       // thể, kể cả sp đã nhập giá vốn) — land qua transform cũ sẽ ghi tồn=0 và đẻ variant mới với
       // costPrice=0 vĩnh viễn (APP-OWNED không cho sync sửa lại). Nguồn products giữ API nightly (03:00).
       return { processedAs: "san-pham-bo-qua" };
+    }
+
+    // Ping kiểm tra đường truyền — KHÔNG phải sự kiện nghiệp vụ. Đặt SAU mọi nhánh thật ở trên để
+    // cổng này không bao giờ che được một nhánh nghiệp vụ (payload có `type` không lọt tới đây).
+    // Vì sao cần kết cục riêng: mỗi lượt XOAY PATH webhook (nay là việc bảo mật định kỳ — checklist
+    // ở `n8n/huong-dan-cai-dat-workflows.md`) đều BẮT BUỘC bắn thử, và lượt 21/09 đẻ 4 dòng đỏ giả.
+    // Hộp đỏ giả lặp lại chính là thứ tập cho người đọc thói quen bỏ qua nó. Vẫn GHI hộp thư và vẫn
+    // ĐẾM trên panel — chỉ thôi tô đỏ (kết cục này cố ý nằm ngoài `KET_CUC_CAN_XEM`).
+    if (laPingThu) {
+      return { processedAs: "ping-thu", note: "ping kiểm tra đường truyền webhook" };
     }
 
     return {

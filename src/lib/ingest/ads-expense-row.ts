@@ -1,4 +1,8 @@
 import type { IngestAdsBody } from "./ads-schema";
+import {
+  laNgayChiTieuAdsHopLy,
+  NGAY_CHI_TIEU_ADS_SOM_NHAT,
+} from "./ngay-chi-tieu-ads-hop-ly";
 
 /** Nguồn chi tiêu quảng cáo — CÙNG hợp đồng với body `/api/ingest/ads`. */
 export type AdsSource = IngestAdsBody["source"];
@@ -34,8 +38,17 @@ export function adsChannelId(source: AdsSource): string {
  * - `amount = round(spendExVat × (1 + vatRate))` — làm tròn TỪNG dòng (app là biên tiền; sàn trả
  *   số chưa thuế, hộ kinh doanh không khấu trừ được VAT đầu vào).
  * - `date` neo `T00:00:00+07:00` (bất biến #3) ⇒ 1 dòng ads = 1 ngày VN.
+ * - Ngày ngoài `[2000-01-01, hôm nay VN]` ⇒ THROW (`laNgayChiTieuAdsHopLy`, cùng biên với cửa file).
+ *   Ném chứ không kẹp im lặng — người gọi đi qua `chuanBiDongAdsHoacBoQua` để bỏ ĐÚNG dòng đó.
  */
 export function prepareAdsExpenseRow(source: AdsSource, row: AdsSpendRow): PreparedAdsExpense {
+  if (!laNgayChiTieuAdsHopLy(row.date)) {
+    throw new Error(
+      `Ngày chi tiêu ads "${row.date}" (chiến dịch ${row.campaignId}) nằm ngoài khoảng ` +
+        `${NGAY_CHI_TIEU_ADS_SOM_NHAT} → hôm nay giờ VN — người gọi tính sai ngày; ghi vào sổ là ` +
+        `chi phí nằm ở năm không báo cáo nào phủ.`,
+    );
+  }
   return {
     refId:
       source === "TIKTOK_ADS" && row.adType === "auction"
@@ -46,4 +59,27 @@ export function prepareAdsExpenseRow(source: AdsSource, row: AdsSpendRow): Prepa
     description: row.campaignName || row.campaignId,
     amount: Math.round(row.spendExVat * (1 + row.vatRate)),
   };
+}
+
+/**
+ * `prepareAdsExpenseRow` cho MỘT dòng, nhưng dòng hỏng (ngày ngoài biên) ⇒ trả `null` + đẩy cảnh báo
+ * thay vì ném. Hai đường ghi dùng chung để cùng một luật: BỎ ĐÚNG dòng hỏng, các dòng còn lại vẫn
+ * vào sổ.
+ *
+ * Vì sao không đỏ cả lô: n8n gửi chi tiêu theo chunk 500 dòng trộn nhiều ngày/chiến dịch, THỬ LẠI khi
+ * gặp 5xx rồi ném — mọi chunk phía sau cũng không được POST. Một dòng ngày hỏng khi đó làm mất chi phí
+ * quảng cáo của CẢ lượt (lãi báo cao lên), trái luật "ghi số trước, kêu lỗi sau" của chính workflow.
+ * Dòng bị bỏ vẫn hiện: cảnh báo ở nhật ký đồng bộ + đếm vào `rowsSkipped`.
+ */
+export function chuanBiDongAdsHoacBoQua(
+  source: AdsSource,
+  row: AdsSpendRow,
+  warnings: string[],
+): PreparedAdsExpense | null {
+  try {
+    return prepareAdsExpenseRow(source, row);
+  } catch (e) {
+    warnings.push(`Bỏ qua chi tiêu ads ${source}: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
 }

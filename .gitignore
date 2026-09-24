@@ -109,3 +109,6 @@ id_ed25519
 *service-account*.json
 *serviceaccount*.json
 gha-creds-*.json
+
+# Thư mục lưu bí mật cá nhân / khoá DR / credential cục bộ — TUYỆT ĐỐI KHÔNG COMMIT
+.secrets/

@@ -6,6 +6,7 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import type { LatestSync } from "@/lib/actions/sync-types";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { giaiUrlSyncNow } from "@/lib/n8n/giai-url-sync-now";
+import { laChuyenHuong } from "@/lib/n8n/kiem-dich-den-n8n";
 import { SYNC_NOW_AUTH_HEADER } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
@@ -44,8 +45,19 @@ export async function triggerSyncNow(): Promise<ActionResult> {
     const res = await fetch(dich.url, {
       method: "POST",
       headers: { [SYNC_NOW_AUTH_HEADER]: secretRow?.value ?? "" },
+      // Đây là đường THỨ BA mang secret ra ngoài (cùng họ với lượt Cài workflows và probe). Đo thật
+      // 22/09 trên undici: qua chuyển hướng KHÁC ORIGIN, chỉ `Authorization` bị strip — **header
+      // custom như header auth ở đây đi tiếp nguyên vẹn**. Nên không chặn là `n8nSyncNowSecret`
+      // chảy sang đích lạ chỉ bằng một lượt 302.
+      redirect: "manual",
       signal: AbortSignal.timeout(5000),
     });
+    if (laChuyenHuong(res.status)) {
+      return {
+        ok: false,
+        error: "n8n URL trả chuyển hướng — đã dừng, không gửi tiếp. Kiểm tra lại địa chỉ n8n ở Cài đặt",
+      };
+    }
     if (!res.ok) {
       return { ok: false, error: "Không gọi được n8n — kiểm tra Cài đặt kết nối" };
     }

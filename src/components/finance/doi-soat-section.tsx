@@ -8,6 +8,8 @@ import type { DoiSoatTienVe } from "@/lib/reports/doi-soat-tien-ve";
 import { CUA_SO_CHO_QUYET_TOAN_NGAY } from "@/lib/reports/doi-soat-tien-ve";
 import { cn } from "@/lib/utils";
 
+import { DoiSoatSanChuaGhiDoanhThu } from "./doi-soat-san-chua-ghi-doanh-thu";
+
 /**
  * Khối "Đối soát tiền về" của tab Dòng tiền — kênh TikTok, cấp TỪNG ĐƠN.
  *
@@ -54,7 +56,15 @@ export function DoiSoatSection({
   tenKenh,
   nguon,
 }: {
-  doiSoat: DoiSoatTienVe & { khongDuKhoa?: number; chuaNhapVi?: number };
+  // Shopee (`DoiSoatShopee`) không có 2 field "sàn chưa ghi doanh thu" — hiện chỉ
+  // TikTok đo được (đọc thẳng revenue_amount Bronze). Để optional thay vì bắt buộc,
+  // Shopee tự rơi về mảng rỗng chứ không vỡ type.
+  doiSoat: Omit<DoiSoatTienVe, "sanChuaGhiDoanhThu" | "tongDoanhThuSanChuaGhi"> & {
+    khongDuKhoa?: number;
+    chuaNhapVi?: number;
+    sanChuaGhiDoanhThu?: DoiSoatTienVe["sanChuaGhiDoanhThu"];
+    tongDoanhThuSanChuaGhi?: number;
+  };
   tenKenh: string;
   /** Nguồn số của sàn, hiện trong dòng khai trục để không ai tưởng hai kênh cùng một đường dữ liệu. */
   nguon: string;
@@ -64,6 +74,8 @@ export function DoiSoatSection({
     tongDelta, tongLechTuyetDoi, danhSachLech,
     hoanConTien, tongTienVeDonHoan,
   } = doiSoat;
+  const sanChuaGhiDoanhThu = doiSoat.sanChuaGhiDoanhThu ?? [];
+  const tongDoanhThuSanChuaGhi = doiSoat.tongDoanhThuSanChuaGhi ?? 0;
   // Cộng cả hai nhóm "không kết luận được" vào phép đếm ẩn khối: kỳ toàn đơn mirror (vd tháng 3 —
   // 0/9 nối được) mà ẩn sạch thì chủ shop không thấy gì, kể cả chính lời giải thích vì sao không thấy.
   const daKetLuan =
@@ -308,6 +320,8 @@ export function DoiSoatSection({
           </div>
         </div>
       )}
+
+      <DoiSoatSanChuaGhiDoanhThu danhSach={sanChuaGhiDoanhThu} tongDoanhThuApp={tongDoanhThuSanChuaGhi} />
 
       {chuaThay > 0 && (
         <p className="mt-3 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">

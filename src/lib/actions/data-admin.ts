@@ -110,6 +110,9 @@ export async function deleteAllData(shopNameConfirm: string): Promise<ActionResu
       // Không FK nào trỏ tới/đi ra từ bảng này ⇒ đặt đâu trong transaction cũng an toàn; đặt ở đây
       // để đứng cạnh 5 bảng nó chụp.
       await tx.banGhiDaXoa.deleteMany();
+      // Bản chốt số dư cuối tháng: thước đo gắn với D0 của chính sổ vừa xoá — giữ lại là sau khi
+      // nhập sổ mới, thẻ đối chiếu vẫn in chênh lệch của thế giới cũ. Không FK, đặt đâu cũng được.
+      await tx.soDuChotThang.deleteMany();
       // TRỪ kind BACKUP — xem khối "GIỮ LẠI" ở đầu file: đó là nguồn trạng thái sao lưu, không phải
       // log giao dịch. Xoá cả bảng thì màn Cài đặt kêu "Chưa sao lưu lần nào" ngay sau lượt xoá.
       await tx.syncLog.deleteMany({ where: { kind: { not: "BACKUP" } } });

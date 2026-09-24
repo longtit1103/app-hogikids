@@ -11,15 +11,18 @@
  * UI qua ActionResult).
  */
 
+import { laChuyenHuong, lyDoTuChoiDichN8n } from "@/lib/n8n/kiem-dich-den-n8n";
+
 export type N8nClient = { base: string; apiKey: string };
 
 const TIMEOUT_MS = 15_000;
 
 export function taoN8nClient(baseUrl: string, apiKey: string): N8nClient {
-  const url = new URL(baseUrl); // ném nếu không phải URL — action đã validate trước, đây là chốt chặn
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("n8n URL phải là http:// hoặc https://");
-  }
+  // Chốt chặn cuối trước khi địa chỉ này thành đích fetch kèm secret. Action đã validate lúc lưu,
+  // nhưng kho khoá còn sửa được bằng tay/qua bản phục hồi nên đường code phải tự gác lần nữa.
+  const lyDo = lyDoTuChoiDichN8n(baseUrl);
+  if (lyDo) throw new Error(`n8n URL ${lyDo}.`);
+  const url = new URL(baseUrl);
   return { base: `${url.origin}${url.pathname.replace(/\/+$/, "")}`, apiKey };
 }
 
@@ -33,10 +36,20 @@ async function goi<T>(client: N8nClient, method: string, path: string, body?: un
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      // KHÔNG đi theo chuyển hướng: n8n Public API không bao giờ 3xx, nên một lượt 3xx hoặc là cấu
+      // hình sai, hoặc là đích đang lái request (kèm API key ở header) sang nơi khác. Kiểm địa chỉ
+      // lúc gọi không bảo vệ được chặng SAU redirect — đây mới là chỗ bịt.
+      redirect: "manual",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch {
     throw new Error(`Không kết nối được n8n (${method} ${path}) — kiểm tra n8n URL và n8n có đang chạy không.`);
+  }
+  if (laChuyenHuong(res.status)) {
+    throw new Error(
+      `n8n URL trả chuyển hướng (HTTP ${res.status}) cho ${method} ${path} — đã DỪNG, không đi theo. ` +
+        "Kiểm tra lại địa chỉ n8n: API của n8n không bao giờ chuyển hướng.",
+    );
   }
   if (res.status === 401) throw new Error("n8n từ chối API key (401) — kiểm tra lại key ở n8n Settings → n8n API.");
   if (res.status === 404) throw new KhongTimThay(`n8n không có tài nguyên ${path} (404).`);

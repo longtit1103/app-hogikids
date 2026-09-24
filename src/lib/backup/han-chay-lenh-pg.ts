@@ -21,7 +21,11 @@
  * nào có đủ ba lớp, nhưng đừng đọc nó thành "mọi lệnh đều có ba lớp".
  *
  * CĂN CỨ SỐ ĐO (prod 01/08/2026): dump `-Fc` schema `app` = 22,9 MB, lượt sao lưu đêm xong trong
- * vài chục giây. Mọi hạn dưới đây đặt rộng gấp nhiều lần số đo — chúng chống TREO VĨNH VIỄN, không
+ * vài chục giây. ⚠️ ĐO LẠI 23/09/2026: **56,6 MiB** (59.338.339 B) — gấp 2,6 lần sau chưa đầy 2
+ * tháng, nên đừng dùng con số 22,9 MB làm cơ sở cho bất kỳ hằng mới nào; đo lại trước khi chốt.
+ * Cùng lượt đo: bung ra SQL phẳng = 621,4 MiB (327.155 dòng, 45 khối COPY) trong 1,45 s.
+ *
+ * Mọi hạn dưới đây đặt rộng gấp nhiều lần số đo — chúng chống TREO VĨNH VIỄN, không
  * bóp hiệu năng. Cũng đo cùng ngày: `statement_timeout`, `lock_timeout`,
  * `idle_in_transaction_session_timeout` trên prod đều = 0 và role app không có `rolconfig` ⇒ nếu
  * app không tự đặt thì KHÔNG có phanh nào ở tầng DB, một truy vấn đọc dài hay một session dev để

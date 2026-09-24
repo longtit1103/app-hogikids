@@ -12,7 +12,7 @@
       ],
       "parameters": {
         "httpMethod": "POST",
-        "path": "pancake-pos",
+        "path": "duong-dan-webhook-kho",
         "responseMode": "onReceived",
         "options": {
           "rawBody": true

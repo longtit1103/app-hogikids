@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/action-result";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import type { KetQuaKiemTra } from "@/lib/ket-noi/kiem-tra-types";
+import { lyDoTuChoiDichN8n } from "@/lib/n8n/kiem-dich-den-n8n";
 import { kiemTraN8n } from "@/lib/n8n/provision/kiem-tra-va-trang-thai-n8n";
 import { CanXacNhanDoiHaTang, provisionN8n, type KetQuaProvision } from "@/lib/n8n/provision/provision-n8n";
 import { prisma } from "@/lib/prisma";
@@ -22,14 +23,13 @@ const urlSchema = z
   .trim()
   .min(1)
   .max(500)
-  .refine((v) => {
-    try {
-      const u = new URL(v);
-      return u.protocol === "http:" || u.protocol === "https:";
-    } catch {
-      return false;
-    }
-  }, "phải là URL http:// hoặc https://");
+  // Kiểm ngay lúc LƯU, không chỉ lúc fetch: bắt lỗi gõ nhầm tại chỗ người gõ, thay vì để nó nằm im
+  // trong kho khoá rồi vỡ ở một lượt Cài nào đó. Luật nằm ở `kiem-dich-den-n8n.ts` — CỐ Ý không cấm
+  // dải private (n8n prod là tên container ⇒ DNS trả 172.x); đọc chú thích ở đó trước khi siết thêm.
+  .superRefine((v, ctx) => {
+    const lyDo = lyDoTuChoiDichN8n(v);
+    if (lyDo) ctx.addIssue({ code: "custom", message: lyDo });
+  });
 
 const apiKeySchema = z.string().trim().min(1).max(1000).refine((v) => !/[\r\n]/.test(v), "không được xuống dòng");
 

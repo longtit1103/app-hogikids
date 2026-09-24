@@ -1,6 +1,7 @@
 /**
- * Công thức Sổ quỹ (spec §5.2) — THUẦN, không Prisma. Quỹ = tiền THẬT: ghi tay + TikTok về bank −
- * Shopee rút ví (có dấu) − Sổ chi phí + cộng lại ads TikTok sàn đã trừ từ ví (có dấu, lưu âm).
+ * Công thức Sổ quỹ — THUẦN, không Prisma. Quỹ = tiền THẬT: ghi tay + TikTok về bank −
+ * Shopee rút ví (có dấu) − Sổ chi phí + cộng lại ads TikTok sàn đã trừ từ ví (có dấu, lưu âm) + thu
+ * nhập tài chính + tiền khách trả tại shop cho đơn bán trực tiếp.
  * KHÔNG dùng số thu DỰ KIẾN theo đơn đã giao, cũng KHÔNG dùng net sàn chốt còn nằm trong ví — cộng
  * chúng cùng tiền đã về là đếm 2 lần (lưới tests/unit/so-quy/khong-dung-tien-du-kien.test.ts).
  */
@@ -17,8 +18,13 @@ export type TongNguon = {
   chiPhi: number;
   /** Σ TiktokAdsSettlement.settlementAmount, CÓ DẤU (sàn trừ ví ⇒ lưu ÂM). */
   adsTiktokViCoDau: number;
-  /** Σ ThuNhap.amount (dương) — thu nhập ngoài bán hàng đã NHẬN, v1 chỉ có lãi sổ tiết kiệm. */
+  /** Σ ThuNhap.amount (dương) — thu nhập ngoài bán hàng đã NHẬN, hiện chỉ có lãi sổ tiết kiệm. */
   thuNhap: number;
+  /**
+   * Σ `Order.paidAtShop` đơn bán trực tiếp COMPLETED (dương) — khách trả NGAY tại shop nên là tiền
+   * THẬT, không phải tiền dự kiến như đơn sàn. Đơn đã vào đây thì KHÔNG ghi tay `DIRECT_SALE`.
+   */
+  banTrucTiep: number;
 };
 
 export const TONG_RONG: TongNguon = {
@@ -29,6 +35,7 @@ export const TONG_RONG: TongNguon = {
   chiPhi: 0,
   adsTiktokViCoDau: 0,
   thuNhap: 0,
+  banTrucTiep: 0,
 };
 
 /**
@@ -50,6 +57,7 @@ export function dongGopTheoNguon(t: TongNguon): number[] {
     -t.chiPhi,
     -t.adsTiktokViCoDau, // lưu âm ⇒ −âm = cộng lại phần ví đã trả ads
     t.thuNhap, // tiền lãi ĐÃ VỀ tài khoản — dương, nên `thuChiTuTong` tự xếp vào vế THU
+    t.banTrucTiep, // khách trả tại shop — dương, vế THU
   ];
 }
 
@@ -99,5 +107,24 @@ export function ghepSoQuyThang(
     cuoiKy: dauKy + thu - chi,
     quyHomNay: tinhQuyTuTong(toiHomNay),
     truocMoSo,
+  };
+}
+
+/**
+ * Nhãn ô "Cuối kỳ" của Sổ quỹ — MỘT luật cho cả thẻ "Quỹ còn lại" lẫn tab Sổ quỹ dòng chạy.
+ *
+ * Tháng đang chạy: số to là quỹ tới HÔM NAY, còn "Cuối kỳ" là quỹ tới CUỐI THÁNG. Hai số lệch nhau
+ * khi có khoản ghi ngày sau hôm nay (chi phí định kỳ, kỳ trả nợ duyệt trước) — không gắn nhãn thì chủ
+ * shop cộng các ô lại thấy khác số to và tưởng app tính sai. Tháng đã qua thì hai số là một.
+ */
+export function nhanCuoiKySoQuy(
+  soQuy: Pick<SoQuyThang, "cuoiKy" | "quyHomNay">,
+  laThangHienTai: boolean
+): { duKien: boolean; nhan: string; ghiChu: string | undefined } {
+  const duKien = laThangHienTai && soQuy.cuoiKy !== soQuy.quyHomNay;
+  return {
+    duKien,
+    nhan: duKien ? "Cuối kỳ (dự kiến hết tháng)" : "Cuối kỳ",
+    ghiChu: duKien ? "đã tính khoản ghi ngày sau hôm nay" : undefined,
   };
 }

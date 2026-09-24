@@ -141,6 +141,11 @@ async function seedFullDataset(): Promise<void> {
       description: "Giải ngân test",
     },
   });
+  // Bản chốt số dư cuối tháng — thước đo gắn với D0 của sổ; sổ xoá thì nó phải đi theo, không thì
+  // thẻ đối chiếu in chênh lệch của thế giới cũ sau khi chủ shop nhập sổ mới.
+  await prisma.soDuChotThang.create({
+    data: { thang: new Date(2026, 7, 1), soDuBank: 85_000_000, tienMat: 5_000_000, note: "chốt T8 cũ" },
+  });
   // Sổ tiết kiệm sinh lãi ĐÃ TẤT TOÁN: đủ cả ba bảng con-cha (`ThuNhap` → `CashMovement` →
   // `SoTietKiem`) để lượt xoá phải đi đúng thứ tự, nếu không FK `Restrict` chặn ngay.
   const soTietKiem = await prisma.soTietKiem.create({
@@ -259,6 +264,7 @@ async function clearAll(): Promise<void> {
   await prisma.cashMovement.deleteMany();
   await prisma.soTietKiem.deleteMany(); // SAU ThuNhap + CashMovement (FK Restrict)
   await prisma.loan.deleteMany(); // SAU CashMovement (FK Restrict)
+  await prisma.soDuChotThang.deleteMany(); // không FK — sót là seed lượt sau vấp UNIQUE `thang`
   await prisma.syncLog.deleteMany();
   await prisma.rawPancakeOrder.deleteMany();
   await prisma.rawPancakeProduct.deleteMany();
@@ -346,6 +352,8 @@ describe("deleteAllData", () => {
     // chính" của P&L vẫn cộng lãi của một sổ không còn tồn tại, mà không phép đếm nào khác đỏ.
     expect(await prisma.soTietKiem.count()).toBe(0);
     expect(await prisma.thuNhap.count()).toBe(0);
+    // Bản chốt số dư đi theo sổ — sót là hàng rào đối chiếu tự kể chuyện của thế giới đã xoá.
+    expect(await prisma.soDuChotThang.count()).toBe(0);
     expect(await prisma.syncLog.count({ where: { kind: { not: "BACKUP" } } })).toBe(0);
 
     // 4 bảng "Tiền đã về" cũng về 0 — cùng là sổ sách giao dịch.
@@ -356,7 +364,7 @@ describe("deleteAllData", () => {
 
     // Cấu hình giữ nguyên.
     expect(await prisma.user.count()).toBe(1);
-    expect(await prisma.channel.count()).toBe(4);
+    expect(await prisma.channel.count()).toBe(5);
     expect(await prisma.expenseCategory.count()).toBeGreaterThanOrEqual(7);
 
     // Setting còn NGUYÊN — cấu hình, không phải giao dịch. So trước/sau thay vì số cứng (seed

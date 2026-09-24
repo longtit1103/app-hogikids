@@ -5,12 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 /**
- * Dòng lãi vay theo kỳ (`refId` `LOAN:{loanId}:{yyyy-MM-dd}`) phải KHOÁ ngày + danh mục ở đường
+ * Dòng lãi vay theo kỳ (`refId` `LOAN:{loanId}:{yyyy-MM-dd}`) phải KHOÁ ngày + danh mục + kênh ở đường
  * SỬA (`hogikids_test`).
  *
  * Vì sao: con dấu `Loan.lastDueHandled` không lùi ở bất kỳ đâu. Dời ngày dòng lãi = tách kỳ khỏi
  * tháng P&L của nó mà không còn đường duyệt lại qua UI (lãi biến mất khỏi Lãi/Lỗ trong khi dư nợ
  * và quỹ đã trừ gốc). Đổi danh mục = mất dòng "Lãi vay" riêng trong bảng Lãi/Lỗ (bất biến #1).
+ * Kênh luôn TRỐNG: lãi vay không phân bổ kênh (bất biến #1) — gắn kênh làm mọc kênh rỗng ở `/kenh`.
  *
  * Nhưng SỐ TIỀN phải mở: đó là đường duy nhất chủ shop tự chữa số lãi khai sai sau khi con dấu đã
  * đóng. Và đường XOÁ CỐ Ý không chặn — xem ca cuối.
@@ -41,7 +42,9 @@ async function seedDongLaiVay() {
   });
 }
 
-const inputSua = (over: Partial<{ date: string; categoryId: string; amount: number }> = {}) => ({
+const inputSua = (
+  over: Partial<{ date: string; categoryId: string; amount: number; channelId: string | null }> = {},
+) => ({
   date: NGAY_KY,
   categoryId: "interest",
   amount: LAI,
@@ -105,6 +108,32 @@ describe("updateExpense — khoá dòng lãi vay theo kỳ", () => {
     const sau = await prisma.expense.findUniqueOrThrow({ where: { id: dong.id } });
     expect(sau.amount).toBe(1_200_000);
     expect(sau.description).toContain("giấy báo ngân hàng");
+  });
+
+  it("gắn KÊNH → từ chối ở ô 'channelId' (lãi vay không phân bổ kênh); kênh sau vẫn trống", async () => {
+    const dong = await seedDongLaiVay();
+
+    const res = await updateExpense(dong.id, inputSua({ channelId: "tiktok" }));
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error("phải bị chặn");
+    expect(res.field).toBe("channelId");
+    expect(res.code).toBe("LAI_VAY_KHONG_GAN_KENH");
+
+    const sau = await prisma.expense.findUniqueOrThrow({ where: { id: dong.id } });
+    expect(sau.channelId).toBeNull();
+  });
+
+  it("dòng lãi LỠ mang kênh từ trước → lượt sửa gửi kênh trống lưu được và GỠ kênh (không đóng băng chỗ sai)", async () => {
+    const dong = await seedDongLaiVay();
+    await prisma.expense.update({ where: { id: dong.id }, data: { channelId: "tiktok" } });
+
+    const res = await updateExpense(dong.id, inputSua({ amount: 1_150_000, channelId: null }));
+
+    expect(res.ok).toBe(true);
+    const sau = await prisma.expense.findUniqueOrThrow({ where: { id: dong.id } });
+    expect(sau.channelId).toBeNull();
+    expect(sau.amount).toBe(1_150_000);
   });
 
   it("dòng refId tiền tố KHÁC (PANCAKE_PURCHASE:…) đổi ngày + danh mục → vẫn lưu được", async () => {

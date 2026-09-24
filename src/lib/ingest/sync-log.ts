@@ -41,6 +41,10 @@ export async function coLuotDangChay(kind?: SyncKind): Promise<boolean> {
  *  (1) CLEANUP: mọi log cùng kind RUNNING treo > 15' → ERROR (app crash/restart) — để nút "Đồng bộ ngay"
  *      không kẹt disabled vĩnh viễn.
  *  (2) tạo log RUNNING → chạy `fn(warnings, syncLogId)` → OK + stats={...result, warnings} / catch → ERROR + trả 500.
+ *  (3) `fn` trả kèm `loiSauKhiGhi` (chuỗi) ⇒ dữ liệu ĐÃ ghi xong nhưng lượt này có phần bị bỏ cần người
+ *      xem: log ERROR (bật banner đồng bộ) mà HTTP vẫn 200. Không ném để trả 500 được — n8n THỬ LẠI khi
+ *      5xx rồi ném, mọi chunk phía sau không được gửi nữa. Còn OK + cảnh báo thì không ai thấy: n8n chỉ
+ *      đọc `rowsUpserted`, badge /cai-dat xanh, banner chỉ bật với ERROR.
  *
  * `syncLogId` truyền xuống để ingest gắn lineage (Bronze `syncLogId`: dòng raw này đến từ lần sync nào).
  */
@@ -56,13 +60,16 @@ export async function withSyncLog(
   const log = await prisma.syncLog.create({ data: { kind, status: "RUNNING" } });
   const warnings: string[] = [];
   try {
-    const result = await fn(warnings, log.id);
+    const { loiSauKhiGhi, ...result } = await fn(warnings, log.id);
     const stats = { ...result, warnings: capWarnings(warnings) };
+    const loi = typeof loiSauKhiGhi === "string" && loiSauKhiGhi ? loiSauKhiGhi : null;
     await prisma.syncLog.update({
       where: { id: log.id },
-      data: { status: "OK", finishedAt: new Date(), stats },
+      data: loi
+        ? { status: "ERROR", finishedAt: new Date(), error: loi, stats }
+        : { status: "OK", finishedAt: new Date(), stats },
     });
-    return Response.json({ ok: true, stats });
+    return Response.json(loi ? { ok: true, stats, loiSauKhiGhi: loi } : { ok: true, stats });
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     // GIỮ warnings đã thu được, đừng vứt. Chúng là thứ nói ĐƠN NÀO hỏng và vì sao — mà lượt hỏng

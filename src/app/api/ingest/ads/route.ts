@@ -1,6 +1,6 @@
 import type { SyncKind } from "@prisma/client";
 
-import { prepareAdsExpenseRow } from "@/lib/ingest/ads-expense-row";
+import { chuanBiDongAdsHoacBoQua, type PreparedAdsExpense } from "@/lib/ingest/ads-expense-row";
 import {
   napSoChiTieuAds,
   upsertOneAdsExpense,
@@ -45,10 +45,18 @@ export async function POST(req: Request): Promise<Response> {
   const { source, rows } = parsed.data;
   const kind: SyncKind = source === "META" ? "META_ADS" : "TIKTOK_ADS";
 
-  // Chuẩn hoá + tính amount (nhân VAT ở app) trước khi vào transaction.
-  const prepared = rows.map((row) => prepareAdsExpenseRow(source, row));
-
   return withSyncLog(kind, async (warnings) => {
+    // Chuẩn hoá + tính amount (nhân VAT ở app) trước khi vào transaction. Dòng ngày ngoài biên hợp lý
+    // bị BỎ kèm cảnh báo (không đỏ cả lô — lý do ở `chuanBiDongAdsHoacBoQua`), rồi log ERROR ở cuối
+    // lượt (`loiSauKhiGhi`) để người soi thấy.
+    const prepared: PreparedAdsExpense[] = [];
+    let ngayHong = 0;
+    for (const row of rows) {
+      const r = chuanBiDongAdsHoacBoQua(source, row, warnings);
+      if (r === null) ngayHong++;
+      else prepared.push(r);
+    }
+
     // Gom theo refId TRƯỚC khi ghi: app là biên tiền, KHÔNG cho phép 2 dòng cùng
     // refId trong 1 payload upsert đè nhau im lặng (auction + GMV Max có thể trùng
     // (campaign, ngày)). Trùng ⇒ THROW để n8n báo đỏ, không ghi số nào (tránh
@@ -63,7 +71,7 @@ export async function POST(req: Request): Promise<Response> {
       seen.add(r.refId);
     }
 
-    const stats: AdsExpenseStats = { adsExpensesUpserted: 0, skipped: 0, boQuaCoChuDich: 0 };
+    const stats: AdsExpenseStats = { adsExpensesUpserted: 0, skipped: ngayHong, boQuaCoChuDich: 0 };
 
     // timeout rộng: 1 upsert = 1 round-trip tuần tự; lô tới 2000 dòng qua Tailscale
     // (RTT cao khi chạy tay) sẽ vượt 5s mặc định ⇒ P2028 rollback cả lô = mất chi phí.
@@ -94,6 +102,15 @@ export async function POST(req: Request): Promise<Response> {
       rowsUpserted: stats.adsExpensesUpserted,
       rowsSkipped: stats.skipped + stats.boQuaCoChuDich,
       rowsBoQuaCoChuDich: stats.boQuaCoChuDich,
+      // Dòng ngày hỏng bị bỏ = một khoản chi thật có thể không vào sổ (lãi báo cao lên) ⇒ log ERROR để
+      // banner đồng bộ bật, dù phần còn lại đã ghi và HTTP vẫn 200 (xem `withSyncLog`).
+      ...(ngayHong > 0
+        ? {
+            loiSauKhiGhi:
+              `Bỏ ${ngayHong}/${rows.length} dòng chi tiêu ads có ngày ngoài khoảng hợp lệ (xem cảnh báo) — ` +
+              `các dòng còn lại ĐÃ ghi. Kiểm lại cách workflow tính ngày.`,
+          }
+        : {}),
     };
   });
 }

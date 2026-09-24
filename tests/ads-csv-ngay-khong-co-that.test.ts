@@ -85,11 +85,18 @@ describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => 
     vi.useRealTimers();
   });
 
-  it("serial Excel = 1 → dòng lỗi, KHÔNG ghi 31/12/1899", () => {
+  it("serial Excel = 1 → dòng lỗi NGOÀI KHOẢNG, KHÔNG ghi 31/12/1899", () => {
     const { rows, errors } = parseAdsFile(xlsx(1), "META");
 
     expect(rows).toHaveLength(0);
-    expect(errors).toEqual([{ line: 2, reason: "Thiếu hoặc sai định dạng ngày" }]);
+    expect(errors).toEqual([
+      {
+        line: 2,
+        reason:
+          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "tương lai (đọc được: 31/12/1899)",
+      },
+    ]);
   });
 
   it("serial Excel = 45 (ô ngày lẫn số nhỏ) → dòng lỗi", () => {
@@ -128,14 +135,21 @@ describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => 
     expect(rows[0].date.toISOString()).toBe(new Date("2000-01-01T00:00:00+07:00").toISOString());
   });
 
-  it("dd/mm/yyyy 31/12/1999 → dòng lỗi", () => {
+  it("dd/mm/yyyy 31/12/1999 → dòng lỗi NGOÀI KHOẢNG", () => {
     const { rows, errors } = parseAdsFile(csv(["31/12/1999,Định dạng VN,10000"]), "META");
 
     expect(rows).toHaveLength(0);
-    expect(errors).toHaveLength(1);
+    expect(errors).toEqual([
+      {
+        line: 2,
+        reason:
+          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "tương lai (đọc được: 31/12/1999)",
+      },
+    ]);
   });
 
-  it("29/02/2028 — nhuận nhưng TƯƠNG LAI → dòng lỗi", () => {
+  it("29/02/2028 — nhuận nhưng TƯƠNG LAI → dòng lỗi NGOÀI KHOẢNG", () => {
     // Ghim đồng hồ: không ghim thì ca này tự đỏ từ 29/02/2028 ở một file không ai vừa sửa —
     // đúng luật "mọi fixture ngày phải ở quá khứ SO VỚI mốc đã ghim".
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -144,15 +158,29 @@ describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => 
     const { rows, errors } = parseAdsFile(csv(["2028-02-29,Nhuận tương lai,70000"]), "META");
 
     expect(rows).toHaveLength(0);
-    expect(errors).toHaveLength(1);
+    expect(errors).toEqual([
+      {
+        line: 2,
+        reason:
+          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "tương lai (đọc được: 29/02/2028)",
+      },
+    ]);
   });
 
-  it("ngày MAI (giờ VN) → dòng lỗi; HÔM NAY → hợp lệ", () => {
+  it("ngày MAI (giờ VN) → dòng lỗi NGOÀI KHOẢNG; HÔM NAY → hợp lệ", () => {
     // Ghim 18/09/2026 14:00 giờ VN = 07:00Z. Biên trên phải đọc theo ngày VN, không theo UTC.
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-18T07:00:00.000Z"));
 
-    expect(parseAdsFile(csv(["2026-09-19,Ngày mai,10000"]), "META").errors).toHaveLength(1);
+    expect(parseAdsFile(csv(["2026-09-19,Ngày mai,10000"]), "META").errors).toEqual([
+      {
+        line: 2,
+        reason:
+          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "tương lai (đọc được: 19/09/2026)",
+      },
+    ]);
 
     const { rows, errors } = parseAdsFile(csv(["2026-09-18,Hôm nay,10000"]), "META");
     expect(errors).toHaveLength(0);
@@ -173,8 +201,22 @@ describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => 
       "META",
     );
 
-    expect(errors).toEqual([{ line: 2, reason: "Thiếu hoặc sai định dạng ngày" }]);
+    expect(errors).toEqual([
+      {
+        line: 2,
+        reason:
+          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "tương lai (đọc được: 05/01/1900)",
+      },
+    ]);
     expect(rows).toHaveLength(1);
     expect(rows[0].amount).toBe(20000);
+  });
+
+  it("chuỗi rác ở ô ngày → giữ câu SAI ĐỊNH DẠNG cũ (không phải ngoài khoảng)", () => {
+    const { rows, errors } = parseAdsFile(csv(["không-phải-ngày,Chiến dịch rác,10000"]), "META");
+
+    expect(rows).toHaveLength(0);
+    expect(errors).toEqual([{ line: 2, reason: "Thiếu hoặc sai định dạng ngày" }]);
   });
 });

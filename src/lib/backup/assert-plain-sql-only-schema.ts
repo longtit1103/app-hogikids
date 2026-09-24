@@ -115,9 +115,21 @@ const PG_DUMP_META_ALLOW = [
  *      có ký tự xuống dòng ngoài khối COPY — thực tế chỉ gặp ở `COMMENT ON … IS '…\n…'` hoặc
  *      DEFAULT/CHECK nhiều dòng. Repo này không sinh dạng đó (Prisma không phát COMMENT ON;
  *      đã đối chiếu dump plain THẬT của prod 31/07, cả bản schema-only lẫn bản có dữ liệu:
- *      KHÔNG dòng nào lệch parity nháy). Nếu về sau gặp từ-chối-oan, lối thoát vận hành là
- *      nạp bản `.dump` custom (đường có `pg_restore -n <schema>` chốt cứng) — KHÔNG nới guard
- *      này, vì nới là mở lại đúng lỗ hổng trên.
+ *      KHÔNG dòng nào lệch parity nháy). ⚠️ LỐI THOÁT ĐỔI TỪ 22/09/2026: câu cũ ở đây viết "gặp
+ *      từ-chối-oan thì nạp bản `.dump` custom" — KHÔNG CÒN ĐÚNG, vì `deploy/restore.sh` nhánh custom
+ *      nay cũng bung dump ra rồi chạy chính guard này. Lối thoát bây giờ là chạy
+ *      `BO_QUA_KIEM_NOI_DUNG_DUMP=1 bash deploy/restore.sh …` (in cảnh báo, giữ guard TOC +
+ *      `pg_restore -n <schema>` chốt cứng). Vẫn KHÔNG nới guard này — nới là mở lại đúng lỗ hổng trên.
+ *      Ca đã ĐO gây từ-chối-oan: `COMMENT ON … IS '…\n…'` mà Supabase Studio ghi khi điền ô
+ *      "Description" — repo không sinh, nhưng người sửa tay thì có.
+ *  (i) `COPY … FROM PROGRAM` / `COPY … TO PROGRAM` — đường CHẠY LỆNH Ở TẦNG SQL. Guard (g) chỉ bắt
+ *      META-COMMAND `\copy … TO PROGRAM` (có dấu `\`); dạng SQL thuần KHÔNG có dấu `\` nào nên
+ *      lọt sạch qua (g). `pg_dump` plain xuất dữ liệu bằng `COPY … FROM stdin`, KHÔNG BAO GIỜ phát
+ *      ra `FROM/TO PROGRAM`.
+ *  (j) Câu lệnh ĐẶC QUYỀN (`CREATE EXTENSION`, `CREATE/ALTER/DROP ROLE|USER`, `ALTER SYSTEM`,
+ *      `CREATE … LANGUAGE`, `SECURITY DEFINER`). Dump schema-scoped (`pg_dump -n <schema>`) không
+ *      sinh ra chúng; chúng chỉ có trong dump full-DB hoặc file chế tác. Đây là lớp BỔ SUNG cho
+ *      (a)/(b)/(e) — denylist luôn thua allowlist về độ chặt, xem ghi chú tại chỗ.
  */
 export function assertPlainSqlOnlySchema(rawSql: string, schema: string): void {
   // Chuẩn hoá xuống dòng NGAY TỪ ĐẦU: file CRLF để lại `\r` cuối dòng làm lệch mọi mốc
@@ -249,5 +261,79 @@ export function assertPlainSqlOnlySchema(rawSql: string, schema: string): void {
         `lệnh \\… khi nạp file và KHÔNG tắt được; pg_dump plain THẬT chỉ phát ra \\. , \\restrict ` +
         `và \\unrestrict — TỪ CHỐI (nghi file bị chỉnh sửa để chạy lệnh trên máy chủ).`,
     );
+  }
+
+  // Bản soi cho (i)/(j) — phải soi HAI bản, không một:
+  //
+  //  • `ijScan` GIỮ thân dollar-quote: `DO $$ BEGIN COPY t FROM PROGRAM 'id'; END $$;` CHẠY THẬT
+  //    lúc restore, bỏ thân là mù đúng ca đó. Guard (b) chọn cùng cách vì cùng lý do.
+  //  • `gScan` (đã tính ở guard (g)) BỎ thân dollar-quote.
+  //
+  // 🔴 VÌ SAO PHẢI CÓ CẢ HAI (đo 22/09/2026 — bản đầu chỉ dùng `ijScan` và ĐÃ THỦNG):
+  // `stripSqlComments` KHÔNG theo dõi dollar-quote, nên một dấu `/*` đặt trong thân `$$…$$` mở
+  // comment và NUỐT mọi câu tới `*/`. Văn bản dưới đây làm `ijScan` chỉ còn `SELECT $$   $$;`:
+  //
+  //     SELECT $$ /* $$;
+  //     COPY (SELECT 1) TO PROGRAM 'touch /tmp/PWNED';
+  //     CREATE ROLE ke_gian SUPERUSER LOGIN;
+  //     SELECT $$ */ $$;
+  //
+  // Twin bash bắt được (lexer của nó theo dõi `dtag`), bản TS thì không ⇒ đúng lớp LỆCH SONG SINH
+  // mà đợt này phải đóng. `gScan` miễn nhiễm vì nó `stripDollarQuoted` TRƯỚC khi bỏ comment.
+  // Soi cả hai = hợp hai vùng phủ; không thêm từ-chối-oan vì cả hai đều đã bỏ comment và che nháy.
+  const ijScan = maskSingleQuotedStrings(stripSqlComments(noCopy));
+  const banSoiIJ = [ijScan, gScan];
+
+  // (i) `COPY … FROM PROGRAM 'cmd'` / `COPY … TO PROGRAM 'cmd'` — chạy lệnh hệ điều hành dưới
+  // quyền server. Guard (g) KHÔNG bắt được: dạng SQL thuần không có ký tự `\` nào.
+  //
+  // Vì sao neo vào `FROM|TO` chứ không từ chối MỌI chữ "PROGRAM": cú pháp PostgreSQL chỉ cho
+  // `PROGRAM` đứng ngay sau `FROM`/`TO` của câu `COPY` (và từ khoá này KHÔNG nháy được). Ngược lại,
+  // từ chối mọi từ "PROGRAM" sẽ cắt nhầm dump HỢP LỆ của một DB có cột/bảng tên `program` — kiểu
+  // từ-chối-oan mà file này coi là nguy hiểm hơn bỏ lọt (nó chỉ nổ đúng lúc chủ shop cần phục hồi).
+  // Comment đã bị bỏ và chuỗi nháy đã bị che nên `FROM/**/PROGRAM` hay chữ "from program" trong dữ
+  // liệu đều không né/không oan.
+  //
+  // ⚠️ GIỚI HẠN ĐÃ BIẾT, ĐỪNG ĐUA REGEX (đo 22/09/2026): mọi guard ở đây che chuỗi nháy đơn trước
+  // khi soi, nên câu lệnh giấu trong ĐỐI SỐ của `EXECUTE` là vô hình với (i) VÀ (j) ở CẢ HAI bản —
+  // `DO $$ BEGIN EXECUTE 'COPY (SELECT 1) TO PROG' || 'RAM ''…'''; END $$;` chạy thật mà không guard
+  // nào đỏ. Bỏ che nháy để bắt nó = từ chối oan mọi dump có chữ đó trong DỮ LIỆU, tức đánh đổi sai
+  // chiều. ⇒ (i)/(j) là lớp chống TAI NẠN và chống dump-sai-hình-dạng, KHÔNG phải hàng rào chống kẻ
+  // tấn công chủ động. Hàng rào cho kẻ tấn công chủ động là TÍNH XÁC THỰC CỦA FILE (kho backup đã
+  // mã hoá `age` từ Đợt 2) — đừng tin nhầm lớp này làm việc của lớp kia.
+  if (banSoiIJ.some((ban) => /\b(?:FROM|TO)\s+PROGRAM\b/i.test(ban))) {
+    throw new Error(
+      "SQL chứa COPY … FROM/TO PROGRAM — đây là đường CHẠY LỆNH trên máy chủ; pg_dump plain THẬT " +
+        "chỉ dùng COPY … FROM stdin — TỪ CHỐI (nghi file bị chỉnh sửa).",
+    );
+  }
+
+  // (j) Câu lệnh ĐẶC QUYỀN. Dump của chính repo này không sinh ra chúng (đo 22/09/2026: 0 câu
+  // `CREATE EXTENSION` trong `prisma/migrations/`; hàm duy nhất `set_setting_updated_at` KHÔNG
+  // `SECURITY DEFINER`; mọi dump đều `-n <schema>` — `run-pg-dump.ts`).
+  // ⚠️ `scripts/kiem-chot-chan-nhan-dump-cua-chinh-minh.ts` KHÔNG phải cổng tự động: `Dockerfile:14`
+  // chỉ ghi lệnh trong COMMENT, phải chạy TAY sau khi dựng ảnh; và nó dùng `-Fp --schema-only` nên
+  // không chạm bề mặt bung-từ-`.dump`. Thêm migration có `SECURITY DEFINER` thì chỉ lượt chạy tay
+  // đó mới bắt — đừng coi là lưới an toàn thường trực.
+  //
+  // `CREATE … LANGUAGE` phải neo `CREATE` liền trước để KHÔNG bắt nhầm mệnh đề `LANGUAGE plpgsql`
+  // đứng cuối mọi `CREATE FUNCTION`.
+  const CAU_LENH_DAC_QUYEN: Array<[RegExp, string]> = [
+    [/\bCREATE\s+EXTENSION\b/i, "CREATE EXTENSION"],
+    [/\b(?:CREATE|ALTER|DROP)\s+(?:ROLE|USER)\b/i, "CREATE/ALTER/DROP ROLE"],
+    [/\bALTER\s+SYSTEM\b/i, "ALTER SYSTEM"],
+    [
+      /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TRUSTED\s+)?(?:PROCEDURAL\s+)?LANGUAGE\b/i,
+      "CREATE LANGUAGE",
+    ],
+    [/\bSECURITY\s+DEFINER\b/i, "SECURITY DEFINER"],
+  ];
+  for (const [re, ten] of CAU_LENH_DAC_QUYEN) {
+    if (banSoiIJ.some((ban) => re.test(ban))) {
+      throw new Error(
+        `SQL chứa câu lệnh đặc quyền ${ten} — dump schema-scoped (pg_dump -n <schema>) KHÔNG BAO ` +
+          `GIỜ phát ra câu này — TỪ CHỐI (nghi dump full-DB hoặc file chế tác).`,
+      );
+    }
   }
 }
