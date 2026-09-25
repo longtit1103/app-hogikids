@@ -6,11 +6,13 @@ import { ExpenseAddButton } from "@/components/expenses/expense-add-button";
 import { ExpenseKpiCards } from "@/components/expenses/expense-kpi-cards";
 import { ExpenseStructureChart } from "@/components/expenses/expense-structure-chart";
 import { ExpenseTable } from "@/components/expenses/expense-table";
+import { KhoanChiDinhKySection } from "@/components/finance/khoan-chi-dinh-ky-section";
 import { type DateRange } from "@/lib/date-range";
 import { ensureRecurringExpensesForMonths, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
 import {
   getExpenseSummary,
   getExpensesPage,
+  getRecurringExpenseList,
   sumPlatformFeeEst,
   type ExpenseListParams,
 } from "@/lib/expenses/expense-queries";
@@ -103,7 +105,7 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
   const sort: ExpenseListParams["sort"] = isValidSort(sp.sap_xep) ? sp.sap_xep : "date_desc";
   const page = docSoTrang(sp.trang);
 
-  const [summary, platformFeeEst, expensesPage, validOrderCount] = await Promise.all([
+  const [summary, platformFeeEst, expensesPage, validOrderCount, recurringList] = await Promise.all([
     getExpenseSummary(range),
     sumPlatformFeeEst(range),
     getExpensesPage({
@@ -125,6 +127,8 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
         status: { notIn: ["RETURNED", "CANCELLED"] },
       },
     }),
+    // Danh sách mẫu định kỳ (đang chạy lẫn đã dừng) — ĐỘC LẬP range đang lọc, khối chỉ-đọc phía dưới.
+    getRecurringExpenseList(),
   ]);
 
   const isEmpty = summary.total === 0;
@@ -210,6 +214,9 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
           />
         </>
       )}
+
+      {/* Độc lập kỳ đang lọc ở trên — mẫu định kỳ là dữ liệu toàn cục, không theo range. */}
+      <KhoanChiDinhKySection items={recurringList} />
     </div>
   );
 }

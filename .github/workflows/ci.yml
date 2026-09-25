@@ -31,6 +31,12 @@ on:
     paths-ignore: ['docs/**', 'plans/**', 'deploy/*.md']
   workflow_dispatch:
 
+# Mặc định GITHUB_TOKEN chỉ đọc — cả 4 job đều không ghi gì lên repo (không comment PR, không
+# push tag, không tạo release). Job nào cần quyền ghi sau này thì khai riêng `permissions:` ở
+# đúng job đó, không nới ở mức workflow.
+permissions:
+  contents: read
+
 # Đẩy commit mới lên PR đang chạy CI ⇒ HUỶ lượt cũ: 4 job × ~13' trên HEAD đã bị thay không còn
 # giá trị. Group theo ref (refs/pull/<n>/merge) nên hai PR khác nhau không huỷ nhau.
 concurrency:

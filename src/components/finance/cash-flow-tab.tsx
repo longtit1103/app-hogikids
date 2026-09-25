@@ -8,6 +8,7 @@ import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 import type { DoiChieuSoDuChot } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
 import { cn } from "@/lib/utils";
+import type { ViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu";
 
 import { CashMovementSection } from "./cash-movement-section";
 import { demKhoanVayCoKyCho } from "./dem-khoan-vay-co-ky-cho";
@@ -98,6 +99,7 @@ export function CashFlowTab({
   tietKiem,
   soTietKiem,
   laiTietKiemTrongKy,
+  viTiktok,
 }: {
   flow: CashFlow;
   isCurrentMonth: boolean;
@@ -117,6 +119,8 @@ export function CashFlowTab({
   soTietKiem: SoTietKiemRow[];
   /** Σ lãi tiết kiệm ĐÃ NHẬN trong KỲ ĐANG XEM — dòng tổng của bảng, không phải cả lịch sử. */
   laiTietKiemTrongKy: number;
+  /** Ô "Còn ở ví TikTok" (thông tin, ngoài số quỹ) — chỉ truyền tiếp cho thẻ Quỹ. */
+  viTiktok: ViTiktokConLaiToiThieu | null;
 }) {
   const balanceNegative = flow.balance < 0;
   const { tiktok, shopee } = flow.actualIn;
@@ -146,13 +150,14 @@ export function CashFlowTab({
         soKhoanVayCoKyCho={soKhoanVayCoKyCho}
         loans={loans}
         tietKiem={tietKiem}
+        viTiktok={viTiktok}
       />
 
       <SoDuChotThangCard doiChieu={doiChieu} isCurrentMonth={isCurrentMonth} />
 
-      <KhoanVaySection loans={loans} />
+      <KhoanVaySection loans={loans} d0={soQuy.d0} />
 
-      <SoTietKiemSection sos={soTietKiem} loans={loans} laiNhanTrongKy={laiTietKiemTrongKy} />
+      <SoTietKiemSection sos={soTietKiem} loans={loans} laiNhanTrongKy={laiTietKiemTrongKy} d0={soQuy.d0} />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-xl bg-surface-card p-4">

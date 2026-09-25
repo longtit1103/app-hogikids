@@ -1,8 +1,11 @@
+import { cache } from "react";
+
 import type { Prisma } from "@prisma/client";
-import { endOfDay, startOfDay, subDays } from "date-fns";
+import { addMonths, endOfDay, endOfMonth, format, startOfDay, startOfMonth, subDays } from "date-fns";
 
 import { isInflow } from "@/lib/cash-movements/cash-movement-kinds";
 import { type DateRange } from "@/lib/date-range";
+import { mauDinhKySinhChoThang, ngayDenHanDinhKy } from "@/lib/expenses/ensure-recurring-expenses";
 import { prisma } from "@/lib/prisma";
 import {
   ghepSoQuyThang,
@@ -106,6 +109,85 @@ export async function ngayMoSo(): Promise<Date | null> {
   return r._min.date ? startOfDay(r._min.date) : null;
 }
 
+/**
+ * `ngayMoSo` NHỚ THEO REQUEST (React `cache` — phạm vi một lượt render server): tab Dòng tiền đọc D0 ở
+ * nhiều nơi cùng lượt (thẻ Quỹ, ô ví sàn bên cạnh, banner dự báo ở layout) — mỗi nơi một query
+ * `MIN(date)` giống hệt nhau. D0 chỉ đổi khi GHI `CashMovement`, mà lượt render không ghi bảng đó.
+ *
+ * CHỈ dùng trên đường đọc lúc RENDER. Server action / script vừa ghi rồi đọc PHẢI gọi `ngayMoSo()`
+ * trần: ngoài lượt render, `cache` không nhớ gì (đo `react` 19.2.8 bản react-server gọi ngoài
+ * render: 2 lời gọi = 2 lần chạy) — nhưng dựa vào chi tiết đó là mong manh, nên danh sách file được
+ * dùng bản nhớ bị khoá ở `tests/unit/so-quy/ngay-mo-so-nho-theo-request.test.ts`.
+ */
+export const ngayMoSoTrongRequest = cache(ngayMoSo);
+
+/**
+ * `thang` là nhãn "MM/yyyy", sắp tăng dần theo thời gian; rỗng ⇒ không có khoản nào thiếu.
+ * `khoang` = từ đầu tháng thiếu SỚM nhất tới cuối tháng thiếu MUỘN nhất — cảnh báo dẫn thẳng Sổ chi phí
+ * của đúng khoảng đó, vì tab ấy gọi `ensureRecurringExpensesForMonths` cho MỌI tháng trong range đang xem
+ * ⇒ một lần bấm là app ghi bù đủ (link trần chỉ mở tháng hiện tại, tháng cũ vẫn thiếu).
+ */
+export type DinhKyChuaGhi = { soKhoan: number; thang: string[]; khoang: DateRange | null };
+
+const DINH_KY_RONG: DinhKyChuaGhi = { soKhoan: 0, thang: [], khoang: null };
+
+/**
+ * Đếm cặp (mẫu chi định kỳ active, tháng) có ngày đến hạn ∈ [D0, min(den, cuối ngày hôm nay)] mà
+ * CHƯA có Expense nào mang đúng `recurringId` trong tháng đó — nghĩa là `ensureRecurringExpenses`
+ * chưa chạy cho tháng này (LAZY, chỉ sinh khi tháng được render). CHỈ ĐỌC: không tự sinh Expense,
+ * không đổi số quỹ/P&L nào — chỉ báo cho chủ shop biết cần mở tháng đó để app tự ghi.
+ *
+ * Đúng 1 query mẫu active + 1 query Expense rồi ghép trong bộ nhớ (không query theo từng tháng×mẫu).
+ * D0 null hoặc không có mẫu active ⇒ rỗng ngay, không query thêm.
+ */
+async function docDinhKyChuaGhi(d0: Date | null, den: Date): Promise<DinhKyChuaGhi> {
+  if (d0 === null) return DINH_KY_RONG;
+
+  const homNay = endOfDay(new Date());
+  const bienTren = endOfDay(den) < homNay ? endOfDay(den) : homNay;
+  if (bienTren < d0) return DINH_KY_RONG;
+
+  const active = await prisma.recurringExpense.findMany({
+    where: { active: true },
+    select: { id: true, dayOfMonth: true, activeFrom: true },
+  });
+  if (active.length === 0) return DINH_KY_RONG;
+
+  const tuThang = startOfMonth(d0);
+  // Mọi Expense định kỳ đã sinh từ D0 trở đi, của đúng các mẫu active — ghép trong bộ nhớ bên dưới.
+  const daSinh = await prisma.expense.findMany({
+    where: { recurringId: { in: active.map((r) => r.id) }, date: { gte: tuThang } },
+    select: { recurringId: true, date: true },
+  });
+  const boDaSinh = new Set(daSinh.map((e) => `${e.recurringId}:${format(e.date, "yyyy-MM")}`));
+
+  let soKhoan = 0;
+  const thang: string[] = [];
+  const thangDaThem = new Set<string>();
+  let dauTien: Date | null = null;
+  let cuoiCung: Date | null = null;
+  for (let m = tuThang; m <= bienTren; m = addMonths(m, 1)) {
+    const key = format(m, "yyyy-MM");
+    for (const r of active) {
+      // Tháng trước mốc `activeFrom`: bộ sinh KHÔNG sinh ⇒ không phải "thiếu" (cùng cổng với bộ sinh).
+      if (!mauDinhKySinhChoThang(r.activeFrom, m)) continue;
+      const ngayDenHan = ngayDenHanDinhKy(r.dayOfMonth, m);
+      if (ngayDenHan < d0 || ngayDenHan > bienTren) continue; // chưa tới hạn hoặc trước ngày mở sổ
+      if (boDaSinh.has(`${r.id}:${key}`)) continue; // đã sinh — không thiếu
+
+      soKhoan++;
+      if (!thangDaThem.has(key)) {
+        thangDaThem.add(key);
+        thang.push(format(m, "MM/yyyy"));
+        dauTien ??= m;
+        cuoiCung = m;
+      }
+    }
+  }
+  const khoang = dauTien && cuoiCung ? { from: dauTien, to: endOfMonth(cuoiCung) } : null;
+  return { soKhoan, thang, khoang };
+}
+
 export type CanhBaoQuy = {
   /** Lệnh TikTok đã trả nhưng thiếu ngày ⇒ chưa vào quỹ. */
   tiktokPaidThieuNgay: number;
@@ -114,8 +196,12 @@ export type CanhBaoQuy = {
   /** Ví Shopee chỉ có dữ liệu SAU ngày mở sổ ⇒ thiếu tiền rút trước đó. */
   shopeeThieuTruocD0: boolean;
   shopeeChuaPhanLoai: number;
-  /** Có chi phí định kỳ đang bật ⇒ tháng chưa ai mở xem thì quỹ còn thiếu khoản đó. */
-  coDinhKyActive: boolean;
+  /**
+   * Mẫu chi định kỳ ACTIVE có tháng đến hạn trong [D0, hôm nay] mà `ensureRecurringExpenses` CHƯA
+   * sinh Expense (tháng đó chưa ai mở xem — cơ chế LAZY) ⇒ Sổ chi phí đang THIẾU đúng khoản chi thật
+   * đó, quỹ hiển thị cao hơn thực tế đúng bằng phần thiếu.
+   */
+  dinhKyChuaGhi: DinhKyChuaGhi;
   /**
    * Ads TikTok sàn ĐÃ trừ ví nhiều hơn phần ads ghi ở Sổ chi phí trong cùng cửa sổ [D0, to]. Quỹ
    * cộng lại NGUYÊN phần sàn trừ ví (không kẹp theo sổ) nên khi Sổ chi phí ads thiếu, quỹ phồng lên
@@ -134,13 +220,14 @@ const ADS_RONG = { soChiPhi: 0, sanTruVi: 0 };
 
 async function docCanhBao(
   d0: Date | null,
+  den: Date,
   ads: { soChiPhi: number; sanTruVi: number }
 ): Promise<CanhBaoQuy> {
-  const [tiktokPaidThieuNgay, viBien, shopeeChuaPhanLoai, soDinhKy] = await Promise.all([
+  const [tiktokPaidThieuNgay, viBien, shopeeChuaPhanLoai, dinhKyChuaGhi] = await Promise.all([
     prisma.tiktokPayment.count({ where: { status: "PAID", paidTime: null } }),
     prisma.shopeeSettlement.aggregate({ _min: { txnTime: true }, _max: { txnTime: true } }),
     prisma.shopeeSettlement.count({ where: { type: "OTHER" } }),
-    prisma.recurringExpense.count({ where: { active: true } }),
+    docDinhKyChuaGhi(d0, den),
   ]);
   const tuNgay = viBien._min.txnTime ?? null;
   return {
@@ -149,7 +236,7 @@ async function docCanhBao(
     shopeeViToiNgay: viBien._max.txnTime ?? null,
     shopeeThieuTruocD0: d0 !== null && tuNgay !== null && startOfDay(tuNgay) > d0,
     shopeeChuaPhanLoai,
-    coDinhKyActive: soDinhKy > 0,
+    dinhKyChuaGhi,
     adsViVuotSo: ads.sanTruVi > ads.soChiPhi,
   };
 }
@@ -179,9 +266,9 @@ async function docAdsTiktok(
  * `CUỐI KỲ(N) ≡ ĐẦU KỲ(N+1)` tự đúng theo cấu trúc, không cần bảng số dư.
  */
 export async function tinhSoQuyThang(range: DateRange): Promise<SoQuyThangDayDu> {
-  const d0 = await ngayMoSo();
+  const d0 = await ngayMoSoTrongRequest();
   if (d0 === null) {
-    const canhBao = await docCanhBao(null, ADS_RONG);
+    const canhBao = await docCanhBao(null, new Date(), ADS_RONG);
     return {
       ...ghepSoQuyThang(null, TONG_RONG, TONG_RONG, TONG_RONG, false),
       adsTiktok: ADS_RONG,
@@ -192,7 +279,9 @@ export async function tinhSoQuyThang(range: DateRange): Promise<SoQuyThangDayDu>
   // Kỳ nằm TRỌN trước ngày mở sổ ⇒ chưa có sổ; 4 số 0 ở đây là "chưa có", không phải "bằng 0".
   if (endOfDay(range.to) < d0) {
     const [canhBao, toiHomNay] = await Promise.all([
-      docCanhBao(d0, ADS_RONG),
+      // Cảnh báo luỹ kế TỚI HÔM NAY (giống `toiHomNay` bên dưới) — không phải theo `range` đang xem,
+      // vì kỳ này nằm TRỌN trước D0 nên chẳng có "range" nào để neo cửa sổ cảnh báo cả.
+      docCanhBao(d0, new Date(), ADS_RONG),
       docTongNguon(d0, new Date()),
     ]);
     return {
@@ -211,7 +300,9 @@ export async function tinhSoQuyThang(range: DateRange): Promise<SoQuyThangDayDu>
     docAdsTiktok(d0, range.to),
   ]);
   // Cảnh báo chạy SAU: cờ `adsViVuotSo` so hai số ads của chính cửa sổ vừa đọc, không đọc lại DB.
-  const canhBao = await docCanhBao(d0, adsTiktok);
+  // `dinhKyChuaGhi` neo TỚI HÔM NAY (giống `toiHomNay` ở trên) — cảnh báo nói về quỹ hiện tại của
+  // chủ shop, không đổi theo tháng đang xem trên màn hình.
+  const canhBao = await docCanhBao(d0, new Date(), adsTiktok);
 
   return { ...ghepSoQuyThang(d0, truocThang, trongThang, toiHomNay, false), adsTiktok, canhBao };
 }

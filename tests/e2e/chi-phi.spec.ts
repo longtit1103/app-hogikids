@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { format } from "date-fns";
 
+import { testPrisma } from "./ingest-raw";
 import { INGEST_SECRET_TEST, TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 /**
@@ -96,13 +97,17 @@ test.describe("Chi phí", () => {
     await dialog.getByRole("button", { name: "Lưu" }).click();
     await expect(page.getByText(/Đã thêm chi phí/)).toBeVisible();
 
+    // Đếm trong BẢNG SỔ CHI PHÍ thôi — khối "Khoản chi định kỳ" (bảng trong `<details>`) cũng in mô tả
+    // của MẪU, đếm lẫn thì ra 2 dù Expense vẫn đúng 1.
+    const dongSo = () => page.locator("table:not(details table) tbody tr").filter({ hasText: desc });
+
     // Đúng 1 dòng ngay sau khi tạo…
     await page.goto(`/tai-chinh?tab=so-chi-phi&q=${encodeURIComponent(desc)}`);
-    await expect(page.locator("tbody tr").filter({ hasText: desc })).toHaveCount(1);
+    await expect(dongSo()).toHaveCount(1);
 
     // …và vẫn đúng 1 dòng sau reload (ensureRecurringExpenses idempotent trong tháng).
     await page.reload();
-    await expect(page.locator("tbody tr").filter({ hasText: desc })).toHaveCount(1);
+    await expect(dongSo()).toHaveCount(1);
   });
 
   test("Dòng ADS_API hiện 'Xem log' + nút xoá bị khoá", async ({ page }) => {
@@ -125,5 +130,59 @@ test.describe("Chi phí", () => {
     await expect(row.getByRole("link", { name: "Xem log" })).toHaveAttribute("href", "/cai-dat#ket-noi");
     await expect(row.getByRole("button", { name: "Sửa" })).toHaveCount(0);
     await expect(row.locator('button[title*="không xóa tay"]')).toBeDisabled();
+  });
+
+  test.describe("Khối 'Khoản chi định kỳ'", () => {
+    const prefix = `E2E dinh ky ${Date.now()}`;
+    const tenActive = `${prefix} — đang chạy`;
+    const tenInactive = `${prefix} — đã dừng`;
+
+    test.beforeAll(async () => {
+      const prisma = testPrisma();
+      await prisma.recurringExpense.createMany({
+        data: [
+          { categoryId: "packaging", amount: 250_000, dayOfMonth: 12, description: tenActive, active: true },
+          { categoryId: "fixed", amount: 800_000, dayOfMonth: 3, description: tenInactive, active: false },
+        ],
+      });
+      await prisma.$disconnect();
+    });
+
+    test.afterAll(async () => {
+      const prisma = testPrisma();
+      // Mở tab là `ensureRecurringExpensesForMonths` SINH Expense từ mẫu đang chạy — `recurringId` không
+      // có FK nên xoá mẫu không kéo theo; dọn cả hai kẻo spec sau thấy khoản chi lạ trong Lãi/Lỗ.
+      const mau = await prisma.recurringExpense.findMany({
+        where: { description: { startsWith: prefix } },
+        select: { id: true },
+      });
+      await prisma.expense.deleteMany({ where: { recurringId: { in: mau.map((m) => m.id) } } });
+      await prisma.recurringExpense.deleteMany({ where: { description: { startsWith: prefix } } });
+      await prisma.$disconnect();
+    });
+
+    test("mở khối → thấy cả mẫu đang chạy lẫn đã dừng, đúng badge; nút Bật lại CHỈ ở mẫu đã dừng", async ({ page }) => {
+      await page.goto("/tai-chinh?tab=so-chi-phi");
+
+      const khoi = page.locator("details", { hasText: "Khoản chi định kỳ" });
+      await expect(khoi).toBeVisible();
+      // Mặc định GẤP — mở bằng bấm summary trước khi tìm dòng bên trong.
+      await khoi.locator("summary").click();
+
+      const rowActive = khoi.locator("tr", { hasText: tenActive });
+      await expect(rowActive).toBeVisible();
+      await expect(rowActive.getByText("Đang chạy", { exact: true })).toBeVisible();
+      await expect(rowActive).toContainText("250.000");
+      await expect(rowActive).toContainText("ngày 12 hằng tháng");
+
+      const rowInactive = khoi.locator("tr", { hasText: tenInactive });
+      await expect(rowInactive).toBeVisible();
+      await expect(rowInactive.getByText("Đã dừng", { exact: true })).toBeVisible();
+
+      // Bật lại chỉ dành cho mẫu đã dừng (server đặt mốc `activeFrom` = tháng hiện tại ⇒ không ghi bù
+      // các tháng đã dừng). Không bấm ở đây: bấm là đổi dữ liệu dùng chung của các spec khác trong file.
+      await expect(rowInactive.getByRole("button", { name: "Bật lại" })).toHaveCount(1);
+      await expect(rowActive.getByRole("button", { name: /bật lại/i })).toHaveCount(0);
+    });
   });
 });

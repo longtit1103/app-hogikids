@@ -178,6 +178,10 @@ model RecurringExpense {
   description String
   channelId   String?
   active      Boolean @default(true)
+  /// Mốc bắt đầu sinh (đầu tháng, giờ VN): mẫu chỉ sinh `Expense` cho tháng >= tháng của mốc. NULL =
+  /// không cận dưới (mẫu dựng trước khi có cột — hành vi cũ). Tạo mẫu mới / bật lại mẫu đã dừng đều
+  /// đặt mốc ⇒ không bao giờ ghi lùi chi phí vào tháng trước khi mẫu chạy hay các tháng đã dừng.
+  activeFrom  DateTime?
 }
 
 /// Chiều tiền SUY từ `kind` (hàm thuần `src/lib/cash-movements/cash-movement-kinds.ts`), KHÔNG lưu

@@ -37,6 +37,7 @@ vi.mock("@/lib/backup/khoa-bao-tri", async (importOriginal) => {
 import { POST } from "@/app/api/backup/route";
 import { docTrangThaiSaoLuu } from "@/lib/backup/doc-trang-thai-sao-luu";
 import { dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { giuKhoaViecNang, traKhoaViecNang } from "@/lib/backup/khoa-viec-nang";
 import { runPgDump } from "@/lib/backup/run-pg-dump";
 import { prisma } from "@/lib/prisma";
 
@@ -135,6 +136,43 @@ describe("POST /api/backup — ghi nhật ký sao lưu", () => {
       expect(res.status).toBe(500);
       expect(await docLogBackup()).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * `/api/backup` phải giành khoá việc nặng TRƯỚC `runPgDump()` — bấm liên tiếp (hoặc một script
+ * dựng lại/khoản vay đang giữ khoá) trước đây xếp chồng nhiều `pg_dump` cùng lúc. Dùng CHUNG khoá
+ * với `/api/restore`/`rebuild-from-raw`, không phải khoá riêng.
+ */
+describe("POST /api/backup — khoá việc nặng", () => {
+  it("việc nặng khác đang giữ khoá → 409 kèm TÊN việc đó, KHÔNG gọi pg_dump, KHÔNG ghi SyncLog", async () => {
+    const khoa = await giuKhoaViecNang("lượt phục hồi giả");
+    try {
+      vi.mocked(runPgDump).mockClear();
+      const res = await POST(req());
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("lượt phục hồi giả");
+      // Cùng giọng với câu 409 của `/api/restore`: khoá có thể là khoá CŨ còn sót (app vừa khởi
+      // động lại / vừa nạp backup), tự hết hạn tối đa 5' — không cần xử lý tay.
+      expect(body.error).toContain("khoá cũ còn sót");
+      expect(body.error).toContain("tối đa 5 phút");
+      expect(runPgDump).not.toHaveBeenCalled();
+      expect(await docLogBackup()).toHaveLength(0);
+    } finally {
+      if (khoa.the) await traKhoaViecNang(khoa.the);
+    }
+  });
+
+  it("dump xong (OK hoặc LỖI) → khoá được TRẢ, lượt sao lưu kế tiếp vào được ngay", async () => {
+    const res1 = await POST(req());
+    expect(res1.status).toBe(200);
+
+    // Khoá đã trả sạch ⇒ giành lại được ngay (không phải chờ TTL 5').
+    const khoa = await giuKhoaViecNang("kiểm khoá đã nhả");
+    expect(khoa.the).not.toBeNull();
+    if (khoa.the) await traKhoaViecNang(khoa.the);
   });
 });
 

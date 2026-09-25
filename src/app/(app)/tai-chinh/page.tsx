@@ -21,6 +21,7 @@ import { docSoDuChot, ghepDoiChieuSoDuChot, tinhKhoanCauTruc } from "@/lib/so-qu
 import { docDuBaoQuy } from "@/lib/so-quy/du-bao-quy-queries";
 import { docSoQuyDongChay } from "@/lib/so-quy/dong-chay-so-quy-queries";
 import { tinhSoQuyThang } from "@/lib/so-quy/so-quy-queries";
+import { docViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu-queries";
 import { demKhoanVayCoKyCho } from "@/components/finance/dem-khoan-vay-co-ky-cho";
 import { SoQuyDongChayTab } from "@/components/finance/so-quy-dong-chay-tab";
 import {
@@ -218,6 +219,7 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
       laiTietKiemTrongKy,
       banChot,
       banChotThangTruoc,
+      viTiktok,
     ] = await Promise.all([
       computeCashFlow(monthRange),
       doiSoatTienVe(monthRange),
@@ -240,6 +242,12 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
       // nằm trong cùng lượt này).
       docSoDuChot(monthRange.from),
       docSoDuChot(subMonths(monthRange.from, 1)),
+      // Ô thông tin "Còn ở ví TikTok" — ĐỘC LẬP `monthRange` (luôn là trạng thái hiện tại) và KHÔNG
+      // bao giờ vào số quỹ. Lỗi đọc chỉ ẩn ô, không được kéo sập cả tab Dòng tiền.
+      docViTiktokConLaiToiThieu().catch((e: unknown) => {
+        console.error("[tai-chinh] docViTiktokConLaiToiThieu lỗi — ẩn ô Còn ở ví TikTok", e);
+        return null;
+      }),
     ]);
     // Thấu chi + tiền đang gửi: hai khoản làm tiền thật lệch sổ mà KHÔNG phải sai sổ — cùng phép
     // lọc với footnote thẻ Quỹ, nhưng thẻ chốt cần chúng dưới dạng SỐ để tự cộng/loại trừ.
@@ -268,6 +276,7 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
         }}
         soTietKiem={soTietKiem}
         laiTietKiemTrongKy={laiTietKiemTrongKy}
+        viTiktok={viTiktok}
       />
     );
   }

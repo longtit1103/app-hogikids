@@ -47,15 +47,16 @@ const nextConfig: NextConfig = {
    * ứng phụ của một cơ chế sinh ra cho việc khác. Đổi một thuộc tính cookie là mất luôn lớp chắn
    * mà không ai nhận ra. `X-Frame-Options: DENY` nói thẳng điều mình muốn.
    *
-   * HAI thứ CỐ Ý KHÔNG đặt ở đây:
+   * HAI thứ KHÔNG đặt ở đây:
    *  - **HSTS** — origin chỉ nghe `127.0.0.1:3000`, TLS do Cloudflare terminate ở edge. Header
    *    HSTS phát từ Next không bao giờ tới trình duyệt qua đường HTTP trần, nên đặt ở đây là
    *    trang trí. Chỗ đúng là Cloudflare → SSL/TLS → Edge Certificates. Và đặt `max-age` +
    *    `includeSubDomains` thôi, KHÔNG `preload`: preload gần như không gỡ được và ghim cứng cho
    *    MỌI subdomain của `example.com` — dựng một subdomain HTTP sau này là gãy.
-   *  - **CSP** — Next inline bootstrap script nên CSP đúng phải đi qua nonce ở middleware. Làm vội
-   *    bằng `'unsafe-inline'` là mua một header không bảo vệ gì; làm đúng thì phải kèm Playwright
-   *    smoke vì CSP sai làm TRẮNG TRANG. Tách thành lượt riêng.
+   *  - **CSP** — Next inline bootstrap script nên CSP đúng phải mang nonce MỚI mỗi request, mà
+   *    `headers()` ở đây là tĩnh. CSP vì vậy do `src/proxy.ts` gắn (chính sách ở
+   *    `src/lib/content-security-policy.ts`), lưới Playwright `tests/e2e/csp-nonce.spec.ts` canh
+   *    0 vi phạm trên các trang chính — CSP sai là TRẮNG TRANG.
    */
   async headers() {
     return [

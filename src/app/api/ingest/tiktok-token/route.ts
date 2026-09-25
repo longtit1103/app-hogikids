@@ -21,6 +21,12 @@ import { prisma } from "@/lib/prisma";
  * mục M-02) — token KHÔNG BAO GIỜ lộ ra UI.
  */
 
+/** Ép mọi response của route này KHÔNG bị cache (browser/CDN/proxy) — body mang token OAuth thật. */
+function noStore(res: Response): Response {
+  res.headers.set("Cache-Control", "no-store");
+  return res;
+}
+
 const KEY_ACCESS_TOKEN = "tiktokShopAccessToken";
 const KEY_REFRESH_TOKEN = "tiktokShopRefreshToken";
 const KEY_EXPIRE_AT = "tiktokShopAccessTokenExpireAt"; // epoch GIÂY
@@ -62,25 +68,27 @@ const tokenBodySchema = z.object({
 
 export async function POST(req: Request): Promise<Response> {
   const unauthorized = requireTokenVaultSecret(req);
-  if (unauthorized) return unauthorized;
+  if (unauthorized) return noStore(unauthorized);
 
   // 503 KHÔNG cứu được token nếu chặn ở ĐÂY: workflow đã refresh xong trước khi POST, và TikTok xoay
   // vòng refresh_token nên cái cũ đã chết. Mục đích là để n8n THROW ồn ào (`persistToken` in nguyên
   // cặp token ra log lỗi để chép lại bằng tay) thay vì nhận 200 rồi bị lượt phục hồi lùi bảng
   // `Setting` — mất lặng, chỉ phát hiện vài tuần sau khi dữ liệu đã hụt.
   const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  if (dangPhucHoi) return noStore(dangPhucHoi);
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return Response.json({ ok: false, error: "invalid json" }, { status: 400 });
+    return noStore(Response.json({ ok: false, error: "invalid json" }, { status: 400 }));
   }
 
   const parsed = tokenBodySchema.safeParse(body);
   if (!parsed.success) {
-    return Response.json({ ok: false, error: "invalid body", issues: parsed.error.issues }, { status: 400 });
+    return noStore(
+      Response.json({ ok: false, error: "invalid body", issues: parsed.error.issues }, { status: 400 }),
+    );
   }
 
   const { accessToken, refreshToken, accessTokenExpireAt, refreshTokenExpireAt } = parsed.data;
@@ -103,22 +111,24 @@ export async function POST(req: Request): Promise<Response> {
     );
   } catch {
     // KHÔNG đưa err.message vào body: lỗi Prisma có thể chứa giá trị token/refresh_token.
-    return Response.json({ ok: false, error: "Lỗi khi lưu token vào kho" }, { status: 500 });
+    return noStore(Response.json({ ok: false, error: "Lỗi khi lưu token vào kho" }, { status: 500 }));
   }
 
-  return Response.json({ ok: true, savedAt, accessTokenExpireAt, refreshTokenExpireAt: refreshTokenExpireAt ?? null });
+  return noStore(
+    Response.json({ ok: true, savedAt, accessTokenExpireAt, refreshTokenExpireAt: refreshTokenExpireAt ?? null }),
+  );
 }
 
 export async function GET(req: Request): Promise<Response> {
   const unauthorized = requireTokenVaultSecret(req);
-  if (unauthorized) return unauthorized;
+  if (unauthorized) return noStore(unauthorized);
 
   // GET là ĐỌC, nhưng nó là bước ĐẦU của một chuỗi ghi không thể làm nguyên tử: đọc token → refresh
   // (đốt refresh_token cũ) → ghi token mới. Chặn ở bước cuối chỉ kịp báo động; chặn ở đây thì
   // `loadToken()` của workflow throw TRƯỚC khi refresh ("dừng TRƯỚC khi refresh để không đốt
   // refresh_token khi chưa có chỗ lưu") ⇒ refresh_token còn nguyên, đêm sau chạy lại là xong.
   const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  if (dangPhucHoi) return noStore(dangPhucHoi);
 
   const rows = await prisma.setting.findMany({
     where: { key: { in: [KEY_ACCESS_TOKEN, KEY_REFRESH_TOKEN, KEY_EXPIRE_AT, KEY_SAVED_AT, KEY_REFRESH_EXPIRE_AT] } },
@@ -128,14 +138,16 @@ export async function GET(req: Request): Promise<Response> {
   // Chưa có gì trong kho ⇒ trả rỗng (KHÔNG lỗi). Workflow không còn giữ token hạt giống (bỏ 2026-07-25)
   // nên phía n8n sẽ THROW để báo phải cấp quyền lại bằng `scripts/tiktok-shop-lay-token.ts` — cố ý ồn ào,
   // vì kho rỗng nghĩa là chuỗi refresh đã đứt và không tự phục hồi được.
-  return Response.json({
-    ok: true,
-    accessToken: map.get(KEY_ACCESS_TOKEN) ?? null,
-    refreshToken: map.get(KEY_REFRESH_TOKEN) ?? null,
-    accessTokenExpireAt: Number(map.get(KEY_EXPIRE_AT) ?? 0),
-    // 0 = chưa biết (token lưu trước 2026-07-25). Workflow chỉ cảnh báo khi > 0 — không có mốc thì
-    // im lặng còn hơn báo "hết hạn" sai rồi làm người đọc mất tin vào cảnh báo.
-    refreshTokenExpireAt: Number(map.get(KEY_REFRESH_EXPIRE_AT) ?? 0),
-    savedAt: Number(map.get(KEY_SAVED_AT) ?? 0),
-  });
+  return noStore(
+    Response.json({
+      ok: true,
+      accessToken: map.get(KEY_ACCESS_TOKEN) ?? null,
+      refreshToken: map.get(KEY_REFRESH_TOKEN) ?? null,
+      accessTokenExpireAt: Number(map.get(KEY_EXPIRE_AT) ?? 0),
+      // 0 = chưa biết (token lưu trước 2026-07-25). Workflow chỉ cảnh báo khi > 0 — không có mốc thì
+      // im lặng còn hơn báo "hết hạn" sai rồi làm người đọc mất tin vào cảnh báo.
+      refreshTokenExpireAt: Number(map.get(KEY_REFRESH_EXPIRE_AT) ?? 0),
+      savedAt: Number(map.get(KEY_SAVED_AT) ?? 0),
+    }),
+  );
 }

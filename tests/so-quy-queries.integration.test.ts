@@ -1,6 +1,7 @@
-import { startOfDay, subMonths } from "date-fns";
+import { addMonths, endOfMonth, format, getDaysInMonth, setDate, startOfDay, startOfMonth, subMonths } from "date-fns";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { ngayDenHanDinhKy } from "@/lib/expenses/ensure-recurring-expenses";
 import { prisma } from "@/lib/prisma";
 import { demKhoanVayCoKyChoDuyet, listKhoanVay } from "@/lib/so-quy/khoan-vay-queries";
 import { tinhSoQuyThang } from "@/lib/so-quy/so-quy-queries";
@@ -443,5 +444,153 @@ describe("listKhoanVay / demKhoanVayCoKyChoDuyet", () => {
         data: { date: new Date(2026, 9, 10), kind: "LOAN_REPAY", amount: 1_000_000 },
       })
     ).rejects.toThrow();
+  });
+});
+
+describe("tinhSoQuyThang — canhBao.dinhKyChuaGhi", () => {
+  /**
+   * Cảnh báo "khoản chi định kỳ chưa ghi" — CHỈ ĐỌC, không tự sinh Expense, không đổi số quỹ. Neo
+   * mọi mốc theo HÔM NAY thật (không hardcode năm/tháng cụ thể) để suite luôn xanh bất kể ngày chạy —
+   * cùng cách xử lý biên "chưa tới hạn" của `recurring-expenses.test.ts` (chọn ngày/tháng chắc chắn
+   * tương lai thay vì giả định hôm nay là ngày nào).
+   */
+  const homNay = new Date();
+  const thangHienTai = startOfMonth(homNay);
+  const thangTruoc = subMonths(thangHienTai, 1);
+  const thangMoSo = subMonths(thangHienTai, 2);
+  const range = { from: thangHienTai, to: endOfMonth(thangHienTai) };
+
+  async function moSo(ngay: Date): Promise<void> {
+    await prisma.cashMovement.create({
+      data: { date: ngay, kind: "CAPITAL_IN", amount: 1_000_000, description: "Mở sổ" },
+    });
+  }
+
+  async function sinhExpenseDinhKy(recurringId: string, ngay: Date, amount: number): Promise<void> {
+    await prisma.expense.create({
+      data: { date: ngay, categoryId: "fixed", description: "x", amount, source: "RECURRING", recurringId },
+    });
+  }
+
+  it("mẫu active, tháng đã có Expense sinh ⇒ không báo", async () => {
+    await moSo(thangMoSo);
+    const r = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 500_000, dayOfMonth: 1, description: "Mặt bằng" },
+    });
+    // Sinh sẵn Expense cho ĐỦ 3 tháng trong cửa sổ [D0, hôm nay] — không tháng nào thiếu.
+    for (const m of [thangMoSo, thangTruoc, thangHienTai]) await sinhExpenseDinhKy(r.id, m, 500_000);
+
+    const soQuy = await tinhSoQuyThang(range);
+    expect(soQuy.canhBao.dinhKyChuaGhi).toEqual({ soKhoan: 0, thang: [], khoang: null });
+  });
+
+  it("tháng đến hạn chưa sinh Expense ⇒ báo đúng tháng + đúng số", async () => {
+    await moSo(thangMoSo);
+    const r = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 500_000, dayOfMonth: 1, description: "Mặt bằng" },
+    });
+    // CỐ Ý bỏ trống `thangTruoc` — chỉ sinh Expense cho tháng mở sổ + tháng hiện tại.
+    for (const m of [thangMoSo, thangHienTai]) await sinhExpenseDinhKy(r.id, m, 500_000);
+
+    const soQuy = await tinhSoQuyThang(range);
+    expect(soQuy.canhBao.dinhKyChuaGhi).toEqual({
+      soKhoan: 1,
+      thang: [format(thangTruoc, "MM/yyyy")],
+      // Khoảng link sang Sổ chi phí phủ TRỌN tháng thiếu — mở đó là app ghi bù đúng tháng này.
+      khoang: { from: startOfMonth(thangTruoc), to: endOfMonth(thangTruoc) },
+    });
+  });
+
+  it("ngày đến hạn TRƯỚC D0 (trong chính tháng mở sổ) ⇒ không báo", async () => {
+    // D0 = ngày 20 tháng mở sổ (không phải đầu tháng) — mẫu đến hạn ngày 5 CÙNG tháng là trước D0.
+    await moSo(setDate(thangMoSo, 20));
+    const r = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 100_000, dayOfMonth: 5, description: "Đến hạn trước D0" },
+    });
+    // Tháng SAU tháng mở sổ mẫu vẫn đến hạn bình thường — sinh sẵn Expense để cô lập đúng case đang
+    // kiểm (chỉ tháng mở sổ), không để 2 tháng kia lẫn vào kết quả.
+    for (const m of [thangTruoc, thangHienTai]) await sinhExpenseDinhKy(r.id, setDate(m, 5), 100_000);
+
+    const soQuy = await tinhSoQuyThang(range);
+    expect(soQuy.canhBao.dinhKyChuaGhi).toEqual({ soKhoan: 0, thang: [], khoang: null });
+  });
+
+  it("ngày đến hạn SAU hôm nay ⇒ không báo", async () => {
+    const daysThisMonth = getDaysInMonth(homNay);
+    const coNgaySau = homNay.getDate() < daysThisMonth;
+    // Hôm nay chưa phải ngày cuối tháng ⇒ dùng đúng ngày cuối tháng hiện tại (chắc chắn > hôm nay).
+    // Hôm nay ĐÃ là ngày cuối tháng ⇒ lùi hẳn sang tháng SAU (mở sổ ở một mốc tương lai) — cùng cách
+    // xử lý biên của `recurring-expenses.test.ts`, tránh test phụ thuộc hôm nay là ngày nào.
+    const thangDangXet = coNgaySau ? thangHienTai : addMonths(thangHienTai, 1);
+    const ngayDenHan = coNgaySau ? daysThisMonth : 15;
+    await moSo(thangDangXet);
+    await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 200_000, dayOfMonth: ngayDenHan, description: "Chưa tới hạn" },
+    });
+
+    const soQuy = await tinhSoQuyThang({ from: thangDangXet, to: endOfMonth(thangDangXet) });
+    expect(soQuy.canhBao.dinhKyChuaGhi).toEqual({ soKhoan: 0, thang: [], khoang: null });
+  });
+
+  it("mẫu active=false ⇒ không báo dù đến hạn và chưa ghi", async () => {
+    await moSo(thangMoSo);
+    await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 300_000, dayOfMonth: 1, description: "Đã tắt", active: false },
+    });
+
+    const soQuy = await tinhSoQuyThang(range);
+    expect(soQuy.canhBao.dinhKyChuaGhi).toEqual({ soKhoan: 0, thang: [], khoang: null });
+  });
+
+  it("mẫu có mốc activeFrom = tháng hiện tại ⇒ KHÔNG báo thiếu các tháng trước mốc", async () => {
+    // Mẫu vừa bật lại/vừa tạo: bộ sinh không bao giờ sinh cho tháng trước mốc, nên báo "chưa ghi" ở
+    // đó là đòi chủ shop mở một tháng mà mở ra cũng không có gì — cảnh báo không bao giờ tắt.
+    await moSo(thangMoSo);
+    const r = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 500_000, dayOfMonth: 1, description: "Bật lại", activeFrom: thangHienTai },
+    });
+    await sinhExpenseDinhKy(r.id, thangHienTai, 500_000);
+
+    const soQuy = await tinhSoQuyThang(range);
+    expect(soQuy.canhBao.dinhKyChuaGhi).toEqual({ soKhoan: 0, thang: [], khoang: null });
+  });
+
+  it("mẫu có mốc = tháng trước ⇒ vẫn báo tháng thiếu TỪ mốc trở đi", async () => {
+    await moSo(thangMoSo);
+    await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 500_000, dayOfMonth: 1, description: "Mốc tháng trước", activeFrom: thangTruoc },
+    });
+
+    const soQuy = await tinhSoQuyThang(range);
+    expect(soQuy.canhBao.dinhKyChuaGhi).toEqual({
+      soKhoan: 2,
+      thang: [format(thangTruoc, "MM/yyyy"), format(thangHienTai, "MM/yyyy")],
+      khoang: { from: startOfMonth(thangTruoc), to: endOfMonth(thangHienTai) },
+    });
+  });
+
+  it("dayOfMonth=31 gặp tháng 30 ngày ⇒ kẹp về ngày 30, không tự thêm entry hay tràn tháng sau", async () => {
+    // Tìm tháng 30 ngày gần nhất (tháng 4/6/9/11), lùi từ 1 tháng trước — giữ cửa sổ nhỏ, tránh
+    // hardcode năm/tháng cụ thể để test xanh bất kể chạy lúc nào.
+    let thang30 = subMonths(thangHienTai, 1);
+    while (getDaysInMonth(thang30) !== 30) thang30 = subMonths(thang30, 1);
+    await moSo(thang30);
+
+    const r = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 400_000, dayOfMonth: 31, description: "Kẹp cuối tháng" },
+    });
+    // Neutralize mọi tháng SAU thang30 tới tháng hiện tại (nếu có) — chỉ để trống ĐÚNG thang30. Dùng
+    // lại đúng hàm sinh ngày đến hạn (`ngayDenHanDinhKy`) — không lặp lại công thức kẹp ở test.
+    for (let m = addMonths(thang30, 1); m <= thangHienTai; m = addMonths(m, 1)) {
+      await sinhExpenseDinhKy(r.id, ngayDenHanDinhKy(31, m), 400_000);
+    }
+
+    const soQuy = await tinhSoQuyThang(range);
+    expect(soQuy.canhBao.dinhKyChuaGhi).toEqual({
+      soKhoan: 1,
+      thang: [format(thang30, "MM/yyyy")],
+      khoang: { from: startOfMonth(thang30), to: endOfMonth(thang30) },
+    });
+    expect(ngayDenHanDinhKy(31, thang30).getDate()).toBe(30); // kẹp về 30, không tràn sang tháng sau
   });
 });

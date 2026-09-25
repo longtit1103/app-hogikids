@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   ensureRecurringExpenses,
   ensureRecurringExpensesForMonths,
+  mauDinhKySinhChoThang,
   monthStartsInRange,
 } from "@/lib/expenses/ensure-recurring-expenses";
 import { prisma } from "@/lib/prisma";
@@ -179,6 +180,69 @@ describe("ensureRecurringExpensesForMonths", () => {
 
     expect(created).toBe(1);
     expect(await prisma.expense.count()).toBe(1);
+  });
+});
+
+describe("mốc activeFrom — mẫu chỉ sinh từ tháng của mốc trở đi", () => {
+  // dayOfMonth=1 để mọi tháng ≤ tháng hiện tại đều đã tới hạn — chỉ cổng mốc quyết định có sinh hay không.
+  const thisMonth = startOfMonth(new Date());
+  const baThang = [subMonths(thisMonth, 2), subMonths(thisMonth, 1), thisMonth];
+
+  it("mốc = tháng trước ⇒ KHÔNG sinh tháng trước mốc, sinh từ tháng mốc tới tháng hiện tại", async () => {
+    await prisma.recurringExpense.create({
+      data: {
+        categoryId: "fixed",
+        amount: 3_000_000,
+        dayOfMonth: 1,
+        description: "Có mốc",
+        activeFrom: subMonths(thisMonth, 1),
+      },
+    });
+
+    const created = await ensureRecurringExpensesForMonths(baThang);
+
+    expect(created).toBe(2);
+    const keys = (await prisma.expense.findMany()).map((e) => format(e.date, "yyyy-MM")).sort();
+    expect(keys).toEqual([subMonths(thisMonth, 1), thisMonth].map((m) => format(m, "yyyy-MM")));
+  });
+
+  it("mốc GIỮA tháng (sau ngày đến hạn) ⇒ tháng của mốc VẪN sinh — so theo tháng, không theo ngày", async () => {
+    await prisma.recurringExpense.create({
+      data: {
+        categoryId: "fixed",
+        amount: 1_000_000,
+        dayOfMonth: 1,
+        description: "Mốc ngày 20",
+        activeFrom: setDate(subMonths(thisMonth, 1), 20),
+      },
+    });
+
+    expect(await ensureRecurringExpenses(subMonths(thisMonth, 1))).toBe(1);
+    expect(await ensureRecurringExpenses(subMonths(thisMonth, 2))).toBe(0);
+  });
+
+  it("activeFrom NULL (mẫu có từ trước khi có cột) ⇒ giữ hành vi cũ: sinh cả tháng quá khứ", async () => {
+    await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 3_000_000, dayOfMonth: 1, description: "Mẫu cũ", activeFrom: null },
+    });
+
+    expect(await ensureRecurringExpensesForMonths(baThang)).toBe(3);
+  });
+});
+
+describe("mauDinhKySinhChoThang", () => {
+  const thang9 = new Date(2026, 8, 1);
+
+  it("NULL ⇒ mọi tháng", () => {
+    expect(mauDinhKySinhChoThang(null, new Date(2020, 0, 1))).toBe(true);
+  });
+
+  it("tháng trước mốc ⇒ không; cùng tháng (kể cả mốc cuối tháng) và sau ⇒ có", () => {
+    const mocCuoiThang9 = new Date(2026, 8, 30, 23, 59);
+    expect(mauDinhKySinhChoThang(mocCuoiThang9, new Date(2026, 7, 31, 23, 59))).toBe(false);
+    expect(mauDinhKySinhChoThang(mocCuoiThang9, thang9)).toBe(true);
+    expect(mauDinhKySinhChoThang(thang9, new Date(2026, 8, 15))).toBe(true);
+    expect(mauDinhKySinhChoThang(thang9, new Date(2026, 9, 1))).toBe(true);
   });
 });
 

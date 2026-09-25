@@ -402,7 +402,15 @@ export async function dungLaiTuKhoTho(): Promise<ActionResult<KetQuaDungLai>> {
       | { ok: true; stats: TransformStats }
       | { ok: false; error: string };
     if (!body.ok) {
-      return { ok: false, error: `Dựng lại thất bại: ${body.error}` };
+      // `withSyncLog` gói MỌI lỗi ném ra từ `fn` (nghiệp vụ LẪN hạ tầng — Prisma, mất kết nối…)
+      // thành `body.error = e.message` — không tách loại. `body.error` có thể mang chi tiết hạ
+      // tầng nên KHÔNG được đẩy thẳng ra client; chi tiết đã nằm sẵn trong `SyncLog.error` của
+      // đúng lượt này (bảng ghi TRƯỚC KHI trả response) nên không mất, chỉ cần xem ở nhật ký.
+      console.error("Dựng lại từ kho thô thất bại (lỗi nghiệp vụ/hạ tầng):", body.error);
+      return {
+        ok: false,
+        error: "Dựng lại thất bại — xem chi tiết ở nhật ký đồng bộ (/cai-dat).",
+      };
     }
 
     revalidatePath("/", "layout");
@@ -420,9 +428,14 @@ export async function dungLaiTuKhoTho(): Promise<ActionResult<KetQuaDungLai>> {
       },
     };
   } catch (err) {
+    // Nhánh `body.ok === false` ở trên đã bắt MỌI lỗi (nghiệp vụ lẫn hạ tầng) mà `withSyncLog` gói
+    // lại từ bên trong `fn` — tới đây là exception THOÁT KHỎI cả lượt gọi đó (chính `withSyncLog`
+    // ném trước khi kịp trả `Response`, hoặc `res.json()` hỏng). Log đủ phía server, trả client
+    // câu cố định thay vì `err.message` thô.
+    console.error("Dựng lại từ kho thô thất bại:", err);
     return {
       ok: false,
-      error: err instanceof Error ? `Dựng lại thất bại: ${err.message}` : "Dựng lại thất bại",
+      error: "Dựng lại thất bại — lỗi hệ thống, kiểm log server để biết chi tiết.",
     };
   } finally {
     await traKhoaViecNang(khoaDb.the);

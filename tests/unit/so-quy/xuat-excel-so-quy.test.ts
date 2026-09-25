@@ -33,7 +33,7 @@ const THE_RONG: SoQuyThangDayDu = {
     shopeeViToiNgay: null,
     shopeeThieuTruocD0: false,
     shopeeChuaPhanLoai: 0,
-    coDinhKyActive: false,
+    dinhKyChuaGhi: { soKhoan: 0, thang: [], khoang: null },
     adsViVuotSo: false,
   },
 };

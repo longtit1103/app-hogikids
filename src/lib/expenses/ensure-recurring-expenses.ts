@@ -17,9 +17,10 @@ import type { DateRange } from "@/lib/date-range";
  * `ensureRecurringExpenses`) để không tự đua với chính mình. Guard tháng
  * tương lai (`target > today`) giữ nguyên ở core. Trả TỔNG Expense vừa tạo.
  *
- * Lưu ý semantics (Path A — schema không có mốc bắt đầu): khoản định kỳ
- * `active` áp cho MỌI tháng được render, kể cả tháng trước khi khoản đó được
- * tạo. Khoản mới phát sinh gần đây bị sinh lùi cho tháng cũ.
+ * Lưu ý semantics: khoản định kỳ `active` áp cho MỌI tháng được render từ tháng
+ * của mốc `activeFrom` trở đi (`mauDinhKySinhChoThang`). Mẫu tạo mới và mẫu bật
+ * lại đều mang mốc ⇒ không sinh lùi. Mẫu dựng TRƯỚC khi có cột giữ `activeFrom
+ * NULL` = không cận dưới (hành vi cũ): nó vẫn sinh cho cả tháng trước khi được tạo.
  *
  * ĐƯỜNG SỬA ĐÚNG là "Xoá và dừng lặp lại" (`deleteExpense(id, "stop_recurring")`) rồi
  * nhập tay tháng cần. **KHÔNG phải "Xoá dòng này"** (`deleteExpense(id, "only")`) như chú
@@ -53,6 +54,28 @@ export function monthStartsInRange(range: DateRange): Date[] {
     months.push(m);
   }
   return months;
+}
+
+/**
+ * Ngày đến hạn của MỘT mẫu chi định kỳ trong MỘT tháng cụ thể — kẹp `dayOfMonth` 29–31 về ngày cuối
+ * tháng khi tháng đó thiếu ngày (vd 31 → 30/11, 28/02). Hàm THUẦN, export để dùng CHUNG bởi nơi sinh
+ * (`runEnsureRecurringExpenses` dưới đây) và nơi cảnh báo chỉ-đọc (`so-quy-queries.ts` — đếm khoản
+ * định kỳ đến hạn mà chưa sinh) — tách hai công thức ngày đến hạn là sớm muộn lệch nhau.
+ */
+export function ngayDenHanDinhKy(dayOfMonth: number, month: Date): Date {
+  return setDate(startOfMonth(month), Math.min(dayOfMonth, getDaysInMonth(month)));
+}
+
+/**
+ * Mẫu chi định kỳ có được sinh cho tháng `month` không — cổng mốc `activeFrom`: `NULL` ⇒ mọi tháng
+ * (mẫu dựng trước khi có cột, hành vi cũ); có mốc ⇒ chỉ tháng >= tháng của mốc. So theo THÁNG (giờ VN,
+ * container TZ=Asia/Ho_Chi_Minh), không theo ngày: mốc giữa tháng vẫn sinh lần đến hạn đầu tháng đó.
+ * Hàm THUẦN dùng CHUNG bởi nơi sinh (dưới đây) và nơi đếm "đến hạn chưa sinh" (`so-quy-queries.ts`) —
+ * một nơi quên cổng là cảnh báo đòi mở một tháng mà mở ra bộ sinh cũng không sinh, không bao giờ tắt.
+ * (Dự báo quỹ `du-bao-quy.ts` so cùng luật trên khoá ngày chuỗi vì lõi đó không dùng `Date`.)
+ */
+export function mauDinhKySinhChoThang(activeFrom: Date | null, month: Date): boolean {
+  return activeFrom === null || startOfMonth(month) >= startOfMonth(activeFrom);
 }
 
 /**
@@ -100,8 +123,9 @@ async function runEnsureRecurringExpenses(month: Date): Promise<number> {
       let created = 0;
 
       for (const r of recurrings) {
-        // Kẹp ngày để 29–31 không tràn sang tháng sau.
-        const target = setDate(start, Math.min(r.dayOfMonth, getDaysInMonth(month)));
+        // Tháng trước mốc (mẫu mới tạo / vừa bật lại) → không sinh: không ghi lùi vào tháng đã dừng.
+        if (!mauDinhKySinhChoThang(r.activeFrom, month)) continue;
+        const target = ngayDenHanDinhKy(r.dayOfMonth, month);
         if (target > today) continue; // chưa tới hạn trong tháng → chưa sinh
 
         const existed = await tx.expense.findFirst({

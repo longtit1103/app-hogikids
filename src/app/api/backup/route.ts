@@ -1,10 +1,14 @@
 import { format } from "date-fns";
 
 import { chanRouteKhiDangPhucHoi, dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { giuKhoaViecNang, traKhoaViecNang } from "@/lib/backup/khoa-viec-nang";
 import { runPgDump } from "@/lib/backup/run-pg-dump";
 import { chanRequestKhacOrigin } from "@/lib/chan-request-khac-origin";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUserId } from "@/lib/session";
+
+/** Tên việc nặng của nút "Sao lưu ngay" — hiện trong câu 409 khi một việc nặng khác đang chạy. */
+const VIEC_SAO_LUU = "sao lưu dữ liệu (tải bản backup)";
 
 /**
  * POST /api/backup — tải bản pg_dump `-Fc` (custom-format) của schema app.
@@ -45,6 +49,42 @@ export async function POST(request: Request): Promise<Response> {
   const chanPhucHoi = chanRouteKhiDangPhucHoi();
   if (chanPhucHoi) return chanPhucHoi;
 
+  // Giành khoá việc nặng TRƯỚC `runPgDump()` — thiếu cổng này thì bấm liên tiếp (hoặc double-click)
+  // xếp chồng nhiều `pg_dump` cùng lúc, mỗi lượt tốn tài nguyên như nhau. Dùng CHUNG khoá với
+  // `/api/restore`/`rebuild-from-raw`/script ghi giá vốn — một lượt sao lưu tay đang chạy cũng phải
+  // chặn được các việc nặng khác, không riêng chặn chính nó.
+  //
+  // BỌC try/catch: `giuKhoaViecNang` tự nó chạm DB (đọc/ghi bảng `Setting`) — DB down thì nó NÉM,
+  // và câu ném đó đứng NGOÀI try/catch của thân route nếu không bọc riêng ⇒ lọt qua handler thành
+  // lỗi chưa bắt, Next.js trả 500 HTML mặc định, phá hợp đồng JSDoc "luôn trả 500 JSON {error}".
+  let luotGianh: Awaited<ReturnType<typeof giuKhoaViecNang>>;
+  try {
+    luotGianh = await giuKhoaViecNang(VIEC_SAO_LUU);
+  } catch (err) {
+    console.error("Không kiểm được khoá việc nặng trước lượt sao lưu:", err);
+    return Response.json(
+      { error: "Không kiểm được khoá việc nặng — cơ sở dữ liệu không phản hồi, thử lại sau." },
+      { status: 503 },
+    );
+  }
+  if (!luotGianh.the) {
+    return Response.json(
+      {
+        error:
+          `Đang có việc nặng "${luotGianh.dangGiu}" chạy — chờ xong rồi thử lại. ` +
+          "(Nếu app vừa khởi động lại hoặc vừa nạp một bản backup thì đây có thể là khoá cũ còn " +
+          "sót — nó tự hết hạn trong tối đa 5 phút.)",
+      },
+      { status: 409 },
+    );
+  }
+  const theViec = luotGianh.the;
+
+  // Giới hạn CỐ Ý không gia hạn: khoá sống 5' (`HAN_KHOA_MS`) nhưng `pg_dump` được phép chạy tới
+  // 10' (`HAN_PG_DUMP_MS`, xem `run-pg-dump.ts`). Một lượt dump treo trong khe 5'–10' sẽ để khoá hết
+  // hạn khi dump vẫn chạy ⇒ lượt phục hồi giành được khoá nhưng vẫn phải chờ `pg_dump` nhả khoá
+  // đọc của nó (pg_restore có hạn riêng). Chấp nhận vì dump toàn bộ prod (~56 MiB) đo thật chạy
+  // vài giây; và `pg_dump` có timeout riêng nên không bao giờ giữ khoá vô hạn.
   try {
     const dump = await runPgDump();
     const finishedAt = new Date();
@@ -64,11 +104,24 @@ export async function POST(request: Request): Promise<Response> {
       },
     });
   } catch (err) {
+    // KHÔNG đưa err.message thô vào response: `runPgDump` đã tự lọc stderr (hostname DB, role) ra
+    // console server trước khi ném lên đây, nên message tới đây vốn đã an toàn để hiện nguyên văn —
+    // vẫn log thêm một lần ở đây để có dấu vết đầy đủ ngay tại route.
     const message = err instanceof Error ? err.message : "Sao lưu thất bại";
+    console.error("Sao lưu thất bại:", err);
     // Ghi cả lượt LỖI: bấm nút mà dump hỏng vẫn phải hiện "loi" ở màn Cài đặt, không được lặng
     // thinh coi như chưa có gì xảy ra (đúng thứ cảnh báo giả mà nguồn SyncLog này sinh ra để sửa).
     await ghiLogSaoLuu({ status: "ERROR", finishedAt: new Date(), error: message });
     return Response.json({ error: message }, { status: 500 });
+  } finally {
+    // Best-effort, giống `/api/restore`: dump hỏng giữa lượt phục hồi có thể đã đổi/xoá dòng khoá —
+    // lỗi trả khoá TUYỆT ĐỐI không được che response gốc. Route KHÔNG stream (trả Buffer trọn vẹn ở
+    // trên) nên không có cửa sổ "trả khoá trước khi body đã gửi hết" phải lo.
+    try {
+      await traKhoaViecNang(theViec);
+    } catch (err) {
+      console.error("Không trả được khoá việc nặng sau lượt sao lưu — tự hết hạn tối đa 5 phút.", err);
+    }
   }
 }
 

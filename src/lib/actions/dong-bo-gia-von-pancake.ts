@@ -2,6 +2,7 @@
 
 import path from "node:path";
 
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import type { ActionResult } from "@/lib/actions/action-result";
@@ -9,6 +10,7 @@ import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import {
   giuKhoaViecNang,
   kiemGiuKhoaTrongTransaction,
+  MatKhoaViecNang,
   traKhoaViecNang,
 } from "@/lib/backup/khoa-viec-nang";
 import { capNhatSoLechGiaVon } from "@/lib/gia-von/cap-nhat-so-lech";
@@ -105,8 +107,41 @@ export async function apGiaVonTheoPancake(
     await dongBoLaiSoDem();
     dungLaiManTien();
     if (e instanceof LoiDungGiuaChung) {
-      return { ok: false, error: e.message };
+      // `LoiDungGiuaChung.message` nhúng NGUYÊN VĂN message của lỗi gốc (Prisma…, có thể mang
+      // hostname/role DB) — không được đẩy thẳng ra client. Log đủ phía server; dựng câu tiếng
+      // Việt CHỈ từ các field có cấu trúc của lớp lỗi (daGhi/boQua/tong/duongDanBackup), không
+      // kèm lý do thô.
+      console.error("Lượt áp giá vốn bị cắt giữa chừng:", e);
+      // Mất lease giữa chừng là lý do chủ shop HÀNH ĐỘNG được (chờ việc kia xong rồi chạy lại), và
+      // câu của `MatKhoaViecNang` là chữ cố định, không mang chi tiết hạ tầng ⇒ giữ lại nguyên văn.
+      const lyDo =
+        e.cause instanceof MatKhoaViecNang
+          ? e.cause.message
+          : "lỗi hệ thống, xem chi tiết ở log server";
+      return {
+        ok: false,
+        error:
+          `DỪNG GIỮA CHỪNG sau ${e.daGhi + e.boQua}/${e.tong} dòng (ít nhất ${e.daGhi} đã ghi, ` +
+          `${e.boQua} bỏ qua vì không còn khớp giá lúc xem) — ${lyDo}.\n` +
+          `Backup "${e.duongDanBackup}" giữ giá TRƯỚC KHI GHI của cả ${e.tong} dòng đề xuất: chỉ ` +
+          `hoàn nguyên dòng nào đang mang giá MỚI trong DB; dòng bị bỏ qua (chủ shop vừa sửa tay) ` +
+          `thì để nguyên.`,
+      };
     }
+    // Phòng xa: hiện KHÔNG đường nào trong `try` ném lỗi Prisma trần (vòng ghi đã bọc mọi lỗi thành
+    // `LoiDungGiuaChung`; `docDeXuatGiaVon`/`giuKhoaViecNang` nằm NGOÀI `try`). Nhánh này giữ để
+    // nếu sau này ai thêm câu Prisma vào `try` thì message (có thể mang hostname/role) vẫn không
+    // lọt ra client.
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError ||
+      e instanceof Prisma.PrismaClientUnknownRequestError ||
+      e instanceof Prisma.PrismaClientInitializationError ||
+      e instanceof Prisma.PrismaClientRustPanicError
+    ) {
+      console.error("Lỗi hạ tầng khi áp giá vốn:", e);
+      return { ok: false, error: "Không áp được giá vốn — lỗi hệ thống, thử lại sau." };
+    }
+    console.error("Lỗi không xác định khi áp giá vốn:", e);
     return {
       ok: false,
       error: `Không áp được giá vốn: ${e instanceof Error ? e.message : String(e)}`,

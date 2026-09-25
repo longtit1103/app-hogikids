@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { addMonths, format, subMonths } from "date-fns";
 
 import { testPrisma } from "./ingest-raw";
+import { luuQuaCongD0 } from "./luu-qua-cong-d0";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 /**
@@ -54,7 +55,7 @@ async function taoKhoan(page: Page, homNay: Date): Promise<void> {
   await form.getByLabel("Lãi %/năm").fill("12");
   await form.getByLabel("Kỳ hạn (số kỳ còn lại)").fill("12");
   await form.getByLabel("Ngày trả kỳ đầu").fill(format(addMonths(homNay, 1), "yyyy-MM-dd"));
-  await form.getByRole("button", { name: "Lưu", exact: true }).click();
+  await luuQuaCongD0(form);
   await expect(page.getByText(`Đã thêm khoản vay ${TEN_KHOAN}`)).toBeVisible();
 }
 

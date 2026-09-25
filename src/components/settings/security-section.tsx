@@ -123,7 +123,7 @@ export function SecuritySection() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Mật khẩu mới tối thiểu 8 ký tự, gồm cả chữ và số. Đăng xuất: dropdown khối user cuối sidebar.
+        Mật khẩu mới tối thiểu 12 ký tự, gồm cả chữ và số. Đăng xuất: dropdown khối user cuối sidebar.
       </p>
 
       <div className="flex justify-end">

@@ -29,6 +29,9 @@ type Props = {
   soKyCho: number;
   /** Đã duyệt ít nhất 1 kỳ — ưu tiên cảnh báo này thay vì câu "sẽ có N kỳ chờ duyệt". */
   daDuyetKy: boolean;
+  /** Cảnh báo D0 (tính sẵn ở component cha) — gốc-cuối-kỳ LUÔN dùng cặp `ngayGiaiNgan`, không có
+   *  nhánh "mang-sang" như hai loại kia (xem chú thích đầu file). */
+  canhBaoD0?: React.ReactNode;
 };
 
 export function KhoanVayFormGocCuoiKyFields({
@@ -42,6 +45,7 @@ export function KhoanVayFormGocCuoiKyFields({
   hienTien,
   soKyCho,
   daDuyetKy,
+  canhBaoD0,
 }: Props) {
   return (
     <>
@@ -64,6 +68,7 @@ export function KhoanVayFormGocCuoiKyFields({
           onChange={(e) => doiNgayNen(e.target.value, "ngayGiaiNgan")}
         />
       </O>
+      {canhBaoD0}
 
       <O label="Kỳ hạn (số kỳ)" error={loi.termMonths}>
         <Input

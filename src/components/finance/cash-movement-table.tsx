@@ -45,12 +45,16 @@ export function CashMovementTable({
     );
   }
 
-  /** Dòng gốc vay hiện luôn TÊN khoản dưới badge — một cột "Loại" trần không nói được nợ của ai. */
+  /**
+   * Dòng gốc vay / gửi-rút sổ tiết kiệm hiện luôn TÊN khoản dưới badge — một cột "Loại" trần không
+   * nói được nợ của ai, tiền nằm ở sổ nào. Hai tên không bao giờ cùng có (CHECK loại trừ ở DB).
+   */
   function kindBadge(row: CashMovementRow) {
+    const tenKhoan = row.loanName ?? row.savingsName;
     return (
       <div className="flex flex-col items-start gap-0.5">
         <Badge variant={isInflow(row.kind) ? "secondary" : "outline"}>{CASH_MOVEMENT_KIND_META[row.kind].label}</Badge>
-        {row.loanName && <span className="text-xs text-muted-foreground">{row.loanName}</span>}
+        {tenKhoan && <span className="text-xs text-muted-foreground">{tenKhoan}</span>}
       </div>
     );
   }

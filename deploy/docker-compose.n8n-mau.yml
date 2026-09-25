@@ -16,11 +16,21 @@
 # cổng 5678. URL công khai đó điền vào ô "n8n URL công khai (Pancake gọi tới)" ở /cai-dat.
 services:
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    # Ghim bản cụ thể thay vì `:latest` — kéo ảnh mới không báo trước lúc `docker compose pull`/`up`
+    # có thể đổi hành vi workflow giữa hai lần deploy mà không ai chủ ý nâng cấp. 2.14.2 = bản đang
+    # chạy thật trên minipc (đo 24/09/2026 bằng `docker exec hogikids-n8n n8n --version`; KHÔNG dùng
+    # `docker inspect … {{.Config.Image}}` — compose thật đang ghi `n8nio/n8n:latest` nên lệnh đó chỉ
+    # ra chữ `latest`, không ra số bản). Dựng lại thì đo lại rồi thay số ở đây cho khớp.
+    # Muốn nâng cấp thì đổi số ở đây rồi `docker compose pull && docker compose up -d` có chủ ý,
+    # không để trôi theo `latest`.
+    image: docker.n8n.io/n8nio/n8n:2.14.2
     container_name: hogikids-n8n
     restart: unless-stopped
     ports:
-      - "5678:5678"
+      # Chỉ localhost — n8n KHÔNG cần nghe LAN/internet trực tiếp: webhook Pancake gọi vào qua
+      # reverse proxy/tunnel (xem ghi chú "Webhook Pancake gọi VÀO n8n" ở trên) trỏ tới cổng này
+      # trên chính host, UI n8n cũng chỉ cần truy cập qua SSH tunnel/VPN của người quản trị.
+      - "127.0.0.1:5678:5678"
     environment:
       - TZ=Asia/Ho_Chi_Minh
       - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh

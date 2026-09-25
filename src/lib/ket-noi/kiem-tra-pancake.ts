@@ -21,7 +21,7 @@ const CAC_SHOP = [
 
 async function kiemTraMotShop(nhan: string, shopId: string, apiKey: string): Promise<DongKiemTra> {
   const url =
-    `${PANCAKE_BASE}/shops/${shopId}/orders?api_key=${encodeURIComponent(apiKey)}` +
+    `${PANCAKE_BASE}/shops/${encodeURIComponent(shopId)}/orders?api_key=${encodeURIComponent(apiKey)}` +
     `&page_size=1&page_number=1`;
   let res: Response;
   let text: string;

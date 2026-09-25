@@ -141,6 +141,7 @@ export function SoTietKiemTable({
   rows,
   loans,
   laiNhanTrongKy,
+  d0,
 }: {
   rows: SoTietKiemRow[];
   loans: KhoanVayRow[];
@@ -151,6 +152,8 @@ export function SoTietKiemTable({
    * biết vì sao con số đó KHÔNG dùng ở đây.
    */
   laiNhanTrongKy: number;
+  /** Ngày mở sổ quỹ; null = chưa mở sổ. Modal Sửa cần để hỏi lại khi ghi ngày gửi trước D0. */
+  d0: Date | null;
 }) {
   const homNay = new Date();
   const tong = tongBangSoTietKiem(rows);
@@ -192,7 +195,7 @@ export function SoTietKiemTable({
                 <LaiCell so={so} />
               </TableCell>
               <TableCell className="text-right">
-                <SoTietKiemRowActions so={so} loans={loans} />
+                <SoTietKiemRowActions so={so} loans={loans} d0={d0} />
               </TableCell>
             </TableRow>
           ))}
@@ -208,7 +211,7 @@ export function SoTietKiemTable({
                 <p className="text-sm font-medium text-ink">{so.name}</p>
                 <p className="text-xs text-muted-foreground">{so.bank || "—"}</p>
               </div>
-              <SoTietKiemRowActions so={so} loans={loans} />
+              <SoTietKiemRowActions so={so} loans={loans} d0={d0} />
             </div>
             <p className="font-serif text-xl text-ink tabular-nums">{formatVnd(so.principal)}</p>
             <p className="text-xs text-muted-foreground">

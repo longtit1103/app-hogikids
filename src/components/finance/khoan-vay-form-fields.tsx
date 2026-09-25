@@ -4,6 +4,7 @@ import { format } from "date-fns";
 
 import { Input } from "@/components/ui/input";
 import { soKyChoTheoLich } from "@/lib/so-quy/lich-tra-no";
+import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
 
 import { KhoanVayFormGocCuoiKyFields } from "./khoan-vay-form-goc-cuoi-ky-fields";
 import { KhoanVayFormTermFields } from "./khoan-vay-form-term-fields";
@@ -30,6 +31,18 @@ export function parseLaiSuat(raw: string): number | null {
   if (s === "") return 0;
   const so = Number(s);
   return Number.isFinite(so) ? Math.round(so * 100) : null;
+}
+
+/**
+ * Cặp field "ngày nền" đang dùng: TRUE ⇒ `soTienGiaiNgan`+`ngayGiaiNgan` (chế độ mới thật, thấu chi
+ * CHƯA rút trước ngày mở sổ, hoặc gốc-cuối-kỳ — cả ba LUÔN sinh đúng 1 dòng `LOAN_IN`); FALSE ⇒
+ * `duNoMoSo`+`startDate` (mang sang / thấu chi đã rút trước mở sổ — KHÔNG sinh dòng tiền, nên
+ * `startDate` trước D0 là BÌNH THƯỜNG). Export dùng CHUNG giữa `khoan-vay-form-modal.tsx` (gate hỏi
+ * lại khi ghi trước D0) và file này (đặt đúng cảnh báo cạnh ô ngày) — hai nơi tính khác nhau là
+ * modal hỏi một đằng, cảnh báo hiện một nẻo.
+ */
+export function dungCapGiaiNgan(cheDo: KhoanVayFormState["cheDo"], thauChiTruocMoSo: boolean): boolean {
+  return cheDo === "moi" || cheDo === "goc-cuoi-ky" || (cheDo === "thau-chi" && !thauChiTruocMoSo);
 }
 
 export type KhoanVayFormState = {
@@ -103,15 +116,32 @@ type Props = {
   doiNgayNen: (giaTri: string, khoa: "ngayGiaiNgan" | "startDate") => void;
   doiTien: (khoa: "soTienGiaiNgan" | "duNoMoSo" | "laiCoDinh" | "tienGuiMoiKy", raw: string) => void;
   hienTien: (n: number) => string;
+  /** Ngày mở sổ quỹ (`soQuy.d0`); null = chưa mở sổ. */
+  d0: Date | null;
+  /** Đã bấm Lưu một lần trên ngày giải ngân sớm hơn D0 (state `hoiTruocD0` ở modal) — cùng với `d0`
+   *  quyết định có in cảnh báo amber ngay dưới ô Ngày giải ngân/Ngày rút hay không. */
+  hoiTruocD0: boolean;
 };
 
-export function KhoanVayFormFields({ f, setF, loi, khoaNen, khoaCheDo, daDuyetKy, ngayNen, doiCheDo, doiNgayNen, doiTien, hienTien }: Props) {
+export function KhoanVayFormFields({ f, setF, loi, khoaNen, khoaCheDo, daDuyetKy, ngayNen, doiCheDo, doiNgayNen, doiTien, hienTien, d0, hoiTruocD0 }: Props) {
   const homNay = new Date();
   const ngayToiDa = format(homNay, NGAY);
   // Một chỗ khai "ô nền bị khoá" cho cả 4 ô — chép `disabled`/`title` bốn lần là để chúng lệch nhau.
   const khoa = khoaNen ? { disabled: true, title: KHOA_NEN_HINT } : {};
   const thauChi = f.cheDo === "thau-chi";
   const gocCuoiKy = f.cheDo === "goc-cuoi-ky";
+  // Chỉ hiện SAU lượt bấm Lưu đầu (khuôn `cash-movement-form-modal.tsx`) — không proactive ngay lúc
+  // gõ ngày, tránh doạ chủ shop trước khi họ bấm Lưu. Đặt cạnh ĐÚNG ô ngày đang dùng làm "ngày nền"
+  // (`dungCapGiaiNgan`) — modal đã đảm bảo `hoiTruocD0` chỉ true khi đang ở cặp field đó.
+  const canhBaoD0 =
+    hoiTruocD0 && d0 !== null ? (
+      <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+        Ngày giải ngân sớm hơn ngày mở sổ ({format(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày mới;
+        dòng số dư mở sổ có thể phải sửa lại.
+        {(f.cheDo === "moi" || f.cheDo === "thau-chi") &&
+          ` Khoản đã có trước ngày mở sổ thì chọn cách khai "đã có từ trước" — tiền đó đã nằm trong số dư mở sổ, ghi giải ngân nữa là đếm hai lần.`}
+      </p>
+    ) : null;
   // BULLET không có công tắc "coLich" riêng (LUÔN có lịch, `Loan_lich_theo_loai`) — coi như đã bật.
   const coLichHieuLuc = gocCuoiKy || f.coLich;
   // Số kỳ đã tới hạn của lịch đang khai, để chủ shop biết TRƯỚC. Thấu chi không có `termMonths`.
@@ -155,6 +185,7 @@ export function KhoanVayFormFields({ f, setF, loi, khoaNen, khoaCheDo, daDuyetKy
           hienTien={hienTien}
           soKyCho={soKyCho}
           daDuyetKy={daDuyetKy}
+          canhBaoD0={canhBaoD0}
         />
       ) : thauChi ? (
         <KhoanVayFormThauChiFields
@@ -169,6 +200,7 @@ export function KhoanVayFormFields({ f, setF, loi, khoaNen, khoaCheDo, daDuyetKy
           hienTien={hienTien}
           soKyCho={soKyCho}
           daDuyetKy={daDuyetKy}
+          canhBaoD0={canhBaoD0}
         />
       ) : (
         <KhoanVayFormTermFields
@@ -182,6 +214,7 @@ export function KhoanVayFormFields({ f, setF, loi, khoaNen, khoaCheDo, daDuyetKy
           hienTien={hienTien}
           soKyCho={soKyCho}
           daDuyetKy={daDuyetKy}
+          canhBaoD0={canhBaoD0}
         />
       )}
 

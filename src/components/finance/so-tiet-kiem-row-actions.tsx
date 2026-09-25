@@ -95,7 +95,16 @@ const NUT: Record<Exclude<HopThoai, null>, string> = {
 /** Hai hộp CHỈ ĐỂ ĐỌC — không nút nào trong chúng gọi action, chỉ giải thích + chỉ đường. */
 const HOP_CHI_DOC = new Set<HopThoai>(["khongXoaDuoc", "khongSuaDuoc"]);
 
-export function SoTietKiemRowActions({ so, loans }: { so: SoTietKiemRow; loans: KhoanVayRow[] }) {
+export function SoTietKiemRowActions({
+  so,
+  loans,
+  d0,
+}: {
+  so: SoTietKiemRow;
+  loans: KhoanVayRow[];
+  /** Ngày mở sổ quỹ; null = chưa mở sổ. Modal Sửa cần để hỏi lại khi ghi ngày gửi trước D0. */
+  d0: Date | null;
+}) {
   const router = useRouter();
   const [moSua, setMoSua] = useState(false);
   const [hopThoai, setHopThoai] = useState<HopThoai>(null);
@@ -181,7 +190,7 @@ export function SoTietKiemRowActions({ so, loans }: { so: SoTietKiemRow; loans: 
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <SoTietKiemFormModal open={moSua} onOpenChange={setMoSua} so={so} loans={loans} />
+      <SoTietKiemFormModal open={moSua} onOpenChange={setMoSua} so={so} loans={loans} d0={d0} />
 
       <Dialog open={hopThoai !== null} onOpenChange={(o) => !o && setHopThoai(null)}>
         <DialogContent className="max-w-sm">

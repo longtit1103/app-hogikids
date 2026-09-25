@@ -22,6 +22,9 @@
  */
 const PG_RESTORE_DESCS = [
   "TABLE DATA",
+  // Bảng partition: pg_dump phát `TABLE ATTACH`/`INDEX ATTACH` — thiếu thì chữ ATTACH bị đọc thành
+  // schema ⇒ từ chối oan dump hợp lệ (DR lượt 3, 25/09). Song sinh với `restore.sh`.
+  "TABLE ATTACH",
   "TABLE",
   "SEQUENCE OWNED BY",
   "SEQUENCE SET",
@@ -29,6 +32,7 @@ const PG_RESTORE_DESCS = [
   "MATERIALIZED VIEW DATA",
   "MATERIALIZED VIEW",
   "VIEW",
+  "INDEX ATTACH",
   "INDEX",
   "FK CONSTRAINT",
   "CHECK CONSTRAINT",

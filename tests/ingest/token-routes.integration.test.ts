@@ -234,6 +234,33 @@ describe("route /api/ingest/tiktok-token", () => {
       spy.mockRestore();
     }
   });
+
+  it("MỌI response (200, 400, 401, 500) đều có Cache-Control: no-store — body mang token OAuth thật", async () => {
+    const res200 = await tiktokGet(getReq("http://t/api/ingest/tiktok-token"));
+    expect(res200.headers.get("Cache-Control")).toBe("no-store");
+
+    const res401 = await tiktokGet(getReq("http://t/api/ingest/tiktok-token", null));
+    expect(res401.headers.get("Cache-Control")).toBe("no-store");
+
+    const res400 = await tiktokPost(
+      jsonReq("http://t/api/ingest/tiktok-token", { accessToken: "a" /* thiếu refreshToken */ }),
+    );
+    expect(res400.headers.get("Cache-Control")).toBe("no-store");
+
+    const spy = vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(new Error("db down"));
+    try {
+      const res500 = await tiktokPost(
+        jsonReq("http://t/api/ingest/tiktok-token", {
+          accessToken: "a",
+          refreshToken: "r",
+          accessTokenExpireAt: Math.floor(Date.now() / 1000) + 3600,
+        }),
+      );
+      expect(res500.headers.get("Cache-Control")).toBe("no-store");
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 /**
@@ -374,6 +401,24 @@ describe("route /api/ingest/meta-token", () => {
       const json = JSON.parse(text) as { ok: boolean; error: string };
       expect(json.ok).toBe(false);
       expect(json.error).toContain("Lỗi khi lưu token");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("MỌI response (200, 401, 500) đều có Cache-Control: no-store — body mang token OAuth thật", async () => {
+    const res200 = await metaGet(getReq("http://t/api/ingest/meta-token"));
+    expect(res200.headers.get("Cache-Control")).toBe("no-store");
+
+    const res401 = await metaGet(getReq("http://t/api/ingest/meta-token", null));
+    expect(res401.headers.get("Cache-Control")).toBe("no-store");
+
+    const spy = vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(new Error("db down"));
+    try {
+      const res500 = await metaPost(
+        jsonReq("http://t/api/ingest/meta-token", { accessToken: "a", expireAt: 0, dataAccessExpireAt: 0 }),
+      );
+      expect(res500.headers.get("Cache-Control")).toBe("no-store");
     } finally {
       spy.mockRestore();
     }

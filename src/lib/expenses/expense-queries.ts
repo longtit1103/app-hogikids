@@ -103,6 +103,52 @@ export async function sumPlatformFeeEst({ from, to }: DateRange, channelId?: str
   return agg._sum.platformFeeEst ?? 0;
 }
 
+export type RecurringExpenseRow = {
+  id: string;
+  description: string;
+  categoryName: string;
+  channelName: string | null;
+  amount: number;
+  dayOfMonth: number;
+  active: boolean;
+  /** Mốc bắt đầu sinh (đầu tháng VN) — NULL với mẫu dựng trước khi có cột. */
+  activeFrom: Date | null;
+};
+
+/**
+ * Danh sách MỌI mẫu định kỳ (đang chạy lẫn đã dừng) — khối "Khoản chi định kỳ" ở tab Sổ chi phí, chủ
+ * shop tra lại mẫu nào còn chạy/đã tắt và bật lại mẫu đã dừng. `RecurringExpense` KHÔNG có quan hệ Prisma tới ExpenseCategory/Channel
+ * (chỉ `categoryId`/`channelId` dạng String, cố ý không migration thêm quan hệ chỉ cho một khối
+ * hiển thị) nên tra tên bằng Map, cùng khuôn `nameById` của `getExpenseSummary` ở trên.
+ * Sắp: đang chạy (active) trước, rồi theo mô tả A→Z (so sánh tiếng Việt).
+ */
+export async function getRecurringExpenseList(): Promise<RecurringExpenseRow[]> {
+  const [records, categories, channels] = await Promise.all([
+    prisma.recurringExpense.findMany(),
+    prisma.expenseCategory.findMany({ select: { id: true, name: true } }),
+    prisma.channel.findMany({ select: { id: true, name: true } }),
+  ]);
+
+  const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+  const channelNameById = new Map(channels.map((c) => [c.id, c.name]));
+
+  return records
+    .map((r) => ({
+      id: r.id,
+      description: r.description,
+      categoryName: categoryNameById.get(r.categoryId) ?? r.categoryId,
+      channelName: r.channelId ? (channelNameById.get(r.channelId) ?? r.channelId) : null,
+      amount: r.amount,
+      dayOfMonth: r.dayOfMonth,
+      active: r.active,
+      activeFrom: r.activeFrom,
+    }))
+    .sort((a, b) => {
+      if (a.active !== b.active) return a.active ? -1 : 1;
+      return a.description.localeCompare(b.description, "vi");
+    });
+}
+
 export type ExpenseListParams = {
   range: DateRange;
   categoryIds?: string[];

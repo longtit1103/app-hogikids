@@ -40,6 +40,9 @@ type Props = {
   soKyCho: number;
   /** Đã duyệt ít nhất 1 kỳ — ưu tiên cảnh báo này thay vì câu "sẽ có N kỳ chờ duyệt". */
   daDuyetKy: boolean;
+  /** Cảnh báo D0 (tính sẵn ở component cha) — chỉ có nghĩa ở nhánh CHƯA rút trước mở sổ (cặp
+   *  `ngayGiaiNgan` đang dùng), nhánh `thauChiTruocMoSo` (`startDate`) không đọc field này. */
+  canhBaoD0?: React.ReactNode;
 };
 
 export function KhoanVayFormThauChiFields({
@@ -54,6 +57,7 @@ export function KhoanVayFormThauChiFields({
   hienTien,
   soKyCho,
   daDuyetKy,
+  canhBaoD0,
 }: Props) {
   return (
     <>
@@ -120,6 +124,7 @@ export function KhoanVayFormThauChiFields({
               onChange={(e) => doiNgayNen(e.target.value, "ngayGiaiNgan")}
             />
           </O>
+          {canhBaoD0}
         </>
       )}
 

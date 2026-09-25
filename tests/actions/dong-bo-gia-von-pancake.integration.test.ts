@@ -275,6 +275,8 @@ describe("apGiaVonTheoPancake", () => {
     try {
       const kq = await apGiaVonTheoPancake("theo-pancake", vanTay);
       expect(kq.ok).toBe(false);
+      // Mất khoá là lý do chủ shop hành động được ⇒ câu trả phải nói rõ, không gộp vào "lỗi hệ thống".
+      if (!kq.ok) expect(kq.error).toContain("Mất khoá việc nặng");
     } finally {
       spy.mockRestore();
       await prisma.setting.deleteMany({ where: { key: "khoaViecNang" } });
@@ -305,5 +307,33 @@ describe("apGiaVonTheoPancake", () => {
     }
 
     expect(await giaVon(id)).toBe(111_111); // số chủ shop vừa gõ được giữ
+  });
+
+  it("lỗi hạ tầng giữa lượt ghi ⇒ câu trả KHÔNG lộ chi tiết Prisma thô, vẫn nói đã ghi/bỏ qua bao nhiêu + đường dẫn backup", async () => {
+    const id = await taoBienThe(120_000);
+    await landBronze(90_000);
+    const { deXuat } = await docDeXuatGiaVon("theo-pancake");
+    const vanTay = vanTayDeXuat(deXuat);
+
+    // Chuỗi nhận diện: nếu lọt ra client là rò rỉ hạ tầng (hostname/role DB).
+    const CHUOI_NHAY_CAM = 'relation "app"."Variant" P2028 secret-host';
+    const spy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async () => {
+      throw new Error(CHUOI_NHAY_CAM);
+    });
+    try {
+      const kq = await apGiaVonTheoPancake("theo-pancake", vanTay);
+      expect(kq.ok).toBe(false);
+      if (!kq.ok) {
+        expect(kq.error).not.toContain(CHUOI_NHAY_CAM);
+        expect(kq.error).not.toContain("secret-host");
+        // Vẫn phải nói đã ghi/bỏ qua bao nhiêu dòng + đường dẫn backup để hoàn nguyên.
+        expect(kq.error).toContain("0/1 dòng");
+        expect(kq.error).toContain("Backup");
+      }
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(await giaVon(id)).toBe(120_000); // không dòng nào lọt qua
   });
 });

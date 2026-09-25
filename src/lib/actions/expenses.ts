@@ -1,6 +1,6 @@
 "use server";
 
-import { getDate, isSameMonth, startOfDay } from "date-fns";
+import { addMonths, format, getDate, isSameMonth, startOfDay, startOfMonth } from "date-fns";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -8,6 +8,8 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { mauDinhKySinhChoThang } from "@/lib/expenses/ensure-recurring-expenses";
+import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { chupVaoThungRac } from "@/lib/thung-rac/ghi-thung-rac";
@@ -110,6 +112,12 @@ async function validateChannel(channelId: string | null): Promise<string | null>
  * Tạo khoản chi. `recurringMonthly=true` → tạo `RecurringExpense` + 1
  * `Expense{source:"RECURRING"}` ngay cho ngày đã chọn (trong 1 transaction)
  * để `ensureRecurringExpenses` không sinh trùng tháng này.
+ *
+ * Mốc `activeFrom` của mẫu = đầu THÁNG CỦA DÒNG ĐẦU TIÊN (giờ VN), không phải "tháng hiện tại": ngày
+ * ghi tay không cho tương lai nên mốc luôn ≤ tháng này (thường chính là tháng này). Chọn ngày ở tháng
+ * cũ = khai khoản đã chạy từ tháng đó ⇒ các tháng từ đó tới nay là chi phí thật, bộ sinh vẫn ghi đủ;
+ * còn đặt mốc = tháng hiện tại thì các tháng xen giữa mất trắng khỏi Lãi/Lỗ mà không ai hay. Tháng
+ * TRƯỚC dòng đầu thì không bao giờ sinh lùi nữa.
  */
 export async function createExpense(input: unknown): Promise<ActionResult> {
   await requireUser();
@@ -137,6 +145,7 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
             description: data.description,
             channelId: data.channelId,
             active: true,
+            activeFrom: startOfMonth(data.date),
           },
         });
         await tx.expense.create({
@@ -197,34 +206,6 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
   const channelError = await validateChannel(data.channelId);
   if (channelError) return { ok: false, error: channelError, field: "channelId" };
 
-  // Dời một dòng ĐỊNH KỲ sang tháng khác = chi phí đếm HAI LẦN trong P&L. Cổng chống trùng của
-  // `ensureRecurringExpenses` chỉ hỏi "tháng này đã có dòng nào mang `recurringId` chưa" (findFirst
-  // theo [đầu tháng, cuối tháng]), nên tháng CŨ vừa trống sẽ được sinh bù ở lần render kế tiếp —
-  // trong khi dòng vừa dời vẫn nằm ở tháng mới. Đổi ngày TRONG CÙNG tháng thì vô hại.
-  // Không gỡ `recurringId` để "hợp thức hoá" lượt dời: mẫu vẫn `active` nên tháng cũ vẫn bị sinh bù,
-  // kết cục y hệt.
-  // Chỉ chặn khi mẫu CÒN BẬT: `ensureRecurringExpenses` lọc `active: true`, nên mẫu đã dừng thì
-  // không còn ai sinh bù và lượt dời vô hại — chặn tiếp là chặn oan.
-  // Câu lỗi phải nói ĐỦ thứ tự an toàn: thêm tay ở tháng đích mà KHÔNG bật "lặp lại hàng tháng".
-  // Bật lại là dựng một mẫu `active` mới, và mẫu mới sinh LÙI cho mọi tháng đang render (semantics
-  // Path A, xem `ensure-recurring-expenses.ts`) ⇒ đẻ ra đúng cái đếm 2 lần mà cổng này đang chặn.
-  if (existing.recurringId !== null && !isSameMonth(existing.date, data.date)) {
-    const mau = await prisma.recurringExpense.findUnique({
-      where: { id: existing.recurringId },
-      select: { active: true },
-    });
-    if (mau?.active) {
-      return {
-        ok: false,
-        field: "date",
-        error:
-          "Khoản định kỳ không dời được sang tháng khác — app sẽ tự sinh lại dòng của tháng cũ " +
-          "(chi phí tính 2 lần). Đổi ngày trong cùng tháng thì được. Muốn dời hẳn: thêm khoản chi " +
-          "tay ở tháng đích (ĐỪNG bật “Lặp lại hàng tháng”) rồi xoá dòng này.",
-      };
-    }
-  }
-
   // Dòng lãi vay theo kỳ: KHOÁ ngày + danh mục, để MỞ số tiền/mô tả. Kênh (luôn trống) do cổng
   // chung `chanKenhChoLaiVay` ngay dưới đảm nhận — danh mục đã khoá = `interest` nên cổng đó bao trùm.
   // Con dấu `Loan.lastDueHandled` không lùi ở bất kỳ đâu, nên dời ngày là tách kỳ lãi khỏi tháng
@@ -257,24 +238,87 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
   const kenhLaiVay = chanKenhChoLaiVay(data);
   if (kenhLaiVay) return kenhLaiVay;
 
+  let chanDoiThang: ActionResult | null;
   try {
-    await prisma.expense.update({
-      where: { id },
-      data: {
-        date: data.date,
-        categoryId: data.categoryId,
-        adsSource: data.adsSource ?? null, // đổi danh mục ra khỏi "ads" phải xoá adsSource cũ
-        amount: data.amount,
-        channelId: data.channelId,
-        description: data.description,
-      },
+    chanDoiThang = await prisma.$transaction(async (tx) => {
+      if (existing.recurringId !== null && !isSameMonth(existing.date, data.date)) {
+        // KHOÁ dòng mẫu tới hết transaction: "Bật lại" (`batLaiDinhKy`) cũng UPDATE đúng dòng này nên
+        // phải CHỜ — không chen được vào giữa lúc cổng đọc "mẫu đã dừng" và lúc dòng bị dời (chen vào
+        // là tháng nguồn vừa trống bị sinh bù ⇒ tính 2 lần). Đọc SAU khi giữ khoá (ReadCommitted) nên
+        // thấy bản đã commit của lượt bật lại nào vừa xong.
+        await tx.$queryRaw`SELECT id FROM "RecurringExpense" WHERE id = ${existing.recurringId} FOR UPDATE`;
+        const mau = await tx.recurringExpense.findUnique({
+          where: { id: existing.recurringId },
+          select: { active: true, activeFrom: true },
+        });
+        const chan = chanDoiThangDinhKy(mau, existing.date, data.date);
+        if (chan) return chan;
+      }
+      await tx.expense.update({
+        where: { id },
+        data: {
+          date: data.date,
+          categoryId: data.categoryId,
+          adsSource: data.adsSource ?? null, // đổi danh mục ra khỏi "ads" phải xoá adsSource cũ
+          amount: data.amount,
+          channelId: data.channelId,
+          description: data.description,
+        },
+      });
+      return null;
     });
   } catch {
     return { ok: false, error: "Lỗi khi cập nhật khoản chi" };
   }
+  if (chanDoiThang) return chanDoiThang;
 
   revalidatePath("/tai-chinh");
   return { ok: true, data: undefined };
+}
+
+/**
+ * Cổng dời một dòng ĐỊNH KỲ sang tháng khác. Cổng chống trùng của `ensureRecurringExpenses` chỉ hỏi
+ * "tháng này đã có dòng nào mang `recurringId` chưa" (findFirst theo [đầu tháng, cuối tháng]), nên
+ * lượt dời hỏng tiền theo HAI chiều, mỗi chiều chỉ xảy ra ở tháng bộ sinh CÒN sinh (mẫu `active` và
+ * tháng không nằm trước mốc — `mauDinhKySinhChoThang`):
+ *  - tháng NGUỒN vừa trống ⇒ bị sinh bù trong khi dòng dời vẫn nằm ở tháng mới ⇒ tính 2 lần;
+ *  - tháng ĐÍCH: dòng dời mang `recurringId` chiếm đúng khoá "1 dòng/mẫu/tháng" — tháng đó đã sinh
+ *    thì thành 2 dòng, chưa sinh thì tới hạn bộ sinh KHÔNG sinh khoản của chính tháng đó (mất trọn).
+ * Mẫu đã dừng, hoặc cả hai tháng đều trước mốc (mẫu vừa bật lại) ⇒ không ai sinh ⇒ dời vô hại, chặn là
+ * chặn oan. Đổi ngày TRONG CÙNG tháng luôn vô hại (caller không gọi cổng này).
+ * Không gỡ `recurringId` để "hợp thức hoá" lượt dời: dòng mất liên kết với mẫu trong danh sách, còn
+ * tháng nguồn vẫn bị sinh bù nếu còn trong vùng sinh.
+ * Câu lỗi phải nói ĐỦ thứ tự an toàn: thêm tay ở tháng đích mà KHÔNG bật "lặp lại hàng tháng" — mẫu mới
+ * mang mốc = tháng của dòng đầu, nên bật lặp ở tháng đích là thêm MỘT khoản định kỳ chạy song song.
+ */
+function chanDoiThangDinhKy(
+  mau: { active: boolean; activeFrom: Date | null } | null,
+  ngayCu: Date,
+  ngayMoi: Date
+): ActionResult | null {
+  if (!mau?.active) return null;
+  const huongDan =
+    "Đổi ngày trong cùng tháng thì được. Muốn dời hẳn: thêm khoản chi tay ở tháng đích " +
+    "(ĐỪNG bật “Lặp lại hàng tháng”) rồi xoá dòng này.";
+  if (mauDinhKySinhChoThang(mau.activeFrom, ngayCu)) {
+    return {
+      ok: false,
+      field: "date",
+      error:
+        "Khoản định kỳ không dời được sang tháng khác — app sẽ tự sinh lại dòng của tháng cũ " +
+        `(chi phí tính 2 lần). ${huongDan}`,
+    };
+  }
+  if (mauDinhKySinhChoThang(mau.activeFrom, ngayMoi)) {
+    return {
+      ok: false,
+      field: "date",
+      error:
+        `Khoản định kỳ không dời được vào tháng ${format(ngayMoi, "MM/yyyy")} — tháng đó app tự ghi ` +
+        `khoản này (dời vào là tính 2 lần hoặc lấp mất khoản của chính tháng đó). ${huongDan}`,
+    };
+  }
+  return null;
 }
 
 /**
@@ -337,6 +381,103 @@ export async function deleteExpense(
 
   revalidatePath("/tai-chinh");
   return { ok: true, data: undefined };
+}
+
+const batLaiSchema = z.object({
+  id: z.string().trim().min(1, "Thiếu khoản định kỳ"),
+  tuyChon: z
+    .object({
+      /** Chủ shop đã thấy cảnh báo trùng mẫu đang chạy và vẫn muốn bật. */
+      xacNhanTrung: z.boolean().optional(),
+      /** Mốc = đầu tháng SAU thay vì tháng này (tháng này đã trả/đã ghi tay khoản đó). */
+      tuThangSau: z.boolean().optional(),
+    })
+    .strict()
+    .optional(),
+});
+
+/**
+ * BẬT LẠI một khoản định kỳ đã dừng: `active=true` + mốc `activeFrom` = đầu tháng hiện tại (giờ VN),
+ * hoặc đầu tháng SAU nếu `tuThangSau` ⇒ bộ sinh chạy tiếp từ mốc, KHÔNG ghi bù các tháng đã dừng (cổng
+ * `mauDinhKySinhChoThang`). "Tháng sau" là lối cho ca tháng này đã trả/đã ghi tay khoản đó (vd vừa
+ * "Xoá và dừng lặp lại" dòng tháng này): mốc tháng này sẽ sinh lại đúng khoản vừa xoá. Tháng này đã có
+ * dòng của CHÍNH mẫu thì cổng chống trùng của bộ sinh giữ đúng 1 dòng. Nhãn `MM/yyyy` format ở SERVER
+ * (giờ VN) để client không tự format theo múi máy người bấm.
+ *
+ * Cổng TRÙNG: đang có mẫu KHÁC `active` cùng `categoryId` + cùng `channelId` (null chỉ bằng null) ⇒
+ * từ chối `DINH_KY_TRUNG_MAU_DANG_CHAY`, không đổi gì, trừ khi `xacNhanTrung`. UI cũ từng dạy "muốn chạy
+ * lại thì thêm khoản định kỳ MỚI", nên rất có thể đã có mẫu thay thế đang chạy — bật mẫu cũ là mỗi tháng
+ * trừ 2 lần cùng một khoản chi, không giới hạn. Chỉ so danh mục + kênh (không so mô tả/số tiền): mẫu
+ * thay thế thường đổi cả hai; bắt thừa thì chủ shop bấm "Vẫn bật lại", bắt thiếu thì mất tiền.
+ *
+ * Nguyên tử: `updateMany` có điều kiện `active=false` là compare-and-set — hai lượt bấm đua nhau chỉ
+ * một lượt đổi được, lượt kia bị từ chối; mẫu ĐANG chạy thì mốc KHÔNG bị kéo lên (kéo lên là giấu mất
+ * các tháng quá khứ chưa sinh của mẫu cũ).
+ * Khôi phục từ thùng rác vẫn CỐ Ý không bật lại — bật lại chỉ đi qua đúng action này, có hộp xác nhận.
+ */
+export async function batLaiDinhKy(
+  recurringId: string,
+  tuyChon?: { xacNhanTrung?: boolean; tuThangSau?: boolean }
+): Promise<ActionResult<{ tuThang: string }>> {
+  await requireUser();
+  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+
+  const parsed = batLaiSchema.safeParse({ id: recurringId, tuyChon });
+  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+  const { id } = parsed.data;
+  const xacNhanTrung = parsed.data.tuyChon?.xacNhanTrung === true;
+  const dauThangNay = startOfMonth(new Date());
+  const moc = parsed.data.tuyChon?.tuThangSau === true ? addMonths(dauThangNay, 1) : dauThangNay;
+
+  type KetQua =
+    | { loai: "DA_BAT" | "DINH_KY_DANG_CHAY" | "KHONG_TIM_THAY" }
+    | { loai: "TRUNG"; description: string; amount: number };
+  let ketQua: KetQua;
+  try {
+    ketQua = await prisma.$transaction(async (tx): Promise<KetQua> => {
+      const mau = await tx.recurringExpense.findUnique({
+        where: { id },
+        select: { active: true, categoryId: true, channelId: true },
+      });
+      if (mau === null) return { loai: "KHONG_TIM_THAY" };
+      if (mau.active) return { loai: "DINH_KY_DANG_CHAY" };
+      if (!xacNhanTrung) {
+        const trung = await tx.recurringExpense.findFirst({
+          where: { id: { not: id }, active: true, categoryId: mau.categoryId, channelId: mau.channelId },
+          select: { description: true, amount: true },
+          orderBy: { description: "asc" },
+        });
+        if (trung) return { loai: "TRUNG", ...trung };
+      }
+      const doi = await tx.recurringExpense.updateMany({
+        where: { id, active: false },
+        data: { active: true, activeFrom: moc },
+      });
+      return { loai: doi.count === 1 ? "DA_BAT" : "DINH_KY_DANG_CHAY" };
+    });
+  } catch {
+    return { ok: false, error: "Lỗi khi bật lại khoản định kỳ" };
+  }
+
+  switch (ketQua.loai) {
+    case "KHONG_TIM_THAY":
+      return { ok: false, code: ketQua.loai, error: "Không tìm thấy khoản định kỳ" };
+    case "DINH_KY_DANG_CHAY":
+      return { ok: false, code: ketQua.loai, error: "Khoản định kỳ này đang chạy — không cần bật lại" };
+    case "TRUNG": {
+      const moTa = ketQua.description.trim() === "" ? "(không mô tả)" : ketQua.description;
+      return {
+        ok: false,
+        code: "DINH_KY_TRUNG_MAU_DANG_CHAY",
+        error:
+          `Đang có khoản định kỳ '${moTa}' ${formatVnd(ketQua.amount)} cùng danh mục đang chạy — ` +
+          "bật lại sẽ trừ 2 lần mỗi tháng; nên dừng khoản kia trước.",
+      };
+    }
+    case "DA_BAT":
+      revalidatePath("/tai-chinh");
+      return { ok: true, data: { tuThang: format(moc, "MM/yyyy") } };
+  }
 }
 
 /** Tắt một khoản định kỳ — các Expense đã sinh trước đó không đổi. */

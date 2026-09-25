@@ -78,7 +78,7 @@ function payloadGiuNguyen(loan: KhoanVayRow) {
   };
 }
 
-export function KhoanVayRowActions({ loan }: { loan: KhoanVayRow }) {
+export function KhoanVayRowActions({ loan, d0 }: { loan: KhoanVayRow; d0: Date | null }) {
   const router = useRouter();
   const [moSua, setMoSua] = useState(false);
   const [hopThoai, setHopThoai] = useState<HopThoai>(null);
@@ -188,7 +188,7 @@ export function KhoanVayRowActions({ loan }: { loan: KhoanVayRow }) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <KhoanVayFormModal open={moSua} onOpenChange={setMoSua} loan={loan} />
+      <KhoanVayFormModal open={moSua} onOpenChange={setMoSua} loan={loan} d0={d0} />
       <ThauChiTatToanDialog loan={loan} open={moTatToanThauChi} onOpenChange={setMoTatToanThauChi} />
 
       <Dialog open={cau !== null} onOpenChange={(o) => !o && setHopThoai(null)}>

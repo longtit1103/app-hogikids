@@ -17,14 +17,37 @@ import { createSession, docGhiNhoCuaPhien, requireUser, thuHoiMoiPhien } from "@
 /** Ít nhất 1 chữ cái + 1 chữ số (không ràng buộc ký tự đặc biệt/hoa-thường). */
 const NEW_PASSWORD_COMPLEXITY = /(?=.*[a-zA-Z])(?=.*\d)/;
 
+/**
+ * Trần dưới của mật khẩu MỚI khi đổi mật khẩu — nâng 8 → 12 ký tự (chốt 24/09). CHỈ áp cho mật
+ * khẩu MỚI ở màn này: đăng nhập bằng mật khẩu CŨ ngắn hơn 12 ký tự (đặt từ trước lượt nâng trần
+ * này) vẫn phải vào được — màn đăng nhập (`auth.ts`) không có ràng buộc độ dài dưới, chỉ so khớp
+ * hash. Không lùi cùng lúc `MAX_PASSWORD_LENGTH` (trần TRÊN, dùng chung với đăng nhập/seed).
+ */
+const MIN_NEW_PASSWORD_LENGTH = 12;
+
+/**
+ * Bộ đếm khoá của màn Đổi mật khẩu PHẢI tách khỏi bộ đếm màn Đăng nhập — trước đây cả hai cùng
+ * gọi `login-lockout.ts` bằng `user.email` THẬT, nên sai mật khẩu HIỆN TẠI 5 lần ở Cài đặt khoá
+ * LUÔN màn Đăng nhập (chủ shop tự khoá mình dù đang thao tác đúng chỗ). `login-lockout.ts` coi
+ * "email" là một chuỗi khoá bất kỳ (chỉ trim + lowercase), nên chỉ cần đưa một chuỗi khoá KHÁC
+ * cho namespace này — không cần sửa `login-lockout.ts`.
+ *
+ * Hàng đợi nối tiếp `chayNoiTiepTheoEmail` (login-gate.ts) thì GIỮ NGUYÊN, vẫn gọi bằng
+ * `user.email` thật — cố ý DÙNG CHUNG với màn đăng nhập để hai lượt kiểm mật khẩu của cùng một
+ * user (đăng nhập từ thiết bị khác + đổi mật khẩu) không chồng lấn nhau qua `await`.
+ */
+function khoaDoiMatKhau(email: string): string {
+  return `doimatkhau:${email}`;
+}
+
 const changePasswordSchema = z
   .object({
     currentPassword: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"),
-    // Trần PHẢI dùng chung hằng số với màn đăng nhập (`MAX_PASSWORD_LENGTH`) — đặt được ở đây mà
-    // đăng nhập lại chặn nghĩa là chủ shop tự khoá mình vĩnh viễn, xem ghi chú ở `password.ts`.
+    // Trần TRÊN phải dùng chung hằng số với màn đăng nhập (`MAX_PASSWORD_LENGTH`) — đặt được ở đây
+    // mà đăng nhập lại chặn nghĩa là chủ shop tự khoá mình vĩnh viễn, xem ghi chú ở `password.ts`.
     newPassword: z
       .string()
-      .min(8, "Mật khẩu mới phải có ít nhất 8 ký tự")
+      .min(MIN_NEW_PASSWORD_LENGTH, `Mật khẩu mới phải có ít nhất ${MIN_NEW_PASSWORD_LENGTH} ký tự`)
       .max(MAX_PASSWORD_LENGTH, `Mật khẩu mới tối đa ${MAX_PASSWORD_LENGTH} ký tự`)
       .regex(NEW_PASSWORD_COMPLEXITY, "Mật khẩu mới phải có cả chữ và số"),
     confirmPassword: z.string().min(1, "Vui lòng nhập lại mật khẩu mới"),
@@ -78,13 +101,14 @@ export async function changePassword(formData: FormData): Promise<ActionResult> 
   // `await` như màn đăng nhập, nên dùng CHUNG cổng nối tiếp theo email (`login-gate.ts`) — cùng
   // một bộ đếm khoá thì phải cùng một cổng, tách ra là hở lại đúng khe vừa bịt. Rủi ro ở đây
   // thấp hơn (đòi phiên hợp lệ) nhưng dùng chung primitive rẻ hơn là giải thích vì sao ngoại lệ.
+  const khoaBoDem = khoaDoiMatKhau(user.email);
   const kiemMatKhauHienTai = await chayNoiTiepTheoEmail(user.email, async () => {
-    const lockedSeconds = getLockoutSecondsRemaining(user.email);
+    const lockedSeconds = getLockoutSecondsRemaining(khoaBoDem);
     if (lockedSeconds > 0) {
       return { ok: false as const, error: `Thử lại sau ${lockedSeconds} giây` };
     }
     if (!(await verifyPassword(currentPassword, user.passwordHash))) {
-      recordFailedAttempt(user.email);
+      recordFailedAttempt(khoaBoDem);
       return { ok: false as const, error: "Mật khẩu hiện tại không đúng" };
     }
     // Xoá bộ đếm NGAY TẠI ĐÂY, trong cổng — giống `login()` xoá ngay sau khi xác thực xong.
@@ -92,7 +116,7 @@ export async function changePassword(formData: FormData): Promise<ActionResult> 
     // cửa sổ rộng: một lượt đăng nhập SAI chen vào giữa sẽ bị lượt xoá muộn này thổi bay, khoá
     // 60 giây rơi về 0. Đòi phải có một lượt đổi mật khẩu thành công chạy đồng thời nên xác suất
     // thấp, nhưng cửa sổ là thật và đóng lại không tốn gì.
-    resetAttempts(user.email);
+    resetAttempts(khoaBoDem);
     return { ok: true as const };
   }).catch((err: unknown) => {
     if (err instanceof QuaNhieuLuotDangNhap) {

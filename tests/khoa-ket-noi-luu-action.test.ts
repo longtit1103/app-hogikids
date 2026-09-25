@@ -4,7 +4,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user") }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    setting: { upsert: vi.fn(), findMany: vi.fn() },
+    setting: { upsert: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
     $transaction: vi.fn(async (arr: unknown[]) => Promise.all(arr)),
   },
 }));
@@ -23,6 +23,9 @@ import { prisma } from "@/lib/prisma";
 describe("luuKhoaKetNoi", () => {
   beforeEach(() => {
     vi.mocked(prisma.setting.upsert).mockReset().mockResolvedValue({} as never);
+    // Không có giá trị CŨ nào đang lưu — nhánh "đổi id khi đã có dữ liệu" của
+    // `chanDoiShopIdKhiCoDuLieu` không kích (có test riêng ở `tests/ket-noi/`).
+    vi.mocked(prisma.setting.findUnique).mockReset().mockResolvedValue(null);
     vi.mocked(prisma.$transaction).mockClear();
     vi.mocked(revalidatePath).mockClear();
   });
@@ -81,5 +84,24 @@ describe("luuKhoaKetNoi", () => {
     vi.mocked(prisma.$transaction).mockRejectedValueOnce(new Error("chua-gia-tri-khoa-abc"));
     const r = await luuKhoaKetNoi("pancake", { pancakeApiKeyKho: "gia-tri-khoa-abc" });
     expect(r).toEqual({ ok: false, error: "Lỗi khi lưu khóa vào kho" });
+  });
+
+  it("shop ID Pancake không phải chuỗi số → chặn thẳng, không ghi (nội suy thẳng vào URL probe Pancake)", async () => {
+    // Chốt này đã có SẴN ở `chanDoiShopIdKhiCoDuLieu` (chạy sau cổng giá trị chung của action) —
+    // suite này chỉ nối dây để xác nhận nó THẬT SỰ chặn qua đường `luuKhoaKetNoi`.
+    const r = await luuKhoaKetNoi("pancake", { pancakeShopIdKho: "123/../evil" });
+    expect(r).toMatchObject({ ok: false });
+    expect(r.ok === false && r.error).toContain("chỉ gồm chữ số");
+    expect(prisma.setting.upsert).not.toHaveBeenCalled();
+  });
+
+  it("shop ID Pancake là chuỗi số thật (714995134 …) → ghi bình thường", async () => {
+    const r = await luuKhoaKetNoi("pancake", {
+      pancakeShopIdKho: "714995134",
+      pancakeShopIdShopee: "1942992175",
+      pancakeShopIdTiktok: "100975192",
+    });
+    expect(r).toEqual({ ok: true, data: { daLuu: 3 } });
+    expect(prisma.setting.upsert).toHaveBeenCalledTimes(3);
   });
 });

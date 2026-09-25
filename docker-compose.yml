@@ -12,6 +12,22 @@ services:
       - ./backups:/backups           # pre-restore dump BỀN qua rebuild + thư mục backups của container đọc được (C3)
       - ./uploads:/app/public/uploads # logo shop BỀN qua rebuild, KHÔNG lưu DB (C6)
     restart: unless-stopped
+    # KHÔNG scale service này ra nhiều replica: khoá đăng nhập sai + hàng đợi đăng nhập
+    # (src/lib/login-lockout.ts, src/lib/login-gate.ts) giữ state bằng `Map` trong RAM của
+    # đúng 1 tiến trình — nhiều replica thì mỗi bản sao có bộ đếm riêng, kẻ tấn công chia đều
+    # request qua các replica là vòng qua khoá hoàn toàn.
+    healthcheck:
+      # Ảnh KHÔNG gỡ `curl` khỏi stage runtime (Dockerfile cài ở stage base cho bước lấy khoá
+      # GPG PGDG, giữ nguyên tới runner) nên dùng thẳng, không cần cõng thêm `node -e fetch(...)`.
+      # /dang-nhap trả 200 không cần đăng nhập — đúng route health-check không đụng DB/session.
+      # docker compose KHÔNG tự restart container unhealthy (không có mục `depends_on.condition:
+      # service_healthy` nào dùng nó) — healthcheck chỉ để NHÌN THẤY trạng thái (`docker ps`) và
+      # làm cổng smoke sau khi deploy, không phải cơ chế tự phục hồi.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/dang-nhap"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     # Trần RAM 3g: minipc chạy CHUNG với Postgres + n8n nên app không được ăn hết RAM máy.
     # Bước ngốn RAM nhất là KIỂM NỘI DUNG file phục hồi: đo 22/09/2026, `assertPlainSqlOnlySchema`
     # dùng RAM gấp ~43 lần kích thước SQL phẳng (nó giữ 4-5 bản soi phái sinh cùng lúc). Vì thế

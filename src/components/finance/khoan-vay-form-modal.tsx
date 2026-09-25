@@ -11,8 +11,17 @@ import { Input } from "@/components/ui/input";
 import { suaKhoanVay, taoKhoanVay } from "@/lib/actions/khoan-vay";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
+import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
 
-import { KhoanVayFormFields, NGAY, ngayVn, O, parseLaiSuat, type KhoanVayFormState } from "./khoan-vay-form-fields";
+import {
+  dungCapGiaiNgan,
+  KhoanVayFormFields,
+  NGAY,
+  ngayVn,
+  O,
+  parseLaiSuat,
+  type KhoanVayFormState,
+} from "./khoan-vay-form-fields";
 import { mongMuoiKeTiep } from "./khoan-vay-form-thau-chi-fields";
 import { trangThaiBanDau } from "./khoan-vay-form-trang-thai-ban-dau";
 
@@ -26,37 +35,55 @@ export function KhoanVayFormModal({
   open,
   onOpenChange,
   loan,
+  d0,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   /** Có = chế độ sửa. */
   loan?: KhoanVayRow;
+  /** Ngày mở sổ quỹ (`soQuy.d0`); null = chưa mở sổ. Hỏi lại khi ghi ngày giải ngân trước D0. */
+  d0: Date | null;
 }) {
   const router = useRouter();
   const isEdit = Boolean(loan);
   const [f, setF] = useState<KhoanVayFormState>(() => trangThaiBanDau(loan));
   const [loi, setLoi] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  // Đã bấm Lưu một lần trên ngày giải ngân sớm hơn D0 ⇒ lượt bấm sau mới thật sự gửi (khuôn
+  // `cash-movement-form-modal.tsx`).
+  const [hoiTruocD0, setHoiTruocD0] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setF(trangThaiBanDau(loan));
     setLoi({});
+    setHoiTruocD0(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, loan?.id]);
+
+  // Công tắc "Đã rút trước ngày mở sổ" (thấu chi) đổi ngay cặp field "ngày nền" giống đổi radio chế
+  // độ — reset câu hỏi D0 để tránh cờ cũ (hỏi ở cặp field trước) lọt qua gate của cặp field mới.
+  useEffect(() => {
+    setHoiTruocD0(false);
+  }, [f.thauChiTruocMoSo]);
 
   const laThauChi = f.cheDo === "thau-chi";
   // Gốc-cuối-kỳ chỉ có MỘT chế độ (khuôn "moi") — xem `khoan-vay-form-goc-cuoi-ky-fields.tsx`.
   const laGocCuoiKy = f.cheDo === "goc-cuoi-ky";
   // "moi" thật, thấu chi chưa rút trước ngày mở sổ, HOẶC gốc-cuối-kỳ — cả ba dùng cặp field
   // `soTienGiaiNgan`+`ngayGiaiNgan`; ngược lại dùng `duNoMoSo`+`startDate`.
-  const dungCheDoMoi = f.cheDo === "moi" || laGocCuoiKy || (laThauChi && !f.thauChiTruocMoSo);
+  const dungCheDoMoi = dungCapGiaiNgan(f.cheDo, f.thauChiTruocMoSo);
   // BULLET LUÔN có lịch (`Loan_lich_theo_loai`) — không dựa vào `f.coLich`, tránh cờ sót từ lượt trước.
   const coLichThucTe = laGocCuoiKy || f.coLich;
+  // D0 = ngày mở sổ quỹ — chỉ hỏi khi cặp field đang dùng LÀ `ngayGiaiNgan` (chế độ "mang sang"/thấu
+  // chi đã rút trước mở sổ KHÔNG sinh dòng tiền nên ngày sớm hơn D0 là bình thường).
+  const ngayTruocD0 = dungCheDoMoi && ngayTruocMoSo(f.ngayGiaiNgan, d0);
 
   // Khoản MỚI: kỳ đầu bám ngày giải ngân (+1 tháng). Thấu chi/gốc-cuối-kỳ: mùng 10 kế tiếp (khớp ca
   // thật 12/05 → 10/06). Ghi đè mỗi khi ngày rút đổi — giữ kỳ đầu cũ đẻ kỳ 1 dài bất thường = sai tiền.
   function doiNgayNen(giaTri: string, khoa: "ngayGiaiNgan" | "startDate") {
+    // Đổi ngày ⇒ câu hỏi D0 cũ hết hiệu lực, bắt xác nhận lại từ đầu.
+    setHoiTruocD0(false);
     setF((p) => {
       if (isEdit || !giaTri) return { ...p, [khoa]: giaTri };
       const ngay = new Date(`${giaTri}T00:00:00`);
@@ -74,8 +101,10 @@ export function KhoanVayFormModal({
    * ngày "+1 tháng" — lệch hẳn lịch ngân hàng, và lãi tính theo ngày/kỳ nên lệch ngày là lệch tiền.
    */
   function doiCheDo(giaTri: KhoanVayFormState["cheDo"]) {
+    // Đổi chế độ ⇒ cặp field "ngày nền" có thể đổi theo, câu hỏi D0 cũ hết hiệu lực.
+    setHoiTruocD0(false);
     setF((p) => {
-      const dungMoi = giaTri === "moi" || giaTri === "goc-cuoi-ky" || (giaTri === "thau-chi" && !p.thauChiTruocMoSo);
+      const dungMoi = dungCapGiaiNgan(giaTri, p.thauChiTruocMoSo);
       const nen = dungMoi ? p.ngayGiaiNgan : p.startDate;
       // Rời khỏi gốc-cuối-kỳ: xoá 3 ô riêng của nó — ô đã ẩn khỏi mắt nhưng số gõ dở (vd tiền gửi)
       // vẫn còn trong state, gửi kèm payload của loại vay KHÁC nếu không dọn ở đây.
@@ -109,6 +138,13 @@ export function KhoanVayFormModal({
     const annualRateBp = parseLaiSuat(f.laiSuat);
     if (annualRateBp === null) {
       setLoi({ annualRateBp: "Lãi suất không hợp lệ (ví dụ 10.5)" });
+      return;
+    }
+    // D0 = ngày mở sổ quỹ, KHÔNG cấu hình ở Cài đặt: ghi giải ngân lùi ngày kéo D0 lùi theo, làm MỌI
+    // số Đầu kỳ/Cuối kỳ của các tháng đã xem đổi im lặng. Hỏi lại bằng chính nút Lưu (bấm lần hai mới
+    // gửi) — khuôn `cash-movement-form-modal.tsx`.
+    if (ngayTruocD0 && !hoiTruocD0) {
+      setHoiTruocD0(true);
       return;
     }
     setSaving(true);
@@ -179,6 +215,8 @@ export function KhoanVayFormModal({
             doiNgayNen={doiNgayNen}
             doiTien={(khoa, raw) => setF((p) => ({ ...p, [khoa]: parseAmountInput(raw) }))}
             hienTien={formatAmountInput}
+            d0={d0}
+            hoiTruocD0={hoiTruocD0}
           />
         </div>
 
@@ -187,7 +225,7 @@ export function KhoanVayFormModal({
             Hủy
           </Button>
           <Button type="button" disabled={!canSave} onClick={luu}>
-            {saving ? "Đang lưu…" : "Lưu"}
+            {saving ? "Đang lưu…" : hoiTruocD0 ? "Xác nhận ghi trước ngày mở sổ" : "Lưu"}
           </Button>
         </DialogFooter>
       </DialogContent>

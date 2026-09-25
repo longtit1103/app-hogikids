@@ -4,8 +4,10 @@ import { formatVnd } from "@/lib/format";
 import { nhanCuoiKySoQuy } from "@/lib/so-quy/cong-thuc-so-quy";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
+import type { ViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu";
 
 import { CashMovementAddButton } from "./cash-movement-add-button";
+import { OViTiktokConLai } from "./o-vi-tiktok-con-lai";
 import { SoQuyCanhBao } from "./so-quy-canh-bao";
 
 /**
@@ -73,6 +75,7 @@ export function SoQuyCard({
   soKhoanVayCoKyCho,
   loans,
   tietKiem,
+  viTiktok = null,
 }: {
   soQuy: SoQuyThangDayDu;
   isCurrentMonth: boolean;
@@ -81,6 +84,8 @@ export function SoQuyCard({
   loans: KhoanVayRow[];
   /** Tiền đang gửi ở sổ tiết kiệm SINH LÃI (`SAVINGS_*`) — KHÁC tiền gửi bắt buộc theo khoản vay. */
   tietKiem: TietKiemQuy | null;
+  /** Ô thông tin "Còn ở ví TikTok" — KHÔNG thuộc số quỹ; `null` ⇒ ẩn ô. */
+  viTiktok?: ViTiktokConLaiToiThieu | null;
 }) {
   if (soQuy.d0 === null) {
     return (
@@ -142,12 +147,9 @@ export function SoQuyCard({
         <ONho nhan="Đầu kỳ" tien={soQuy.dauKy} />
         <ONho nhan="Thu" tien={soQuy.thu} />
         <ONho nhan="Chi" tien={soQuy.chi} dau="−" />
-        <ONho
-          nhan={cuoiKy.nhan}
-          tien={soQuy.cuoiKy}
-          ghiChu={cuoiKy.ghiChu}
-        />
+        <ONho nhan={cuoiKy.nhan} tien={soQuy.cuoiKy} ghiChu={cuoiKy.ghiChu} />
       </div>
+      <OViTiktokConLai vi={viTiktok} />
 
       <div className="mt-3 flex flex-col gap-1 border-t border-hairline pt-2 text-xs text-muted-foreground">
         <p>

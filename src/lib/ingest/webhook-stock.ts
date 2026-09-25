@@ -33,7 +33,13 @@ import { parseVnDate } from "./pancake-mapping";
  * thành bắt buộc là mọi phiếu nhập rơi vào `ton-kho-can-xem`; lưới giữ ở
  * `tests/bronze/webhook-ton-kho.test.ts` ("phiếu nhập kho").
  *
- * Ca CÒN chưa từng thấy trong mẫu: chỉnh tồn tay, kho thứ hai.
+ * CHỈNH TỒN TAY: ĐÃ CÓ MẪU THẬT (đo hộp thư prod 2026-09-25, đối chiếu `RawPancakeInventoryHistory`
+ * khớp tới micro-giây): "Điều chỉnh từ phiếu kiểm hàng" (4 sự kiện 21/08, `change_quantity=-5`) và
+ * "Xuất kho" tay không đơn (20 sự kiện 09/09, `change_quantity=-30`) — cùng shape `order_id` vắng +
+ * `change_quantity` ÂM. Hàm dưới KHÔNG rẽ nhánh theo `order_id`/`change_quantity` (chỉ ghi vào `note`),
+ * mọi nguồn biến động đi chung một đường ghi `remain_quantity` ⇒ đúng-by-construction, không cần sửa.
+ *
+ * Ca CÒN chưa từng thấy trong mẫu: kho thứ hai (962/962 sự kiện shop Kho tới 25/09 đều 1 `warehouse_id`).
  */
 
 /*

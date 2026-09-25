@@ -3,6 +3,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ensureRecurringExpenses } from "@/lib/expenses/ensure-recurring-expenses";
 import { prisma } from "@/lib/prisma";
 import { docCanhBaoSapCan, docDuBaoQuy, KEY_QUY_TOI_THIEU } from "@/lib/so-quy/du-bao-quy-queries";
+import { tinhSoQuyThang } from "@/lib/so-quy/so-quy-queries";
+import { docViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu-queries";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
 
@@ -14,19 +16,26 @@ import { seedReference, truncateBusinessTables } from "../helpers/test-db";
  * layout đọc trước, rồi trang chạy `ensureRecurringExpenses` sinh dòng, rồi mới đọc lịch sử — dự báo
  * phải tự đọc lại thay vì ném "cuối lịch sử ≠ quỹ hôm nay của dự báo".
  */
-const nho = vi.hoisted(() => ({ bang: new Map<unknown, unknown>(), soLanTinh: 0 }));
+const nho = vi.hoisted(() => ({
+  bang: new Map<unknown, unknown>(),
+  soLanTinh: 0,
+  /** D0 (`ngayMoSo`) cũng nhớ theo request — bảng riêng, không lẫn vào phép đếm phần dự báo. */
+  bangD0: new Map<unknown, unknown>(),
+}));
 
 vi.mock("react", async (goc) => ({
   ...(await goc<typeof import("react")>()),
-  cache:
-    <A, R>(fn: (a: A) => R) =>
-    (a: A): R => {
-      if (!nho.bang.has(a)) {
-        nho.soLanTinh += 1;
-        nho.bang.set(a, fn(a));
+  cache: <A, R>(fn: (a: A) => R) => {
+    const laD0 = fn.name === "ngayMoSo";
+    return (a: A): R => {
+      const bang = laD0 ? nho.bangD0 : nho.bang;
+      if (!bang.has(a)) {
+        if (!laD0) nho.soLanTinh += 1;
+        bang.set(a, fn(a));
       }
-      return nho.bang.get(a) as R;
-    },
+      return bang.get(a) as R;
+    };
+  },
 }));
 
 const vn = (iso: string) => new Date(`${iso}+07:00`);
@@ -39,6 +48,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await truncateBusinessTables();
   nho.bang.clear();
+  nho.bangD0.clear();
   nho.soLanTinh = 0;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(HOM_NAY);
@@ -94,5 +104,35 @@ describe("phần dự báo nhớ theo request", () => {
     expect(tab.khoanDuKien.some((k) => k.moTa.includes("đến hạn, chưa ghi sổ"))).toBe(false);
     // Điểm đầu dự báo y hệt bản banner đã thấy — cùng một sự thật, chỉ khác phía nào đang giữ khoản.
     expect(tab.duBao[0]).toEqual({ ngay: "2026-09-25", soDu: 99_400_000, duBao: true });
+  });
+
+  it("thẻ Quỹ + ô ví TikTok + banner cùng request ⇒ D0 (ngày mở sổ) đọc DB đúng MỘT lần", async () => {
+    await prisma.tiktokSettlement.create({
+      data: {
+        statementId: "cache-s1",
+        shopId: "100975192",
+        statementTime: vn("2026-09-10T08:00:00"),
+        paymentTime: vn("2026-09-10T08:00:00"),
+        paymentStatus: "SETTLED",
+        settlementAmount: 2_000_000,
+        revenueAmount: 2_000_000,
+        feeAmount: 0,
+        adjustmentAmount: 0,
+        netSalesAmount: 2_000_000,
+        shippingCostAmount: 0,
+      },
+    });
+    const docDb = vi.spyOn(prisma.cashMovement, "aggregate");
+    const [the, viTiktok] = await Promise.all([
+      tinhSoQuyThang({ from: vn("2026-09-01T00:00:00"), to: vn("2026-09-30T00:00:00") }),
+      docViTiktokConLaiToiThieu(),
+      docCanhBaoSapCan(),
+    ]);
+    // `ngayMoSo` là lượt DUY NHẤT gọi `aggregate` với `_min` trên bảng ghi tay.
+    const luotDocD0 = docDb.mock.calls.filter(([a]) => a !== undefined && "_min" in a);
+    docDb.mockRestore();
+    expect(luotDocD0).toHaveLength(1);
+    expect(the.d0).toEqual(vn("2026-09-01T00:00:00"));
+    expect(viTiktok).toEqual({ b0ToiThieu: 0, viHienTai: 2_000_000, tangTuD0: 2_000_000 });
   });
 });

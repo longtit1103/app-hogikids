@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { addMonths, format, subMonths } from "date-fns";
 
 import { testPrisma } from "./ingest-raw";
+import { luuQuaCongD0 } from "./luu-qua-cong-d0";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 /**
@@ -46,14 +47,21 @@ async function moMenu(page: Page, tenSo: string, muc: string): Promise<void> {
   await page.getByRole("menuitem", { name: muc, exact: true }).click();
 }
 
+/** Dọn mọi sổ "E2E TK" theo đúng thứ tự khoá ngoại (ThuNhap → CashMovement → SoTietKiem). */
+async function don(): Promise<void> {
+  const prisma = testPrisma();
+  await prisma.thuNhap.deleteMany({ where: { soTietKiem: { name: { startsWith: "E2E TK" } } } });
+  await prisma.cashMovement.deleteMany({ where: { soTietKiem: { name: { startsWith: "E2E TK" } } } });
+  await prisma.soTietKiem.deleteMany({ where: { name: { startsWith: "E2E TK" } } });
+  await prisma.$disconnect();
+}
+
 test.describe("Sổ tiết kiệm sinh lãi — tab Dòng tiền", () => {
-  test.beforeAll(async () => {
-    const prisma = testPrisma();
-    await prisma.thuNhap.deleteMany({ where: { soTietKiem: { name: { startsWith: "E2E TK" } } } });
-    await prisma.cashMovement.deleteMany({ where: { soTietKiem: { name: { startsWith: "E2E TK" } } } });
-    await prisma.soTietKiem.deleteMany({ where: { name: { startsWith: "E2E TK" } } });
-    await prisma.$disconnect();
-  });
+  test.beforeAll(don);
+  // Dọn cả SAU lượt chạy: sổ ở đây gửi lùi 6 tháng ⇒ để lại là D0 của DB e2e lùi 6 tháng cho MỌI lượt
+  // chạy sau; layout `/` dựng dự báo quỹ từ D0 tới nay nên trang chậm hẳn ở dev, spec khác đăng nhập
+  // xong chờ về `/` quá 5s mà đỏ oan (đo 25/09: `so-quy-khoan-vay.spec` 5/5 đỏ, dọn xong thì xanh).
+  test.afterAll(don);
 
   test.beforeEach(async ({ page }) => {
     await login(page);
@@ -84,7 +92,7 @@ test.describe("Sổ tiết kiệm sinh lãi — tab Dòng tiền", () => {
     // điều kiện để thẻ nhắc đáo hạn hiện ra ở ca dưới.
     await form.getByLabel("Ngày đáo hạn").fill(ngayDaoHan);
     await form.getByLabel("Lãi %/năm").fill("5.2");
-    await form.getByRole("button", { name: "Lưu" }).click();
+    await luuQuaCongD0(form);
 
     await expect(page.getByText(`Đã thêm sổ tiết kiệm ${TEN_SO}`)).toBeVisible();
 
@@ -111,6 +119,16 @@ test.describe("Sổ tiết kiệm sinh lãi — tab Dòng tiền", () => {
 
     await hopTatToan.getByRole("button", { name: "Tất toán", exact: true }).click();
     await expect(page.getByText(`Đã tất toán ${TEN_SO}`)).toBeVisible();
+
+    // --- Dòng gốc về quỹ ở bảng "Khoản tiền khác" mang TÊN sổ --------------------------------
+    // Gốc tất toán hôm nay nên nằm trong bảng ghi tay của tháng này; thiếu tên sổ thì chủ shop có
+    // nhiều sổ không biết khoản "Nhận lại gốc tiết kiệm" là của sổ nào.
+    const dongGocVe = page
+      .locator("#ghi-tay")
+      .getByRole("row")
+      .filter({ hasText: "Nhận lại gốc tiết kiệm" })
+      .filter({ hasText: TEN_SO });
+    await expect(dongGocVe).toBeVisible();
 
     // --- Lãi vào bảng Lãi/Lỗ của THÁNG NÀY ------------------------------------------------
     await page.goto("/tai-chinh");
@@ -143,7 +161,7 @@ test.describe("Sổ tiết kiệm sinh lãi — tab Dòng tiền", () => {
     await form.getByLabel("Kỳ hạn (tháng)").fill("6");
     await form.getByLabel("Ngày đáo hạn").fill(ngayDaoHan);
     await form.getByLabel("Lãi %/năm").fill("5.2");
-    await form.getByRole("button", { name: "Lưu" }).click();
+    await luuQuaCongD0(form);
     await expect(page.getByText(`Đã thêm sổ tiết kiệm ${TEN_SO_RUT_SOM}`)).toBeVisible();
 
     // Rút trước hạn: ô lãi để TRỐNG (app không đoán) — gõ đúng số ngân hàng trả.

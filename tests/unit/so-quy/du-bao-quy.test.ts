@@ -185,11 +185,34 @@ describe("khoanKyTraNo — từ duKienNKy", () => {
 });
 
 describe("khoanDinhKy — từ tháng hiện tại, kẹp cuối tháng", () => {
-  const mau = (id: string, dayOfMonth: number, amount = 1_000_000, description = ""): MauDinhKy => ({
+  const mau = (
+    id: string,
+    dayOfMonth: number,
+    amount = 1_000_000,
+    description = "",
+    activeFrom: MauDinhKy["activeFrom"] = null
+  ): MauDinhKy => ({
     id,
     amount,
     dayOfMonth,
     description,
+    activeFrom,
+  });
+
+  it("🔴 mẫu có mốc activeFrom ở tháng SAU ⇒ bỏ mọi lần phát sinh trước tháng mốc (bộ sinh không sinh)", () => {
+    const ra = khoanDinhKy(
+      [mau("moc", 5, 700_000, "", "2026-10-20"), mau("null", 5, 100_000)],
+      "2026-09-24",
+      "2026-10-24",
+      new Set()
+    );
+    // "null" (không mốc) đến hạn 05/09 chưa sinh ⇒ tính vào hôm nay, và 05/10. "moc" chỉ có 05/10:
+    // so theo THÁNG — mốc ngày 20 vẫn tính lần ngày 5 cùng tháng, đúng như bộ sinh.
+    expect(ra.map((k) => [k.ngay, k.soTien])).toEqual([
+      ["2026-09-24", -100_000],
+      ["2026-10-05", -700_000],
+      ["2026-10-05", -100_000],
+    ]);
   });
 
   it("🔴 ngày 31 gặp tháng 2 (không nhuận) ⇒ 28/02; tháng 3 ngày 31 vượt cửa sổ ⇒ không có", () => {

@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { suaSoTietKiem, taoSoTietKiem } from "@/lib/actions/so-tiet-kiem";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
+import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 
 import { NGAY, ngayVn, O, parseLaiSuat } from "./khoan-vay-form-fields";
@@ -22,9 +23,12 @@ import { NGAY, ngayVn, O, parseLaiSuat } from "./khoan-vay-form-fields";
  * `-fields.tsx` riêng như khoản vay.
  *
  * Sửa `principal`/`startDate` của sổ ĐANG GỬI kéo theo sửa dòng `SAVINGS_OUT` (spec §7.3) — quỹ các
- * tháng đã qua đổi theo vì quỹ là HÀM của dòng tiền, không snapshot. Nhịp xác nhận hai lượt bấm giống
- * `cash-movement-form-modal.tsx` (`hoiTruocD0`): lượt Lưu đầu tiên chỉ hiện cảnh báo, lượt thứ hai mới
- * thật sự gửi — tránh `window.confirm` (bị trình duyệt chặn/nuốt, không dịch được câu tiếng Việt).
+ * tháng đã qua đổi theo vì quỹ là HÀM của dòng tiền, không snapshot. Cả tạo lẫn sửa còn phải hỏi lại
+ * riêng khi `startDate` sớm hơn D0 (ngày mở sổ quỹ) — GỘP chung một cờ xác nhận (`canXacNhan`) với
+ * nhịp "đổi tiền" cũ để chủ shop không phải bấm ba lần khi cả hai cảnh báo cùng nổ ra một lúc. Nhịp
+ * xác nhận hai lượt bấm giống `cash-movement-form-modal.tsx`: lượt Lưu đầu tiên chỉ hiện cảnh báo,
+ * lượt thứ hai mới thật sự gửi — tránh `window.confirm` (bị trình duyệt chặn/nuốt, không dịch được
+ * câu tiếng Việt).
  */
 
 type SoTietKiemFormState = {
@@ -82,6 +86,7 @@ export function SoTietKiemFormModal({
   onOpenChange,
   so,
   loans,
+  d0,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -89,6 +94,8 @@ export function SoTietKiemFormModal({
   so?: SoTietKiemRow;
   /** Khoản vay nguồn (tuỳ chọn, spec §6.3) — CHỈ hiện khoản chưa tất toán, trừ khoản sổ đang gắn. */
   loans: KhoanVayRow[];
+  /** Ngày mở sổ quỹ (`soQuy.d0`); null = chưa mở sổ. Hỏi lại khi ghi ngày gửi trước D0. */
+  d0: Date | null;
 }) {
   const router = useRouter();
   const isEdit = Boolean(so);
@@ -98,7 +105,9 @@ export function SoTietKiemFormModal({
   // "chạm" ngay từ đầu.
   const [maturityTouched, setMaturityTouched] = useState(isEdit);
   const [loi, setLoi] = useState<Record<string, string>>({});
-  const [xacNhanDoiTien, setXacNhanDoiTien] = useState(false);
+  // Cùng MỘT cờ xác nhận cho cả hai cảnh báo (đổi tiền/ngày ở sổ đang sửa VÀ ghi ngày trước D0) —
+  // gộp để chủ shop chỉ bấm Lưu thêm một lần dù cả hai cùng nổ ra.
+  const [canXacNhan, setCanXacNhan] = useState(false);
   const [saving, setSaving] = useState(false);
 
   function moLai(o: boolean) {
@@ -106,7 +115,7 @@ export function SoTietKiemFormModal({
       setF(trangThaiBanDau(so));
       setMaturityTouched(isEdit);
       setLoi({});
-      setXacNhanDoiTien(false);
+      setCanXacNhan(false);
     }
     onOpenChange(o);
   }
@@ -114,6 +123,8 @@ export function SoTietKiemFormModal({
   /** Đổi ngày gửi/kỳ hạn: tính lại ngày đáo hạn đề xuất — CHỈ khi chủ shop chưa tự sửa ô đó
    *  (`maturityTouched` false), tránh ghi đè ngày họ vừa gõ tay theo giấy ngân hàng thật. */
   function doiNen(khoa: "startDate" | "termMonths", giaTri: string) {
+    // Đổi ngày gửi ⇒ câu hỏi D0 (và câu hỏi "đổi nền" nếu có) cũ hết hiệu lực, bắt xác nhận lại.
+    if (khoa === "startDate") setCanXacNhan(false);
     setF((p) => {
       const next = { ...p, [khoa]: giaTri };
       if (!maturityTouched) {
@@ -127,6 +138,9 @@ export function SoTietKiemFormModal({
   const loansConHieuLuc = loans.filter((l) => l.closedAt === null || l.id === f.loanId);
   const doiNenTang =
     isEdit && so !== undefined && (f.principal !== so.principal || f.startDate !== format(so.startDate, NGAY));
+  // Chạy cho CẢ tạo lẫn sửa (khác `doiNenTang`, chỉ có nghĩa lúc sửa) — sổ mới gửi ngày trước D0 cũng
+  // phải hỏi, vì dòng `SAVINGS_OUT` sinh ra là dòng tiền THẬT đầu tiên có thể kéo D0 lùi theo.
+  const ngayTruocD0 = ngayTruocMoSo(f.startDate, d0);
   const canSave =
     f.name.trim().length > 0 &&
     f.principal > 0 &&
@@ -143,8 +157,8 @@ export function SoTietKiemFormModal({
       setLoi({ annualRateBp: "Lãi suất không hợp lệ (ví dụ 5,2)" });
       return;
     }
-    if (doiNenTang && !xacNhanDoiTien) {
-      setXacNhanDoiTien(true);
+    if ((doiNenTang || ngayTruocD0) && !canXacNhan) {
+      setCanXacNhan(true);
       return;
     }
     setSaving(true);
@@ -277,7 +291,13 @@ export function SoTietKiemFormModal({
             />
           </O>
 
-          {xacNhanDoiTien && (
+          {canXacNhan && ngayTruocD0 && d0 !== null && (
+            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+              Ngày này sớm hơn ngày mở sổ ({format(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày mới;
+              dòng số dư mở sổ có thể phải sửa lại.
+            </p>
+          )}
+          {canXacNhan && doiNenTang && (
             <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
               Đổi số tiền hoặc ngày gửi làm số dư quỹ các tháng đã qua đổi theo (quỹ tính lại từ dòng
               tiền, không snapshot). Bấm Lưu lần nữa để xác nhận.
@@ -290,7 +310,13 @@ export function SoTietKiemFormModal({
             Hủy
           </Button>
           <Button type="button" disabled={!canSave} onClick={luu}>
-            {saving ? "Đang lưu…" : xacNhanDoiTien ? "Xác nhận lưu" : "Lưu"}
+            {saving
+              ? "Đang lưu…"
+              : !canXacNhan
+                ? "Lưu"
+                : ngayTruocD0
+                  ? "Xác nhận ghi trước ngày mở sổ"
+                  : "Xác nhận lưu"}
           </Button>
         </DialogFooter>
       </DialogContent>

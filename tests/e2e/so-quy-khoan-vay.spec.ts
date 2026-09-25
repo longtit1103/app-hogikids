@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { addMonths, format, subMonths } from "date-fns";
 
 import { testPrisma } from "./ingest-raw";
+import { luuQuaCongD0 } from "./luu-qua-cong-d0";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 /**
@@ -42,7 +43,9 @@ async function login(page: Page): Promise<void> {
   await page.getByLabel("Email").fill(TEST_USER_EMAIL);
   await page.getByLabel("Mật khẩu", { exact: true }).fill(TEST_USER_PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page).toHaveURL("/");
+  // Về `/` mất 2,8–6,4s ở dev local (đo 25/09: biên dịch lạnh + dựng dashboard), ngưỡng 5s mặc định
+  // đỏ oan cả spec ngay bước đăng nhập. Nới riêng ở đây — spec này đăng nhập lại trước MỖI test.
+  await expect(page).toHaveURL("/", { timeout: 15000 });
 }
 
 test.describe("Sổ quỹ + Khoản vay — tab Dòng tiền", () => {
@@ -81,7 +84,7 @@ test.describe("Sổ quỹ + Khoản vay — tab Dòng tiền", () => {
     await form.getByLabel("Ngày trả kỳ đầu").fill(ngayKyDau);
     // Khai lùi ngày ⇒ form phải nói trước SỐ kỳ sẽ xếp hàng chờ duyệt, không chỉ "sẽ có kỳ".
     await expect(form.getByText(/Sẽ có \d+ kỳ chờ duyệt/)).toBeVisible();
-    await form.getByRole("button", { name: "Lưu", exact: true }).click();
+    await luuQuaCongD0(form);
 
     await expect(page.getByText(`Đã thêm khoản vay ${TEN_KHOAN}`)).toBeVisible();
     const dongKhoan = khoiVay.locator("tbody tr").filter({ hasText: TEN_KHOAN });
@@ -238,7 +241,7 @@ test.describe("Sổ quỹ + Khoản vay — tab Dòng tiền", () => {
     await form.getByLabel("Lãi %/năm").fill("12");
     // "Ngân hàng thu lãi hàng tháng" mặc định BẬT — không cần bấm; chỉ sửa lại ngày kỳ đầu.
     await form.getByLabel("Ngày thu lãi kỳ đầu").fill(ngayKyDauLai);
-    await form.getByRole("button", { name: "Lưu", exact: true }).click();
+    await luuQuaCongD0(form);
 
     await expect(page.getByText(`Đã thêm khoản vay ${TEN_THAU_CHI}`)).toBeVisible();
     const dongThauChi = khoiVay.locator("tbody tr").filter({ hasText: TEN_THAU_CHI });
@@ -331,7 +334,7 @@ test.describe("Sổ quỹ + Khoản vay — tab Dòng tiền", () => {
     // bật công tắc trước.
     await form.getByLabel("Lãi cố định mỗi kỳ").fill("1121096");
     await form.getByLabel("Tiền gửi tiết kiệm bắt buộc mỗi kỳ").fill("300000");
-    await form.getByRole("button", { name: "Lưu", exact: true }).click();
+    await luuQuaCongD0(form);
 
     await expect(page.getByText(`Đã thêm khoản vay ${TEN_GOC_CUOI_KY}`)).toBeVisible();
     const dongKhoan = khoiVay.locator("tbody tr").filter({ hasText: TEN_GOC_CUOI_KY });

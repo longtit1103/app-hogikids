@@ -73,7 +73,7 @@ function TrangThai({ loan }: { loan: KhoanVayRow }) {
   );
 }
 
-export function KhoanVayTable({ rows }: { rows: KhoanVayRow[] }) {
+export function KhoanVayTable({ rows, d0 }: { rows: KhoanVayRow[]; d0: Date | null }) {
   return (
     <div className="rounded-xl border border-hairline">
       {/* Desktop: bảng */}
@@ -119,7 +119,7 @@ export function KhoanVayTable({ rows }: { rows: KhoanVayRow[] }) {
                 <TrangThai loan={loan} />
               </TableCell>
               <TableCell className="text-right">
-                <KhoanVayRowActions loan={loan} />
+                <KhoanVayRowActions loan={loan} d0={d0} />
               </TableCell>
             </TableRow>
           ))}
@@ -135,7 +135,7 @@ export function KhoanVayTable({ rows }: { rows: KhoanVayRow[] }) {
                 <p className="text-sm font-medium text-ink">{loan.name}</p>
                 <p className="text-xs text-muted-foreground">{loan.lender || "—"}</p>
               </div>
-              <KhoanVayRowActions loan={loan} />
+              <KhoanVayRowActions loan={loan} d0={d0} />
             </div>
             <p className="font-serif text-xl text-ink tabular-nums">{formatVnd(loan.duNo)}</p>
             {loan.laiTamTinh !== null && (

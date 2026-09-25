@@ -107,6 +107,36 @@ describe("kiemTraPancake", () => {
     expect(JSON.stringify(r)).not.toContain(KEY_KHO);
   });
 
+  it("shop id mang ký tự đặc biệt (phòng hờ upstream lọt) → encode trước khi nội suy vào URL probe", async () => {
+    // `layCauHinhShop()` thật ép `/^\d+$/` nên nhánh này không tới được qua đường bình thường —
+    // test PHÒNG HỜ (defense-in-depth): nếu một ngày chốt đó bị nới/bỏ, module này vẫn không tự
+    // nội suy thẳng giá trị vào URL path.
+    vi.doMock("@/lib/ket-noi/cau-hinh-shop", () => ({
+      layCauHinhShop: vi.fn(async () => ({ kho: "123/../evil", shopee: SHOP_SHOPEE, tiktok: SHOP_TIKTOK })),
+    }));
+    vi.resetModules();
+    const { kiemTraPancake: kiemTraPancakeIsolated } = await import("@/lib/ket-noi/kiem-tra-pancake");
+
+    seedSetting([["pancakeApiKeyKho", KEY_KHO]]);
+    let urlGoi = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL) => {
+        urlGoi = String(url);
+        return { ok: true, status: 200, text: async () => '{"success":true}' };
+      }),
+    );
+
+    await kiemTraPancakeIsolated();
+
+    // Path segment KHÔNG được chứa "/" chưa encode (mới thoát khỏi đúng segment shop id).
+    expect(urlGoi).toContain(encodeURIComponent("123/../evil"));
+    expect(urlGoi).not.toContain("/shops/123/../evil/");
+
+    vi.doUnmock("@/lib/ket-noi/cau-hinh-shop");
+    vi.resetModules();
+  });
+
   it("HTTP 200 nhưng body không xác nhận success → coi là chưa thông (không xanh giả)", async () => {
     seedSetting([
       ["pancakeApiKeyKho", KEY_KHO],

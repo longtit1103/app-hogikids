@@ -88,15 +88,19 @@ export async function runPgDump(): Promise<Buffer> {
         "Không tìm thấy lệnh pg_dump — image app phải cài postgresql-client-15 khớp supabase-db.",
       );
     }
+    // stderr thô (hostname DB, tên role, đường dẫn) CHỈ ra console server — KHÔNG được ghép vào
+    // message ném lên trên: message đó chảy thẳng vào response `/api/backup` trả cho client.
     const stderr = e.stderr ? e.stderr.toString().trim() : "";
+    if (stderr) console.error("pg_dump stderr:", stderr);
     // Quá hạn phải nói THẲNG là quá hạn: `execFile` giết bằng SIGTERM nên stderr thường rỗng, để
     // rơi vào nhánh chung sẽ ra "pg_dump thất bại (Command failed…)" — không chỉ được hướng nào.
     if (laLoiQuaHan(e)) {
       throw new Error(
         `pg_dump quá hạn ${giay(HAN_PG_DUMP_MS)} và đã bị dừng — DB không phản hồi hoặc đang bị ` +
-          `khoá giữ lâu${stderr ? `: ${stderr}` : "."}`,
+          `khoá giữ lâu.`,
       );
     }
-    throw new Error(`pg_dump thất bại${stderr ? `: ${stderr}` : ` (${e.message})`}`);
+    console.error("pg_dump thất bại:", e.message);
+    throw new Error("pg_dump thất bại — kiểm log server để biết chi tiết.");
   }
 }

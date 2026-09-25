@@ -23,6 +23,9 @@ type Props = {
   soKyCho: number;
   /** Đã duyệt ít nhất 1 kỳ — ưu tiên cảnh báo này thay vì câu "sẽ có N kỳ chờ duyệt". */
   daDuyetKy: boolean;
+  /** Cảnh báo D0 (tính sẵn ở component cha) — chỉ có nghĩa ở nhánh "moi" (cặp `ngayGiaiNgan` đang
+   *  dùng), nhánh "mang-sang" (`startDate`) không đọc field này. */
+  canhBaoD0?: React.ReactNode;
 };
 
 export function KhoanVayFormTermFields({
@@ -36,6 +39,7 @@ export function KhoanVayFormTermFields({
   hienTien,
   soKyCho,
   daDuyetKy,
+  canhBaoD0,
 }: Props) {
   return (
     <>
@@ -62,6 +66,7 @@ export function KhoanVayFormTermFields({
               onChange={(e) => doiNgayNen(e.target.value, "ngayGiaiNgan")}
             />
           </O>
+          {canhBaoD0}
         </>
       ) : (
         <>

@@ -269,7 +269,10 @@ async function runPgClient(
         `Không tìm thấy lệnh ${cmd} — image app phải cài postgresql-client-15 khớp supabase-db.`,
       );
     }
+    // stderr thô (hostname DB, tên role, đường dẫn) CHỈ ra console server — KHÔNG được ghép vào
+    // message ném lên trên: message đó chảy thẳng vào response `/api/restore` trả cho client.
     const stderr = e.stderr ? e.stderr.toString().trim() : "";
+    if (stderr) console.error(`${cmd} stderr:`, stderr);
     // SIGTERM thường không để lại stderr, nên không tách nhánh thì câu báo ra "… thất bại (Command
     // failed)" — người đọc không biết là treo hay hỏng dữ liệu. Nói thẳng "quá hạn".
     //
@@ -287,11 +290,10 @@ async function runPgClient(
       const nguyenNhan = han.coTheNapDo
         ? "DB không phản hồi hoặc có phiên khác giữ khoá; dữ liệu có thể đã nạp dở"
         : "lệnh này không ghi dữ liệu nên bản đang có còn nguyên vẹn, thử lại được";
-      throw new Error(
-        `${cmd} quá hạn ${giay(han.hanMs)} và đã bị dừng — ${nguyenNhan}${stderr ? `: ${stderr}` : "."}`,
-      );
+      throw new Error(`${cmd} quá hạn ${giay(han.hanMs)} và đã bị dừng — ${nguyenNhan}.`);
     }
-    throw new Error(`${cmd} thất bại${stderr ? `: ${stderr}` : ` (${e.message})`}`);
+    console.error(`${cmd} thất bại:`, e.message);
+    throw new Error(`${cmd} thất bại — kiểm log server để biết chi tiết.`);
   }
 }
 

@@ -30,6 +30,12 @@ import {
  * mục M-02) — token KHÔNG BAO GIỜ lộ ra UI.
  */
 
+/** Ép mọi response của route này KHÔNG bị cache (browser/CDN/proxy) — body mang token OAuth thật. */
+function noStore(res: Response): Response {
+  res.headers.set("Cache-Control", "no-store");
+  return res;
+}
+
 const tokenBodySchema = z.object({
   accessToken: z.string().min(1),
   /** epoch GIÂY. 0 = không hết hạn (System User token của Business Manager). */
@@ -39,7 +45,7 @@ const tokenBodySchema = z.object({
 
 export async function POST(req: Request): Promise<Response> {
   const unauthorized = requireTokenVaultSecret(req);
-  if (unauthorized) return unauthorized;
+  if (unauthorized) return noStore(unauthorized);
 
   // POST này KHÔNG phải n8n mà là `scripts/meta-ads-lay-token.ts` chạy tay. Nhận 200 rồi bị lượt
   // phục hồi lùi lại = chủ shop tin token mới đã nằm trong kho, còn `meta-ads-nightly` vẫn lặng lẽ
@@ -47,18 +53,20 @@ export async function POST(req: Request): Promise<Response> {
   // GET KHÔNG chặn (bất đối xứng có chủ đích): Meta không có refresh_token xoay vòng để bị đốt nên
   // chặn đọc chỉ làm mất một đêm dữ liệu ads mà không cứu được gì.
   const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  if (dangPhucHoi) return noStore(dangPhucHoi);
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return Response.json({ ok: false, error: "invalid json" }, { status: 400 });
+    return noStore(Response.json({ ok: false, error: "invalid json" }, { status: 400 }));
   }
 
   const parsed = tokenBodySchema.safeParse(body);
   if (!parsed.success) {
-    return Response.json({ ok: false, error: "invalid body", issues: parsed.error.issues }, { status: 400 });
+    return noStore(
+      Response.json({ ok: false, error: "invalid body", issues: parsed.error.issues }, { status: 400 }),
+    );
   }
 
   // Transaction 4 key nằm trong `luuTokenMetaVaoKho` — dùng chung với action "Đổi & lưu token
@@ -68,15 +76,15 @@ export async function POST(req: Request): Promise<Response> {
     savedAt = await luuTokenMetaVaoKho(parsed.data);
   } catch {
     // KHÔNG đưa err.message vào body: lỗi Prisma có thể chứa giá trị token.
-    return Response.json({ ok: false, error: "Lỗi khi lưu token vào kho" }, { status: 500 });
+    return noStore(Response.json({ ok: false, error: "Lỗi khi lưu token vào kho" }, { status: 500 }));
   }
 
-  return Response.json({ ok: true, savedAt });
+  return noStore(Response.json({ ok: true, savedAt }));
 }
 
 export async function GET(req: Request): Promise<Response> {
   const unauthorized = requireTokenVaultSecret(req);
-  if (unauthorized) return unauthorized;
+  if (unauthorized) return noStore(unauthorized);
 
   const rows = await prisma.setting.findMany({
     where: { key: { in: [KEY_META_ACCESS_TOKEN, KEY_META_EXPIRE_AT, KEY_META_DATA_EXPIRE_AT, KEY_META_SAVED_AT] } },
@@ -84,11 +92,13 @@ export async function GET(req: Request): Promise<Response> {
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
 
   // Kho rỗng ⇒ trả accessToken rỗng: workflow rơi về token HẠT GIỐNG trong CONFIG (lần chạy đầu).
-  return Response.json({
-    ok: true,
-    accessToken: map[KEY_META_ACCESS_TOKEN] ?? "",
-    expireAt: Number(map[KEY_META_EXPIRE_AT] ?? 0),
-    dataAccessExpireAt: Number(map[KEY_META_DATA_EXPIRE_AT] ?? 0),
-    savedAt: Number(map[KEY_META_SAVED_AT] ?? 0),
-  });
+  return noStore(
+    Response.json({
+      ok: true,
+      accessToken: map[KEY_META_ACCESS_TOKEN] ?? "",
+      expireAt: Number(map[KEY_META_EXPIRE_AT] ?? 0),
+      dataAccessExpireAt: Number(map[KEY_META_DATA_EXPIRE_AT] ?? 0),
+      savedAt: Number(map[KEY_META_SAVED_AT] ?? 0),
+    }),
+  );
 }

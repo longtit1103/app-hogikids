@@ -146,9 +146,12 @@ export async function ghiChiPhiNhapHang(
         code: "DA_GHI_ROI",
       };
     }
+    // Tới đây LUÔN là lỗi hạ tầng Prisma/DB (P2002 đã tách nhánh riêng ở trên) — message driver có
+    // thể mang hostname/tên cột. Log đủ phía server, trả client câu cố định.
+    console.error("Không ghi được chi phí nhập hàng:", e);
     return {
       ok: false,
-      error: `Không ghi được chi phí nhập hàng: ${e instanceof Error ? e.message : String(e)}`,
+      error: "Không ghi được chi phí nhập hàng — lỗi hệ thống, thử lại sau.",
     };
   }
 

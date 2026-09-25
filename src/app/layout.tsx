@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { EB_Garamond, Inter, JetBrains_Mono } from "next/font/google";
+import { connection } from "next/server";
 import { Toaster } from "sonner";
 import "./globals.css";
 
@@ -27,11 +28,16 @@ export const metadata: Metadata = {
   description: "Lớp P&L trên Pancake POS cho shop thời trang trẻ em HogiKids",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Ép MỌI trang render động theo request: CSP ở `src/proxy.ts` cấp nonce MỚI mỗi request, trang
+  // prerender tĩnh (vd 404) sẽ mang HTML thiếu nonce ⇒ script Next bị chặn, trang mất tương tác.
+  // Trang trong app vốn đã động nhờ cookie phiên — dòng này chỉ đổi thêm trang 404.
+  await connection();
+
   return (
     <html lang="vi">
       <body

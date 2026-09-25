@@ -156,7 +156,7 @@ test.describe("Sổ quỹ (dòng chạy) — tab Sổ quỹ", () => {
       "thiếu tiền rút Shopee trước đó",
       "ví Shopee mới nhập tới",
       "giao dịch Shopee chưa phân loại (toàn bộ)",
-      "chi phí định kỳ chỉ được ghi khi tháng đó được mở xem",
+      "khoản chi định kỳ chưa ghi",
       "sàn trừ ví ads TikTok nhiều hơn ads đã ghi Sổ chi phí",
       "khoản vay có kỳ trả nợ chưa ghi",
     ];

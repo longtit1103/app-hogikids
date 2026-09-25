@@ -35,7 +35,7 @@ import { updateVariantCost, updateVariantThreshold, updateProductCost, updatePro
 import { deleteAllData, dungLaiTuKhoTho } from "@/lib/actions/data-admin";
 import { ghiChiPhiNhapHang } from "@/lib/actions/chi-phi-nhap-hang";
 import { apGiaVonTheoPancake } from "@/lib/actions/dong-bo-gia-von-pancake";
-import { createExpense, updateExpense, deleteExpense, stopRecurring } from "@/lib/actions/expenses";
+import { createExpense, updateExpense, deleteExpense, stopRecurring, batLaiDinhKy } from "@/lib/actions/expenses";
 import {
   ghiKyTraNo,
   suaKhoanVay,
@@ -85,6 +85,7 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["expenses.updateExpense", () => updateExpense("id-gia", {})],
   ["expenses.deleteExpense", () => deleteExpense("id-gia", "only")],
   ["expenses.stopRecurring", () => stopRecurring("id-gia")],
+  ["expenses.batLaiDinhKy", () => batLaiDinhKy("id-gia")],
   // Khoản tiền khác ghi tay (tab Dòng tiền) — cùng số phận với Expense nhập tay nếu lùi mất giữa lượt phục hồi.
   ["cash-movements.createCashMovement", () => createCashMovement({})],
   ["cash-movements.updateCashMovement", () => updateCashMovement("id-gia", {})],

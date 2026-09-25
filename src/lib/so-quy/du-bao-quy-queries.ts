@@ -89,7 +89,7 @@ async function docKhoanKyTraNo(bayGio: Date, homNay: KhoaNgay, den: KhoaNgay): P
 async function docKhoanDinhKy(homNay: KhoaNgay, den: KhoaNgay): Promise<KhoanDuKien[]> {
   const mau = await prisma.recurringExpense.findMany({
     where: { active: true },
-    select: { id: true, amount: true, dayOfMonth: true, description: true },
+    select: { id: true, amount: true, dayOfMonth: true, description: true, activeFrom: true },
   });
   if (mau.length === 0) return [];
   // Dòng đã sinh trong các tháng mà cửa sổ chạm — cổng "1 dòng/mẫu/tháng" của chính bộ sinh.
@@ -107,7 +107,8 @@ async function docKhoanDinhKy(homNay: KhoaNgay, den: KhoaNgay): Promise<KhoanDuK
   for (const e of daSinhDong) {
     if (e.recurringId !== null) daSinh.add(khoaDaSinh(e.recurringId, khoaNgayVn(e.date)));
   }
-  return khoanDinhKy(mau, homNay, den, daSinh);
+  const mauCoMoc = mau.map((m) => ({ ...m, activeFrom: m.activeFrom ? khoaNgayVn(m.activeFrom) : null }));
+  return khoanDinhKy(mauCoMoc, homNay, den, daSinh);
 }
 
 type PhanDuBao =

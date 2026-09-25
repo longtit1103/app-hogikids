@@ -172,8 +172,17 @@ export function khoanKyTraNo(
   return ra;
 }
 
-/** Mẫu chi phí định kỳ (bảng `RecurringExpense`, chỉ các cột cần cho dự báo). */
-export type MauDinhKy = { id: string; amount: number; dayOfMonth: number; description: string };
+/**
+ * Mẫu chi phí định kỳ (bảng `RecurringExpense`, chỉ các cột cần cho dự báo). `activeFrom` = khoá ngày VN
+ * của mốc bắt đầu sinh (NULL = không cận dưới) — BẮT BUỘC khai để nơi đọc không lỡ quên cột.
+ */
+export type MauDinhKy = {
+  id: string;
+  amount: number;
+  dayOfMonth: number;
+  description: string;
+  activeFrom: KhoaNgay | null;
+};
 
 /** Khoá "mẫu đã sinh dòng trong tháng" — `recurringId|yyyy-MM` (tháng theo giờ VN). */
 export function khoaDaSinh(recurringId: string, ngay: KhoaNgay): string {
@@ -212,6 +221,9 @@ export function khoanDinhKy(
     const soNgay = soNgayTrongThang(nam, thang);
     for (const m of mau) {
       if (m.amount === 0) continue;
+      // Cổng mốc — CÙNG luật `mauDinhKySinhChoThang` của bộ sinh (so theo THÁNG), viết trên khoá chuỗi
+      // vì lõi này không dùng `Date`. Tháng trước mốc bộ sinh không sinh ⇒ dự báo không được trừ.
+      if (m.activeFrom !== null && tienTo < m.activeFrom.slice(0, 7)) continue;
       const ngayPhatSinh = `${tienTo}-${pad2(Math.min(m.dayOfMonth, soNgay))}`;
       if (ngayPhatSinh > den) continue;
       if (daSinh.has(khoaDaSinh(m.id, ngayPhatSinh))) continue;

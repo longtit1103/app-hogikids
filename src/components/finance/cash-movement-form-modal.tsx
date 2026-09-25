@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format, startOfDay } from "date-fns";
+import { format } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import type { CashMovementRow } from "@/lib/cash-movements/cash-movement-queries
 import { formatVnd } from "@/lib/format";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
+import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 
 import { KhoanVaySelect } from "./khoan-vay-select";
@@ -216,7 +217,7 @@ export function CashMovementFormModal({
     (!laLoaiVay || Boolean(loanId)) &&
     (!laSoTietKiem || Boolean(savingsId)) &&
     !saving;
-  const ngayTruocD0 = d0 !== null && Boolean(date) && new Date(`${date}T00:00:00+07:00`) < startOfDay(d0);
+  const ngayTruocD0 = ngayTruocMoSo(date, d0);
 
   async function handleSubmit() {
     if (!kind || !date) return;

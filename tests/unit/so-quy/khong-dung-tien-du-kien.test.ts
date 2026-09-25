@@ -21,7 +21,13 @@ import { describe, expect, it } from "vitest";
  */
 const THU_MUC = path.resolve(__dirname, "../../../src/lib/so-quy");
 
-const CAM = /calcPnl|pnlOrderSelect|prisma\.order\b|expectedIn|prisma\.tiktokSettlement\b|"REVENUE"/;
+/**
+ * `vi-san/` + `ViTiktokConLai`: ô "Còn ở ví TikTok" (`src/lib/vi-san/`) đọc net sàn chốt ĐỂ HIỂN
+ * THỊ riêng — một `import` ngược vào đây (alias hay relative, hàm hay kiểu) là con số ví, chưa phải
+ * tiền quỹ, lọt vào số dư / dự báo / Excel Sổ quỹ.
+ */
+const CAM =
+  /calcPnl|pnlOrderSelect|prisma\.order\b|expectedIn|prisma\.tiktokSettlement\b|"REVENUE"|vi-san\/|ViTiktokConLai/;
 
 /** Đệ quy (khuôn `khong-ro-ri-vao-pnl.test.ts`): lưới canh cả `src/lib/so-quy/**`, thư mục con cũng phải soi. */
 function docTatCa(thuMuc: string, tienTo = ""): { file: string; noiDung: string }[] {
@@ -103,6 +109,10 @@ describe("src/lib/so-quy không dùng tiền dự kiến / net sàn chốt", () 
     expect("await prisma.order.findMany({})").toMatch(CAM);
     expect("const x = cf.expectedIn;").toMatch(CAM);
     expect("await prisma.tiktokSettlement.aggregate({})").toMatch(CAM);
+    expect('import { docViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu-queries";').toMatch(CAM);
+    expect('import { x } from "../vi-san/vi-tiktok-con-lai-toi-thieu";').toMatch(CAM);
+    expect("const v: ViTiktokConLaiToiThieu | null = null;").toMatch(CAM);
+    expect("// tiền còn trong ví Shopee chưa rút").not.toMatch(CAM);
     expect('where: { type: "REVENUE" }').toMatch(CAM);
     expect('where: { type: "WITHDRAWAL" }').not.toMatch(CAM);
     expect("await prisma.tiktokPayment.aggregate({})").not.toMatch(CAM);

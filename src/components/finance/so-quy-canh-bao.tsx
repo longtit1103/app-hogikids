@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { differenceInCalendarDays, format } from "date-fns";
 
+import { type DateRange, serializeDateRange } from "@/lib/date-range";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
 
 import { ShopeeImportButton } from "./shopee-import-button";
@@ -11,6 +12,13 @@ import { ShopeeImportButton } from "./shopee-import-button";
  */
 
 const NGAY_VI_COI_LA_CU = 15;
+
+/** Sổ chi phí mở ĐÚNG khoảng tháng đang thiếu — tab đó tự ghi bù định kỳ cho mọi tháng trong range. */
+function hrefSoChiPhi(khoang: DateRange | null): string {
+  if (khoang === null) return "/tai-chinh?tab=so-chi-phi";
+  const { tu, den } = serializeDateRange(khoang);
+  return `/tai-chinh?tab=so-chi-phi&tu=${tu}&den=${den}`;
+}
 
 export function SoQuyCanhBao({
   soQuy,
@@ -32,7 +40,7 @@ export function SoQuyCanhBao({
     c.shopeeThieuTruocD0 ||
     viCu ||
     c.shopeeChuaPhanLoai > 0 ||
-    c.coDinhKyActive ||
+    c.dinhKyChuaGhi.soKhoan > 0 ||
     c.adsViVuotSo ||
     soKhoanVayCoKyCho > 0;
   if (!coDong) return null;
@@ -58,7 +66,12 @@ export function SoQuyCanhBao({
       {c.shopeeChuaPhanLoai > 0 && (
         <p>⚠️ {c.shopeeChuaPhanLoai} giao dịch Shopee chưa phân loại (toàn bộ)</p>
       )}
-      {c.coDinhKyActive && <p>⚠️ chi phí định kỳ chỉ được ghi khi tháng đó được mở xem</p>}
+      {c.dinhKyChuaGhi.soKhoan > 0 && (
+        <Link href={hrefSoChiPhi(c.dinhKyChuaGhi.khoang)} className="underline underline-offset-2">
+          ⚠️ {c.dinhKyChuaGhi.soKhoan} khoản chi định kỳ chưa ghi (tháng {c.dinhKyChuaGhi.thang.join(", ")}) —
+          quỹ đang tính dư; mở tháng đó ở Sổ chi phí để app tự ghi
+        </Link>
+      )}
       {c.adsViVuotSo && (
         <p>⚠️ sàn trừ ví ads TikTok nhiều hơn ads đã ghi Sổ chi phí — quỹ đang tính dư</p>
       )}

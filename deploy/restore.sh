@@ -51,6 +51,16 @@ SCHEMA_DEFAULT=app
 CONTAINER=supabase-db
 OWNER_ROLE=hogikids
 
+# Hạn chờ (giây) của `LOCK TABLE … ACCESS EXCLUSIVE` trong cổng khoá việc nặng (xem
+# `sql_cong_khoa_viec_nang`). Đây là lock CẤP POSTGRES — khác khoá logic ở giá trị cột `Setting.value`
+# (TTL 5 phút do app tự quản). Nếu một phiên khác đang giữ BẤT KỲ lock nào trên bảng `Setting` (vd
+# transaction dài đang UPDATE dòng khoá lúc gia hạn) thì không có `lock_timeout` ⇒ restore CHỜ VÔ HẠN
+# — không rollback, không thông báo, người vận hành tưởng script treo. 30s đủ dài để không văng oan
+# vì một UPDATE/gia hạn ngắn đang chạy song song, đủ ngắn để không giữ chân người chạy DR nhiều phút
+# khi thật sự có phiên giữ khoá — hết hạn thì psql lỗi rõ ràng, rollback, schema còn nguyên (xem hint
+# lỗi ở `drop_schema_dich`).
+LOCK_TIMEOUT_CONG_KHOA_GIAY=30
+
 # Role CHỈ-ĐỌC của n8n (đọc kho khoá `Setting`). Thay sạch schema + `pg_restore --no-privileges`
 # xoá cả ACL, nên hậu kỳ phải cấp lại — nếu không, 10 workflow n8n chết ở node lấy khoá trong khi
 # app vẫn đăng nhập bình thường (ingest/ads/webhook tắt câm, không có báo động).
@@ -105,7 +115,9 @@ assert_toc_only_schema() {
     BEGIN {
       # DESC pg_dump/pg_restore — khớp tiền tố DÀI NHẤT trước. Không cần vét cạn:
       # DESC lạ (không khớp) sẽ bỏ qua chứ không từ chối.
-      n = split("TABLE DATA|SEQUENCE SET|SEQUENCE OWNED BY|MATERIALIZED VIEW DATA|MATERIALIZED VIEW|FK CONSTRAINT|CHECK CONSTRAINT|DEFAULT ACL|EVENT TRIGGER|ROW SECURITY|PUBLICATION TABLE|FOREIGN TABLE|OPERATOR CLASS|OPERATOR FAMILY|ACCESS METHOD|SHELL TYPE|USER MAPPING|DATABASE PROPERTIES|LARGE OBJECT|PROCEDURAL LANGUAGE|FOREIGN DATA WRAPPER|TEXT SEARCH CONFIGURATION|TEXT SEARCH DICTIONARY|TEXT SEARCH PARSER|TEXT SEARCH TEMPLATE|TABLE|SEQUENCE|VIEW|INDEX|CONSTRAINT|DEFAULT|ACL|TRIGGER|FUNCTION|PROCEDURE|AGGREGATE|TYPE|DOMAIN|SCHEMA|EXTENSION|COMMENT|POLICY|RULE|STATISTICS|ENCODING|STDSTRINGS|SEARCHPATH|DATABASE|COLLATION|CONVERSION|OPERATOR|CAST|TRANSFORM|SERVER|BLOB|BLOBS|PUBLICATION", a, "|")
+      # `TABLE ATTACH`/`INDEX ATTACH` (bảng partition): thiếu thì khớp `TABLE`/`INDEX` 1 từ và đọc chữ
+      # ATTACH thành namespace ⇒ từ chối OAN dump hợp lệ (DR lượt 3, 25/09). Bản TS song sinh cũng có.
+      n = split("TABLE DATA|TABLE ATTACH|INDEX ATTACH|SEQUENCE SET|SEQUENCE OWNED BY|MATERIALIZED VIEW DATA|MATERIALIZED VIEW|FK CONSTRAINT|CHECK CONSTRAINT|DEFAULT ACL|EVENT TRIGGER|ROW SECURITY|PUBLICATION TABLE|FOREIGN TABLE|OPERATOR CLASS|OPERATOR FAMILY|ACCESS METHOD|SHELL TYPE|USER MAPPING|DATABASE PROPERTIES|LARGE OBJECT|PROCEDURAL LANGUAGE|FOREIGN DATA WRAPPER|TEXT SEARCH CONFIGURATION|TEXT SEARCH DICTIONARY|TEXT SEARCH PARSER|TEXT SEARCH TEMPLATE|TABLE|SEQUENCE|VIEW|INDEX|CONSTRAINT|DEFAULT|ACL|TRIGGER|FUNCTION|PROCEDURE|AGGREGATE|TYPE|DOMAIN|SCHEMA|EXTENSION|COMMENT|POLICY|RULE|STATISTICS|ENCODING|STDSTRINGS|SEARCHPATH|DATABASE|COLLATION|CONVERSION|OPERATOR|CAST|TRANSFORM|SERVER|BLOB|BLOBS|PUBLICATION", a, "|")
       for (i = 1; i <= n; i++) D[a[i]] = 1
     }
     # Dòng object TOC: "<id>; <tableoid> <oid> <DESC…> <namespace> <tag…> <owner>".
@@ -477,12 +489,69 @@ assert_sql_only_schema() {
 # ---------------------------------------------------------------------------
 drop_schema_dich() {
   local db=$1 schema=$2 dump_tu_tao=$3 sql
+  # Cổng khoá việc nặng đứng ĐẦU cùng một chuỗi `psql -c` = CÙNG MỘT transaction với DROP (xem
+  # `sql_cong_khoa_viec_nang`): khoá đang giữ ⇒ RAISE ⇒ rollback, schema còn nguyên.
+  # `SET TRANSACTION` đứng ĐẦU: cổng phải đọc bản khoá MỚI NHẤT — nếu cluster đặt mặc định
+  # REPEATABLE READ thì snapshot đóng băng ở câu đầu và cổng nhìn khoá cũ, DROP đè lên việc đang chạy
+  # (review 25/09 đo được trên PG thật). Vẫn cùng một transaction ngầm của `psql -c`.
+  # `SET LOCAL lock_timeout` đứng NGAY SAU (chỉ có hiệu lực trong transaction hiện tại, phải sau câu
+  # SET TRANSACTION vì câu đó BẮT BUỘC là câu đầu) — chặn treo vô hạn ở `LOCK TABLE` phía dưới khi có
+  # phiên khác đang giữ lock Postgres trên `Setting` (xem giải thích ở hằng số `LOCK_TIMEOUT_CONG_KHOA_GIAY`).
+  sql="SET TRANSACTION ISOLATION LEVEL READ COMMITTED; SET LOCAL lock_timeout = '${LOCK_TIMEOUT_CONG_KHOA_GIAY}s'; $(sql_cong_khoa_viec_nang "$schema")"
   if [[ "$dump_tu_tao" == "1" ]]; then
-    sql="DROP SCHEMA IF EXISTS \"$schema\" CASCADE;"
+    sql="$sql DROP SCHEMA IF EXISTS \"$schema\" CASCADE;"
   else
-    sql="DROP SCHEMA IF EXISTS \"$schema\" CASCADE; CREATE SCHEMA \"$schema\";"
+    sql="$sql DROP SCHEMA IF EXISTS \"$schema\" CASCADE; CREATE SCHEMA \"$schema\";"
   fi
-  docker exec -i "$CONTAINER" psql -U supabase_admin -d "$db" -v ON_ERROR_STOP=1 -c "$sql"
+  docker exec -i "$CONTAINER" psql -U supabase_admin -d "$db" -v ON_ERROR_STOP=1 -c "$sql" || {
+    echo "Lỗi: KHÔNG dọn được schema '$schema' của '$db' — schema CÒN NGUYÊN (cổng khoá + DROP chạy trong MỘT transaction)." >&2
+    echo "    Dòng ERROR có KHOA_VIEC_NANG_DANG_GIU ⇒ một việc nặng (dựng lại từ kho thô / ghi giá vốn /" >&2
+    echo "    xoá dữ liệu / sao lưu trong app) ĐANG ghi vào schema này. Chờ nó xong rồi chạy lại — việc đã" >&2
+    echo "    chết thì khoá tự hết hạn sau tối đa 5 phút. Khoá hỏng định dạng (lỗi bigint) mà chắc chắn không" >&2
+    echo "    còn việc nào chạy: DELETE FROM \"$schema\".\"Setting\" WHERE key = '$KHOA_VIEC_NANG_KEY';" >&2
+    echo "    Vừa nạp một bản sao lưu TẠO TỪ APP (/api/backup) chưa tới 5 phút? Bản đó mang theo chính dòng khoá" >&2
+    echo "    của lượt sao lưu ⇒ bị chặn oan — chờ hết hạn rồi chạy lại." >&2
+    echo "    ERROR là 'deadlock detected' ⇒ KHÔNG phải khoá việc nặng: một việc khác vừa chạm bảng Setting cùng" >&2
+    echo "    lúc; lượt này đã huỷ an toàn, chạy lại." >&2
+    echo "    ERROR là 'canceling statement due to lock timeout' ⇒ KHÔNG phải khoá việc nặng của app (cổng còn" >&2
+    echo "    chưa kịp đọc tới) — một phiên KHÁC đang giữ lock Postgres trên bảng Setting (transaction dài, phiên" >&2
+    echo "    treo…) quá ${LOCK_TIMEOUT_CONG_KHOA_GIAY}s. Dừng app (docker compose stop app), đóng phiên psql/prisma" >&2
+    echo "    đang mở tới DB này rồi chạy lại." >&2
+    return 1
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Cổng "khoá việc nặng" — cùng khoá với app (`src/lib/backup/khoa-viec-nang.ts`): dòng
+# `Setting.key = khoaViecNang`, giá trị `<token>|<hạn epoch ms>|<tên việc>`, hạn 5 phút, chủ khoá
+# gia hạn ở mỗi mốc tiến độ thật. Script dựng lại / ghi giá vốn chạy ở tiến trình RIÊNG
+# (`docker compose run --rm app …`) nên `docker compose stop app` KHÔNG dừng được chúng — cổng này
+# là thứ duy nhất chặn DROP đè lên một việc đang ghi. arg1 = schema đích. In ra một khối SQL.
+#
+# VÌ SAO chỉ ĐỌC dưới LOCK, không giành/nhả như app: khoá nằm TRONG chính bảng sắp bị DROP. Giành
+# rồi nhả là vô nghĩa (DROP xoá luôn dòng khoá; bảng về lại từ dump), còn trap nhả khoá là thêm đúng
+# lớp lỗi `trap` đã cắn đường DR 23/09. Thay vào đó: LOCK ACCESS EXCLUSIVE ⇒ không ai giành/gia hạn
+# được giữa lúc kiểm và lúc DROP (họ chờ, rồi vấp bảng đã mất — chết TRƯỚC khi ghi). Không có khe.
+# Bảng chưa tồn tại (DB nháp mới tạo, cluster DR trắng) ⇒ không có gì để bảo vệ ⇒ bỏ qua; nhờ vậy
+# diễn tập vào DB nháp KHÔNG bao giờ đọc/ghi khoá của DB thật (khoá theo DB đích, không dùng chung).
+# Giới hạn (giống app): việc nặng khởi động SAU khi DROP commit, giữa lúc đang nạp, không bị chặn.
+# ⚠️ Chuỗi nháy KÉP: KHÔNG backtick, `$$` phải viết `\$\$` (bài học 23/09).
+# ---------------------------------------------------------------------------
+KHOA_VIEC_NANG_KEY=khoaViecNang   # BẢN SONG SINH của KHOA_KEY trong khoa-viec-nang.ts — test ép khớp
+sql_cong_khoa_viec_nang() {
+  local schema=$1
+  printf '%s\n' "DO \$\$
+DECLARE v text;
+BEGIN
+  IF to_regclass('\"$schema\".\"Setting\"') IS NULL THEN RETURN; END IF;
+  LOCK TABLE \"$schema\".\"Setting\" IN ACCESS EXCLUSIVE MODE;
+  SELECT \"value\" INTO v FROM \"$schema\".\"Setting\" WHERE \"key\" = '$KHOA_VIEC_NANG_KEY';
+  IF v IS NOT NULL AND split_part(v, '|', 2)::bigint >= (extract(epoch from now()) * 1000)::bigint THEN
+    RAISE EXCEPTION 'KHOA_VIEC_NANG_DANG_GIU: viec \"%\" con han ~% giay', split_part(v, '|', 3),
+      (split_part(v, '|', 2)::bigint - (extract(epoch from now()) * 1000)::bigint) / 1000;
+  END IF;
+END
+\$\$;"
 }
 
 # ---------------------------------------------------------------------------
