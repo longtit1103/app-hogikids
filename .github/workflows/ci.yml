@@ -171,7 +171,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - name: Lưu report khi lỗi
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: playwright-report
