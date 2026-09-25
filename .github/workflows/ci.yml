@@ -51,7 +51,7 @@ jobs:
       # Chỉ cần biến TỒN TẠI cho prisma generate / tsc — KHÔNG kết nối thật.
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Cổng allowlist của bản snapshot công khai: file nguồn mới nào chưa được phân loại
       # (allowlist hoặc luật exclude) thì lượt publish sẽ ABORT — nhưng cổng đó chỉ nổ lúc có
       # NGƯỜI chạy publish, tức muộn hơn hẳn lúc file được thêm vào (ca thật 20/08: lộ ra sau
@@ -110,7 +110,7 @@ jobs:
       SESSION_SECRET: ci-session-secret-not-for-prod-min-32-characters
       INGEST_SECRET: ci-ingest-secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -148,7 +148,7 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/postgres?schema=app
       TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/hogikids_test?schema=app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -186,7 +186,7 @@ jobs:
     # prisma generate + next build 22,7s) ⇒ quá 25 phút là treo, không phải chậm.
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # VÌ SAO CÓ JOB NÀY: ba job trên đều chạy trên repo ĐÃ CHECKOUT ĐỦ nên mù với trọn lớp lỗi
       # chỉ vỡ BÊN TRONG ảnh — thứ tự COPY sai, file thiếu trong build context, .dockerignore loại
       # nhầm, kho apt/PGDG đổi. Ca thật 19/08: `npm ci` chết ENOENT vì tarball vendor
