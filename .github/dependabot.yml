@@ -8,6 +8,19 @@ updates:
     groups:
       minor-va-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Hoãn CÓ CHỦ ĐÍCH (chốt 26/09/2026) — không phải quên cập nhật:
+      # typescript major 7: chờ tới khi có compiler API phù hợp cho tooling nội bộ, ghim ^6.0.3.
+      # prisma + @prisma/client major 7: PR nâng cấp (driver adapter pg) đã dựng nhưng ĐANG DỪNG ở
+      # draft chờ xử lý xong rủi ro pg_locks. Gỡ 3 dòng ignore này khi 1 trong 2 quyết định trên đổi.
+      # `ignore`/`update-types` CHỈ chặn version update thường — theo tài liệu GitHub, PR vá BẢO MẬT
+      # (kể cả khi bản vá đó nằm ở major mới) KHÔNG bị chặn, Dependabot vẫn tự mở như bình thường.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "prisma"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@prisma/client"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
