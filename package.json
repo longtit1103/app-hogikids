@@ -43,8 +43,7 @@
     "shadcn": "^4.21.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2",
-    "typescript6": "npm:@typescript/typescript6@^6.0.2",
+    "typescript": "^6.0.3",
     "vite": "^8.3.1",
     "vitest": "^5.0.2"
   }
