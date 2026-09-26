@@ -45,6 +45,7 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "typescript6": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "^4.1.11"
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
   }
 }

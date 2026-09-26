@@ -15,6 +15,11 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Vitest 5 đổi mặc định `clearMocks` từ false sang true (tự `mockClear()` trước mỗi test).
+    // Ghim lại `false` để giữ NGUYÊN hành vi v4 — ~250 file test, phần lớn chạm DB thật qua
+    // Tailscale, không thể chạy hết cục bộ để soát từng file có cộng dồn `toHaveBeenCalledTimes`
+    // qua nhiều `it()` hay không. Đổi mặc định là thay đổi hành vi ngoài phạm vi nâng cấp.
+    clearMocks: false,
     setupFiles: ["tests/setup.ts"],
     // Giành khoá độc quyền trên database test cho cả lượt: `fileParallelism: false` dưới đây chỉ
     // điều phối được TRONG MỘT tiến trình, còn hai lượt `npm test` cùng lúc thì giẫm lên nhau
