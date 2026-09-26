@@ -2,7 +2,12 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import ts from "typescript";
+// TypeScript 7 KHÔNG còn ship JS Compiler API (chỉ export `version`) — file này
+// PHẢI dùng AST parser thật (createSourceFile/SyntaxKind...) nên trỏ riêng sang
+// gói bí danh `typescript6` (= @typescript/typescript6, compat chính thức của
+// đội TypeScript) chỉ cho lượt import này; toàn bộ repo còn lại vẫn build/typecheck
+// bằng `typescript` 7 gốc qua tsc CLI.
+import ts from "typescript6";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ActionResult } from "@/lib/actions/action-result";
