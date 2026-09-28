@@ -1,0 +1,187 @@
+{
+  "code": 0,
+  "message": "Success",
+  "data": {
+    "latest_available_date": "2026-08-23",
+    "performance": {
+      "intervals": [
+        {
+          "end_date": "2026-08-16",
+          "sales": {
+            "avg_customers_count": 1,
+            "gmv": {
+              "breakdowns": [
+                {
+                  "gmv": {
+                    "amount": "0.00",
+                    "currency": "VND"
+                  },
+                  "type": "LIVE"
+                },
+                {
+                  "gmv": {
+                    "amount": "220000.00",
+                    "currency": "VND"
+                  },
+                  "type": "VIDEO"
+                },
+                {
+                  "gmv": {
+                    "amount": "0.00",
+                    "currency": "VND"
+                  },
+                  "type": "PRODUCT_CARD"
+                }
+              ],
+              "overall": {
+                "amount": "220000.00",
+                "currency": "VND"
+              }
+            },
+            "gross_revenue": {
+              "breakdowns": [
+                {
+                  "percentage": "1.0000",
+                  "type": "GMV_MAX"
+                },
+                {
+                  "percentage": "0.0000",
+                  "type": "NON_GMV_MAX"
+                }
+              ],
+              "overall": {
+                "amount": "220000.00",
+                "currency": "VND"
+              }
+            },
+            "items_sold": 1,
+            "orders_count": 1,
+            "refunds": {
+              "amount": "0.00",
+              "currency": "VND"
+            },
+            "sku_orders_count": 1
+          },
+          "start_date": "2026-08-15",
+          "traffic": {
+            "avg_conversation_rate": "0.0050",
+            "avg_page_views": 264,
+            "avg_visitors": 199
+          }
+        },
+        {
+          "end_date": "2026-08-20",
+          "sales": {
+            "avg_customers_count": 2,
+            "gmv": {
+              "breakdowns": [
+                {
+                  "gmv": {
+                    "amount": "0.00",
+                    "currency": "VND"
+                  },
+                  "type": "LIVE"
+                },
+                {
+                  "gmv": {
+                    "amount": "220000.00",
+                    "currency": "VND"
+                  },
+                  "type": "VIDEO"
+                },
+                {
+                  "gmv": {
+                    "amount": "161920.00",
+                    "currency": "VND"
+                  },
+                  "type": "PRODUCT_CARD"
+                }
+              ],
+              "overall": {
+                "amount": "381920.00",
+                "currency": "VND"
+              }
+            },
+            "gross_revenue": {
+              "breakdowns": [
+                {
+                  "percentage": "0.0000",
+                  "type": "GMV_MAX"
+                },
+                {
+                  "percentage": "1.0000",
+                  "type": "NON_GMV_MAX"
+                }
+              ],
+              "overall": {
+                "amount": "440000.00",
+                "currency": "VND"
+              }
+            },
+            "items_sold": 2,
+            "orders_count": 2,
+            "refunds": {
+              "amount": "0.00",
+              "currency": "VND"
+            },
+            "sku_orders_count": 2
+          },
+          "start_date": "2026-08-19",
+          "traffic": {
+            "avg_conversation_rate": "0.0112",
+            "avg_page_views": 267,
+            "avg_visitors": 178
+          }
+        },
+        {
+          "end_date": "2026-08-21",
+          "sales": {
+            "avg_customers_count": 0,
+            "gmv": {
+              "breakdowns": [
+                {
+                  "gmv": {
+                    "amount": "0.00",
+                    "currency": "VND"
+                  },
+                  "type": "LIVE"
+                },
+                {
+                  "gmv": {
+                    "amount": "0.00",
+                    "currency": "VND"
+                  },
+                  "type": "VIDEO"
+                },
+                {
+                  "gmv": {
+                    "amount": "0.00",
+                    "currency": "VND"
+                  },
+                  "type": "PRODUCT_CARD"
+                }
+              ],
+              "overall": {
+                "amount": "0.00",
+                "currency": "VND"
+              }
+            },
+            "items_sold": 0,
+            "orders_count": 0,
+            "refunds": {
+              "amount": "0.00",
+              "currency": "VND"
+            },
+            "sku_orders_count": 0
+          },
+          "start_date": "2026-08-20",
+          "traffic": {
+            "avg_conversation_rate": "0.0000",
+            "avg_page_views": 228,
+            "avg_visitors": 171
+          }
+        }
+      ]
+    }
+  }
+}

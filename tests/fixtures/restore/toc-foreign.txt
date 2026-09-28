@@ -1,0 +1,14 @@
+;
+; Archive created at 2026-07-16 02:15:06 +07
+;     dbname: postgres
+;     Format: CUSTOM
+;
+; Selected TOC Entries:
+;
+6; 2615 16384 SCHEMA - app postgres
+221; 1259 16386 TABLE app Order postgres
+3863; 0 16386 TABLE DATA app Order postgres
+3873; 0 0 SEQUENCE OWNED BY app Order_id_seq postgres
+999; 1259 99999 TABLE public LeakedThing postgres
+7; 2615 90000 SCHEMA - auth supabase_admin
+1000; 1259 90001 TABLE auth users supabase_auth_admin

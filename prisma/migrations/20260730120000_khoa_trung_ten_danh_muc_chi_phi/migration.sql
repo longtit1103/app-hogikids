@@ -1,0 +1,13 @@
+-- Tên danh mục chi phí phải DUY NHẤT.
+--
+-- Vì sao cần: hàm thêm danh mục kiểm trùng bằng "đọc cả bảng rồi so trong JS" rồi mới INSERT — hai
+-- submit đồng thời (hai tab, hoặc hai lần Enter trong cùng một tick) đều thấy "chưa có" và tạo 2
+-- dòng cùng tên. Không sai Σ P&L (P&L nhóm theo `categoryId`), nhưng dropdown "Thêm chi phí" hiện
+-- hai dòng giống nhau và chi phí bị rải sang dòng chủ shop không định chọn.
+--
+-- Case-SENSITIVE có chủ đích: phép kiểm trong app đã so không phân biệt hoa/thường, index này chỉ
+-- là cổng cuối cho khe trùng y hệt. Dùng citext là thêm một extension cho một vấn đề mức thấp.
+--
+-- ⚠️ Lượt migrate FAIL nếu bảng đang có tên trùng — kiểm trước bằng:
+--   SELECT name, count(*) FROM "ExpenseCategory" GROUP BY name HAVING count(*) > 1;
+CREATE UNIQUE INDEX "ExpenseCategory_name_key" ON "ExpenseCategory"("name");

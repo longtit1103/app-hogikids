@@ -1,0 +1,205 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * HogiKids brand tokens — source of truth: claude-DESIGN.md
+ * Exact hex values per Task 1 brief. Do not hand-edit hex here without
+ * updating claude-DESIGN.md first.
+ */
+:root {
+  --canvas: #faf9f5;
+  --surface-soft: #f5f0e8;
+  --surface-card: #efe9de;
+  --surface-cream-strong: #e8e0d2;
+  --surface-dark: #181715;
+  --surface-dark-elevated: #252320;
+  --ink: #141413;
+  --body: #3d3d3a;
+  --muted: #6c6a64;
+  --hairline: #e6dfd8;
+  --primary: #cc785c;
+  --primary-active: #a9583e;
+  --primary-disabled: #e6dfd8;
+  --on-primary: #ffffff;
+  --on-dark: #faf9f5;
+  --accent-teal: #5db8a6;
+  --accent-amber: #e8a55a;
+  --success: #5db872;
+  --warning: #d4a017;
+  --error: #c64545;
+
+  /* shadcn/ui semantic slots, wired to the brand tokens above.
+   * Note: shadcn's --muted is a *background* role (e.g. hover states,
+   * table rows) while the brief's --muted (#6c6a64) is a *text* role
+   * ("sub-headings, breadcrumbs, footer text" per claude-DESIGN.md).
+   * These are kept as separate variables and reconciled below in
+   * @theme inline: --color-muted (bg) uses --surface-soft while
+   * --color-muted-foreground (text) uses --muted, so shadcn components
+   * (Table, DropdownMenu, Input placeholder, etc.) render correctly. */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: var(--canvas);
+  --card-foreground: var(--ink);
+  --popover: var(--canvas);
+  --popover-foreground: var(--ink);
+  --primary-foreground: var(--on-primary);
+  --secondary: var(--surface-card);
+  --secondary-foreground: var(--ink);
+  --muted-bg: var(--surface-soft);
+  --accent: var(--surface-card);
+  --accent-foreground: var(--ink);
+  --destructive: var(--error);
+  --border: var(--hairline);
+  --input: var(--hairline);
+  --ring: var(--primary);
+  --chart-1: var(--primary);
+  --chart-2: var(--accent-teal);
+  --chart-3: var(--accent-amber);
+  --chart-4: var(--success);
+  --chart-5: var(--warning);
+  --sidebar: var(--canvas);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--on-primary);
+  --sidebar-accent: var(--surface-card);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--hairline);
+  --sidebar-ring: var(--primary);
+
+  /* Radius scale — buttons/inputs 8px, cards 12px, badges pill (claude-DESIGN.md rounded.*) */
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  /* Fonts — set in src/app/layout.tsx via next/font/google */
+  --font-serif: var(--font-eb-garamond);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+
+  /* Brand color tokens exposed as Tailwind utilities: bg-canvas, text-ink, border-hairline, etc. */
+  --color-canvas: var(--canvas);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-card: var(--surface-card);
+  --color-surface-cream-strong: var(--surface-cream-strong);
+  --color-surface-dark: var(--surface-dark);
+  --color-surface-dark-elevated: var(--surface-dark-elevated);
+  --color-ink: var(--ink);
+  --color-body: var(--body);
+  --color-hairline: var(--hairline);
+  --color-on-primary: var(--on-primary);
+  --color-on-dark: var(--on-dark);
+  --color-accent-teal: var(--accent-teal);
+  --color-accent-amber: var(--accent-amber);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-primary-active: var(--primary-active);
+  --color-primary-disabled: var(--primary-disabled);
+
+  /* shadcn/ui semantic scale */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted-bg);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Radius scale: rounded-lg (buttons/inputs) = 8px, rounded-xl (cards) = 12px,
+   * rounded-4xl stays large enough to read as a pill on badge-height elements. */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+  /* Display headlines: serif, weight 400, negative tracking — never bold (claude-DESIGN.md typography) */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-serif font-normal tracking-tight;
+  }
+}
+
+/*
+ * In báo cáo (/bao-cao, window.print()) — chỉ in card của tab đang mở, ẩn
+ * toàn bộ chrome (sidebar/topbar/nút điều khiển). Từng nút/hàng điều khiển cụ
+ * thể tự đánh dấu `print:hidden` (Tailwind) ngay tại component; phần dưới xử
+ * lý CHROME CHUNG của app (sidebar/topbar) mà /bao-cao/page.tsx không sở hữu
+ * DOM nên không thể gắn class trực tiếp — chọn theo thẻ ngữ nghĩa `aside`/
+ * `header` do ShellChrome (src/components/shell/shell-chrome.tsx) render.
+ */
+@media print {
+  aside,
+  header {
+    display: none !important;
+  }
+
+  /* ShellChrome bọc {Sidebar,content} trong 1 CSS grid 2 cột (240px + 1fr).
+     Khi `aside` biến mất khỏi layout, cột nội dung phải tự trải hết chiều
+     rộng trang in — chọn qua thuộc tính class (không phụ thuộc thứ tự
+     utility Tailwind) để không phải sửa shell-chrome.tsx (ngoài phạm vi Task 5). */
+  [class*="md:grid"] {
+    display: block !important;
+  }
+
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* Bảng dài hơn khổ giấy: container cuộn ngang (overflow-x-auto, Table
+     component) không tồn tại khi in — overflow:auto sẽ bị CẮT thay vì cuộn,
+     mất cột. Cho tràn tự nhiên thay vì clip âm thầm. */
+  [data-slot="table-container"] {
+    overflow: visible !important;
+  }
+
+  @page {
+    size: A4;
+    margin: 16mm;
+  }
+}

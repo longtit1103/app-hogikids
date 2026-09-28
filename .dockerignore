@@ -1,0 +1,55 @@
+# .dockerignore — bắt buộc đi cùng Dockerfile: `COPY . .` KHÔNG được nướng secrets
+# hay node_modules của host (Mac arm64) vào image; backups/uploads do compose mount
+# lúc chạy (volume), không cần bake vào image (A4/C3/C6).
+
+# Secrets — TUYỆT ĐỐI không vào image
+.env
+.env.*
+
+# Deps của host (Mac arm64) — image tự `npm ci` lại theo linux/amd64
+node_modules
+
+# Build artifacts — image tự `next build`
+.next
+out
+build
+
+# Git + lịch sử
+.git
+.gitignore
+
+# Test / plan / docs — không cần trong image runtime.
+# LƯU Ý: phải loại CẢ config test, không chỉ thư mục `tests/`. `next build` type-check
+# mọi file trong tsconfig include; `playwright.config.ts` import `./tests/e2e/test-constants`
+# nên nếu bỏ `tests/` mà giữ config → build trong image chết vì thiếu module.
+tests
+test-results
+playwright-report
+playwright.config.ts
+vitest.config.ts
+plans
+docs
+.superpowers
+
+# Volume-mounted lúc chạy (không bake vào image)
+backups
+uploads
+
+# Logs & rác
+*.log
+.DS_Store
+*.tsbuildinfo
+
+# Claude Code local
+.claude
+
+# .codex/.agents chứa cấu hình MCP (n8n URL/API key) + rác phòng xa — .gitignore đã chặn
+# khỏi GIT nhưng KHÔNG chặn khỏi docker build context (2 cơ chế độc lập), phải khai riêng ở đây
+# kẻo `COPY . .` (Dockerfile) nướng thẳng secret vào image.
+.codex/
+.agents/
+
+# Rác artifact ở ROOT (báo cáo review .docx, ảnh chụp màn hình .png) — không cần trong image
+# runtime. CHỈ neo root (`/`) để KHÔNG loại nhầm ảnh trong public/ (next build cần asset đó).
+/*.docx
+/*.png

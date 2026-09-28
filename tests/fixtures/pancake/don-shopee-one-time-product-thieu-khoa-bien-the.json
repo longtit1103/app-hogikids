@@ -1,0 +1,82 @@
+[
+  {
+    "id": "MAU-DON-0001",
+    "system_id": 1,
+    "status": 3,
+    "status_name": "delivered",
+    "inserted_at": "2026-01-01T00:00:00.000000",
+    "updated_at": "2026-01-01T01:00:00.000000",
+    "order_sources_name": "Shopee",
+    "marketplace_id": "-3",
+    "total_price": 300000,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 30000,
+    "cod": 270000,
+    "advanced_platform_fee": {
+      "tax": 0,
+      "payment_fee": 30000,
+      "marketplace_promotion": [],
+      "returned_fee": 0
+    },
+    "status_history": [],
+    "customer": {
+      "name": "Khách ẩn danh"
+    },
+    "items": [
+      {
+        "quantity": 1,
+        "discount_each_product": 0,
+        "total_discount": 0,
+        "variation_id": null,
+        "one_time_product": true,
+        "variation_info": {
+          "display_id": null,
+          "name": "LISTING-01 - Sản phẩm mẫu A",
+          "detail": "Phân loại A,Cỡ 1",
+          "retail_price": 300000
+        }
+      }
+    ]
+  },
+  {
+    "id": "MAU-DON-0002",
+    "system_id": 2,
+    "status": 3,
+    "status_name": "delivered",
+    "inserted_at": "2026-01-02T00:00:00.000000",
+    "updated_at": "2026-01-02T01:00:00.000000",
+    "order_sources_name": "Shopee",
+    "marketplace_id": "-3",
+    "total_price": 600000,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 60000,
+    "cod": 540000,
+    "advanced_platform_fee": {
+      "tax": 0,
+      "payment_fee": 60000,
+      "marketplace_promotion": [],
+      "returned_fee": 0
+    },
+    "status_history": [],
+    "customer": {
+      "name": "Khách ẩn danh"
+    },
+    "items": [
+      {
+        "quantity": 1,
+        "discount_each_product": 0,
+        "total_discount": 0,
+        "variation_id": null,
+        "one_time_product": true,
+        "variation_info": {
+          "display_id": null,
+          "name": "LISTING-02 - Sản phẩm mẫu B",
+          "detail": "Phân loại B,Cỡ 2",
+          "retail_price": 600000
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,25 @@
+;
+; Archive created at 2026-07-16 02:15:06 +07
+;     dbname: postgres
+;     Format: CUSTOM
+;
+; Selected TOC Entries:
+;
+6; 2615 16384 SCHEMA - app postgres
+221; 1259 16386 TABLE app Order postgres
+220; 1259 16385 SEQUENCE app Order_id_seq postgres
+3873; 0 0 SEQUENCE OWNED BY app Order_id_seq postgres
+223; 1259 16396 TABLE app Variant postgres
+222; 1259 16395 SEQUENCE app Variant_id_seq postgres
+3874; 0 0 SEQUENCE OWNED BY app Variant_id_seq postgres
+224; 1259 16407 VIEW app v_order postgres
+3705; 2604 16389 DEFAULT app Order id postgres
+3706; 2604 16399 DEFAULT app Variant id postgres
+3863; 0 16386 TABLE DATA app Order postgres
+3865; 0 16396 TABLE DATA app Variant postgres
+3875; 0 0 SEQUENCE SET app Order_id_seq postgres
+3876; 0 0 SEQUENCE SET app Variant_id_seq postgres
+3708; 2606 16394 CONSTRAINT app Order Order_pkey postgres
+3711; 2606 16404 CONSTRAINT app Variant Variant_pkey postgres
+3713; 2606 16406 CONSTRAINT app Variant Variant_sku_key postgres
+3709; 1259 16411 INDEX app idx_order_note postgres

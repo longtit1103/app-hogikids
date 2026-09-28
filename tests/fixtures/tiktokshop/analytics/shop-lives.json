@@ -1,0 +1,95 @@
+{
+  "code": 0,
+  "message": "Success",
+  "data": {
+    "latest_available_date": "2026-08-23",
+    "next_page_token": "",
+    "total_count": 60,
+    "live_stream_sessions": [
+      {
+        "end_time": "1785571018",
+        "id": "7668935874625751828",
+        "sales_performance": {
+          "24h_live_gmv": {
+            "amount": "0",
+            "currency": "VND"
+          },
+          "avg_price": {
+            "amount": "0",
+            "currency": "VND"
+          },
+          "click_to_order_rate": "0.00%",
+          "created_sku_orders": 0,
+          "customers": 0,
+          "different_products_sold": 0,
+          "gmv": {
+            "amount": "0",
+            "currency": "VND"
+          },
+          "items_sold": 0,
+          "products_added": 1,
+          "sku_orders": 0
+        },
+        "start_time": "1785563299",
+        "title": "tieu_de_6653",
+        "username": "creator_10"
+      },
+      {
+        "end_time": "1785996816",
+        "id": "7670797759402822421",
+        "sales_performance": {
+          "24h_live_gmv": {
+            "amount": "0",
+            "currency": "VND"
+          },
+          "avg_price": {
+            "amount": "0",
+            "currency": "VND"
+          },
+          "click_to_order_rate": "0.00%",
+          "created_sku_orders": 0,
+          "customers": 0,
+          "different_products_sold": 0,
+          "gmv": {
+            "amount": "0",
+            "currency": "VND"
+          },
+          "items_sold": 0,
+          "products_added": 1,
+          "sku_orders": 0
+        },
+        "start_time": "1785996813",
+        "title": "tieu_de_6206",
+        "username": "creator_10"
+      },
+      {
+        "end_time": "1786109473",
+        "id": "7671268054237514504",
+        "sales_performance": {
+          "24h_live_gmv": {
+            "amount": "0",
+            "currency": "VND"
+          },
+          "avg_price": {
+            "amount": "0",
+            "currency": "VND"
+          },
+          "click_to_order_rate": "0.00%",
+          "created_sku_orders": 0,
+          "customers": 0,
+          "different_products_sold": 0,
+          "gmv": {
+            "amount": "0",
+            "currency": "VND"
+          },
+          "items_sold": 0,
+          "products_added": 1,
+          "sku_orders": 0
+        },
+        "start_time": "1786106296",
+        "title": "tieu_de_2784",
+        "username": "creator_11"
+      }
+    ]
+  }
+}

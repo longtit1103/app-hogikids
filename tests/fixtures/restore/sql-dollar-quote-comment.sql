@@ -1,0 +1,1 @@
+SELECT $$--$$; TRUNCATE auth.users;

@@ -1,0 +1,446 @@
+{
+  "code": 0,
+  "message": "Success",
+  "data": {
+    "latest_available_date": "2026-08-22",
+    "next_page_token": "cGFnZV9udW1iZXI9MQ==",
+    "total_count": 148,
+    "products": [
+      {
+        "affiliate_live_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "atc_users": 0,
+          "click_order_rate": "0.0000",
+          "ctr": "0.0000",
+          "live_attributed_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "new_live_count": 0,
+          "product_clicks": 0,
+          "product_impressions": 0,
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 0,
+          "unique_ctr": "0.0000",
+          "unique_product_impressions": 0
+        },
+        "affiliate_total_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "add_cart_users": 0,
+          "aov": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_orders": 0,
+          "attributed_sku_orders": 0,
+          "attributed_sold_items": 0,
+          "avg_daily_creator_posted_content": 0,
+          "click_order_rate": "0.0000",
+          "ctr": "0.0000",
+          "estimated_customers": 0,
+          "product_clicks": 0,
+          "product_impressions": 42,
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 0,
+          "unique_ctr": "0.0000",
+          "unique_product_impressions": 25
+        },
+        "affiliate_video_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "atc_users": 0,
+          "attributed_video_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "click_order_rate": "0.0000",
+          "ctr": "0.0000",
+          "new_video_count": 0,
+          "product_clicks": 0,
+          "product_impressions": 5,
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 0,
+          "unique_ctr": "0.0000",
+          "unique_product_impressions": 3
+        },
+        "id": "1733583824365520555",
+        "seller_live_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "add_cart_users": 0,
+          "aov": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_orders": 0,
+          "attributed_sku_orders": 0,
+          "attributed_sold_items": 0,
+          "click_order_rate": "0.0000",
+          "ctr": "0.0000",
+          "estimated_customers": 0,
+          "new_live_count": 0,
+          "product_clicks": 0,
+          "product_impressions": 0,
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 0,
+          "unique_ctr": "0.0000",
+          "unique_product_impressions": 0
+        },
+        "seller_product_card_performance": {
+          "add_cart_count": 14,
+          "add_cart_rate": "0.0745",
+          "add_cart_users": 6,
+          "aov": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_orders": 0,
+          "attributed_sku_orders": 0,
+          "attributed_sold_items": 0,
+          "click_order_rate": "0.0000",
+          "ctr": "0.0683",
+          "estimated_customers": 0,
+          "product_clicks": 188,
+          "product_impressions": 2752,
+          "unique_atc_rate": "0.0441",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 136,
+          "unique_ctr": "0.0710",
+          "unique_product_impressions": 1915
+        },
+        "seller_video_performance": {
+          "add_cart_count": 17,
+          "add_cart_rate": "0.0914",
+          "add_cart_users": 10,
+          "aov": {
+            "amount": "330000.00",
+            "currency": "VND"
+          },
+          "attributed_gmv": {
+            "amount": "330000.00",
+            "currency": "VND"
+          },
+          "attributed_orders": 1,
+          "attributed_sku_orders": 1,
+          "attributed_sold_items": 1,
+          "click_order_rate": "0.0054",
+          "ctr": "0.0788",
+          "estimated_customers": 1,
+          "new_video_count": 0,
+          "product_clicks": 186,
+          "product_impressions": 2361,
+          "unique_atc_rate": "0.0752",
+          "unique_click_order_rate": "0.0075",
+          "unique_clicks": 133,
+          "unique_ctr": "0.0955",
+          "unique_product_impressions": 1392
+        },
+        "shop_tab_performance": {
+          "estimated_shop_tab_customers": 0,
+          "shop_tab_ctor_sku": "0.0000",
+          "shop_tab_ctr": "0.0528",
+          "shop_tab_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "shop_tab_product_clicks": 105,
+          "shop_tab_product_impressions": 1988,
+          "shop_tab_sold_items": 0,
+          "unique_shop_tab_product_clicks": 89
+        },
+        "total_performance": {
+          "add_cart_count": 31,
+          "add_cart_rate": "0.0829",
+          "add_cart_users": 15,
+          "aov": {
+            "amount": "330000.00",
+            "currency": "VND"
+          },
+          "click_order_rate": "0.0027",
+          "ctr": "0.0725",
+          "estimated_customers": 1,
+          "gmv": {
+            "amount": "330000.00",
+            "currency": "VND"
+          },
+          "gmv_incl_tax": {
+            "amount": "330000.00",
+            "currency": "VND"
+          },
+          "gross_merchandise_value": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "items_sold": 1,
+          "orders": 1,
+          "product_clicks": 374,
+          "product_impressions": 5156,
+          "refund_customers": 0,
+          "refunded_items": 0,
+          "refunds": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "shipping_fees": {
+            "amount": "40000.01",
+            "currency": "VND"
+          },
+          "sku_orders": 1,
+          "tax": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "unique_atc_rate": "0.0528",
+          "unique_click_order_rate": "0.0035",
+          "unique_clicks": 284,
+          "unique_ctr": "0.0858",
+          "unique_product_impressions": 3309
+        }
+      },
+      {
+        "id": "1729557518640450219",
+        "seller_product_card_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "add_cart_users": 0,
+          "aov": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_orders": 0,
+          "attributed_sku_orders": 0,
+          "attributed_sold_items": 0,
+          "click_order_rate": "0.0000",
+          "ctr": "0.0244",
+          "estimated_customers": 0,
+          "product_clicks": 1,
+          "product_impressions": 41,
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 1,
+          "unique_ctr": "0.0256",
+          "unique_product_impressions": 39
+        },
+        "shop_tab_performance": {
+          "estimated_shop_tab_customers": 0,
+          "shop_tab_ctor_sku": "0.0000",
+          "shop_tab_ctr": "0.0556",
+          "shop_tab_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "shop_tab_product_clicks": 1,
+          "shop_tab_product_impressions": 18,
+          "shop_tab_sold_items": 0,
+          "unique_shop_tab_product_clicks": 1
+        },
+        "total_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "add_cart_users": 0,
+          "aov": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "click_order_rate": "0.0000",
+          "ctr": "0.0244",
+          "estimated_customers": 0,
+          "gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "gmv_incl_tax": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "gross_merchandise_value": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "items_sold": 0,
+          "orders": 0,
+          "product_clicks": 1,
+          "product_impressions": 41,
+          "refund_customers": 0,
+          "refunded_items": 0,
+          "refunds": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "shipping_fees": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "sku_orders": 0,
+          "tax": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 1,
+          "unique_ctr": "0.0250",
+          "unique_product_impressions": 40
+        }
+      },
+      {
+        "affiliate_total_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "add_cart_users": 0,
+          "aov": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_orders": 0,
+          "attributed_sku_orders": 0,
+          "attributed_sold_items": 0,
+          "avg_daily_creator_posted_content": 0,
+          "click_order_rate": "0.0000",
+          "ctr": "0.0000",
+          "estimated_customers": 0,
+          "product_clicks": 0,
+          "product_impressions": 14,
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 0,
+          "unique_ctr": "0.0000",
+          "unique_product_impressions": 14
+        },
+        "affiliate_video_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "atc_users": 0,
+          "attributed_video_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "click_order_rate": "0.0000",
+          "ctr": "0.0000",
+          "new_video_count": 0,
+          "product_clicks": 0,
+          "product_impressions": 2,
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 0,
+          "unique_ctr": "0.0000",
+          "unique_product_impressions": 2
+        },
+        "id": "1729557551540701867",
+        "seller_product_card_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "add_cart_users": 0,
+          "aov": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "attributed_orders": 0,
+          "attributed_sku_orders": 0,
+          "attributed_sold_items": 0,
+          "click_order_rate": "0.0000",
+          "ctr": "0.0000",
+          "estimated_customers": 0,
+          "product_clicks": 0,
+          "product_impressions": 6,
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 0,
+          "unique_ctr": "0.0000",
+          "unique_product_impressions": 5
+        },
+        "shop_tab_performance": {
+          "estimated_shop_tab_customers": 0,
+          "shop_tab_ctor_sku": "0.0000",
+          "shop_tab_ctr": "0.0000",
+          "shop_tab_gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "shop_tab_product_clicks": 0,
+          "shop_tab_product_impressions": 7,
+          "shop_tab_sold_items": 0,
+          "unique_shop_tab_product_clicks": 0
+        },
+        "total_performance": {
+          "add_cart_count": 0,
+          "add_cart_rate": "0.0000",
+          "add_cart_users": 0,
+          "aov": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "click_order_rate": "0.0000",
+          "ctr": "0.0000",
+          "estimated_customers": 0,
+          "gmv": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "gmv_incl_tax": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "gross_merchandise_value": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "items_sold": 0,
+          "orders": 0,
+          "product_clicks": 0,
+          "product_impressions": 20,
+          "refund_customers": 0,
+          "refunded_items": 0,
+          "refunds": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "shipping_fees": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "sku_orders": 0,
+          "tax": {
+            "amount": "0.00",
+            "currency": "VND"
+          },
+          "unique_atc_rate": "0.0000",
+          "unique_click_order_rate": "0.0000",
+          "unique_clicks": 0,
+          "unique_ctr": "0.0000",
+          "unique_product_impressions": 20
+        }
+      }
+    ]
+  }
+}

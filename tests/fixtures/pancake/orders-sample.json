@@ -1,0 +1,693 @@
+[
+  {
+    "id": "260620HR6W3JSW",
+    "system_id": 80,
+    "status": 3,
+    "status_name": "delivered",
+    "inserted_at": "2026-06-19T23:15:18.000000",
+    "updated_at": "2026-06-26T03:41:53.661007",
+    "order_sources_name": "Shopee",
+    "order_sources": "-3",
+    "marketplace_id": "-3",
+    "total_price": 790000,
+    "total_price_after_sub_discount": 503310,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 286690,
+    "advanced_platform_fee": {
+      "marketplace_promotion": [
+        "SV1445757233434624"
+      ],
+      "payment_fee": 130350,
+      "platform_commission": 45390,
+      "seller_transaction_fee": 49950,
+      "service_fee": 49150,
+      "tax": 11850
+    },
+    "cod": 503310,
+    "money_to_collect": 503310,
+    "total_quantity": 2,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 12533944127,
+        "product_id": "988d2b6a-1487-4530-9c23-610441b254fd",
+        "variation_id": "fbdbf696-22af-4df3-aa33-447f996bf02f",
+        "quantity": 1,
+        "discount_each_product": 0,
+        "total_discount": 0,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000168)",
+          "display_id": "SP000168",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "112-3",
+          "retail_price": 490000,
+          "average_imported_price": 0,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Đỏ"
+            },
+            {
+              "name": "Kích cỡ",
+              "value": "Size M ( 51-55kg )"
+            }
+          ],
+          "detail": "Màu sắc: Đỏ, Kích cỡ: Size M ( 51-55kg )"
+        }
+      },
+      {
+        "id": 12533944128,
+        "product_id": "988d2b6a-1487-4530-9c23-610441b254fd",
+        "variation_id": "31310015-d3b9-47d0-8567-c66a23423d8e",
+        "quantity": 1,
+        "discount_each_product": 0,
+        "total_discount": 0,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000128)",
+          "display_id": "SP000128",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "112-14",
+          "retail_price": 300000,
+          "average_imported_price": 0,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Đỏ"
+            },
+            {
+              "name": "Kích cỡ",
+              "value": "120"
+            }
+          ],
+          "detail": "Màu sắc: Đỏ, Kích cỡ: 120"
+        }
+      }
+    ]
+  },
+  {
+    "id": "260513AE3NS1HU",
+    "system_id": 69,
+    "status": 3,
+    "status_name": "delivered",
+    "inserted_at": "2026-05-13T08:05:53.000000",
+    "updated_at": "2026-05-18T08:12:02.291422",
+    "order_sources_name": "Shopee",
+    "order_sources": "-3",
+    "marketplace_id": "-3",
+    "total_price": 230000,
+    "total_price_after_sub_discount": 160055,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 69945,
+    "advanced_platform_fee": {
+      "marketplace_promotion": [
+        "CRMSOWDTA3"
+      ],
+      "payment_fee": 31050,
+      "platform_commission": 7825,
+      "seller_transaction_fee": 13800,
+      "service_fee": 13820,
+      "tax": 3450
+    },
+    "cod": 160055,
+    "money_to_collect": 160055,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 11919636873,
+        "product_id": "ab3a286e-2487-4d56-a7e6-c7fd75ec4780",
+        "variation_id": "feca05c5-de63-49f2-acc0-880a05d31387",
+        "quantity": 1,
+        "discount_each_product": 0,
+        "total_discount": 0,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000316)",
+          "display_id": "SP000316",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "88-2",
+          "retail_price": 230000,
+          "average_imported_price": 0,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Nâu Tutu"
+            },
+            {
+              "name": "Kíchcỡ",
+              "value": "120"
+            }
+          ],
+          "detail": "Màu sắc: Nâu Tutu, Kíchcỡ: 120"
+        }
+      }
+    ]
+  },
+  {
+    "id": "260425QACGBGMQ",
+    "system_id": 62,
+    "status": 4,
+    "status_name": "returning",
+    "inserted_at": "2026-04-25T07:30:32.000000",
+    "updated_at": "2026-05-02T18:04:15.681026",
+    "order_sources_name": "Shopee",
+    "order_sources": "-3",
+    "marketplace_id": "-3",
+    "total_price": 230000,
+    "total_price_after_sub_discount": 228380,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 1620,
+    "advanced_platform_fee": {
+      "returned_fee": 1620
+    },
+    "cod": 228380,
+    "money_to_collect": 228380,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 12506625374,
+        "product_id": "ab3a286e-2487-4d56-a7e6-c7fd75ec4780",
+        "variation_id": "1fa1bef7-8c94-4bef-9071-dedf34001ae7",
+        "quantity": 1,
+        "discount_each_product": 0,
+        "total_discount": 0,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000315)",
+          "display_id": "SP000315",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "88-6",
+          "retail_price": 230000,
+          "average_imported_price": 0,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Nâu Tutu"
+            },
+            {
+              "name": "Kíchcỡ",
+              "value": "110"
+            }
+          ],
+          "detail": "Màu sắc: Nâu Tutu, Kíchcỡ: 110"
+        }
+      }
+    ]
+  },
+  {
+    "id": "260422F7SFCQ3W",
+    "system_id": 57,
+    "status": 4,
+    "status_name": "returning",
+    "inserted_at": "2026-04-22T02:22:47.000000",
+    "updated_at": "2026-05-17T18:39:19.041296",
+    "order_sources_name": "Shopee",
+    "order_sources": "-3",
+    "marketplace_id": "-3",
+    "total_price": 230000,
+    "total_price_after_sub_discount": 228380,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 1620,
+    "advanced_platform_fee": {
+      "returned_fee": 1620
+    },
+    "cod": 228380,
+    "money_to_collect": 228380,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 11905968989,
+        "product_id": "ab3a286e-2487-4d56-a7e6-c7fd75ec4780",
+        "variation_id": "feca05c5-de63-49f2-acc0-880a05d31387",
+        "quantity": 1,
+        "discount_each_product": 0,
+        "total_discount": 0,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000316)",
+          "display_id": "SP000316",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "88-2",
+          "retail_price": 230000,
+          "average_imported_price": 0,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Nâu Tutu"
+            },
+            {
+              "name": "Kíchcỡ",
+              "value": "120"
+            }
+          ],
+          "detail": "Màu sắc: Nâu Tutu, Kíchcỡ: 120"
+        }
+      }
+    ]
+  },
+  {
+    "id": "2606033JKDFHMN",
+    "system_id": 75,
+    "status": 6,
+    "status_name": "canceled",
+    "inserted_at": "2026-06-02T18:11:02.000000",
+    "updated_at": "2026-06-06T18:36:46.880508",
+    "order_sources_name": "Shopee",
+    "order_sources": "-3",
+    "marketplace_id": "-3",
+    "total_price": 230000,
+    "total_price_after_sub_discount": 159150,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 70850,
+    "advanced_platform_fee": {
+      "marketplace_promotion": [
+        "SVIPDDV0106M350C200"
+      ],
+      "payment_fee": 37950,
+      "seller_transaction_fee": 13800,
+      "service_fee": 15650,
+      "tax": 3450
+    },
+    "cod": 159150,
+    "money_to_collect": 159150,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 11931129389,
+        "product_id": "ab3a286e-2487-4d56-a7e6-c7fd75ec4780",
+        "variation_id": "feca05c5-de63-49f2-acc0-880a05d31387",
+        "quantity": 1,
+        "discount_each_product": 0,
+        "total_discount": 0,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000316)",
+          "display_id": "SP000316",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "88-2",
+          "retail_price": 230000,
+          "average_imported_price": null,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Nâu Tutu"
+            },
+            {
+              "name": "Kíchcỡ",
+              "value": "120"
+            }
+          ],
+          "detail": "Màu sắc: Nâu Tutu, Kíchcỡ: 120"
+        }
+      }
+    ]
+  },
+  {
+    "id": "260525C9AP4B6A",
+    "system_id": 72,
+    "status": 6,
+    "status_name": "canceled",
+    "inserted_at": "2026-05-25T15:32:41.000000",
+    "updated_at": "2026-05-27T17:44:56.289643",
+    "order_sources_name": "Shopee",
+    "order_sources": "-3",
+    "marketplace_id": "-3",
+    "total_price": 300000,
+    "total_price_after_sub_discount": 208500,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 91500,
+    "advanced_platform_fee": {
+      "marketplace_promotion": [
+        "SVIPDDV0105M350C200"
+      ],
+      "payment_fee": 49500,
+      "seller_transaction_fee": 18000,
+      "service_fee": 19500,
+      "tax": 4500
+    },
+    "cod": 208500,
+    "money_to_collect": 208500,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 12521043439,
+        "product_id": "988d2b6a-1487-4530-9c23-610441b254fd",
+        "variation_id": "31310015-d3b9-47d0-8567-c66a23423d8e",
+        "quantity": 1,
+        "discount_each_product": 0,
+        "total_discount": 0,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000128)",
+          "display_id": "SP000128",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "112-14",
+          "retail_price": 300000,
+          "average_imported_price": null,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Đỏ"
+            },
+            {
+              "name": "Kích cỡ",
+              "value": "120"
+            }
+          ],
+          "detail": "Màu sắc: Đỏ, Kích cỡ: 120"
+        }
+      }
+    ]
+  },
+  {
+    "id": "5846974909xxxxxxx",
+    "system_id": 567,
+    "status": 3,
+    "status_name": "delivered",
+    "inserted_at": "2026-06-25T05:14:17.000000",
+    "updated_at": "2026-07-03T17:09:44.310080",
+    "order_sources_name": "Tiktok",
+    "order_sources": "-9",
+    "marketplace_id": "-9",
+    "total_price": 230000,
+    "total_price_after_sub_discount": 166805,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 63195,
+    "advanced_platform_fee": {
+      "affiliate_commission": 0,
+      "customer_paid_shipping_fee": 34800,
+      "diff_shipping_fee": 0,
+      "isr_income_tax_amount": 1150,
+      "iva_vat_amount": 2300,
+      "marketplace_voucher": 50600,
+      "payment_fee": 13240,
+      "platform_commission": 31050,
+      "service_fee": 15455,
+      "shipping_fee_amount": 0,
+      "tax": 3450
+    },
+    "cod": 166805,
+    "money_to_collect": 166805,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 10955940269,
+        "product_id": "450d2fd5-e9a5-4a10-8cb6-796c0296d682",
+        "variation_id": "002b1e24-eb72-4eac-8361-7ebab55d19a4",
+        "quantity": 1,
+        "discount_each_product": 50600,
+        "total_discount": 50600,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000316)",
+          "display_id": "SP000316",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "88-2",
+          "retail_price": 230000,
+          "average_imported_price": 0,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Nâu Tutu"
+            },
+            {
+              "name": "Kíchcỡ",
+              "value": "120"
+            }
+          ],
+          "detail": "Màu sắc: Nâu Tutu, Kíchcỡ: 120"
+        }
+      }
+    ]
+  },
+  {
+    "id": "580000000000000001",
+    "system_id": 566,
+    "status": 3,
+    "status_name": "delivered",
+    "inserted_at": "2026-06-25T04:14:23.000000",
+    "updated_at": "2026-07-01T17:15:47.456072",
+    "order_sources_name": "Tiktok",
+    "order_sources": "-9",
+    "marketplace_id": "-9",
+    "total_price": 350000,
+    "total_price_after_sub_discount": 152585,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 56415,
+    "advanced_platform_fee": {
+      "affiliate_commission": 0,
+      "customer_paid_shipping_fee": 0,
+      "diff_shipping_fee": 0,
+      "isr_income_tax_amount": 1045,
+      "iva_vat_amount": 2090,
+      "marketplace_voucher": 0,
+      "payment_fee": 10450,
+      "platform_commission": 28215,
+      "service_fee": 14615,
+      "shipping_fee_amount": 0,
+      "tax": 3135
+    },
+    "cod": 152585,
+    "money_to_collect": 152585,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 11292857504,
+        "product_id": "faf2cb08-b104-4a96-a113-40103630b54f",
+        "variation_id": "d579171f-79a8-4632-a134-54175588852c",
+        "quantity": 1,
+        "discount_each_product": 141000,
+        "total_discount": 141000,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP-TT-01)",
+          "display_id": "SP-TT-01",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "37-4",
+          "retail_price": 350000,
+          "average_imported_price": 0,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Vàng Non"
+            },
+            {
+              "name": "Kíchcỡ",
+              "value": "130"
+            }
+          ],
+          "detail": "Màu sắc: Vàng Non, Kíchcỡ: 130"
+        }
+      }
+    ]
+  },
+  {
+    "id": "580000000000000002",
+    "system_id": 564,
+    "status": 4,
+    "status_name": "returning",
+    "inserted_at": "2026-06-25T01:14:03.000000",
+    "updated_at": "2026-07-03T14:12:06.171231",
+    "order_sources_name": "Tiktok",
+    "order_sources": "-9",
+    "marketplace_id": "-9",
+    "total_price": 230000,
+    "total_price_after_sub_discount": 174800,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 9200,
+    "advanced_platform_fee": {
+      "marketplace_voucher": 0
+    },
+    "cod": 174800,
+    "money_to_collect": 174800,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 12536320227,
+        "product_id": "450d2fd5-e9a5-4a10-8cb6-796c0296d682",
+        "variation_id": "002b1e24-eb72-4eac-8361-7ebab55d19a4",
+        "quantity": 1,
+        "discount_each_product": 46000,
+        "total_discount": 46000,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000316)",
+          "display_id": "SP000316",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "88-2",
+          "retail_price": 230000,
+          "average_imported_price": 0,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Nâu Tutu"
+            },
+            {
+              "name": "Kíchcỡ",
+              "value": "120"
+            }
+          ],
+          "detail": "Màu sắc: Nâu Tutu, Kíchcỡ: 120"
+        }
+      }
+    ]
+  },
+  {
+    "id": "58488856609xxxxxxx",
+    "system_id": 568,
+    "status": 6,
+    "status_name": "canceled",
+    "inserted_at": "2026-07-06T11:34:47.000000",
+    "updated_at": "2026-07-06T11:35:18.865797",
+    "order_sources_name": "Tiktok",
+    "order_sources": "-9",
+    "marketplace_id": "-9",
+    "total_price": 400000,
+    "total_price_after_sub_discount": 293550,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 15450,
+    "advanced_platform_fee": {
+      "marketplace_voucher": 0
+    },
+    "cod": 293550,
+    "money_to_collect": 293550,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 10961225462,
+        "product_id": "aba49c86-3037-4143-8c76-606a4ef3b2d7",
+        "variation_id": "93b1313b-f382-47bc-844f-8cee9a4531ed",
+        "quantity": 1,
+        "discount_each_product": 91000,
+        "total_discount": 91000,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP000449)",
+          "display_id": "SP000449",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "21-23",
+          "retail_price": 400000,
+          "average_imported_price": null,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Rêu tơ óng"
+            },
+            {
+              "name": "Kíchcỡ",
+              "value": "110"
+            }
+          ],
+          "detail": "Màu sắc: Rêu tơ óng, Kíchcỡ: 110"
+        }
+      }
+    ]
+  },
+  {
+    "id": "584696409xxxxxxx0",
+    "system_id": 565,
+    "status": 6,
+    "status_name": "canceled",
+    "inserted_at": "2026-06-25T04:04:32.000000",
+    "updated_at": "2026-06-25T04:19:20.642368",
+    "order_sources_name": "Tiktok",
+    "order_sources": "-9",
+    "marketplace_id": "-9",
+    "total_price": 350000,
+    "total_price_after_sub_discount": 198550,
+    "total_discount": 0,
+    "shipping_fee": 0,
+    "fee_marketplace": 10450,
+    "advanced_platform_fee": {
+      "marketplace_voucher": 0
+    },
+    "cod": 198550,
+    "money_to_collect": 198550,
+    "total_quantity": 1,
+    "customer": {
+      "name": "Khách hàng ẩn danh"
+    },
+    "items": [
+      {
+        "id": 10955908649,
+        "product_id": "faf2cb08-b104-4a96-a113-40103630b54f",
+        "variation_id": "d99c2ef7-dac1-4b2d-bf1a-8fc16c2f60af",
+        "quantity": 1,
+        "discount_each_product": 141000,
+        "total_discount": 141000,
+        "variation_info": {
+          "name": "Sản phẩm mẫu (SP-TT-02)",
+          "display_id": "SP-TT-02",
+          "product_display_id": "SAMPLE-LISTING",
+          "barcode": "37-6",
+          "retail_price": 350000,
+          "average_imported_price": null,
+          "last_imported_price": 0,
+          "exact_price": null,
+          "fields": [
+            {
+              "name": "Màu sắc",
+              "value": "Vàng Non"
+            },
+            {
+              "name": "Kíchcỡ",
+              "value": "120"
+            }
+          ],
+          "detail": "Màu sắc: Vàng Non, Kíchcỡ: 120"
+        }
+      }
+    ]
+  }
+]

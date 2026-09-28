@@ -1,0 +1,60 @@
+<svg viewBox="0 0 480 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">
+  <!-- Hanger -->
+  <path
+    d="M240 58 C240 47 249 39 259 39 C269 39 277 47 277 57 C277 65 271 71 263 75 L338 128 L142 128 L217 75 C209 71 203 65 203 57 C203 47 211 39 221 39"
+    stroke="#cc785c"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <line x1="142" y1="128" x2="338" y2="128" stroke="#cc785c" stroke-width="4" stroke-linecap="round" />
+
+  <!-- Onesie hanging from the bar -->
+  <path
+    d="M182 128
+       L182 156
+       L152 184
+       L152 214
+       L182 204
+       L182 256
+       C182 276 202 292 240 292
+       C278 292 298 276 298 256
+       L298 204
+       L328 214
+       L328 184
+       L298 156
+       L298 128
+       C298 146 272 154 240 154
+       C208 154 182 146 182 128 Z"
+    stroke="#cc785c"
+    stroke-width="4"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+    fill="#efe9de"
+  />
+  <circle cx="240" cy="176" r="9" stroke="#cc785c" stroke-width="3" fill="none" />
+  <path d="M222 230 C230 238 250 238 258 230" stroke="#cc785c" stroke-width="3" stroke-linecap="round" />
+
+  <!-- Shipping box, left -->
+  <g transform="translate(50 246)">
+    <rect x="0" y="0" width="88" height="66" rx="4" stroke="#cc785c" stroke-width="4" fill="#faf9f5" />
+    <line x1="0" y1="22" x2="88" y2="22" stroke="#cc785c" stroke-width="3" />
+    <line x1="44" y1="0" x2="44" y2="22" stroke="#cc785c" stroke-width="3" />
+  </g>
+
+  <!-- Shipping box, right -->
+  <g transform="translate(348 258)">
+    <rect x="0" y="0" width="62" height="48" rx="4" stroke="#cc785c" stroke-width="4" fill="#faf9f5" />
+    <line x1="0" y1="16" x2="62" y2="16" stroke="#cc785c" stroke-width="3" />
+    <line x1="31" y1="0" x2="31" y2="16" stroke="#cc785c" stroke-width="3" />
+  </g>
+
+  <!-- Small decorative star -->
+  <path
+    d="M370 90 L374 100 L385 100 L376 107 L379 118 L370 111 L361 118 L364 107 L355 100 L366 100 Z"
+    stroke="#cc785c"
+    stroke-width="3"
+    stroke-linejoin="round"
+    fill="none"
+  />
+</svg>

@@ -1,0 +1,90 @@
+{
+  "name": "hogikids-pancake-nightly",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "0a3f1c62-7b4e-4a1d-9c3a-2f6b8d51e004",
+      "name": "03:00 mỗi đêm",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// NIGHTLY 3h sáng — (1) kéo đơn VỪA CẬP NHẬT (3 ngày) + (2) 5 stream nặng/tĩnh.\n//\n// (1) Orders API CÓ lọc theo thời điểm cập nhật: `updateStatus` nhận TÊN TRƯỜNG THỜI GIAN\n//     (`inserted_at` mặc định | `updated_at` | `paid_at` = lúc sàn đối soát | `partner_inserted_at`).\n//     Đo thật 2026-07-14 (shop TikTok, cửa sổ 3 ngày): mặc định trả 1 đơn; `updateStatus=updated_at`\n//     trả 4 đơn — trong đó 3 đơn TẠO từ 25/06–07/07 nhưng vừa được sửa trong cửa sổ.\n//     Kết luận cũ \"API CHỈ lọc inserted_at\" là SAI: test cũ truyền `updateStatus=0/1`, mà 0/1 là\n//     MÃ TRẠNG THÁI ĐƠN (Mới / Đã xác nhận), không phải tên trường.\n//     ⇒ Bỏ vòng re-sync 45 ngày (45 cửa sổ × 3 shop = 135 request/đêm) → 1 cửa sổ 3 ngày/shop.\n//     Đơn đổi sang HOÀN/HUỶ và đơn được sàn CẬP NHẬT PHÍ (5% tạm → phí thật cao hơn hẳn mức tạm) đều lọt cửa sổ này.\n//\n// (1b) LƯỚI AN TOÀN — CHỦ NHẬT (giờ VN) quét thêm 45 ngày theo `inserted_at`: bù trường hợp app/n8n\n//      chết dài ngày, hoặc Pancake KHÔNG cập nhật `updated_at` cho một loại thay đổi nào đó (chưa\n//      chứng minh được là nó luôn cập nhật). Rẻ: 1 lần/tuần. Bronze dedupe theo hash ⇒ chồng lấn miễn phí.\n//\n// (2) customers/purchases/transactions/inventory_histories/reverse_order đổi chậm → 1 lần/đêm là đủ;\n//     kéo mỗi 30' (customers hàng trăm trang) sẽ ăn rate-limit ban.\n//\n// (3) TỪ 2026-07-28 lượt này còn kéo `products` + `products/variations` — trước đây việc đó do\n//     workflow 30' làm. Lịch 30' ĐÃ TẮT (chỉ còn chạy khi bấm \"Đồng bộ ngay\" trong app): webhook\n//     Pancake nay lo phần TƯƠI (đơn hàng + tồn kho theo thời gian thực) nên không cần gọi API 48\n//     lượt/ngày nữa. Hệ quả BẮT BUỘC nhớ: đây là lượt DUY NHẤT làm mới giá vốn/sản phẩm mỗi ngày,\n//     và cũng là lượt tạo điều kiện cho bước vá tồn ở cuối (chốt chặn của endpoint đòi có lượt kéo\n//     `products` shop kho trong 2 giờ) ⇒ products PHẢI đứng trước trong STREAMS, đừng đảo xuống sau.\n// Land TEXT THÔ vào Bronze (KHÔNG để n8n parse JSON). SỬA khối CONFIG rồi Execute.\n/**\n * Khoá lấy từ node \"Lấy khoá từ bảng Setting\" (mỗi dòng = 1 cặp key/value của bảng `app.\"Setting\"`).\n * Để khoá trong bảng thay vì viết thẳng vào đây: mở bảng là xem được, đổi khoá chỉ sửa 1 ô, và\n * file workflow trong repo khớp tuyệt đối bản đang chạy nên diff được.\n */\nconst KHOA = Object.fromEntries($input.all().map((i) => [i.json.key, i.json.value]));\nconst KHOA_THIEU = [\"n8nAppUrl\",\"n8nIngestSecret\",\"pancakeApiKeyKho\",\"pancakeApiKeyShopee\",\"pancakeApiKeyTiktok\",\"pancakeShopIdKho\",\"pancakeShopIdShopee\",\"pancakeShopIdTiktok\"].filter((k) => !KHOA[k]);\nif (KHOA_THIEU.length) {\n  throw new Error(\n    `THIẾU KHOÁ trong bảng app.\"Setting\": ${KHOA_THIEU.join(\", \")}. Thêm dòng key/value tương ứng rồi ` +\n      `chạy lại — không cần đụng file cấu hình hay dựng lại container.`\n  );\n}\n\nconst CONFIG = {\n  base: \"https://pos.pages.fm/api/v1\",\n  appUrl: KHOA.n8nAppUrl,              // go-live: http://hogikids-app:3000 | test: http://<IP-Tailscale-dev>:3000\n  ingestSecret: KHOA.n8nIngestSecret,  // == INGEST_SECRET trong .env app\n  // Shop ID đọc từ bảng Setting (clone-and-go 2026-08-21) — cùng nguồn với app; bản clone điền id CỦA HỌ ở /cai-dat.\n  shops: {\n    kho:    { id: KHOA.pancakeShopIdKho,    key: KHOA.pancakeApiKeyKho },\n    shopee: { id: KHOA.pancakeShopIdShopee, key: KHOA.pancakeApiKeyShopee },\n    tiktok: { id: KHOA.pancakeShopIdTiktok, key: KHOA.pancakeApiKeyTiktok },\n  },\n};\n\n// `shops` = shop THẬT SỰ có dữ liệu cho stream đó (Task 0 discovery) — purchases chỉ có ở shop kho;\n// transactions + reverse_order chỉ có ở 2 shop marketplace (Shopee/TikTok).\nconst STREAMS = [\n  // THỨ TỰ CỐ Ý: products (+ variations) TRƯỚC orders — OrderItem tra Variant theo SKU để lấy giá\n  // vốn, chưa có Variant thì item mồ côi và COGS = 0.\n  { name: \"products\",                  shops: [\"kho\", \"shopee\", \"tiktok\"] },\n  { name: \"products/variations\",       shops: [\"kho\", \"shopee\", \"tiktok\"] },\n  { name: \"orders\",                    shops: [\"kho\", \"shopee\", \"tiktok\"], dated: true },\n  { name: \"purchases\",                 shops: [\"kho\"] },\n  { name: \"inventory_histories\",       shops: [\"kho\", \"shopee\", \"tiktok\"] },\n  { name: \"transactions\",              shops: [\"shopee\", \"tiktok\"] },\n  { name: \"marketplace/reverse_order\", shops: [\"shopee\", \"tiktok\"] },\n  { name: \"customers\",                 shops: [\"kho\", \"shopee\", \"tiktok\"] },\n];\n\nconst http = this.helpers.httpRequest;\nconst sleep = (ms) => new Promise((r) => setTimeout(r, ms));\nconst nowSec = Math.floor(Date.now() / 1000);\n\n// Chủ nhật tính theo GIỜ VN (không theo TZ container — container có thể chạy UTC).\nconst vnWeekday = new Intl.DateTimeFormat(\"en-US\", { timeZone: \"Asia/Ho_Chi_Minh\", weekday: \"short\" }).format(\n  new Date(nowSec * 1000)\n);\nconst isSunday = vnWeekday === \"Sun\";\n\n/**\n * Mỗi \"lượt\" = 1 cửa sổ thời gian + 1 cách lọc. Đơn kéo theo `updated_at` nên KHÔNG cần chẻ nhỏ\n * cửa sổ (3 ngày đơn vừa-đổi là vài chục đơn, phân trang lo được).\n */\nconst ORDER_PASSES = [\n  { updateStatus: \"updated_at\", days: 3, label: \"đơn vừa cập nhật 3 ngày\" },\n];\nif (isSunday) {\n  ORDER_PASSES.push({ updateStatus: null, days: 45, label: \"LƯỚI AN TOÀN chủ nhật: 45 ngày theo inserted_at\" });\n}\n\nconst results = [];\nconst errors = [];\n// Shop bị Pancake TỪ CHỐI XÁC THỰC (401/403) — không đụng tới nữa trong lượt chạy này.\nconst authDeadShops = new Set();\n\n/** Rút total_pages bằng regex trên TEXT THÔ — TUYỆT ĐỐI KHÔNG JSON.parse (int64 sẽ hỏng). */\nfunction totalPagesOf(text) {\n  const m = text.match(/\"total_pages\":\\s*(\\d+)/);\n  return m ? Number(m[1]) : 1;\n}\n\n/** 401/403 = key sai/bị chặn. KHÁC hẳn lỗi mạng/rate-limit: thử lại chỉ làm tình hình tệ hơn. */\nfunction isAuthError(err) {\n  const code = (err && (err.httpCode || err.statusCode || (err.response && err.response.status))) || \"\";\n  const msg = (err && err.message) || String(err);\n  return String(code) === \"401\" || String(code) === \"403\" || /status code (401|403)/.test(msg);\n}\n\n/** GET 1 trang (TEXT thô) → POST thẳng sang app. Trả total_pages đọc được từ chuỗi thô. */\nasync function fetchAndLand(streamName, shopKey, win, page, updateStatus) {\n  const shop = CONFIG.shops[shopKey];\n  // Pancake KHÔNG nhất quán tham số phân trang: đa số stream nghe `page_number`, riêng\n  // `inventory_histories` CHỈ nghe `page` — gửi page_number cho nó thì mọi trang đều trả về\n  // trang 1 (mất sạch trang 2..N mà không hề báo lỗi). Gửi CẢ HAI, cùng giá trị.\n  const qs = { api_key: shop.key, page_number: page, page: page, page_size: 100 };\n  if (win) { qs.startDateTime = win.start; qs.endDateTime = win.end; }\n  // `updateStatus` = TÊN TRƯỜNG mà startDateTime/endDateTime lọc theo. Bỏ trống ⇒ inserted_at.\n  if (updateStatus) qs.updateStatus = updateStatus;\n  // `encoding: \"text\"` LÀ BẮT BUỘC: trong n8n `json: false` CHỈ đổi header Accept — responseType của\n  // axios chỉ được set từ `encoding`. Thiếu nó, axios VẪN JSON.parse body ⇒ int64 bị làm tròn (hỏng\n  // khoá), regex total_pages trượt (chỉ kéo trang 1), và payload thành object ⇒ app trả 400.\n  const text = await http({\n    method: \"GET\",\n    url: `${CONFIG.base}/shops/${shop.id}/${streamName}`,\n    qs,\n    json: false,\n    encoding: \"text\",\n  });\n  // Chốt chặn: bản n8n nào đổi hành vi thì workflow KÊU TO, không âm thầm hỏng khoá.\n  if (typeof text !== \"string\") {\n    throw new Error(\"n8n trả về object, không phải TEXT thô — thiếu encoding:'text'. int64 sẽ hỏng.\");\n  }\n  const totalPages = totalPagesOf(text);\n\n  // Gửi NGUYÊN chuỗi thô sang app — app tự bung mảng/băm/dedupe, KHÔNG parse ở đây.\n  const r = await http({\n    method: \"POST\",\n    url: `${CONFIG.appUrl}/api/ingest/raw`,\n    json: true,\n    headers: { Authorization: `Bearer ${CONFIG.ingestSecret}` },\n    body: { stream: streamName, shopId: shop.id, payload: text },\n  });\n  results.push({\n    stream: streamName, shop: shopKey, page, totalPages,\n    filter: updateStatus || \"inserted_at\",\n    landed: r && r.stats ? r.stats.landed : undefined,\n    mode: r && r.stats ? r.stats.mode : undefined,\n  });\n  return totalPages;\n}\n\n/** Kéo hết mọi trang của 1 (stream, shop, cửa sổ, cách lọc). */\nasync function pullPages(streamName, shopKey, win, updateStatus) {\n  let page = 1;\n  let totalPages = 1;\n  do {\n    try {\n      totalPages = await fetchAndLand(streamName, shopKey, win, page, updateStatus);\n    } catch (err) {\n      if (page === 1) {\n        // Trang 1 hỏng ⇒ totalPages vẫn = 1 ⇒ do-while thoát ⇒ MẤT CẢ lượt này, không chỉ 1 trang.\n        // Thử lại ĐÚNG 1 lần sau 2s; vẫn hỏng thì ghi lỗi RÕ RÀNG rồi đi tiếp.\n        await sleep(2000);\n        try {\n          totalPages = await fetchAndLand(streamName, shopKey, win, page, updateStatus);\n        } catch (err2) {\n          errors.push({\n            scope: win ? \"CA_CUA_SO_BI_BO\" : \"CA_STREAM_BI_BO\",\n            stream: streamName, shop: shopKey, page, window: win || null,\n            filter: updateStatus || \"inserted_at\",\n            message: `BỎ QUA — stream \"${streamName}\", shop \"${shopKey}\", trang 1 lỗi 2 lần: ${(err2 && err2.message) || String(err2)}`,\n          });\n          // Sai key thì mọi lượt sau của shop này cũng sai — ngắt ngay, đừng bắn thêm.\n          if (isAuthError(err2)) {\n            authDeadShops.add(shopKey);\n            return;\n          }\n        }\n      } else {\n        // Lỗi 1 trang lẻ (rate-limit / app 500) KHÔNG được giết cả lượt sync — ghi lỗi rồi chạy tiếp.\n        // NHƯNG key bị chặn GIỮA CHỪNG (sau khi trang 1 đã qua) ⇒ mọi trang sau của shop cũng hỏng:\n        // escalate (scope NẶNG + dừng shop) để C1 ném đỏ thay vì nuốt thành MOT_TRANG.\n        if (isAuthError(err)) {\n          authDeadShops.add(shopKey);\n          errors.push({\n            scope: \"SHOP_CHET_XAC_THUC\",\n            stream: streamName, shop: shopKey, page, window: win || null,\n            filter: updateStatus || \"inserted_at\",\n            message: `BỎ QUA phần còn lại của shop \"${shopKey}\" — key bị chặn xác thực (401/403) giữa chừng ở trang ${page}.`,\n          });\n          return;\n        }\n        errors.push({\n          scope: \"MOT_TRANG\",\n          stream: streamName, shop: shopKey, page, window: win || null,\n          filter: updateStatus || \"inserted_at\",\n          message: (err && err.message) || String(err),\n        });\n      }\n    }\n    page++;\n    await sleep(300); // né rate-limit Pancake\n  } while (page <= totalPages && page <= 500); // chặn vòng lặp vô hạn nếu total_pages đọc sai\n}\n\n/** Kéo 1 stream cho 1 shop. Stream `dated` (orders) chạy theo ORDER_PASSES; còn lại kéo toàn bộ. */\nasync function pullStreamShop(streamName, shopKey, dated) {\n  // CẦU DAO: key của shop này đã bị từ chối xác thực ⇒ DỪNG HẲN shop đó.\n  // Không có cầu dao thì 1 key sai sẽ đẻ ra hàng loạt request hỏng ⇒ Pancake coi là lạm dụng và\n  // chặn tạm key + IP vài giờ (đã xảy ra thật 2026-07-13).\n  if (authDeadShops.has(shopKey)) {\n    errors.push({\n      scope: \"SHOP_CHET_XAC_THUC\",\n      stream: streamName, shop: shopKey, page: 0, window: null,\n      message: `BỎ QUA — shop \"${shopKey}\" đã bị Pancake từ chối xác thực (401/403). Kiểm tra lại api_key.`,\n    });\n    return;\n  }\n\n  if (!dated) {\n    await pullPages(streamName, shopKey, null, null);\n    return;\n  }\n\n  for (const pass of ORDER_PASSES) {\n    const win = { start: nowSec - pass.days * 86400, end: nowSec };\n    await pullPages(streamName, shopKey, win, pass.updateStatus);\n    if (authDeadShops.has(shopKey)) return;\n  }\n}\n\nfor (const st of STREAMS) {\n  for (const shopKey of st.shops) {\n    await pullStreamShop(st.name, shopKey, !!st.dated);\n  }\n}\n\n// VÁ TỒN KHO TỪ API — bước làm cho câu \"API là CHUẨN\" đúng với tồn kho.\n// Vì sao cần: /api/ingest/raw chỉ dựng lại Silver cho sản phẩm VỪA đổi payload (Bronze dedupe theo\n// hash) ⇒ một giá trị tồn sai do webhook ghi sẽ nằm lại vĩnh viễn nếu bên Pancake món đó không đổi\n// gì thêm. Endpoint quét toàn bộ Bronze products dựng lại tồn. Nó TỪ CHỐI CHẠY (trả 500) nếu nhật\n// ký đồng bộ không có lượt kéo `products` shop kho nào trong 2 giờ — nghĩa là lượt sync 30' đã chết,\n// lúc đó đè tồn bằng ảnh Bronze cũ sẽ xoá mất số webhook đúng.\n// Lỗi ở bước này KHÔNG giết ngay lượt nightly (dữ liệu đã land an toàn ở trên) nhưng được ghi vào\n// `errors` với scope riêng ⇒ cuối lượt vẫn THROW để lượt chạy ĐỎ. Im lặng = tồn sai nằm lại mãi.\nlet vaTonKho;\ntry {\n  const rv = await http({\n    method: \"POST\",\n    url: `${CONFIG.appUrl}/api/ingest/resync-products`,\n    json: true,\n    headers: { Authorization: `Bearer ${CONFIG.ingestSecret}` },\n    body: {},\n  });\n  vaTonKho = rv && rv.stats ? rv.stats : rv;\n} catch (err) {\n  vaTonKho = { loi: String((err && err.message) || err) };\n  // Scope RIÊNG ⇒ lượt chạy ĐỎ. Cố ý: ngoài n8n không còn chỗ nào báo bước này trượt (request\n  // không tới app thì cũng không có SyncLog), mà trượt im lặng = tồn sai nằm lại vô thời hạn.\n  errors.push({\n    scope: \"VA_TON_KHO\",\n    stream: \"resync-products\", shop: \"-\", page: 0, window: null,\n    message: `vá tồn kho lỗi: ${String((err && err.message) || err)}`,\n  });\n}\n\n// ĐỐI SOÁT ĐƠN CÒN DỞ — nhặt đơn đã land Bronze mà chưa dựng xong Sổ. Đặt SAU vá tồn kho, TRƯỚC\n// bước chặn lỗi. Vì sao cần: một tiến trình chết giữa \"land Bronze\" và \"ghi Sổ\" để lại đơn kẹt mà\n// lượt gửi lại đúng trang TỰ CHỮA được (route dò seenIds), nhưng đơn đã yên vị thì Pancake không bắn lại nên không lượt nào chạm ⇒ doanh thu\n// thiếu âm thầm. Endpoint quét các đơn CHƯA đóng dấu kết cục rồi dựng nốt.\n// Mã HTTP nói \"phép đối soát có CHẠY được không\", KHÔNG nói \"dữ liệu có sạch không\": 200 kể cả khi\n// còn `pending`/`needs_attention` (đó là TRẠNG THÁI, panel /cai-dat hiển thị, không phải sync hỏng);\n// MỌI request lỗi/non-2xx (bearer sai 401, đang phục hồi 503, lỗi hệ thống 500, lỗi mạng) đều vào catch ⇒ scope riêng ⇒ lượt ĐỎ; riêng 500 nghĩa: không đối soát được đáng tin cậy.\nlet doiSoatDon;\ntry {\n  const rd = await http({\n    method: \"POST\",\n    url: `${CONFIG.appUrl}/api/ingest/reconcile-orders`,\n    json: true,\n    headers: { Authorization: `Bearer ${CONFIG.ingestSecret}` },\n    body: {},\n  });\n  doiSoatDon = rd && rd.stats ? rd.stats : rd;\n} catch (err) {\n  doiSoatDon = { loi: String((err && err.message) || err) };\n  errors.push({\n    scope: \"DOI_SOAT_DON\",\n    stream: \"reconcile-orders\", shop: \"-\", page: 0, window: null,\n    message: `đối soát đơn còn dở lỗi: ${String((err && err.message) || err)}`,\n  });\n}\n\n// CHẶN NUỐT LỖI: lỗi NẶNG (mất dữ liệu — khác MOT_TRANG) phải làm workflow ĐỎ.\n// Thiếu bước này thì 1 shop bị chặn api_key khiến n8n báo XANH mà doanh thu thiếu âm thầm (Pancake là nguồn duy nhất).\nconst nang = errors.filter((e) => e.scope !== \"MOT_TRANG\");\nif (nang.length) {\n  const nl = String.fromCharCode(10); // xuống dòng cho dễ đọc trong panel lỗi n8n\n  throw new Error(\n    nang.length + \" lượt BỊ BỎ (mất dữ liệu):\" + nl +\n    nang.map((e) => \"- [\" + e.scope + \"] \" + e.stream + \"/\" + e.shop + \": \" + e.message).join(nl)\n  );\n}\n\nreturn [{ json: { vnWeekday, isSunday, passes: ORDER_PASSES.map((p) => p.label), results, vaTonKho, doiSoatDon, errors } }];\n"
+      },
+      "id": "5d2b9e47-1c88-4f36-8a72-91c0e4d7b115",
+      "name": "Re-sync 45 ngày + stream nặng → app",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        740,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select key, value from app.\"SettingN8n\"\nwhere key in ('n8nAppUrl', 'n8nIngestSecret', 'pancakeApiKeyKho', 'pancakeApiKeyShopee', 'pancakeApiKeyTiktok', 'pancakeShopIdKho', 'pancakeShopIdShopee', 'pancakeShopIdTiktok')",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        540,
+        300
+      ],
+      "id": "b2c3d4e5-0000-4a10-9c01-784937600000",
+      "name": "Lấy khoá từ bảng Setting",
+      "credentials": {
+        "postgres": {
+          "id": "id-credential-cua-instance-goc",
+          "name": "hogikids-config-ro (bảng Setting)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "03:00 mỗi đêm": {
+      "main": [
+        [
+          {
+            "node": "Lấy khoá từ bảng Setting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lấy khoá từ bảng Setting": {
+      "main": [
+        [
+          {
+            "node": "Re-sync 45 ngày + stream nặng → app",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": true
+  }
+}

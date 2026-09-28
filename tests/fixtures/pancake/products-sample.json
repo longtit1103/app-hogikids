@@ -1,0 +1,661 @@
+[
+  {
+    "id": "6faaabc7-9cab-4330-9673-b85299d9e083",
+    "name": "Sản phẩm mẫu 1",
+    "custom_id": "SAMPLE-1",
+    "display_id": 216,
+    "is_published": null,
+    "categories": [],
+    "image": null,
+    "variations": [
+      {
+        "id": "1aebcd89-deb8-4b0b-9635-b1f258d84956",
+        "display_id": "SB0190",
+        "barcode": null,
+        "retail_price": 350000,
+        "remain_quantity": 30,
+        "is_hidden": false,
+        "average_imported_price": 120000,
+        "last_imported_price": 120000,
+        "total_purchase_price": 3600000,
+        "fields": [
+          {
+            "name": "Size",
+            "value": "90"
+          }
+        ]
+      },
+      {
+        "id": "78958206-f9f3-4f74-8458-89865f2e916e",
+        "display_id": "SB01100",
+        "barcode": null,
+        "retail_price": 350000,
+        "remain_quantity": 30,
+        "is_hidden": false,
+        "average_imported_price": 120000,
+        "last_imported_price": 120000,
+        "total_purchase_price": 3600000,
+        "fields": [
+          {
+            "name": "Size",
+            "value": "100"
+          }
+        ]
+      },
+      {
+        "id": "3db0c604-e804-4d33-8041-7db023cef63a",
+        "display_id": "SB01110",
+        "barcode": null,
+        "retail_price": 350000,
+        "remain_quantity": 30,
+        "is_hidden": false,
+        "average_imported_price": 120000,
+        "last_imported_price": 120000,
+        "total_purchase_price": 3600000,
+        "fields": [
+          {
+            "name": "Size",
+            "value": "110"
+          }
+        ]
+      },
+      {
+        "id": "547a959e-18f9-44c1-b510-cb65213c0933",
+        "display_id": "SB01120",
+        "barcode": null,
+        "retail_price": 350000,
+        "remain_quantity": 30,
+        "is_hidden": false,
+        "average_imported_price": 120000,
+        "last_imported_price": 120000,
+        "total_purchase_price": 3600000,
+        "fields": [
+          {
+            "name": "Size",
+            "value": "120"
+          }
+        ]
+      },
+      {
+        "id": "c19a6db9-824a-4f8e-ae69-71f93e23d38c",
+        "display_id": "SB01130",
+        "barcode": null,
+        "retail_price": 350000,
+        "remain_quantity": 30,
+        "is_hidden": false,
+        "average_imported_price": 120000,
+        "last_imported_price": 120000,
+        "total_purchase_price": 3600000,
+        "fields": [
+          {
+            "name": "Size",
+            "value": "130"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "f2c411d1-c989-408a-8b18-73e59bbaad81",
+    "name": "Sản phẩm mẫu 2",
+    "custom_id": "SAMPLE-2",
+    "display_id": 215,
+    "is_published": null,
+    "categories": [],
+    "image": null,
+    "variations": [
+      {
+        "id": "fe4d5eb3-4e3a-4d9d-a12a-fa3af588d34d",
+        "display_id": "QT02",
+        "barcode": null,
+        "retail_price": 390000,
+        "remain_quantity": 50,
+        "is_hidden": false,
+        "average_imported_price": 40000,
+        "last_imported_price": 40000,
+        "total_purchase_price": 2000000,
+        "fields": []
+      }
+    ]
+  },
+  {
+    "id": "2d40d17d-8e4c-4a1b-bddf-c6cc2e1b7613",
+    "name": "Sản phẩm mẫu 3",
+    "custom_id": "SAMPLE-3",
+    "display_id": 214,
+    "is_published": null,
+    "categories": [],
+    "image": null,
+    "variations": [
+      {
+        "id": "32e7eced-934d-4417-8420-f5b7b13ea76e",
+        "display_id": "1",
+        "barcode": null,
+        "retail_price": 89000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 45000,
+        "total_purchase_price": 0,
+        "fields": []
+      }
+    ]
+  },
+  {
+    "id": "cbf06d3d-95b8-4a37-b381-f943541a593a",
+    "name": "Sản phẩm mẫu 4",
+    "custom_id": "SAMPLE-4",
+    "display_id": 213,
+    "is_published": null,
+    "categories": [],
+    "image": null,
+    "variations": [
+      {
+        "id": "17e3f9be-accb-4bc4-a64f-bbf9ff16663a",
+        "display_id": "1081",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "100"
+          }
+        ]
+      },
+      {
+        "id": "c4c7483a-a0d9-4a06-b67e-39c8deacb9c6",
+        "display_id": "1082",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 1,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "110"
+          }
+        ]
+      },
+      {
+        "id": "a1e4c296-4c19-427f-8689-2945dbfae97f",
+        "display_id": "1083",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "120"
+          }
+        ]
+      },
+      {
+        "id": "f0ee2163-2ec6-4080-b2ee-0af20c196e75",
+        "display_id": "1084",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "130"
+          }
+        ]
+      },
+      {
+        "id": "1fb4ad08-6491-47ce-9766-061fbdadcce1",
+        "display_id": "1080",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "90"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "f922f074-5643-4783-a7fe-01f98d4b4d22",
+    "name": "Sản phẩm mẫu 5",
+    "custom_id": "SAMPLE-5",
+    "display_id": 212,
+    "is_published": null,
+    "categories": [],
+    "image": null,
+    "variations": [
+      {
+        "id": "2051216f-8f9e-4374-93e4-a0c7bebfeebc",
+        "display_id": "887",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "100"
+          }
+        ]
+      },
+      {
+        "id": "5cfeaed9-06f3-415f-9642-a50d5b0568e5",
+        "display_id": "888",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 1,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "110"
+          }
+        ]
+      },
+      {
+        "id": "020c84df-f64e-4779-b4ba-4ac4c1f7a66f",
+        "display_id": "889",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "120"
+          }
+        ]
+      },
+      {
+        "id": "c1dec4a5-816b-490e-ae00-2b1662bd2081",
+        "display_id": "885",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "80"
+          }
+        ]
+      },
+      {
+        "id": "a270548b-04bd-4fe5-8621-6b8de6c3e3ea",
+        "display_id": "886",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Hồng"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "90"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "5d4b4c44-ed58-40cc-a166-c71226ed45a1",
+    "name": "Sản phẩm mẫu 6",
+    "custom_id": "SAMPLE-6",
+    "display_id": 211,
+    "is_published": null,
+    "categories": [],
+    "image": null,
+    "variations": [
+      {
+        "id": "48d545ee-ea3d-4ef0-b523-76f2e5d5beb1",
+        "display_id": "1006",
+        "barcode": null,
+        "retail_price": 260000,
+        "remain_quantity": 1,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Nâu"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "100"
+          }
+        ]
+      },
+      {
+        "id": "7cce9440-57b1-4eed-91bb-6b8c5a9e5497",
+        "display_id": "1007",
+        "barcode": null,
+        "retail_price": 260000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Nâu"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "110"
+          }
+        ]
+      },
+      {
+        "id": "8c0d497a-536d-4988-a1e0-00dbb3cb8e7a",
+        "display_id": "1008",
+        "barcode": null,
+        "retail_price": 260000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Nâu"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "120"
+          }
+        ]
+      },
+      {
+        "id": "501acbd0-d67e-4902-8b5b-d68b20dece0a",
+        "display_id": "1009",
+        "barcode": null,
+        "retail_price": 260000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Nâu"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "130"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "d6eb0af5-0dcc-4623-be2e-88b4c494f700",
+    "name": "Sản phẩm mẫu 7",
+    "custom_id": "SAMPLE-7",
+    "display_id": 210,
+    "is_published": null,
+    "categories": [],
+    "image": null,
+    "variations": [
+      {
+        "id": "c3018385-4d16-4a28-9e86-436b2a23139c",
+        "display_id": "1152",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 1,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Tím"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "100"
+          }
+        ]
+      },
+      {
+        "id": "b9e3af7a-df75-4a25-9d9e-28828b81b40d",
+        "display_id": "1153",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Tím"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "110"
+          }
+        ]
+      },
+      {
+        "id": "f45b3708-167c-42d9-a60d-a7f8b15d9c8d",
+        "display_id": "1150",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Tím"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "80"
+          }
+        ]
+      },
+      {
+        "id": "cd5ffcae-b8af-498a-aca3-12d5d0a55bd0",
+        "display_id": "1151",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Tím"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "90"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "229be685-451e-44e5-8c7f-a37764011dd4",
+    "name": "Sản phẩm mẫu 8",
+    "custom_id": "SAMPLE-8",
+    "display_id": 209,
+    "is_published": null,
+    "categories": [],
+    "image": null,
+    "variations": [
+      {
+        "id": "0db180fe-ef78-4c48-90be-d6121aef67f0",
+        "display_id": "1190",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 1,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Xanh"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "100"
+          }
+        ]
+      },
+      {
+        "id": "d4354b48-9218-446c-a888-d23c7c50bc69",
+        "display_id": "1191",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Xanh"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "110"
+          }
+        ]
+      },
+      {
+        "id": "453c971e-3554-44b4-87d6-4591226688cf",
+        "display_id": "1188",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 0,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Xanh"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "80"
+          }
+        ]
+      },
+      {
+        "id": "1193da2a-5fdd-4283-9d58-2520cad37ca3",
+        "display_id": "1189",
+        "barcode": null,
+        "retail_price": 294000,
+        "remain_quantity": 1,
+        "is_hidden": false,
+        "average_imported_price": 0,
+        "last_imported_price": 0,
+        "total_purchase_price": 0,
+        "fields": [
+          {
+            "name": "Màu sắc",
+            "value": "Xanh"
+          },
+          {
+            "name": "Kíchcỡ",
+            "value": "90"
+          }
+        ]
+      }
+    ]
+  }
+]

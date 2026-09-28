@@ -1,0 +1,199 @@
+{
+  "code": 0,
+  "data": {
+    "next_page_token": "WzE3NzYzNDQ5MzI2MTYsNTgzNTYwMTgxNzQyNzk4NTMzLDE3MzQ2MzY5NjU1Nzk5NDk3Mzld",
+    "orders": [
+      {
+        "create_time": 1776497985,
+        "delivery_time": 1776680594,
+        "id": "583585276075082966",
+        "skus": [
+          {
+            "actual_cofunded_creator_bonus_amount": {},
+            "actual_commission_base": {
+              "amount": "204700",
+              "currency": "VND"
+            },
+            "actual_paid_commission": {},
+            "actual_paid_partner_commission": {},
+            "actual_paid_shop_ads_commission": {
+              "amount": "6141",
+              "currency": "VND"
+            },
+            "campaign_id": "",
+            "commission_model": "Fixed commission",
+            "commission_tier_setting": "-",
+            "content_id": "7629572620026924306",
+            "content_type": "VIDEO",
+            "creator_username": "creator_1",
+            "estimated_cofunded_creator_bonus_amount": {},
+            "estimated_commission_base": {
+              "amount": "204700",
+              "currency": "VND"
+            },
+            "estimated_paid_commission": {},
+            "estimated_paid_partner_commission": {},
+            "estimated_paid_shop_ads_commission": {
+              "amount": "6141",
+              "currency": "VND"
+            },
+            "fully_return": "No",
+            "open_collaboration_id": "244996499205",
+            "price": {
+              "amount": "204700",
+              "currency": "VND"
+            },
+            "product_id": "1731910711337911979",
+            "quantity": 1,
+            "settlement_status": "SETTLED",
+            "shop_ads_commission_rate": "300",
+            "sku_id": "1731910824361625259",
+            "target_collaboration_id": ""
+          },
+          {
+            "actual_cofunded_creator_bonus_amount": {},
+            "actual_commission_base": {
+              "amount": "204700",
+              "currency": "VND"
+            },
+            "actual_paid_commission": {},
+            "actual_paid_partner_commission": {},
+            "actual_paid_shop_ads_commission": {
+              "amount": "6141",
+              "currency": "VND"
+            },
+            "campaign_id": "",
+            "commission_model": "Fixed commission",
+            "commission_tier_setting": "-",
+            "content_id": "7629572620026924306",
+            "content_type": "VIDEO",
+            "creator_username": "creator_1",
+            "estimated_cofunded_creator_bonus_amount": {},
+            "estimated_commission_base": {
+              "amount": "204700",
+              "currency": "VND"
+            },
+            "estimated_paid_commission": {},
+            "estimated_paid_partner_commission": {},
+            "estimated_paid_shop_ads_commission": {
+              "amount": "6141",
+              "currency": "VND"
+            },
+            "fully_return": "No",
+            "open_collaboration_id": "244996499205",
+            "price": {
+              "amount": "204700",
+              "currency": "VND"
+            },
+            "product_id": "1731910711337911979",
+            "quantity": 1,
+            "settlement_status": "SETTLED",
+            "shop_ads_commission_rate": "300",
+            "sku_id": "1731910824361559723",
+            "target_collaboration_id": ""
+          }
+        ]
+      },
+      {
+        "create_time": 1776497739,
+        "delivery_time": 1776774789,
+        "id": "583585257652192734",
+        "skus": [
+          {
+            "actual_cofunded_creator_bonus_amount": {},
+            "actual_commission_base": {
+              "amount": "0",
+              "currency": "VND"
+            },
+            "actual_paid_commission": {
+              "amount": "0",
+              "currency": "VND"
+            },
+            "actual_paid_partner_commission": {},
+            "actual_paid_shop_ads_commission": {},
+            "campaign_id": "",
+            "commission_model": "Fixed commission",
+            "commission_rate": "500",
+            "commission_tier_setting": "-",
+            "content_id": "7494427587222669489",
+            "content_type": "SHOP",
+            "creator_username": "creator_2",
+            "estimated_cofunded_creator_bonus_amount": {},
+            "estimated_commission_base": {
+              "amount": "294400",
+              "currency": "VND"
+            },
+            "estimated_paid_commission": {
+              "amount": "14720",
+              "currency": "VND"
+            },
+            "estimated_paid_partner_commission": {},
+            "estimated_paid_shop_ads_commission": {},
+            "fully_return": "Yes",
+            "open_collaboration_id": "831547407363",
+            "price": {
+              "amount": "294400",
+              "currency": "VND"
+            },
+            "product_id": "1734636878223935147",
+            "quantity": 1,
+            "settlement_status": "INELIGIBLE",
+            "sku_id": "1734636965579949739",
+            "target_collaboration_id": ""
+          }
+        ]
+      },
+      {
+        "create_time": 1776592037,
+        "delivery_time": 1776936955,
+        "id": "583601650514297876",
+        "skus": [
+          {
+            "actual_cofunded_creator_bonus_amount": {},
+            "actual_commission_base": {
+              "amount": "330000",
+              "currency": "VND"
+            },
+            "actual_paid_commission": {
+              "amount": "23100",
+              "currency": "VND"
+            },
+            "actual_paid_partner_commission": {},
+            "actual_paid_shop_ads_commission": {},
+            "campaign_id": "",
+            "commission_model": "Fixed commission",
+            "commission_rate": "700",
+            "commission_tier_setting": "-",
+            "content_id": "7629916284772518676",
+            "content_type": "LIVE",
+            "creator_username": "creator_3",
+            "estimated_cofunded_creator_bonus_amount": {},
+            "estimated_commission_base": {
+              "amount": "330000",
+              "currency": "VND"
+            },
+            "estimated_paid_commission": {
+              "amount": "23100",
+              "currency": "VND"
+            },
+            "estimated_paid_partner_commission": {},
+            "estimated_paid_shop_ads_commission": {},
+            "fully_return": "No",
+            "open_collaboration_id": "834034828419",
+            "price": {
+              "amount": "330000",
+              "currency": "VND"
+            },
+            "product_id": "1734650874238568107",
+            "quantity": 1,
+            "settlement_status": "SETTLED",
+            "sku_id": "1734651044375987883",
+            "target_collaboration_id": ""
+          }
+        ]
+      }
+    ],
+    "total_count": 253
+  },
+  "message": "Success"
+}

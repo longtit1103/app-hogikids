@@ -1,0 +1,5 @@
+{
+  "code": 36009004,
+  "data": null,
+  "message": "PageSize is invalid, check validation rule is: $this > 0 && $this <= 100."
+}
