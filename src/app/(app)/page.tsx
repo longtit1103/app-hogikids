@@ -9,11 +9,13 @@ import { SyncStatusCard, type SyncStatusRow } from "@/components/dashboard/sync-
 import { TopProductsCard } from "@/components/dashboard/top-products-card";
 import {
   clampRangeEndToNow,
+  khoangServerThuocTinh,
   lastMonthToSameDay,
   resolveRangeFromParams,
   resolveRangePreset,
   type DateRange,
 } from "@/lib/date-range";
+import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import { ensureRecurringExpensesForMonths, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
 import { prisma } from "@/lib/prisma";
 import { getLowStockPreview } from "@/lib/queries/variants";
@@ -59,7 +61,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const sp = await searchParams;
   // Range chung cho biểu đồ/donut/top: ?tu=&den= (Tùy chọn) → ?range=<preset> → this_month.
   // Hàng KPI phía dưới CỐ Ý độc lập range này (today/tháng-này/tháng-trước cố định — xem buildKpiRanges).
-  const range = resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range });
+  const range = resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, new Date(), await docLuaChonDaLuu());
 
   const now = new Date();
   const { today, thisMonth, lastMonthSameDays } = buildKpiRanges(now);
@@ -103,7 +105,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const syncRows: SyncStatusRow[] = SYNC_KINDS.map((kind, i) => ({ kind, log: syncLogs[i] }));
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" data-khoang-server={khoangServerThuocTinh(range)}>
       <PageTitle title="Dashboard">
         <p className="text-sm text-muted-foreground">Sức khỏe kinh doanh 30 giây — bấm vào bất kỳ số nào để đi sâu</p>
       </PageTitle>

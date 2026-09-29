@@ -47,6 +47,7 @@ export function DateRangePresetTabs({
   range,
   onSelectPreset,
   onApplyCustomRange,
+  dangCapNhat = false,
 }: {
   presets: ReadonlyArray<PresetOption>;
   /** Preset đang chọn; "custom" = range tay; null = không lọc ngày (Đơn hàng: "tất cả thời gian"). */
@@ -55,6 +56,8 @@ export function DateRangePresetTabs({
   range: { from: Date; to: Date } | null;
   onSelectPreset: (preset: RangePreset) => void;
   onApplyCustomRange: (range: { from: Date; to: Date }) => void;
+  /** Đang chờ server lưu lựa chọn + dựng lại số liệu — báo bận, nút đang chọn đổi khi server trả. */
+  dangCapNhat?: boolean;
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [draftFrom, setDraftFrom] = useState("");
@@ -62,15 +65,19 @@ export function DateRangePresetTabs({
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Reset draft về range đang áp mỗi lần mở popover (kể cả mở programmatic) —
-  // tách khỏi click handler của trigger.
+  // tách khỏi click handler của trigger. Phụ thuộc GIÁ TRỊ ngày, không phụ thuộc
+  // tham chiếu `range`: layout dựng lại (lưu lựa chọn, điều hướng) tạo object mới
+  // cùng ngày — reset theo tham chiếu là xoá mất nháp người dùng đang gõ dở.
+  const draftTuGoc = range ? format(range.from, QUERY_DATE_FORMAT) : "";
+  const draftDenGoc = range ? format(range.to, QUERY_DATE_FORMAT) : "";
   useEffect(() => {
     if (!popoverOpen) {
       return;
     }
-    setDraftFrom(range ? format(range.from, QUERY_DATE_FORMAT) : "");
-    setDraftTo(range ? format(range.to, QUERY_DATE_FORMAT) : "");
+    setDraftFrom(draftTuGoc);
+    setDraftTo(draftDenGoc);
     setValidationError(null);
-  }, [popoverOpen, range]);
+  }, [popoverOpen, draftTuGoc, draftDenGoc]);
 
   const customLabel =
     activePreset === "custom" && range
@@ -124,7 +131,10 @@ export function DateRangePresetTabs({
         ref={cuonRef}
         role="group"
         aria-label="Chọn khoảng thời gian"
-        className="flex items-center gap-1 overflow-x-auto rounded-lg bg-surface-soft p-1"
+        aria-busy={dangCapNhat}
+        className={`flex items-center gap-1 overflow-x-auto rounded-lg bg-surface-soft p-1 transition-opacity ${
+          dangCapNhat ? "opacity-60" : ""
+        }`}
       >
         {presets.map((option) => (
           <button

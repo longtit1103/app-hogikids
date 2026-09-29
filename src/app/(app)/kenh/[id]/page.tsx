@@ -10,7 +10,8 @@ import { ChannelOrdersTab } from "@/components/kenh/channel-orders-tab";
 import { ChannelRevenueAdsChart } from "@/components/kenh/channel-revenue-ads-chart";
 import { SanPhamBanChayKenh } from "@/components/kenh/san-pham-ban-chay-kenh";
 import { Badge } from "@/components/ui/badge";
-import { clampRangeEndToNow, previousComparableRange, resolveRangeFromParams, serializeDateRange } from "@/lib/date-range";
+import { clampRangeEndToNow, khoangServerThuocTinh, previousComparableRange, resolveRangeFromParams, serializeDateRange } from "@/lib/date-range";
+import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { slugToStatus } from "@/lib/orders/order-status-meta";
 import { docSoTrang } from "@/lib/pagination";
@@ -68,7 +69,10 @@ export default async function KenhChiTietPage({
   // không có trong URL nên mặc định "this_month". Kẹp biên phải về hôm nay; kỳ
   // trước (ChannelKpiCards) dùng previousComparableRange để ca "Tháng này" khớp
   // hàng KPI Dashboard (cùng số ngày đầu tháng trước).
-  const range = clampRangeEndToNow(resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, now), now);
+  const range = clampRangeEndToNow(
+    resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, now, await docLuaChonDaLuu(now)),
+    now,
+  );
   const tab: ChannelTab = isChannelTab(sp.tab) ? sp.tab : "don-hang";
   const page = docSoTrang(sp.trang);
   const statuses = slugToStatus(sp.trang_thai ?? "");
@@ -136,7 +140,7 @@ export default async function KenhChiTietPage({
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" data-khoang-server={khoangServerThuocTinh(range)}>
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
         <Link href="/kenh" className="text-primary hover:underline">
           Kênh

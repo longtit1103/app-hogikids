@@ -11,7 +11,7 @@ const ORDERS_PATH = "/don-hang";
 /**
  * Bộ lọc ngày của /don-hang, render TRONG topbar (cùng dòng nút "Đồng bộ ngay")
  * để đồng bộ vị trí với picker toàn cục ở Dashboard/Tài chính. Tự ẩn ngoài
- * /don-hang. CỐ Ý KHÔNG dùng provider toàn cục (`?range=`/localStorage): trang
+ * /don-hang. CỐ Ý KHÔNG dùng provider toàn cục (`?range=`/cookie lựa chọn đã lưu): trang
  * Đơn hàng đọc URL `ngay_tu`/`ngay_den` cho server query + hợp đồng drill P&L
  * (`pnl-drill-href.ts`) — đổi param scheme sẽ phá 2 thứ đó.
  */

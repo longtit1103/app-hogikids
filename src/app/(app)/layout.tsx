@@ -3,6 +3,8 @@ import { DateRangeProvider } from "@/components/shell/date-range-provider";
 import { docTrangThaiSaoLuu } from "@/lib/backup/doc-trang-thai-sao-luu";
 import { saoLuuCanBaoDong } from "@/lib/backup/trang-thai-sao-luu";
 import { hasBronzeBacklog } from "@/lib/bronze/bronze-only";
+import { chuanHoaLuaChonDaLuu } from "@/lib/date-range-cookie";
+import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import {
   KEY_MOC_KIEM_GIA_VON,
   KEY_SO_LECH_GIA_VON,
@@ -28,6 +30,9 @@ import { demKhoanVayCoKyChoDuyet } from "@/lib/so-quy/khoan-vay-queries";
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const userId = await requireUser("/");
+  // Lựa chọn khoảng ngày đã lưu (cookie, đã kiểm hình) — cùng nguồn 6 trang dùng để dựng số liệu,
+  // truyền xuống bộ chọn để nhãn không lệch số (#254).
+  const luaChonDaLuu = await docLuaChonDaLuu();
   const [
     user,
     missingCostCount,
@@ -88,7 +93,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   );
 
   return (
-    <DateRangeProvider>
+    <DateRangeProvider luaChonDaLuu={luaChonDaLuu ? chuanHoaLuaChonDaLuu(luaChonDaLuu) : null}>
       <ShellChrome
         shopName={user?.shopName ?? "HogiKids"}
         missingCostCount={missingCostCount}

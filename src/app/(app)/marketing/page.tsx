@@ -6,7 +6,8 @@ import { NoiDungSection } from "@/components/marketing/noi-dung-section";
 import { PheuTiktokSection } from "@/components/marketing/pheu-tiktok-section";
 import { QuangCaoChienDichSection } from "@/components/marketing/quang-cao-chien-dich-section";
 import { SanPhamNguonSection } from "@/components/marketing/san-pham-nguon-section";
-import { clampRangeEndToNow, resolveRangeFromParams } from "@/lib/date-range";
+import { clampRangeEndToNow, khoangServerThuocTinh, resolveRangeFromParams } from "@/lib/date-range";
+import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
 import { affiliateTheoKy } from "@/lib/reports/marketing/affiliate-pancake";
 import { tinhChuThichDoTuoi } from "@/lib/reports/marketing/cau-do-tuoi-du-lieu";
@@ -73,7 +74,10 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   const sp = await searchParams;
   const now = new Date();
   // Kẹp biên phải về hôm nay như `/kenh`: "Tháng này" không được kéo tới ngày tương lai.
-  const range = clampRangeEndToNow(resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, now), now);
+  const range = clampRangeEndToNow(
+    resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, now, await docLuaChonDaLuu(now)),
+    now,
+  );
   const tab: MarketingTab = isMarketingTab(sp.tab) ? sp.tab : "tong-quan";
 
   let content: React.ReactNode;
@@ -294,7 +298,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" data-khoang-server={khoangServerThuocTinh(range)}>
       <PageTitle title="Marketing">
         <p className="text-xs text-muted-foreground">
           Hiệu quả nội dung · creator · quảng cáo — số do sàn báo, đặt cạnh số thật từ Pancake

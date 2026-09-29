@@ -12,20 +12,17 @@ import { cn } from "@/lib/utils";
 const MONTH_LABELS = Array.from({ length: 12 }, (_, i) => `Th${i + 1}`);
 
 /**
- * Điều hướng THÁNG cho tab P&L. KHÔNG có state tháng riêng — ghi thẳng vào
- * range toàn cục qua `useDateRange().applyCustomRange` (KHÔNG có `setRange`,
- * xem file header date-range-provider.tsx), nên đổi tháng ở đây cũng đổi cả
- * date-range-picker trên topbar và ngược lại — 1 nguồn thời gian duy nhất,
- * đồng bộ 2 chiều.
+ * Điều hướng THÁNG cho tab P&L. KHÔNG có state tháng riêng — đọc/ghi thẳng lựa chọn toàn cục qua
+ * `useDateRange()` (xem file header date-range-provider.tsx), nên đổi tháng ở đây cũng đổi bộ chọn
+ * trên topbar và ngược lại — 1 nguồn thời gian duy nhất. Chọn tháng = chọn CÓ CHỦ Ý ⇒ lưu cookie
+ * (#254); chọn đúng tháng HIỆN TẠI ⇒ lưu preset "Tháng này" (tự trôi sang tháng mới — chủ shop chốt
+ * 29/09), tháng cũ ⇒ lưu cứng khoảng tháng đó.
  *
- * Giới hạn đã biết (khớp ghi chú "phase 1" ở chi-phi/page.tsx): ngay sau khi
- * hydrate, nếu localStorage đang giữ 1 preset KHÁC "this_month" và URL không
- * có `?tu=&den=`, nhãn tháng có thể lệch 1 nhịp so với dữ liệu server đã
- * render (server luôn mặc định "this_month" khi URL trống) cho tới khi người
- * dùng tương tác — chấp nhận được, không phải lỗi riêng của component này.
+ * Tháng đang hiện chỉ đổi khi server trả (cùng lúc số liệu). Trong lúc chờ (`dangCapNhat`) mọi nút
+ * đổi tháng bị khoá: bấm ‹ hai lần nhanh sẽ tính bước thứ hai từ tháng CŨ (chưa đổi) ⇒ chỉ lùi 1 tháng.
  */
 export function PnlMonthPicker() {
-  const { range, applyCustomRange } = useDateRange();
+  const { range, applyCustomRange, selectPreset, dangCapNhat } = useDateRange();
   const [open, setOpen] = useState(false);
   const [gridYear, setGridYear] = useState(() => range.to.getFullYear());
 
@@ -41,19 +38,22 @@ export function PnlMonthPicker() {
     range.from.getTime() !== startOfMonth(month).getTime() || range.to.getTime() !== endOfMonth(month).getTime();
 
   function goToMonth(target: Date) {
-    applyCustomRange({ from: startOfMonth(target), to: endOfMonth(target) });
+    if (dangCapNhat) return;
+    if (isSameMonth(target, now)) selectPreset("this_month");
+    else applyCustomRange({ from: startOfMonth(target), to: endOfMonth(target) });
     setOpen(false);
   }
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1" aria-busy={dangCapNhat}>
         <Button
           type="button"
           variant="ghost"
           size="icon"
           aria-label="Tháng trước"
           className="print:hidden"
+          disabled={dangCapNhat}
           onClick={() => goToMonth(subMonths(month, 1))}
         >
           <ChevronLeft className="size-4" />
@@ -95,7 +95,7 @@ export function PnlMonthPicker() {
             <div className="mt-2 grid grid-cols-4 gap-1">
               {MONTH_LABELS.map((label, i) => {
                 const candidate = new Date(gridYear, i, 1);
-                const disabled = candidate > now;
+                const disabled = candidate > now || dangCapNhat;
                 const active = isSameMonth(candidate, month);
                 return (
                   <button
@@ -123,7 +123,7 @@ export function PnlMonthPicker() {
           size="icon"
           aria-label="Tháng sau"
           className="print:hidden"
-          disabled={isCurrentMonth}
+          disabled={isCurrentMonth || dangCapNhat}
           onClick={() => goToMonth(addMonths(month, 1))}
         >
           <ChevronRight className="size-4" />

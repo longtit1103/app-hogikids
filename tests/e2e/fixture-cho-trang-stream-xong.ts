@@ -20,7 +20,7 @@ const VUNG_STREAM_AN = 'div[hidden][id^="S\\3A"]';
  *     ~300ms (sát mốc 2s thì chờ tới 2,3s). Sự kiện `load` có thể bắn TRƯỚC đó ⇒ bản duy nhất của
  *     nội dung đang nằm trong vùng ẩn. `innerText` của phần tử không được vẽ trả về NGUYÊN
  *     `textContent` (gồm cả dòng `md:hidden`) ⇒ số đọc ra dính thêm chữ số.
- *  2. Khi một context phía trên (bộ chọn kỳ đọc localStorage lúc mount) đổi giá trị trong lúc
+ *  2. Khi một context phía trên (bộ chọn kỳ — trước #254 đọc localStorage lúc mount) đổi giá trị trong lúc
  *     boundary còn chờ server, React bỏ hydrate và tự render lại trang ở client. Nếu bản client vào
  *     `<main>` trước khi `$RC` tới xoá vùng ẩn thì DOM có HAI bản cùng lúc (một hiện, một ẩn) ⇒
  *     locator chế độ strict vỡ ngay lập tức.

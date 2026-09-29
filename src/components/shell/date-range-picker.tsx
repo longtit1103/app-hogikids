@@ -12,7 +12,7 @@ import { useDateRange } from "./date-range-provider";
  * `DateRangePresetTabs` (dùng chung với bộ lọc Đơn hàng).
  */
 export function DateRangePicker() {
-  const { preset, range, isApplicableRoute, selectPreset, applyCustomRange } = useDateRange();
+  const { preset, range, isApplicableRoute, selectPreset, applyCustomRange, dangCapNhat } = useDateRange();
 
   if (!isApplicableRoute) {
     return null;
@@ -25,6 +25,7 @@ export function DateRangePicker() {
       range={range}
       onSelectPreset={selectPreset}
       onApplyCustomRange={applyCustomRange}
+      dangCapNhat={dangCapNhat}
     />
   );
 }

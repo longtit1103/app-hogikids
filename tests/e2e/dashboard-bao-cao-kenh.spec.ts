@@ -174,12 +174,12 @@ test.describe("Phase 5 smoke — Dashboard / Báo cáo / Kênh", () => {
     // Sau fix: picker nhận tu/den từ URL → nhãn "Tùy chọn" đổi thành khoảng ngày.
     await expect(customLabel).toBeVisible();
 
-    // Guard: drill soft-nav CHỈ đổi nhãn hiển thị, KHÔNG ghi range vào
-    // localStorage (nếu ghi, phiên sau mở app URL sạch sẽ kẹt range drill thay
-    // vì "Tháng này"). localStorage chỉ giữ lựa chọn CÓ CHỦ Ý trong bộ chọn —
-    // test này chưa chọn gì (context mới) ⇒ phải còn TRỐNG.
-    const stored = await page.evaluate(() => window.localStorage.getItem("hogikids_date_range_v2"));
-    expect(stored).toBeNull();
+    // Guard: drill soft-nav CHỈ đổi nhãn hiển thị, KHÔNG ghi lựa chọn đã lưu
+    // (cookie `hogikids_khoang_ngay` — nếu ghi, phiên sau mở app URL sạch sẽ kẹt
+    // range drill thay vì "Tháng này"). Cookie chỉ giữ lựa chọn CÓ CHỦ Ý trong bộ
+    // chọn — test này chưa chọn gì (context mới) ⇒ KHÔNG được có cookie đó.
+    const cookies = await page.context().cookies();
+    expect(cookies.find((c) => c.name === "hogikids_khoang_ngay")).toBeUndefined();
   });
 
   test("giữ lựa chọn preset khi soft-nav sang route URL sạch (không âm thầm reset về Tháng này)", async ({
@@ -188,18 +188,23 @@ test.describe("Phase 5 smoke — Dashboard / Báo cáo / Kênh", () => {
     // Chốt chặn nhánh "URL sạch → GIỮ lựa chọn in-memory" của effect sync: dễ
     // hồi quy nếu ai đó thêm else-branch reset. Dùng /kenh ↔ "/" (Dashboard) vì
     // cả hai đều có bộ chọn ngày toàn cục và điều hướng giữa chúng giữ URL sạch.
+    // Đáp án số liệu lấy từ CHÍNH server trước (URL tường minh không đổi lựa chọn đã lưu).
+    await page.goto("/?range=7d");
+    const dung7d = await page.locator("[data-khoang-server]").getAttribute("data-khoang-server");
     await page.goto("/kenh");
     const sevenDays = page.getByRole("button", { name: "7 ngày" });
     await sevenDays.click();
-    await expect(page).toHaveURL(/range=7d/);
+    // Lựa chọn lưu vào cookie (URL giữ sạch) — nút đổi khi server trả nhãn + số liệu mới.
     await expect(sevenDays).toHaveClass(/bg-surface-card/); // active
 
     // Soft-nav sang Dashboard qua logo (Link href="/", KHÔNG mang ?range) → URL sạch.
     await page.getByRole("link", { name: "HogiKids" }).first().click();
     await expect(page).toHaveURL(/^http:\/\/localhost:3000\/$/);
 
-    // Nút "7 ngày" vẫn active (lựa chọn dính), KHÔNG bị reset về "Tháng này".
+    // Nút "7 ngày" vẫn active (lựa chọn dính), KHÔNG bị reset về "Tháng này" — và SỐ LIỆU server
+    // cũng là 7 ngày (#254: nhãn và số luôn cùng một khoảng; đáp án lấy từ chính server).
     await expect(page.getByRole("button", { name: "7 ngày" })).toHaveClass(/bg-surface-card/);
+    await expect(page.locator("[data-khoang-server]")).toHaveAttribute("data-khoang-server", dung7d ?? "");
   });
 
   test("/kenh/khong-ton-tai redirect về /kenh", async ({ page }) => {

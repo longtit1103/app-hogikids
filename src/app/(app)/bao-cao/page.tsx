@@ -5,7 +5,8 @@ import { format, startOfMonth, subMonths } from "date-fns";
 import { ProductReportTab } from "@/components/bao-cao/product-report-tab";
 import { ReportExportButtons } from "@/components/bao-cao/report-export-buttons";
 import { TrendTab } from "@/components/bao-cao/trend-tab";
-import { resolveRangeFromParams } from "@/lib/date-range";
+import { khoangServerThuocTinh, resolveRangeFromParams } from "@/lib/date-range";
+import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import { ensureRecurringExpensesForMonths } from "@/lib/expenses/ensure-recurring-expenses";
 import { prisma } from "@/lib/prisma";
 import { computeMonthlyTrend } from "@/lib/reports/monthly-trend";
@@ -44,7 +45,7 @@ export default async function BaoCaoPage({ searchParams }: { searchParams: Promi
   }
   const tab: ReportTab = isReportTab(sp.tab) ? sp.tab : "san-pham";
   // Range chung: ?tu=&den= (Tùy chọn) → ?range=<preset> → this_month.
-  const range = resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range });
+  const range = resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, new Date(), await docLuaChonDaLuu());
 
   // Chuyển tab giữ nguyên range đang xem — KHÔNG giữ sp/kenh (đặc thù tab Sản phẩm).
   function tabHref(target: ReportTab): string {
@@ -102,7 +103,7 @@ export default async function BaoCaoPage({ searchParams }: { searchParams: Promi
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" data-khoang-server={khoangServerThuocTinh(range)}>
       {/* Chỉ hiện khi in (window.print()) — sidebar/topbar bị ẩn qua @media print. */}
       <div className="hidden print:block">
         <p className="font-serif text-xl text-ink">HogiKids</p>

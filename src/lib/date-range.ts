@@ -84,22 +84,35 @@ export function isRangePreset(value: string | undefined | null): value is RangeP
 }
 
 /**
- * Nguồn range DUY NHẤT cho mọi trang server có picker toàn cục. Thứ tự ưu tiên:
- *   1. `?tu=&den=` — range "Tùy chọn" (ngày cụ thể).
+ * Nguồn range DUY NHẤT cho mọi trang server có picker toàn cục. Thứ tự ưu tiên (hợp đồng #254):
+ *   1. `?tu=&den=` — range "Tùy chọn" (ngày cụ thể) trên URL.
  *   2. `?range=<preset>` — preset today/yesterday/7d/30d/this_month/last_month (resolve theo `now`).
- *   3. Mặc định `this_month`.
+ *   3. `daLuu` — lựa chọn CÓ CHỦ Ý đã lưu trong cookie (đã kiểm hình ở `docLuaChonTuCookie`).
+ *   4. Mặc định `this_month`.
  *
- * Preset đi qua URL (không chỉ localStorage) nên bấm preset LÀ re-render server. Thiếu
- * bước này thì mọi trang kẹt ở this_month dù client đổi lựa chọn — đúng bug đã gặp.
+ * URL LUÔN thắng cookie: link chia sẻ/drill là ngữ cảnh tạm của lần mở đó. URL sạch (menu, mở lại
+ * app) mới rơi về lựa chọn đã lưu — trước #254 bậc 3 không có nên URL sạch luôn ra "Tháng này"
+ * trong khi nhãn bộ chọn hiện lựa chọn đã lưu (nhãn lệch số).
  */
 export function resolveRangeFromParams(
   params: { tu?: string; den?: string; range?: string },
   now: Date = new Date(),
+  daLuu: DateRangeSelection | null = null,
 ): DateRange {
-  const custom = parseDateRange({ tu: params.tu, den: params.den });
-  if (custom) return custom;
-  if (isRangePreset(params.range)) return resolveRangePreset(params.range, now);
+  const tuUrl = selectionFromQuery(params, now);
+  if (tuUrl) return tuUrl.range;
+  if (daLuu) return daLuu.range;
   return resolveRangePreset("this_month", now);
+}
+
+/**
+ * Khoảng ngày server ĐÃ dùng để dựng trang, dạng `yyyy-MM-dd..yyyy-MM-dd` — gắn vào
+ * `data-khoang-server` ở khung nội dung 6 trang có bộ chọn ngày. Không hiện ra giao diện; để e2e
+ * (và người chẩn đoán) đối chiếu NHÃN bộ chọn với khoảng số liệu thật (#254: hai thứ từng lệch nhau).
+ */
+export function khoangServerThuocTinh(range: DateRange): string {
+  const { tu, den } = serializeDateRange(range);
+  return `${tu}..${den}`;
 }
 
 /**
@@ -248,25 +261,6 @@ export type DateRangeSelection = {
   preset: RangePreset | "custom";
   range: DateRange;
 };
-
-/**
- * Hai lựa chọn có TRÙNG GIÁ TRỊ không — so preset + khoá ngày `yyyy-MM-dd` của
- * hai biên, KHÔNG so tham chiếu object. Mọi range trong app đều neo biên trọn
- * ngày (resolveRangePreset / parseDateRange / normalizeCustomRange) nên khoá
- * ngày đủ phân biệt.
- *
- * Vì sao cần: `resolveRangePreset` luôn trả object MỚI. Provider nằm TRÊN
- * boundary `(app)/loading.tsx`; effect lúc mount mà set lại một range "y hệt"
- * nhưng khác tham chiếu thì context đổi khi boundary còn đang khử nước ⇒ React
- * bỏ HTML server, render lại cả trang ở client. So theo giá trị thì lượt tải
- * thường (preset nhớ lại trùng mặc định) không phát sinh cập nhật nào.
- */
-export function isSameDateRangeSelection(a: DateRangeSelection, b: DateRangeSelection): boolean {
-  if (a.preset !== b.preset) return false;
-  const ka = serializeDateRange(a.range);
-  const kb = serializeDateRange(b.range);
-  return ka.tu === kb.tu && ka.den === kb.den;
-}
 
 /**
  * Lựa chọn mà URL MANG TƯỜNG MINH: `?tu=&den=` hợp lệ ⇒ "custom"; không thì

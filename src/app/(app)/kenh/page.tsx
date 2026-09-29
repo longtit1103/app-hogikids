@@ -3,7 +3,8 @@ import Link from "next/link";
 import { ChannelComparisonSection } from "@/components/kenh/channel-comparison-section";
 import { ChannelNotFoundToast } from "@/components/kenh/channel-not-found-toast";
 import { ChannelTrendChart } from "@/components/kenh/channel-trend-chart";
-import { clampRangeEndToNow, previousComparableRange, resolveRangeFromParams } from "@/lib/date-range";
+import { clampRangeEndToNow, khoangServerThuocTinh, previousComparableRange, resolveRangeFromParams } from "@/lib/date-range";
+import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import { prisma } from "@/lib/prisma";
 import { computeChannelDailyRevenue } from "@/lib/reports/daily-series";
 import { chuThichBienRongTheoKenh } from "@/lib/reports/chu-thich-thu-nhap-tai-chinh";
@@ -57,7 +58,10 @@ export default async function KenhPage({ searchParams }: { searchParams: Promise
   // hôm nay để "Tháng này" không kéo tới cuối tháng (tương lai). Kỳ trước dùng
   // previousComparableRange: ca "Tháng này" so CÙNG số ngày đầu tháng trước
   // (KHỚP hàng KPI Dashboard), các preset khác trượt cùng span như cũ.
-  const range = clampRangeEndToNow(resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, now), now);
+  const range = clampRangeEndToNow(
+    resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, now, await docLuaChonDaLuu(now)),
+    now,
+  );
 
   const [pnlChannels, prevPnlChannels, dailyRevenue, allChannels, thuNhapTaiChinh] = await Promise.all([
     computeChannelPnl(range),
@@ -84,7 +88,7 @@ export default async function KenhPage({ searchParams }: { searchParams: Promise
   const ghiChuKenh = chuThichBienRongTheoKenh(thuNhapTaiChinh);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" data-khoang-server={khoangServerThuocTinh(range)}>
       <ChannelNotFoundToast />
 
       <ChannelComparisonSection

@@ -16,7 +16,6 @@ import {
   clampDateRange,
   clampRangeEndToNow,
   isRangePreset,
-  isSameDateRangeSelection,
   lastMonthToSameDay,
   normalizeCustomRange,
   parseDateRange,
@@ -335,45 +334,6 @@ describe("isRangePreset", () => {
     expect(isRangePreset("xxx")).toBe(false);
     expect(isRangePreset(undefined)).toBe(false);
     expect(isRangePreset(null)).toBe(false);
-  });
-});
-
-describe("isSameDateRangeSelection (provider không phát cập nhật thừa lúc mount)", () => {
-  it("cùng preset, range dựng lại ra object MỚI ⇒ vẫn TRÙNG (không so tham chiếu)", () => {
-    const a = { preset: "this_month" as const, range: resolveRangePreset("this_month", NOW) };
-    const b = { preset: "this_month" as const, range: resolveRangePreset("this_month", NOW) };
-    expect(a.range).not.toBe(b.range);
-    expect(isSameDateRangeSelection(a, b)).toBe(true);
-  });
-
-  it("cùng preset nhưng lệch vài ms trong cùng ngày ⇒ vẫn TRÙNG (so theo khoá ngày)", () => {
-    const a = { preset: "today" as const, range: resolveRangePreset("today", NOW) };
-    const b = {
-      preset: "today" as const,
-      range: { from: a.range.from, to: new Date(a.range.to.getTime() - 5) },
-    };
-    expect(isSameDateRangeSelection(a, b)).toBe(true);
-  });
-
-  it("khác preset dù trùng ngày ⇒ KHÁC (nhãn picker phải đổi)", () => {
-    const range = resolveRangePreset("this_month", NOW);
-    expect(
-      isSameDateRangeSelection({ preset: "this_month", range }, { preset: "custom", range }),
-    ).toBe(false);
-  });
-
-  it("cùng 'custom' nhưng khác một biên ngày ⇒ KHÁC", () => {
-    const a = { preset: "custom" as const, range: parseDateRange({ tu: "2026-06-01", den: "2026-06-30" })! };
-    const b = { preset: "custom" as const, range: parseDateRange({ tu: "2026-06-01", den: "2026-06-29" })! };
-    const c = { preset: "custom" as const, range: parseDateRange({ tu: "2026-06-02", den: "2026-06-30" })! };
-    expect(isSameDateRangeSelection(a, b)).toBe(false);
-    expect(isSameDateRangeSelection(a, c)).toBe(false);
-  });
-
-  it("cùng preset nhưng resolve ở hai ngày khác nhau ⇒ KHÁC (qua nửa đêm phải cập nhật)", () => {
-    const a = { preset: "today" as const, range: resolveRangePreset("today", NOW) };
-    const b = { preset: "today" as const, range: resolveRangePreset("today", subDays(NOW, 1)) };
-    expect(isSameDateRangeSelection(a, b)).toBe(false);
   });
 });
 

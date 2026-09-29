@@ -229,6 +229,7 @@ const CHI_DOC: Record<string, string> = {
   "auth.logout": "xoá phiên (cookie), không ghi DB",
   "cost-price.previewCostImport": "đọc file + đối chiếu, không ghi",
   "data-admin.coDuLieuGiaoDich": "đếm",
+  "khoang-ngay.luuLuaChonKhoangNgay": "ghi cookie lựa chọn khoảng ngày của bộ chọn, không ghi DB",
   "data-admin.demChiPhiKhongDungLai": "đếm",
   "data-admin.demDonMoCoi": "đếm",
   "data-admin.demAdsMoCoi": "đếm",

@@ -6,7 +6,8 @@ import { ReportExportButtons } from "@/components/bao-cao/report-export-buttons"
 import { CashFlowTab } from "@/components/finance/cash-flow-tab";
 import { ExpenseLedgerTab } from "@/components/finance/expense-ledger-tab";
 import { listCashMovements } from "@/lib/cash-movements/cash-movement-queries";
-import { resolveRangeFromParams } from "@/lib/date-range";
+import { khoangServerThuocTinh, resolveRangeFromParams } from "@/lib/date-range";
+import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import { ensureRecurringExpensesForMonths } from "@/lib/expenses/ensure-recurring-expenses";
 import { isPnlMonthEmpty } from "@/lib/reports/pnl-line-items";
 import { calcPnl } from "@/lib/reports/pnl";
@@ -80,7 +81,7 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const tab: FinanceTab = isFinanceTab(sp.tab) ? sp.tab : "loi-lo";
   // Range chung: ?tu=&den= (Tùy chọn) → ?range=<preset> → this_month.
-  const range = resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range });
+  const range = resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, new Date(), await docLuaChonDaLuu());
 
   // Chuyển tab giữ range đang xem (tu/den HOẶC preset), bỏ filter riêng của sổ.
   function tabHref(target: FinanceTab): string {
@@ -283,7 +284,7 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" data-khoang-server={khoangServerThuocTinh(range)}>
       {/* Tiêu đề trang Tài chính ẨN khi in (như trước) — ngoại lệ duy nhất của PageTitle. */}
       <PageTitle title="Tài chính" className="print:hidden">
         <p className="text-xs text-muted-foreground">
