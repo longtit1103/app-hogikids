@@ -717,8 +717,8 @@ async function chayGhiKy({
 }
 
 /**
- * P2034 = write conflict / deadlock → retry ĐÚNG 1 lần (khuôn `ensure-recurring-expenses.ts`).
- * Vẫn giữ dù không còn Serializable: khoá dòng vẫn có thể deadlock khi chạy chồng lượt ghi khác.
+ * P2034 = write conflict / deadlock → retry ĐÚNG 1 lần. Vẫn giữ dù không còn Serializable: khoá dòng
+ * vẫn có thể deadlock khi chạy chồng lượt ghi khác.
  */
 async function chayGhiKyCoRetry(tham: ThamSoGhiKy): Promise<number> {
   try {

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { addMonths, format, subMonths } from "date-fns";
 
 import { testPrisma } from "./ingest-raw";
@@ -16,9 +16,11 @@ import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
  *
  * Số cụ thể là số TÍNH TAY theo spec §5.2 — không suy lại bằng chính công thức đang kiểm.
  *
- * Cách ly: tên khoản vay bắt đầu "E2E"; `beforeAll` dọn theo đúng thứ tự khoá ngoại (Expense →
- * CashMovement gắn khoản → Loan) bằng `testPrisma()` (guard chỉ cho đụng DB e2e). KHÔNG assert số
- * quỹ tuyệt đối — dữ liệu e2e tích luỹ từ spec khác.
+ * Cách ly: tên khoản vay bắt đầu "E2E"; `beforeAll` VÀ `afterAll` đều dọn theo đúng thứ tự khoá
+ * ngoại (Expense → CashMovement gắn khoản → Loan) bằng `testPrisma()` (guard chỉ cho đụng DB e2e) —
+ * `afterAll` (issue #247) để chính spec này không để lại Lãi vay/Loan/CashMovement sau khi chạy xong,
+ * `beforeAll` giữ lại phòng lượt trước bị giết giữa chừng ("Ctrl-C") nên `afterAll` không kịp chạy.
+ * KHÔNG assert số quỹ tuyệt đối — dữ liệu e2e tích luỹ từ spec khác.
  */
 
 const TEN_KHOAN = "E2E VPBank";
@@ -50,6 +52,14 @@ async function login(page: Page): Promise<void> {
 
 test.describe("Sổ quỹ + Khoản vay — tab Dòng tiền", () => {
   test.beforeAll(async () => {
+    const prisma = testPrisma();
+    await prisma.expense.deleteMany({ where: { description: { contains: "E2E" } } });
+    await prisma.cashMovement.deleteMany({ where: { loan: { name: { startsWith: "E2E" } } } });
+    await prisma.loan.deleteMany({ where: { name: { startsWith: "E2E" } } });
+    await prisma.$disconnect();
+  });
+
+  test.afterAll(async () => {
     const prisma = testPrisma();
     await prisma.expense.deleteMany({ where: { description: { contains: "E2E" } } });
     await prisma.cashMovement.deleteMany({ where: { loan: { name: { startsWith: "E2E" } } } });
@@ -170,6 +180,28 @@ test.describe("Sổ quỹ + Khoản vay — tab Dòng tiền", () => {
     await expect(
       page.getByRole("option", { name: `${TEN_KHOAN} — dư nợ 1.100.000 ₫`, exact: true })
     ).toBeVisible();
+  });
+
+  /**
+   * PHỤ THUỘC test đầu (khoản vay còn kỳ chờ duyệt ⇒ banner hiện). Bấm banner từ trang KHÁC
+   * `/tai-chinh` là đổi pathname ⇒ màn đổi qua khung chờ chung `(app)/loading.tsx` trước khi khối
+   * Khoản vay tồn tại. Bộ cuộn-theo-hash của router chạy ở lượt commit khung chờ đó; nếu không ai
+   * cuộn lại khi nội dung về thì chủ shop rơi ở đầu tab và phải tự đi tìm khối Khoản vay.
+   */
+  test("bấm banner khoản vay từ Dashboard ⇒ màn cuộn tới khối Khoản vay", async ({ page }) => {
+    // Màn thấp để khối Khoản vay chắc chắn nằm DƯỚI mép màn khi đứng ở đầu tab.
+    await page.setViewportSize({ width: 1280, height: 480 });
+
+    // Chống xanh rỗng: mở tab KHÔNG kèm neo thì khối phải nằm ngoài màn — nếu không, phép kiểm
+    // `toBeInViewport` bên dưới đúng sẵn dù không có cú cuộn nào.
+    await page.goto("/tai-chinh?tab=dong-tien");
+    await expect(page.locator("#khoan-vay")).toBeAttached();
+    await expect(page.locator("#khoan-vay")).not.toBeInViewport();
+
+    await page.goto("/");
+    await page.getByRole("link", { name: /khoản vay có kỳ trả nợ tới hạn chưa ghi/ }).click();
+    await expect(page).toHaveURL(/\/tai-chinh\?tab=dong-tien#khoan-vay$/);
+    await expect(page.locator("#khoan-vay")).toBeInViewport();
   });
 
   /**

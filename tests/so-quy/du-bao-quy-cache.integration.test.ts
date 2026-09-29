@@ -133,6 +133,11 @@ describe("phần dự báo nhớ theo request", () => {
     docDb.mockRestore();
     expect(luotDocD0).toHaveLength(1);
     expect(the.d0).toEqual(vn("2026-09-01T00:00:00"));
-    expect(viTiktok).toEqual({ b0ToiThieu: 0, viHienTai: 2_000_000, tangTuD0: 2_000_000 });
+    expect(viTiktok).toEqual({
+      b0ToiThieu: 0,
+      viHienTai: 2_000_000,
+      tangTuD0: 2_000_000,
+      chuaChot: { soDong: 0, tong: 0 },
+    });
   });
 });

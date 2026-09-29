@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { batLaiDinhKy } from "@/lib/actions/expenses";
+import type { LuaChonThangBatLai } from "@/lib/expenses/thang-cho-bat-lai";
 import { formatVnd } from "@/lib/format";
 
 export type NutBatLaiKhoanChiDinhKyProps = {
@@ -15,15 +16,18 @@ export type NutBatLaiKhoanChiDinhKyProps = {
   amount: number;
   dayOfMonth: number;
   /**
-   * Nhãn "MM/yyyy" của tháng này và tháng sau — server tính theo giờ VN rồi truyền xuống; client KHÔNG
-   * tự format `new Date()` (máy người bấm có thể khác múi giờ).
+   * Tháng này / tháng sau, mỗi tháng một CẶP nhãn `MM/yyyy` + khoá `yyyy-MM` — server dựng bằng
+   * `thangChoBatLai` (giờ VN) rồi truyền xuống; client KHÔNG tự format `new Date()` (máy người bấm có
+   * thể khác múi giờ). Nhãn hiện ra và khoá gửi đi luôn lấy từ CÙNG một object lựa chọn. Server ghi mốc
+   * đúng tháng của khoá, hoặc từ chối `TRANG_CU` nếu tháng đó không còn là tháng này/tháng sau.
    */
-  thangNay: string;
-  thangSau: string;
+  thang: { nay: LuaChonThangBatLai; sau: LuaChonThangBatLai };
 };
 
 /** Mã lỗi server khi đang có mẫu khác cùng danh mục + kênh chạy — phải xác nhận lần hai mới bật. */
 const MA_TRUNG = "DINH_KY_TRUNG_MAU_DANG_CHAY";
+/** Mã lỗi server khi tháng đã chọn không còn là tháng này/tháng sau — trang mở từ trước nửa đêm cuối tháng. */
+const MA_TRANG_CU = "TRANG_CU";
 
 /**
  * Nút "Bật lại" cho MỘT mẫu chi định kỳ đã dừng + hộp xác nhận: chọn bắt đầu từ tháng này hay tháng
@@ -35,14 +39,14 @@ export function NutBatLaiKhoanChiDinhKy({
   description,
   amount,
   dayOfMonth,
-  thangNay,
-  thangSau,
+  thang,
 }: NutBatLaiKhoanChiDinhKyProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [dangBat, setDangBat] = useState(false);
   const [tuThangSau, setTuThangSau] = useState(false);
   const [canhBaoTrung, setCanhBaoTrung] = useState<string | null>(null);
+  const luaChon = tuThangSau ? thang.sau : thang.nay;
 
   function doiTrangThaiHop(mo: boolean) {
     setOpen(mo);
@@ -55,10 +59,21 @@ export function NutBatLaiKhoanChiDinhKy({
   async function xacNhan() {
     setDangBat(true);
     try {
-      const res = await batLaiDinhKy(recurringId, { tuThangSau, xacNhanTrung: canhBaoTrung !== null });
+      const res = await batLaiDinhKy(recurringId, {
+        thangBatDau: luaChon.khoa,
+        xacNhanTrung: canhBaoTrung !== null,
+      });
       if (!res.ok) {
-        if (res.code === MA_TRUNG) setCanhBaoTrung(res.error);
-        else toast.error(res.error);
+        if (res.code === MA_TRUNG) {
+          setCanhBaoTrung(res.error);
+        } else if (res.code === MA_TRANG_CU) {
+          // Tháng trong hộp đã cũ (qua nửa đêm cuối tháng) — đóng hộp + nạp lại để nhãn tính lại.
+          toast.error(res.error);
+          setOpen(false);
+          router.refresh();
+        } else {
+          toast.error(res.error);
+        }
         return;
       }
       toast.success(`Đã bật lại — sinh chi phí từ tháng ${res.data.tuThang}`);
@@ -70,8 +85,6 @@ export function NutBatLaiKhoanChiDinhKy({
       setDangBat(false);
     }
   }
-
-  const thangBatDau = tuThangSau ? thangSau : thangNay;
 
   return (
     <>
@@ -97,7 +110,7 @@ export function NutBatLaiKhoanChiDinhKy({
                 checked={!tuThangSau}
                 onChange={() => setTuThangSau(false)}
               />
-              Tháng này ({thangNay})
+              Tháng này ({thang.nay.nhan})
             </label>
             <label className="flex items-center gap-2 text-sm text-ink">
               <input
@@ -106,12 +119,12 @@ export function NutBatLaiKhoanChiDinhKy({
                 checked={tuThangSau}
                 onChange={() => setTuThangSau(true)}
               />
-              Tháng sau ({thangSau}) — tháng này đã trả hoặc đã ghi tay khoản này
+              Tháng sau ({thang.sau.nhan}) — tháng này đã trả hoặc đã ghi tay khoản này
             </label>
           </fieldset>
 
           <p className="text-sm text-muted-foreground" data-testid="bat-lai-dinh-ky-giai-thich">
-            App sẽ sinh chi phí từ tháng {thangBatDau} trở đi
+            App sẽ sinh chi phí từ tháng {luaChon.nhan} trở đi
             {tuThangSau ? "" : ` (tháng này ghi khi tới ngày ${dayOfMonth}, nếu chưa có dòng của khoản này)`}.{" "}
             <strong>Không</strong> ghi bù các tháng đã dừng.
           </p>

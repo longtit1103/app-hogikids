@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 
 import { Button } from "@/components/ui/button";
@@ -95,72 +95,105 @@ export function DateRangePresetTabs({
     setPopoverOpen(false);
   }
 
-  return (
-    <div
-      role="group"
-      aria-label="Chọn khoảng thời gian"
-      className="flex items-center gap-1 overflow-x-auto rounded-lg bg-surface-soft p-1"
-    >
-      {presets.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => onSelectPreset(option.value)}
-          className={tabClassName(activePreset === option.value)}
-        >
-          {option.label}
-        </button>
-      ))}
+  // Mép phải mờ dần = "còn nữa, vuốt ngang" (ảnh iPhone 26/09: thanh bị cắt ở chữ "T…" mà không
+  // có dấu hiệu nào). Tắt khi đã cuộn hết để khỏi che nút cuối; không bao giờ chặn chạm. KHÔNG gắn
+  // theo breakpoint: dưới xl (kể cả iPhone xoay ngang có sidebar) thanh vẫn cuộn — tự bật/tắt theo đo.
+  const cuonRef = useRef<HTMLDivElement>(null);
+  const [conBenPhai, setConBenPhai] = useState(false);
+  useEffect(() => {
+    const el = cuonRef.current;
+    if (!el) return;
+    const capNhat = () => setConBenPhai(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+    capNhat();
+    el.addEventListener("scroll", capNhat, { passive: true });
+    // `ResizeObserver` thay cho nghe `resize` của window — bắt đúng khi BỀ RỘNG PHẦN TỬ đổi mà
+    // không có sự kiện resize cửa sổ nào bắn (vd xoay ngang không luôn đồng bộ nhịp với `resize`,
+    // nội dung dải tab đổi độ rộng do font/ngôn ngữ số). Đã quan sát cả thay đổi do window resize
+    // (phần tử responsive theo viewport) nên không cần nghe thêm window riêng.
+    const ro = new ResizeObserver(capNhat);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", capNhat);
+      ro.disconnect();
+    };
+  }, []);
 
-      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <PopoverTrigger className={tabClassName(activePreset === "custom")}>
-          {customLabel}
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-72">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="date-range-from">
-              Từ ngày
-            </label>
-            <Input
-              id="date-range-from"
-              type="date"
-              value={draftFrom}
-              max={draftTo || undefined}
-              onChange={(event) => setDraftFrom(event.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="date-range-to">
-              Đến ngày
-            </label>
-            <Input
-              id="date-range-to"
-              type="date"
-              value={draftTo}
-              min={draftFrom || undefined}
-              onChange={(event) => setDraftTo(event.target.value)}
-            />
-          </div>
-          {validationError && (
-            <p className="text-xs text-error" role="alert">
-              {validationError}
-            </p>
-          )}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setPopoverOpen(false)}>
-              Hủy
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={!draftFrom || !draftTo}
-              onClick={handleApply}
-            >
-              Áp dụng
-            </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
+  return (
+    <div className="relative">
+      <div
+        ref={cuonRef}
+        role="group"
+        aria-label="Chọn khoảng thời gian"
+        className="flex items-center gap-1 overflow-x-auto rounded-lg bg-surface-soft p-1"
+      >
+        {presets.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onSelectPreset(option.value)}
+            className={tabClassName(activePreset === option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+
+        <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+          <PopoverTrigger className={tabClassName(activePreset === "custom")}>
+            {customLabel}
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-72">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="date-range-from">
+                Từ ngày
+              </label>
+              <Input
+                id="date-range-from"
+                type="date"
+                value={draftFrom}
+                max={draftTo || undefined}
+                onChange={(event) => setDraftFrom(event.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="date-range-to">
+                Đến ngày
+              </label>
+              <Input
+                id="date-range-to"
+                type="date"
+                value={draftTo}
+                min={draftFrom || undefined}
+                onChange={(event) => setDraftTo(event.target.value)}
+              />
+            </div>
+            {validationError && (
+              <p className="text-xs text-error" role="alert">
+                {validationError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setPopoverOpen(false)}>
+                Hủy
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={!draftFrom || !draftTo}
+                onClick={handleApply}
+              >
+                Áp dụng
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+      {conBenPhai && (
+        <div
+          aria-hidden="true"
+          data-slot="mo-cuon-phai"
+          className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r-lg bg-linear-to-l from-surface-soft to-transparent"
+        />
+      )}
     </div>
   );
 }

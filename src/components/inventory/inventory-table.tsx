@@ -127,20 +127,22 @@ export function InventoryTable({
             key={v.variantId}
             className={cn("flex flex-col gap-1.5 rounded-lg border border-hairline p-3", v.isLow && "bg-warning/5")}
           >
-            <div className="flex items-center justify-between">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-sm text-ink">{v.productName}</span>
-                <span className="flex items-center gap-1.5">
-                  <Badge variant="outline" className="w-fit">
-                    {v.label}
+            {/* `min-w-0` + `break-all`: SKU dài KHÔNG có dấu cách (vd "AD02HAIDUONGXANHMINTMESIZES") không
+                tự xuống dòng ⇒ đẩy thẻ tràn ngang, nhãn "Hết hàng" văng ra ngoài mép màn (iPhone 28/09). */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-sm break-words text-ink">{v.productName}</span>
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className="w-fit max-w-full">
+                    <span className="truncate">{v.label}</span>
                   </Badge>
-                  <span className="font-mono text-xs text-muted-foreground">{v.sku}</span>
+                  <span className="min-w-0 font-mono text-xs break-all text-muted-foreground">{v.sku}</span>
                 </span>
               </div>
               {v.stock === 0 ? (
-                <Badge className="bg-error text-white">Hết hàng</Badge>
+                <Badge className="shrink-0 bg-error text-white">Hết hàng</Badge>
               ) : v.isLow ? (
-                <Badge className="bg-warning/20 text-ink">Sắp hết</Badge>
+                <Badge className="shrink-0 bg-warning/20 text-ink">Sắp hết</Badge>
               ) : null}
             </div>
             <div className="flex items-center justify-between text-xs text-muted-foreground">

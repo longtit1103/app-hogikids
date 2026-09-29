@@ -9,6 +9,7 @@ import { ChannelCompareTable } from "@/components/kenh/channel-compare-table";
 import { Switch } from "@/components/ui/switch";
 import type { ChannelPnl } from "@/lib/reports/pnl";
 import { cn } from "@/lib/utils";
+import { PageTitle } from "@/components/shell/page-title";
 
 const VIEW_MODE_STORAGE_KEY = "hogikids_kenh_view_mode";
 type ViewMode = "card" | "table";
@@ -52,7 +53,7 @@ export function ChannelComparisonSection({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-serif text-2xl text-ink">Kênh</h1>
+        <PageTitle title="Kênh" />
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-ink">
             <Switch checked={compareOn} onCheckedChange={setCompareOn} />

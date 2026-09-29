@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 
 import { KEY_QUY_TOI_THIEU } from "@/lib/so-quy/du-bao-quy-queries";
 

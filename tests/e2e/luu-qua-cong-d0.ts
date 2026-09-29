@@ -1,4 +1,4 @@
-import { expect, type Locator } from "@playwright/test";
+import { expect, type Locator } from "./fixture-cho-trang-stream-xong";
 
 /**
  * Bấm "Lưu" trên form Khoản vay / Sổ tiết kiệm / Nhập quỹ và tự bấm tiếp "Xác nhận ghi trước ngày mở

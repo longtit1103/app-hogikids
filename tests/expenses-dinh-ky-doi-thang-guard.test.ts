@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { updateExpense } from "@/lib/actions/expenses";
 import { ensureRecurringExpenses } from "@/lib/expenses/ensure-recurring-expenses";
+import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { prisma } from "@/lib/prisma";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
@@ -12,7 +13,8 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * Vì sao: cổng chống trùng của `ensureRecurringExpenses` chỉ hỏi "tháng này đã có dòng nào mang
  * `recurringId` chưa". Dời dòng của tháng 7 sang tháng 8 ⇒ tháng 7 trống ⇒ lần render kế sinh bù
  * một dòng mới, trong khi dòng vừa dời vẫn nằm ở tháng 8. Khoản định kỳ vào P&L HAI LẦN, không có
- * cảnh báo nào, và không unique DB nào đỡ (schema cố ý không có unique (recurringId, tháng)).
+ * cảnh báo nào. UNIQUE `(recurringId, recurringMonth)` dưới DB chỉ đỡ chiều ĐÍCH (tháng đích đã có
+ * dòng của chính mẫu); chiều NGUỒN (tháng cũ trống rồi bị sinh bù) vẫn chỉ cổng trong action chặn.
  */
 vi.mock("@/lib/session", () => ({
   requireUser: vi.fn(async () => "test-user-id"),
@@ -54,6 +56,7 @@ async function seedDongDinhKy() {
       channelId: null,
       source: "RECURRING",
       recurringId: recurring.id,
+      recurringMonth: khoaThangDinhKy(thangCu),
     },
   });
   return { recurring, expense };
@@ -146,8 +149,43 @@ describe("updateExpense — chặn dời dòng định kỳ sang tháng khác", 
     expect(res.ok).toBe(true);
     const sau = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
     expect(format(sau.date, "yyyy-MM")).toBe(format(thangGiua, "yyyy-MM"));
+    // Khoá tháng đi THEO ngày — dòng dời chiếm đúng ô "1 dòng/mẫu/tháng" của tháng mới.
+    expect(sau.recurringMonth).toBe(format(thangGiua, "yyyy-MM"));
     // Và đúng là không có dòng nào được sinh bù cho tháng cũ.
     expect(await ensureRecurringExpenses(thangCu)).toBe(0);
+  });
+
+  it("mẫu đã dừng, dời vào tháng ĐÃ có dòng của chính mẫu → UNIQUE chặn, câu lỗi rõ, không trùng", async () => {
+    // Cổng trong action cho qua (mẫu dừng, cả hai tháng đã qua) — trước khi có UNIQUE, lượt này lọt
+    // thành 2 dòng cùng khoản chi trong tháng cũ (chi phí tính 2 lần).
+    const { recurring } = await seedDongDinhKy();
+    const ngayGiua = new Date(`${khoaNgay(thangGiua)}T00:00:00+07:00`);
+    const dongGiua = await prisma.expense.create({
+      data: {
+        date: ngayGiua,
+        categoryId: "other",
+        description: "Tiền thuê kho",
+        amount: TIEN,
+        source: "RECURRING",
+        recurringId: recurring.id,
+        recurringMonth: khoaThangDinhKy(ngayGiua),
+      },
+    });
+    await prisma.recurringExpense.update({ where: { id: recurring.id }, data: { active: false } });
+
+    const res = await updateExpense(dongGiua.id, inputSua(khoaNgay(thangCu, 20)));
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("DINH_KY_TRUNG_THANG");
+      expect(res.field).toBe("date");
+      expect(res.error).toContain(format(thangCu, "MM/yyyy"));
+    }
+    const sau = await prisma.expense.findUniqueOrThrow({ where: { id: dongGiua.id } });
+    expect(format(sau.date, "yyyy-MM")).toBe(format(thangGiua, "yyyy-MM"));
+    expect(
+      await prisma.expense.count({ where: { recurringId: recurring.id, recurringMonth: format(thangCu, "yyyy-MM") } })
+    ).toBe(1);
   });
 
   it("dòng THƯỜNG (recurringId null) dời sang tháng khác → vẫn lưu được", async () => {

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 
 import { testPrisma } from "./ingest-raw";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";

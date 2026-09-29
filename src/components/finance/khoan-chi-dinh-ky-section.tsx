@@ -1,9 +1,10 @@
-import { addMonths, format, startOfMonth } from "date-fns";
+import { format } from "date-fns";
 
 import { NutBatLaiKhoanChiDinhKy } from "@/components/finance/nut-bat-lai-khoan-chi-dinh-ky";
 import { Badge } from "@/components/ui/badge";
 import { formatVnd } from "@/lib/format";
 import type { RecurringExpenseRow } from "@/lib/expenses/expense-queries";
+import { thangChoBatLai } from "@/lib/expenses/thang-cho-bat-lai";
 
 /**
  * Khối liệt kê MỌI mẫu chi định kỳ (đang chạy lẫn đã dừng) — tab "Sổ chi phí". Mẫu đã dừng có nút
@@ -20,9 +21,7 @@ export function KhoanChiDinhKySection({ items }: { items: RecurringExpenseRow[] 
 
   const soDangChay = items.filter((i) => i.active).length;
   const soDaDung = items.length - soDangChay;
-  const dauThangNay = startOfMonth(new Date());
-  const thangNay = format(dauThangNay, "MM/yyyy");
-  const thangSau = format(addMonths(dauThangNay, 1), "MM/yyyy");
+  const thang = thangChoBatLai(new Date());
 
   return (
     <details className="rounded-xl border border-hairline bg-surface-card p-4">
@@ -70,8 +69,7 @@ export function KhoanChiDinhKySection({ items }: { items: RecurringExpenseRow[] 
                       description={item.description}
                       amount={item.amount}
                       dayOfMonth={item.dayOfMonth}
-                      thangNay={thangNay}
-                      thangSau={thangSau}
+                      thang={thang}
                     />
                   )}
                 </td>

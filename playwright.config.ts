@@ -27,6 +27,10 @@ const THU_MUC_BACKUP_E2E = mkdtempSync(path.join(tmpdir(), "hogikids-e2e-backups
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Chỉ `*.spec.ts(x)` là spec — đúng tập hàng rào tests/unit/e2e-dung-fixture-cho-stream.test.ts
+  // quét (mặc định Playwright còn nhận `.test.*`, `.js`… mà hàng rào không soi). Test đó khoá
+  // nguyên văn dòng này.
+  testMatch: /\.spec\.tsx?$/,
   globalSetup: "./tests/e2e/global-setup.ts",
   // Mọi spec dùng CHUNG một DB test (DB test của e2e) và nhiều spec ghi dữ liệu
   // tiền vào CÙNG bucket "tháng này" (đơn/chi phí ngày hôm nay). `acceptance.spec.ts`

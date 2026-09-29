@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { datQuyToiThieu } from "@/lib/actions/so-quy-quy-toi-thieu";
 import { ensureRecurringExpenses } from "@/lib/expenses/ensure-recurring-expenses";
+import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { prisma } from "@/lib/prisma";
 import type { KhoanDuKien } from "@/lib/so-quy/du-bao-quy-types";
 import {
@@ -139,6 +140,7 @@ async function seedFixture(): Promise<void> {
         description: "Phần mềm",
         source: "RECURRING",
         recurringId: r5.id,
+        recurringMonth: khoaThangDinhKy(vn("2026-09-05T00:00:00")),
       },
       // Lãi của kỳ khoản A duyệt TRƯỚC hạn — ngày tương lai, khoá `LOAN:` như đường duyệt kỳ thật.
       {
@@ -323,6 +325,7 @@ describe("docDuBaoQuy — chi phí định kỳ ĐẾN HẠN trong tháng mà ch
         description: "Nước",
         source: "RECURRING",
         recurringId: nuoc.id,
+        recurringMonth: khoaThangDinhKy(vn("2026-09-10T00:00:00")),
       },
     });
   });

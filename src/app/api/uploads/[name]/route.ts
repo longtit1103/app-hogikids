@@ -1,10 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-// Chỉ khớp filename do saveLogoFile sinh ra (settings-shop-info.ts): `logo-<timestamp>.png|jpg`.
-// TUYỆT ĐỐI không nối trực tiếp param người dùng vào path — chặn path traversal
-// (`..`, `/`, `\`) bằng allowlist regex trước khi build path đọc file.
-const SAFE_FILENAME = /^logo-\d+\.(png|jpg)$/;
+// Allowlist tên file chặn path traversal — luật chung ở lib/branding/logo-file.ts.
+import { LOGO_FILENAME_RE } from "@/lib/branding/logo-file";
 
 const CONTENT_TYPE_BY_EXT: Record<string, string> = {
   png: "image/png",
@@ -26,7 +24,7 @@ const CONTENT_TYPE_BY_EXT: Record<string, string> = {
 export async function GET(_req: Request, { params }: { params: Promise<{ name: string }> }): Promise<Response> {
   const { name } = await params;
 
-  if (!SAFE_FILENAME.test(name)) {
+  if (!LOGO_FILENAME_RE.test(name)) {
     return new Response(null, { status: 404 });
   }
 

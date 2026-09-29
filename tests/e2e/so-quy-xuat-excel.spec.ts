@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import * as XLSX from "xlsx";
 
 import { testPrisma } from "./ingest-raw";

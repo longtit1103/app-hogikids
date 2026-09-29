@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import type { CashMovement, Expense, Loan, SoTietKiem, ThuNhap } from "@prisma/client";
 
 import { CASH_MOVEMENT_KIND_META } from "@/lib/cash-movements/cash-movement-kinds";
+import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { formatVnd } from "@/lib/format";
 
 /**
@@ -36,7 +37,7 @@ export type BangThungRac = (typeof BANG_THUNG_RAC)[number];
 export const TRUONG_CHUP: Record<BangThungRac, readonly string[]> = {
   Expense: [
     "id", "date", "categoryId", "adsSource", "description", "channelId",
-    "amount", "source", "refId", "recurringId", "createdAt",
+    "amount", "source", "refId", "recurringId", "recurringMonth", "createdAt",
   ],
   CashMovement: ["id", "date", "kind", "amount", "description", "loanId", "savingsId", "createdAt"],
   ThuNhap: ["id", "date", "kind", "amount", "description", "savingsId", "refId", "createdAt"],
@@ -132,6 +133,12 @@ export function doiNguocBanGhi(
   for (const truong of TRUONG_NGAY[bang]) {
     const gt = ra[truong];
     if (typeof gt === "string") ra[truong] = new Date(gt);
+  }
+  // Khoá tháng định kỳ TÍNH LẠI từ `date` chứ không tin ảnh: ảnh chụp trước khi có cột
+  // `recurringMonth` không mang khoá, mà dòng định kỳ thiếu khoá bị CHECK dưới DB từ chối.
+  if (bang === "Expense") {
+    ra.recurringMonth =
+      typeof ra.recurringId === "string" && ra.date instanceof Date ? khoaThangDinhKy(ra.date) : null;
   }
   return ra;
 }

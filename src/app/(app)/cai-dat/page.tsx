@@ -35,6 +35,7 @@ import { KEY_HAN_TOKEN, tinhHanToken } from "@/lib/tokens/token-expiry";
 import { doiChieuDonKhoVsSan } from "@/lib/reports/doi-chieu-don-kho";
 import { demCanXem, demTonDong, dsDonCanXem } from "@/lib/bronze/ket-cuc-silver";
 import { QUA_HAN_PHUT } from "@/lib/bronze/doi-soat-don-con-do";
+import { PageTitle } from "@/components/shell/page-title";
 
 /**
  * Anchor id CHỐT theo thứ tự — `#ket-noi` phải khớp NGUYÊN VĂN href
@@ -178,10 +179,9 @@ export default async function CaiDatPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="flex flex-col gap-1">
-          <h1 className="font-serif text-2xl text-ink">Cài đặt</h1>
+        <PageTitle title="Cài đặt">
           <p className="text-sm text-muted-foreground">Cấu hình shop, kênh bán và dữ liệu</p>
-        </div>
+        </PageTitle>
         <AnchorTabs tabs={SETTINGS_TABS} />
       </div>
 

@@ -12,7 +12,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { logout } from "@/lib/actions/auth";
 import { cn } from "@/lib/utils";
-import { NAV_ITEMS, SETTINGS_NAV_ITEM, isNavItemActive } from "./nav-config";
+import { NAV_ITEMS, SETTINGS_NAV_ITEM, TAB_CHINH_HREFS, isNavItemActive } from "./nav-config";
 
 type SidebarProps = {
   shopName: string;
@@ -24,8 +24,9 @@ type SidebarProps = {
 
 /**
  * Renders the sidebar twice with the same nav content: a persistent desktop
- * `<aside>` and a mobile `Sheet` (controlled by `ShellChrome`'s hamburger
- * button in the top bar) — kept as one component so the two never drift.
+ * `<aside>` and a mobile `Sheet` — kept as one component so the two never drift.
+ * Ngăn kéo mobile do tab "Thêm" của `BottomTabBar` mở (từ 26/09), nên CHỈ liệt kê mục KHÔNG có
+ * tab riêng (`chiMucPhu`) + Cài đặt + tài khoản; sidebar máy tính vẫn đủ mọi mục.
  */
 export function Sidebar({ shopName, missingCostCount, lowStockWarning, mobileOpen, onMobileOpenChange }: SidebarProps) {
   return (
@@ -35,6 +36,7 @@ export function Sidebar({ shopName, missingCostCount, lowStockWarning, mobileOpe
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
+        {/* Đệm safe-area (PWA iPhone) do chính SheetContent bù theo `data-side` — ui/sheet.tsx. */}
         <SheetContent side="left" className="w-72 max-w-[85vw] gap-0 bg-canvas p-0">
           <SheetTitle className="sr-only">Điều hướng</SheetTitle>
           <SidebarNavContent
@@ -42,6 +44,7 @@ export function Sidebar({ shopName, missingCostCount, lowStockWarning, mobileOpe
             missingCostCount={missingCostCount}
             lowStockWarning={lowStockWarning}
             onNavigate={() => onMobileOpenChange(false)}
+            chiMucPhu
           />
         </SheetContent>
       </Sheet>
@@ -54,15 +57,19 @@ function SidebarNavContent({
   missingCostCount,
   lowStockWarning,
   onNavigate,
+  chiMucPhu = false,
 }: {
   shopName: string;
   missingCostCount: number;
   lowStockWarning: boolean;
   onNavigate?: () => void;
+  /** Chỉ liệt kê mục KHÔNG nằm trong 4 tab chính (ngăn kéo mở từ tab "Thêm"). */
+  chiMucPhu?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const avatarLetter = shopName.trim().charAt(0).toUpperCase() || "H";
+  const navItems = chiMucPhu ? NAV_ITEMS.filter((i) => !TAB_CHINH_HREFS.includes(i.href)) : NAV_ITEMS;
 
   async function handleLogout() {
     await logout();
@@ -78,7 +85,7 @@ function SidebarNavContent({
       </Link>
 
       <nav className="flex flex-1 flex-col gap-1">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <SidebarNavLink
             key={item.href}
             item={item}

@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deleteCashMovement } from "@/lib/actions/cash-movements";
@@ -7,6 +8,7 @@ import { xoaSoTietKiem } from "@/lib/actions/so-tiet-kiem";
 import { khoiPhucBanGhi, xoaVinhVienBanGhi } from "@/lib/actions/thung-rac";
 import { ensureRecurringExpenses } from "@/lib/expenses/ensure-recurring-expenses";
 import { getExpenseSummary } from "@/lib/expenses/expense-queries";
+import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { prisma } from "@/lib/prisma";
 import { calcPnl } from "@/lib/reports/pnl";
 import { listKhoanVay } from "@/lib/so-quy/khoan-vay-queries";
@@ -60,18 +62,19 @@ async function doTien() {
 }
 
 async function taoChiPhi(ghiDe: Record<string, unknown> = {}) {
-  return prisma.expense.create({
-    data: {
-      date: new Date(2026, 6, 10),
-      // Danh mục "Vận chuyển" chứ không "Nhập hàng": Nhập hàng CỐ Ý không bao giờ trừ vào P&L (bất
-      // biến #1, nó là dòng tiền) nên fixture đó sẽ làm phép so P&L trước/sau thành so hai số 0.
-      categoryId: "shipping",
-      description: "Cước vận chuyển tháng 7",
-      amount: TIEN_CHI,
-      source: "MANUAL",
-      ...ghiDe,
-    },
-  });
+  const data = {
+    date: new Date(2026, 6, 10),
+    // Danh mục "Vận chuyển" chứ không "Nhập hàng": Nhập hàng CỐ Ý không bao giờ trừ vào P&L (bất
+    // biến #1, nó là dòng tiền) nên fixture đó sẽ làm phép so P&L trước/sau thành so hai số 0.
+    categoryId: "shipping",
+    description: "Cước vận chuyển tháng 7",
+    amount: TIEN_CHI,
+    source: "MANUAL" as const,
+    ...ghiDe,
+  } as Prisma.ExpenseUncheckedCreateInput;
+  // Dòng định kỳ mang khoá tháng (CHECK dưới DB) — tính từ đúng ngày của fixture như writer thật.
+  if (data.recurringId) data.recurringMonth = khoaThangDinhKy(new Date(data.date));
+  return prisma.expense.create({ data });
 }
 
 describe("xoá rồi khôi phục một khoản chi", () => {

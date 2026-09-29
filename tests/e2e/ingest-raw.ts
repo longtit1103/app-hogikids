@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { expect, request as pwRequest, type APIResponse } from "@playwright/test";
+import { expect, request as pwRequest, type APIResponse } from "./fixture-cho-trang-stream-xong";
 
 import { INGEST_SECRET_TEST } from "./test-constants";
 import { e2eDatabaseUrlFromEnv } from "./test-database-url";

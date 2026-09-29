@@ -239,3 +239,49 @@ export function parseDateRange(params: Partial<DateRangeQuery>): DateRange | nul
 
   return clampDateRange(expanded);
 }
+
+/**
+ * Một lựa chọn của picker toàn cục: preset đặt tên, hoặc "custom" kèm range
+ * ngày cụ thể. Là state của `DateRangeProvider` (date-range-provider.tsx).
+ */
+export type DateRangeSelection = {
+  preset: RangePreset | "custom";
+  range: DateRange;
+};
+
+/**
+ * Hai lựa chọn có TRÙNG GIÁ TRỊ không — so preset + khoá ngày `yyyy-MM-dd` của
+ * hai biên, KHÔNG so tham chiếu object. Mọi range trong app đều neo biên trọn
+ * ngày (resolveRangePreset / parseDateRange / normalizeCustomRange) nên khoá
+ * ngày đủ phân biệt.
+ *
+ * Vì sao cần: `resolveRangePreset` luôn trả object MỚI. Provider nằm TRÊN
+ * boundary `(app)/loading.tsx`; effect lúc mount mà set lại một range "y hệt"
+ * nhưng khác tham chiếu thì context đổi khi boundary còn đang khử nước ⇒ React
+ * bỏ HTML server, render lại cả trang ở client. So theo giá trị thì lượt tải
+ * thường (preset nhớ lại trùng mặc định) không phát sinh cập nhật nào.
+ */
+export function isSameDateRangeSelection(a: DateRangeSelection, b: DateRangeSelection): boolean {
+  if (a.preset !== b.preset) return false;
+  const ka = serializeDateRange(a.range);
+  const kb = serializeDateRange(b.range);
+  return ka.tu === kb.tu && ka.den === kb.den;
+}
+
+/**
+ * Lựa chọn mà URL MANG TƯỜNG MINH: `?tu=&den=` hợp lệ ⇒ "custom"; không thì
+ * `?range=<preset>` hợp lệ ⇒ preset đó; URL sạch/hỏng ⇒ `null` (người gọi giữ
+ * lựa chọn hiện có). Khác `resolveRangeFromParams` ở chỗ KHÔNG rơi về mặc định —
+ * phía client cần phân biệt "URL không nói gì" với "URL chọn this_month".
+ */
+export function selectionFromQuery(
+  params: { tu?: string; den?: string; range?: string },
+  now: Date = new Date(),
+): DateRangeSelection | null {
+  const custom = parseDateRange({ tu: params.tu, den: params.den });
+  if (custom) return { preset: "custom", range: custom };
+  if (isRangePreset(params.range)) {
+    return { preset: params.range, range: resolveRangePreset(params.range, now) };
+  }
+  return null;
+}

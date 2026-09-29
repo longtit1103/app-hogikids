@@ -24,7 +24,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const redirectTo = redirectParam && isSafeRedirectPath(redirectParam) ? redirectParam : "/";
 
   return (
-    <div className="flex min-h-screen flex-col bg-canvas">
+    <div className="flex min-h-man-hinh flex-col bg-canvas">
       <main className="flex flex-1 items-center justify-center px-4 py-12 md:px-8">
         <div className="grid w-full max-w-5xl gap-10 md:grid-cols-2 md:items-center md:gap-16">
           {/* Branding column */}

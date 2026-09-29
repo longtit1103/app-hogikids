@@ -38,6 +38,15 @@ export type ViTiktokConLaiToiThieu = {
   tangTuD0: number | null;
 };
 
+/**
+ * Statement sàn CHƯA chốt (trạng thái ≠ SETTLED) — đã bị loại khỏi MỌI con số trong
+ * `ViTiktokConLaiToiThieu`, chỉ đi kèm để ô hiển thị cảnh báo. `tong` = Σ `settlementAmount` (có dấu).
+ */
+export type StatementChuaChot = { soDong: number; tong: number };
+
+/** Dữ liệu ô "Còn ở ví TikTok": cận dưới ví + phần statement bị loại vì chưa chốt. */
+export type ViTiktokConLaiHienThi = ViTiktokConLaiToiThieu & { chuaChot: StatementChuaChot };
+
 const TRANG_THAI_BO_QUA = "FAILED";
 
 /**

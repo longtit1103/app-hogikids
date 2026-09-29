@@ -1,5 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { startOfMonth } from "date-fns";
+
+import { cauChenhLech } from "@/lib/so-quy/doi-chieu-so-du-chot";
 
 import { testPrisma } from "./ingest-raw";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
@@ -10,6 +12,14 @@ import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
  *
  * DB e2e tích luỹ dữ liệu từ spec khác nên KHÔNG giả định số cuối kỳ: đọc "Cuối kỳ (sổ quỹ)" từ chính
  * thẻ rồi suy số cần gõ. `beforeAll` đảm bảo có sổ (một dòng CAPITAL_IN mang tiền tố E2E, dọn sau).
+ *
+ * Bước ① (issue #247, 28/09): KHÔNG còn giả định `cuoiKy > 0` — DB e2e tích luỹ chi phí từ spec khác
+ * có thể làm `cuoiKy` âm dù đã seed 100tr. Nhãn chênh lệch kỳ vọng suy TRỰC TIẾP từ chính `cuoiKy` vừa
+ * đọc, gọi ĐÚNG hàm thuần `cauChenhLech` mà thẻ dùng để render (không đoán chữ tay) — đúng cho MỌI
+ * dấu của `cuoiKy`. Bỏ qua `duNoThauChi` (mặc định 0 của `cauChenhLech`) là AN TOÀN cho `nhan`: tham
+ * số đó chỉ đổi `giaiThich`, không đổi câu `nhan` đang so ở đây; còn khoản thấu chi DUY NHẤT trong bộ
+ * e2e (`so-quy-khoan-vay.spec.ts`) tự tất toán trong cùng test VÀ chạy SAU file này theo thứ tự chữ
+ * cái nên chưa từng tồn tại lúc spec này chạy.
  */
 const MO_TA = "E2E chot so du — mo so";
 
@@ -70,8 +80,10 @@ test.describe("Chốt số dư cuối tháng — tab Dòng tiền", () => {
     await expect(page.getByText(/Đã chốt số dư tháng/)).toBeVisible();
 
     const cuoiKy = docTien((await card.getByTestId("so-du-chot-cuoi-ky").innerText()).trim());
-    expect(cuoiKy).toBeGreaterThan(0); // seed mở sổ 100tr ⇒ cuối kỳ dương dù spec khác để lại chi phí
-    await expect(card.getByTestId("so-du-chot-chenh-lech")).toContainText("Sổ NHIỀU HƠN tiền thật");
+    // soChot = 0 (đã gõ 0/0) ⇒ chenhLechTho = 0 − cuoiKy = −cuoiKy. Suy nhãn kỳ vọng từ CHÍNH số vừa
+    // đọc thay vì giả định dấu — xem docblock đầu file (issue #247).
+    const nhanKyVong = cauChenhLech(-cuoiKy).nhan;
+    await expect(card.getByTestId("so-du-chot-chenh-lech")).toHaveText(nhanKyVong);
 
     // ② Sửa bank = cuối kỳ ⇒ khớp.
     await card.getByRole("button", { name: "Sửa" }).click();

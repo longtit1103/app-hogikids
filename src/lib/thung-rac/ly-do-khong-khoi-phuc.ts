@@ -66,14 +66,22 @@ export type TinhTrangKhoiPhuc = {
   chaDaTatToan: ChaDaTatToan | null;
   /**
    * Bản ghi là một khoản chi ĐỊNH KỲ mà tháng đó nay ĐÃ có dòng khác cùng `recurringId`.
-   * `ensureRecurringExpenses` tự sinh lại dòng thay thế ngay lần render sau (cổng idempotent của nó
-   * chỉ là `findFirst` theo tháng, không có unique dưới DB) — khôi phục thêm nữa là HAI dòng cùng
-   * một khoản chi, lãi ròng và quỹ cùng hụt đúng một lần tiền.
+   * `ensureRecurringExpenses` tự sinh lại dòng thay thế ngay lần render sau — khôi phục thêm nữa là
+   * HAI dòng cùng một khoản chi (lãi ròng và quỹ cùng hụt đúng một lần tiền); UNIQUE
+   * `(recurringId, recurringMonth)` dưới DB cũng từ chối câu ghi đó.
    */
   thangDaCoDinhKy: boolean;
   /** Trục số dư mà lượt khôi phục sẽ đẩy xuống âm (dò TRƯỚC khi ghi), hoặc null. */
   seLamAmSoDu: TrucSoDuAm | null;
 };
+
+/**
+ * Câu cho ca "tháng đó đã có dòng định kỳ thay thế" — dùng CHUNG cho phép dò trước (cột "Trạng thái")
+ * và cho va chạm UNIQUE `(recurringId, recurringMonth)` lúc ghi (lượt sinh song song chen vào sau phép
+ * dò): một sự cố, một câu.
+ */
+export const CAU_THANG_DA_CO_DINH_KY =
+  "Tháng này đã có khoản định kỳ thay thế — xoá dòng đó trước khi khôi phục mục này";
 
 export function lyDoKhongKhoiPhuc(t: TinhTrangKhoiPhuc): string | null {
   if (t.daKhoiPhuc) return "Mục này đã được khôi phục";
@@ -84,9 +92,7 @@ export function lyDoKhongKhoiPhuc(t: TinhTrangKhoiPhuc): string | null {
   if (t.chaDaMat !== null) return CAU_CHA_DA_MAT[t.chaDaMat];
   // "Cha đã mất" thắng "cha đã tất toán": không có cha thì `closedAt` còn chẳng đọc được.
   if (t.chaDaTatToan !== null) return CAU_CHA_DA_TAT_TOAN[t.chaDaTatToan];
-  if (t.thangDaCoDinhKy) {
-    return "Tháng này đã có khoản định kỳ thay thế — xoá dòng đó trước khi khôi phục mục này";
-  }
+  if (t.thangDaCoDinhKy) return CAU_THANG_DA_CO_DINH_KY;
   if (t.seLamAmSoDu !== null) return CAU_SO_DU_AM[t.seLamAmSoDu];
   return null;
 }

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 
 import { ingestPancake, resetRawPancake, testPrisma } from "./ingest-raw";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
@@ -119,6 +119,12 @@ test.describe("Đồng bộ giá vốn từ Pancake", () => {
 
     await nut.click();
     await page.getByRole("button", { name: "Áp giá vốn", exact: true }).click();
+
+    // Chờ ACTION TRẢ VỀ (toast thành công) trước mọi phép kiểm sau: action ghi TỪNG mã một
+    // transaction theo độ chênh giảm dần, nên mã của test có thể xong sớm trong khi các mã khác còn
+    // đang ghi. Chỉ poll dòng của mình rồi tải lại trang ⇒ màn còn "N mã lệch" (#251, tái hiện tất
+    // định bằng cách giữ khoá dòng cuối). Cùng ngân sách 20s với phép poll DB bên dưới.
+    await expect(page.getByText(/^Đã áp giá vốn cho \d+ mã\.$/)).toBeVisible({ timeout: 20_000 });
 
     // Chốt bằng DB, không chốt bằng chữ trên màn: toast xanh mà số không đổi là ca đã gặp (12/08).
     await expect

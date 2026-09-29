@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
+import { laLoiTrungDongDinhKyThang } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { prisma } from "@/lib/prisma";
 import {
   chanDuNoAm,
@@ -20,7 +21,11 @@ import {
   tachAnh,
   type BanGhiCanDung,
 } from "@/lib/thung-rac/do-tinh-trang-khoi-phuc";
-import { CAU_SO_DU_AM, lyDoKhongKhoiPhuc } from "@/lib/thung-rac/ly-do-khong-khoi-phuc";
+import {
+  CAU_SO_DU_AM,
+  CAU_THANG_DA_CO_DINH_KY,
+  lyDoKhongKhoiPhuc,
+} from "@/lib/thung-rac/ly-do-khong-khoi-phuc";
 
 /**
  * Khôi phục một mục trong thùng rác: dựng lại bản ghi (và cả CỤM con của nó) với ĐÚNG id cũ.
@@ -181,6 +186,10 @@ export async function khoiPhucBanGhiDaXoa(id: string): Promise<KetQuaKhoiPhuc> {
     if (e instanceof LoiDuNoAm) return { ok: false, lyDo: CAU_SO_DU_AM.duNo };
     if (e instanceof LoiTienGuiAm) return { ok: false, lyDo: CAU_SO_DU_AM.tienGui };
     if (e instanceof LoiSoDuTietKiemAm) return { ok: false, lyDo: CAU_SO_DU_AM.soDuTietKiem };
+    // Phép dò `thangDaCoDinhKy` chạy TRƯỚC câu ghi (ReadCommitted): bộ sinh định kỳ của một lượt
+    // render song song vẫn chen được dòng thay thế vào giữa. UNIQUE `(recurringId, recurringMonth)`
+    // là cổng cuối — cả transaction rollback (con dấu "đã khôi phục" tan theo), trả đúng câu dò trước.
+    if (laLoiTrungDongDinhKyThang(e)) return { ok: false, lyDo: CAU_THANG_DA_CO_DINH_KY };
     throw e;
   }
 }

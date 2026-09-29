@@ -28,6 +28,7 @@ import { calcPnl } from "@/lib/reports/pnl";
 import { requireUser } from "@/lib/session";
 import { KhoiAffiliate, TongQuanP1Section } from "@/components/marketing/tong-quan-p1-section";
 import { DONG_MOI_TRANG_MARKETING } from "@/components/marketing/phan-trang-marketing";
+import { PageTitle } from "@/components/shell/page-title";
 
 type SearchParams = {
   tu?: string;
@@ -294,12 +295,11 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-serif text-2xl text-ink">Marketing</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
+      <PageTitle title="Marketing">
+        <p className="text-xs text-muted-foreground">
           Hiệu quả nội dung · creator · quảng cáo — số do sàn báo, đặt cạnh số thật từ Pancake
         </p>
-      </div>
+      </PageTitle>
 
       <MarketingTabNav tab={tab} sp={sp} />
 

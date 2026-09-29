@@ -29,21 +29,32 @@ function formatPct(n: number | null): string {
   return `${n.toLocaleString("vi-VN", { maximumFractionDigits: 1, minimumFractionDigits: 0 })}%`;
 }
 
-function DeltaCell({ delta }: { delta: PnlLineDelta }) {
-  if (delta.kind === "new") {
-    return (
-      <TableCell className="text-right">
-        <Badge variant="outline">Mới</Badge>
-      </TableCell>
-    );
-  }
+/** Nội dung ô "So tháng trước" — DÙNG CHUNG cho cột máy tính và dòng phụ mobile (không tính lại). */
+function DeltaText({ delta }: { delta: PnlLineDelta }) {
+  if (delta.kind === "new") return <Badge variant="outline">Mới</Badge>;
   if (delta.kind === "flat") {
-    return <TableCell className="text-right text-muted-foreground">—</TableCell>;
+    return (
+      <span className="text-muted-foreground">
+        <span aria-hidden="true">—</span>
+        <span className="sr-only">không đổi</span>
+      </span>
+    );
   }
   const up = delta.pct > 0;
   return (
-    <TableCell className={cn("text-right tabular-nums text-xs", up ? "text-success" : "text-error")}>
-      {up ? "▲" : "▼"} {Math.abs(delta.pct).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%
+    <span className={cn("tabular-nums", up ? "text-success" : "text-error")}>
+      <span aria-hidden="true">{up ? "▲" : "▼"} </span>
+      <span className="sr-only">{up ? "tăng " : "giảm "}</span>
+      {Math.abs(delta.pct).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%
+    </span>
+  );
+}
+
+/** Ẩn dưới md — giá trị xuống dòng phụ trong ô "Số tiền"; bản in hiện lại tường minh. */
+function DeltaCell({ delta }: { delta: PnlLineDelta }) {
+  return (
+    <TableCell className="hidden text-right text-xs md:table-cell print:table-cell">
+      <DeltaText delta={delta} />
     </TableCell>
   );
 }
@@ -199,8 +210,8 @@ export function PnlTab({
                 </span>
               </TableHead>
               <TableHead className="text-right">Số tiền</TableHead>
-              <TableHead className="text-right">% / Doanh thu</TableHead>
-              <TableHead className="text-right">So tháng trước</TableHead>
+              <TableHead className="hidden text-right md:table-cell print:table-cell">% / Doanh thu</TableHead>
+              <TableHead className="hidden text-right md:table-cell print:table-cell">So tháng trước</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -216,7 +227,13 @@ export function PnlTab({
                 <TableRow key={item.id} className={rowBandClass(item, monthPnl.netProfit < 0)}>
                   {/* `print:whitespace-normal`: bản in bổ sung chú thích vào cạnh nhãn
                       (xem PnlLineLabel), để nowrap thì dòng dài tràn khỏi khổ giấy. */}
-                  <TableCell className={cn(rowTypeClass(item), "print:whitespace-normal")}>
+                  <TableCell
+                    className={cn(
+                      rowTypeClass(item),
+                      // Dưới md nhãn dài xuống dòng (bảng không tràn ngang); máy tính giữ một dòng.
+                      "min-w-0 whitespace-normal md:whitespace-nowrap print:whitespace-normal",
+                    )}
+                  >
                     <div className="flex items-center gap-1.5">
                       <PnlLineLabel
                         item={item}
@@ -244,8 +261,22 @@ export function PnlTab({
                     )}
                   >
                     {item.aside ? `(${formatVnd(amount)})` : formatVnd(amount)}
+                    {/* Dưới md: % doanh thu + so tháng trước xuống dòng phụ thay 2 cột bị cắt (ảnh
+                        iPhone 26/09). `opacity-80` thay màu cố định — dòng LN ròng nền tối vẫn đọc được. */}
+                    <div
+                      data-slot="pnl-dong-phu"
+                      className="mt-0.5 text-xs font-normal opacity-80 md:hidden print:hidden"
+                    >
+                      <span className="sr-only">Phần trăm doanh thu: </span>
+                      {formatPct(pct)}
+                      <span aria-hidden="true"> · </span>
+                      <span className="sr-only">. So tháng trước: </span>
+                      <DeltaText delta={delta} />
+                    </div>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums text-xs opacity-80">{formatPct(pct)}</TableCell>
+                  <TableCell className="hidden text-right tabular-nums text-xs opacity-80 md:table-cell print:table-cell">
+                    {formatPct(pct)}
+                  </TableCell>
                   <DeltaCell delta={delta} />
                 </TableRow>
               );

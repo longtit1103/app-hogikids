@@ -16,6 +16,7 @@ import {
   clampDateRange,
   clampRangeEndToNow,
   isRangePreset,
+  isSameDateRangeSelection,
   lastMonthToSameDay,
   normalizeCustomRange,
   parseDateRange,
@@ -23,6 +24,7 @@ import {
   previousRange,
   resolveRangeFromParams,
   resolveRangePreset,
+  selectionFromQuery,
   serializeDateRange,
   type DateRange,
 } from "@/lib/date-range";
@@ -333,6 +335,64 @@ describe("isRangePreset", () => {
     expect(isRangePreset("xxx")).toBe(false);
     expect(isRangePreset(undefined)).toBe(false);
     expect(isRangePreset(null)).toBe(false);
+  });
+});
+
+describe("isSameDateRangeSelection (provider không phát cập nhật thừa lúc mount)", () => {
+  it("cùng preset, range dựng lại ra object MỚI ⇒ vẫn TRÙNG (không so tham chiếu)", () => {
+    const a = { preset: "this_month" as const, range: resolveRangePreset("this_month", NOW) };
+    const b = { preset: "this_month" as const, range: resolveRangePreset("this_month", NOW) };
+    expect(a.range).not.toBe(b.range);
+    expect(isSameDateRangeSelection(a, b)).toBe(true);
+  });
+
+  it("cùng preset nhưng lệch vài ms trong cùng ngày ⇒ vẫn TRÙNG (so theo khoá ngày)", () => {
+    const a = { preset: "today" as const, range: resolveRangePreset("today", NOW) };
+    const b = {
+      preset: "today" as const,
+      range: { from: a.range.from, to: new Date(a.range.to.getTime() - 5) },
+    };
+    expect(isSameDateRangeSelection(a, b)).toBe(true);
+  });
+
+  it("khác preset dù trùng ngày ⇒ KHÁC (nhãn picker phải đổi)", () => {
+    const range = resolveRangePreset("this_month", NOW);
+    expect(
+      isSameDateRangeSelection({ preset: "this_month", range }, { preset: "custom", range }),
+    ).toBe(false);
+  });
+
+  it("cùng 'custom' nhưng khác một biên ngày ⇒ KHÁC", () => {
+    const a = { preset: "custom" as const, range: parseDateRange({ tu: "2026-06-01", den: "2026-06-30" })! };
+    const b = { preset: "custom" as const, range: parseDateRange({ tu: "2026-06-01", den: "2026-06-29" })! };
+    const c = { preset: "custom" as const, range: parseDateRange({ tu: "2026-06-02", den: "2026-06-30" })! };
+    expect(isSameDateRangeSelection(a, b)).toBe(false);
+    expect(isSameDateRangeSelection(a, c)).toBe(false);
+  });
+
+  it("cùng preset nhưng resolve ở hai ngày khác nhau ⇒ KHÁC (qua nửa đêm phải cập nhật)", () => {
+    const a = { preset: "today" as const, range: resolveRangePreset("today", NOW) };
+    const b = { preset: "today" as const, range: resolveRangePreset("today", subDays(NOW, 1)) };
+    expect(isSameDateRangeSelection(a, b)).toBe(false);
+  });
+});
+
+describe("selectionFromQuery (lựa chọn URL mang tường minh, phía client)", () => {
+  it("tu/den hợp lệ ⇒ custom, thắng cả range", () => {
+    const s = selectionFromQuery({ tu: "2026-06-01", den: "2026-06-30", range: "today" }, NOW);
+    expect(s?.preset).toBe("custom");
+    expect(serializeDateRange(s!.range)).toEqual({ tu: "2026-06-01", den: "2026-06-30" });
+  });
+
+  it("chỉ range hợp lệ ⇒ preset đó, resolve theo now", () => {
+    const s = selectionFromQuery({ range: "7d" }, NOW);
+    expect(s?.preset).toBe("7d");
+    expect(serializeDateRange(s!.range)).toEqual(serializeDateRange(resolveRangePreset("7d", NOW)));
+  });
+
+  it("URL sạch hoặc toàn tham số hỏng ⇒ null (KHÔNG rơi về this_month)", () => {
+    expect(selectionFromQuery({}, NOW)).toBeNull();
+    expect(selectionFromQuery({ tu: "bad", den: "bad", range: "xxx" }, NOW)).toBeNull();
   });
 });
 

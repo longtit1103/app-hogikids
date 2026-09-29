@@ -164,10 +164,16 @@ model Expense {
   source      ExpenseSource   @default(MANUAL)
   refId       String?         @unique // idempotency cho ADS_API: "META:2026-07-04:{campaignId}" (source viết HOA) — ingest lại không trùng
   recurringId String?
+  /// Khoá tháng `yyyy-MM` (giờ VN) của dòng ĐỊNH KỲ — CHỈ có khi `recurringId` có (CHECK dưới DB), và
+  /// phải khớp tháng VN của `date` (CHECK). Mọi writer lấy từ `khoaThangDinhKy(date)`
+  /// (`src/lib/expenses/khoa-thang-dinh-ky.ts`). Dòng thường giữ NULL ⇒ không vướng unique dưới đây.
+  recurringMonth String?
   createdAt   DateTime        @default(now())
 
   @@index([date])
   @@index([categoryId, date])
+  /// Mỗi mẫu định kỳ TỐI ĐA 1 dòng/tháng — do Postgres bảo đảm, bộ sinh chèn `ON CONFLICT DO NOTHING`.
+  @@unique([recurringId, recurringMonth])
 }
 
 model RecurringExpense {

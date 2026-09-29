@@ -1,7 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { format } from "date-fns";
 
-import { ingestPancake, resetRawPancake, type IngestInput } from "./ingest-raw";
+import { ingestPancake, resetRawPancake, testPrisma, type IngestInput } from "./ingest-raw";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 /**
@@ -63,8 +63,11 @@ async function readPnlAmount(page: Page, label: string): Promise<number> {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const labelEl = page.getByText(new RegExp(`^(?:− |= )?${escaped}$`));
   const row = page.locator("table tbody tr").filter({ has: labelEl }).first();
-  const amountText = await row.locator("td").nth(1).textContent();
-  return parseVndText(amountText ?? "");
+  // `innerText` (chữ NGƯỜI DÙNG THẤY), KHÔNG `textContent`: ô "Số tiền" còn chứa dòng phụ mobile
+  // (% doanh thu · so tháng trước, `md:hidden`) — ẩn ở máy tính nhưng vẫn nằm trong textContent,
+  // chữ số của nó sẽ dính vào số tiền.
+  const amountText = await row.locator("td").nth(1).innerText();
+  return parseVndText(amountText);
 }
 
 /** Chọn 1 mục trong base-ui Select đang hiển thị trong dialog (trigger hiện `placeholder`) — khớp chi-phi.spec.ts. */
@@ -305,16 +308,25 @@ test.describe("Acceptance", () => {
     expect(await readPnlAmount(page, "LN ròng")).toBe(netProfitAfterOrders);
 
     // Thêm Expense danh mục "purchase" (Nhập hàng) qua UI → LN ròng KHÔNG đổi (dòng tiền, không phải P&L).
-    await page.goto("/tai-chinh?tab=so-chi-phi");
-    await page.getByRole("button", { name: "+ Thêm chi phí" }).first().click();
-    const dialog = page.getByRole("dialog");
-    await pickSelectOption(page, "Chọn danh mục", "Nhập hàng");
-    await dialog.getByPlaceholder("0").fill("500000");
-    await dialog.locator("textarea").fill(`AC4 purchase excluded ${stamp}`);
-    await dialog.getByRole("button", { name: "Lưu" }).click();
-    await expect(page.getByText(/Đã thêm chi phí/)).toBeVisible();
+    const descNhapHang = `AC4 purchase excluded ${stamp}`;
+    try {
+      await page.goto("/tai-chinh?tab=so-chi-phi");
+      await page.getByRole("button", { name: "+ Thêm chi phí" }).first().click();
+      const dialog = page.getByRole("dialog");
+      await pickSelectOption(page, "Chọn danh mục", "Nhập hàng");
+      await dialog.getByPlaceholder("0").fill("500000");
+      await dialog.locator("textarea").fill(descNhapHang);
+      await dialog.getByRole("button", { name: "Lưu" }).click();
+      await expect(page.getByText(/Đã thêm chi phí/)).toBeVisible();
 
-    await page.goto("/tai-chinh?tab=loi-lo");
-    expect(await readPnlAmount(page, "LN ròng")).toBe(netProfitAfterOrders);
+      await page.goto("/tai-chinh?tab=loi-lo");
+      expect(await readPnlAmount(page, "LN ròng")).toBe(netProfitAfterOrders);
+    } finally {
+      // Ngoài P&L nhưng VẪN trừ vào Sổ quỹ (mọi danh mục, kể cả "Nhập hàng") — không dọn thì tích luỹ
+      // âm quỹ e2e mỗi lượt chạy (issue #247).
+      const prisma = testPrisma();
+      await prisma.expense.deleteMany({ where: { description: descNhapHang } });
+      await prisma.$disconnect();
+    }
   });
 });

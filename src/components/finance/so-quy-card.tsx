@@ -4,7 +4,7 @@ import { formatVnd } from "@/lib/format";
 import { nhanCuoiKySoQuy } from "@/lib/so-quy/cong-thuc-so-quy";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
-import type { ViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu";
+import type { ViTiktokConLaiHienThi } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu";
 
 import { CashMovementAddButton } from "./cash-movement-add-button";
 import { OViTiktokConLai } from "./o-vi-tiktok-con-lai";
@@ -85,7 +85,7 @@ export function SoQuyCard({
   /** Tiền đang gửi ở sổ tiết kiệm SINH LÃI (`SAVINGS_*`) — KHÁC tiền gửi bắt buộc theo khoản vay. */
   tietKiem: TietKiemQuy | null;
   /** Ô thông tin "Còn ở ví TikTok" — KHÔNG thuộc số quỹ; `null` ⇒ ẩn ô. */
-  viTiktok?: ViTiktokConLaiToiThieu | null;
+  viTiktok?: ViTiktokConLaiHienThi | null;
 }) {
   if (soQuy.d0 === null) {
     return (

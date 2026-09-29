@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { format } from "date-fns";
 
 import { testPrisma } from "./ingest-raw";
@@ -37,23 +37,29 @@ test.describe("Chi phí", () => {
 
   test("Thêm khoản Đóng gói → toast + dòng mới xuất hiện", async ({ page }) => {
     const desc = `E2E đóng gói ${Date.now()}`;
-    await page.goto("/tai-chinh?tab=so-chi-phi");
+    try {
+      await page.goto("/tai-chinh?tab=so-chi-phi");
 
-    await page.getByRole("button", { name: "+ Thêm chi phí" }).first().click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText("Thêm chi phí")).toBeVisible();
+      await page.getByRole("button", { name: "+ Thêm chi phí" }).first().click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByText("Thêm chi phí")).toBeVisible();
 
-    await pickSelectOption(page, "Chọn danh mục", "Đóng gói");
-    await dialog.getByPlaceholder("0").fill("350000");
-    await dialog.locator("textarea").fill(desc);
-    await dialog.getByRole("button", { name: "Lưu" }).click();
+      await pickSelectOption(page, "Chọn danh mục", "Đóng gói");
+      await dialog.getByPlaceholder("0").fill("350000");
+      await dialog.locator("textarea").fill(desc);
+      await dialog.getByRole("button", { name: "Lưu" }).click();
 
-    await expect(page.getByText(/Đã thêm chi phí/)).toBeVisible();
+      await expect(page.getByText(/Đã thêm chi phí/)).toBeVisible();
 
-    // Lọc đúng dòng vừa tạo — chứng minh khoản chi đã vào sổ + hiển thị số tiền.
-    await page.goto(`/tai-chinh?tab=so-chi-phi&q=${encodeURIComponent(desc)}`);
-    const row = page.locator("tbody tr").filter({ hasText: desc }).first();
-    await expect(row).toContainText("350.000");
+      // Lọc đúng dòng vừa tạo — chứng minh khoản chi đã vào sổ + hiển thị số tiền.
+      await page.goto(`/tai-chinh?tab=so-chi-phi&q=${encodeURIComponent(desc)}`);
+      const row = page.locator("tbody tr").filter({ hasText: desc }).first();
+      await expect(row).toContainText("350.000");
+    } finally {
+      const prisma = testPrisma();
+      await prisma.expense.deleteMany({ where: { description: desc } });
+      await prisma.$disconnect();
+    }
   });
 
   test("Danh mục Quảng cáo chưa chọn nguồn → nút Lưu bị khoá", async ({ page }) => {
@@ -86,56 +92,76 @@ test.describe("Chi phí", () => {
 
   test("Bật 'Lặp lại hàng tháng' → reload không sinh dòng trùng", async ({ page }) => {
     const desc = `E2E định kỳ ${Date.now()}`;
-    await page.goto("/tai-chinh?tab=so-chi-phi");
+    try {
+      await page.goto("/tai-chinh?tab=so-chi-phi");
 
-    await page.getByRole("button", { name: "+ Thêm chi phí" }).first().click();
-    const dialog = page.getByRole("dialog");
-    await pickSelectOption(page, "Chọn danh mục", "Mặt bằng-cố định");
-    await dialog.getByPlaceholder("0").fill("1200000");
-    await dialog.locator("textarea").fill(desc);
-    await dialog.getByRole("switch").click();
-    await dialog.getByRole("button", { name: "Lưu" }).click();
-    await expect(page.getByText(/Đã thêm chi phí/)).toBeVisible();
+      await page.getByRole("button", { name: "+ Thêm chi phí" }).first().click();
+      const dialog = page.getByRole("dialog");
+      await pickSelectOption(page, "Chọn danh mục", "Mặt bằng-cố định");
+      await dialog.getByPlaceholder("0").fill("1200000");
+      await dialog.locator("textarea").fill(desc);
+      await dialog.getByRole("switch").click();
+      await dialog.getByRole("button", { name: "Lưu" }).click();
+      await expect(page.getByText(/Đã thêm chi phí/)).toBeVisible();
 
-    // Đếm trong BẢNG SỔ CHI PHÍ thôi — khối "Khoản chi định kỳ" (bảng trong `<details>`) cũng in mô tả
-    // của MẪU, đếm lẫn thì ra 2 dù Expense vẫn đúng 1.
-    const dongSo = () => page.locator("table:not(details table) tbody tr").filter({ hasText: desc });
+      // Đếm trong BẢNG SỔ CHI PHÍ thôi — khối "Khoản chi định kỳ" (bảng trong `<details>`) cũng in mô tả
+      // của MẪU, đếm lẫn thì ra 2 dù Expense vẫn đúng 1.
+      const dongSo = () => page.locator("table:not(details table) tbody tr").filter({ hasText: desc });
 
-    // Đúng 1 dòng ngay sau khi tạo…
-    await page.goto(`/tai-chinh?tab=so-chi-phi&q=${encodeURIComponent(desc)}`);
-    await expect(dongSo()).toHaveCount(1);
+      // Đúng 1 dòng ngay sau khi tạo…
+      await page.goto(`/tai-chinh?tab=so-chi-phi&q=${encodeURIComponent(desc)}`);
+      await expect(dongSo()).toHaveCount(1);
 
-    // …và vẫn đúng 1 dòng sau reload (ensureRecurringExpenses idempotent trong tháng).
-    await page.reload();
-    await expect(dongSo()).toHaveCount(1);
+      // …và vẫn đúng 1 dòng sau reload (ensureRecurringExpenses idempotent trong tháng).
+      await page.reload();
+      await expect(dongSo()).toHaveCount(1);
+    } finally {
+      // `recurringMonthly=true` tạo CẢ `RecurringExpense` LẪN 1 `Expense{recurringId}` ngay lúc Lưu —
+      // mẫu còn `active` nên MỌI lượt render Dashboard/tab Chi phí sau đó (kể cả của spec khác) tự
+      // sinh thêm dòng Expense cho tháng mới (issue #247: 453 dòng/491tr tích luỹ do thiếu đúng dọn
+      // này). Xoá Expense (con) TRƯỚC rồi mẫu (cha) — không FK nên thứ tự chỉ để tránh mồ côi tạm thời.
+      const prisma = testPrisma();
+      const mau = await prisma.recurringExpense.findMany({ where: { description: desc }, select: { id: true } });
+      await prisma.expense.deleteMany({ where: { recurringId: { in: mau.map((m) => m.id) } } });
+      await prisma.recurringExpense.deleteMany({ where: { description: desc } });
+      await prisma.$disconnect();
+    }
   });
 
   test("Dòng ADS_API hiện 'Xem log' + nút xoá bị khoá", async ({ page }) => {
     const desc = `E2E ADS API ${Date.now()}`;
-    // Seed dòng ADS_API qua đúng luồng ingest (đi qua webServer → test DB).
-    const res = await page.request.post("/api/ingest/ads", {
-      headers: { Authorization: `Bearer ${INGEST_SECRET_TEST}` },
-      data: {
-        source: "META",
-        rows: [{ date: TODAY, campaignId: `e2e-${Date.now()}`, campaignName: desc, spendExVat: 54321, vatRate: 0.1 }],
-      },
-    });
-    expect(res.ok()).toBe(true);
+    try {
+      // Seed dòng ADS_API qua đúng luồng ingest (đi qua webServer → test DB).
+      const res = await page.request.post("/api/ingest/ads", {
+        headers: { Authorization: `Bearer ${INGEST_SECRET_TEST}` },
+        data: {
+          source: "META",
+          rows: [{ date: TODAY, campaignId: `e2e-${Date.now()}`, campaignName: desc, spendExVat: 54321, vatRate: 0.1 }],
+        },
+      });
+      expect(res.ok()).toBe(true);
 
-    await page.goto(`/tai-chinh?tab=so-chi-phi&q=${encodeURIComponent(desc)}`);
-    const row = page.locator("tbody tr").filter({ hasText: desc }).first();
-    await expect(row).toBeVisible();
+      await page.goto(`/tai-chinh?tab=so-chi-phi&q=${encodeURIComponent(desc)}`);
+      const row = page.locator("tbody tr").filter({ hasText: desc }).first();
+      await expect(row).toBeVisible();
 
-    // Có "Xem log" trỏ mục Kết nối; KHÔNG có nút Sửa; nút xoá disabled.
-    await expect(row.getByRole("link", { name: "Xem log" })).toHaveAttribute("href", "/cai-dat#ket-noi");
-    await expect(row.getByRole("button", { name: "Sửa" })).toHaveCount(0);
-    await expect(row.locator('button[title*="không xóa tay"]')).toBeDisabled();
+      // Có "Xem log" trỏ mục Kết nối; KHÔNG có nút Sửa; nút xoá disabled.
+      await expect(row.getByRole("link", { name: "Xem log" })).toHaveAttribute("href", "/cai-dat#ket-noi");
+      await expect(row.getByRole("button", { name: "Sửa" })).toHaveCount(0);
+      await expect(row.locator('button[title*="không xóa tay"]')).toBeDisabled();
+    } finally {
+      // Dòng ADS_API "không xóa tay" qua UI (đúng hành vi đang kiểm) — dọn thẳng qua Prisma.
+      const prisma = testPrisma();
+      await prisma.expense.deleteMany({ where: { description: desc } });
+      await prisma.$disconnect();
+    }
   });
 
   test.describe("Khối 'Khoản chi định kỳ'", () => {
     const prefix = `E2E dinh ky ${Date.now()}`;
     const tenActive = `${prefix} — đang chạy`;
     const tenInactive = `${prefix} — đã dừng`;
+    const tenBatLai = `${prefix} — bật lại tháng sau`;
 
     test.beforeAll(async () => {
       const prisma = testPrisma();
@@ -143,6 +169,7 @@ test.describe("Chi phí", () => {
         data: [
           { categoryId: "packaging", amount: 250_000, dayOfMonth: 12, description: tenActive, active: true },
           { categoryId: "fixed", amount: 800_000, dayOfMonth: 3, description: tenInactive, active: false },
+          { categoryId: "fixed", amount: 900_000, dayOfMonth: 5, description: tenBatLai, active: false },
         ],
       });
       await prisma.$disconnect();
@@ -183,6 +210,44 @@ test.describe("Chi phí", () => {
       // các tháng đã dừng). Không bấm ở đây: bấm là đổi dữ liệu dùng chung của các spec khác trong file.
       await expect(rowInactive.getByRole("button", { name: "Bật lại" })).toHaveCount(1);
       await expect(rowActive.getByRole("button", { name: /bật lại/i })).toHaveCount(0);
+    });
+
+    test("Bật lại → chọn 'Tháng sau' → toast + cột mốc đúng THÁNG SAU đã hiện trong hộp", async ({ page }) => {
+      // Chuỗi UI → server action: nhãn hiện trong hộp và khoá gửi lên phải là CÙNG một tháng. Đảo khoá
+      // (chọn "tháng sau" mà gửi khoá tháng này) là sinh lại đúng khoản chủ shop vừa xoá. So với nhãn
+      // đọc từ chính hộp (server render giờ VN) — không tự tính tháng ở worker (múi giờ worker tuỳ máy).
+      await page.goto("/tai-chinh?tab=so-chi-phi");
+      const khoi = page.locator("details", { hasText: "Khoản chi định kỳ" });
+      await khoi.locator("summary").click();
+      const row = khoi.locator("tr", { hasText: tenBatLai });
+      await row.getByRole("button", { name: "Bật lại" }).click();
+
+      const dialog = page.getByRole("dialog");
+      const radioThangSau = dialog.getByRole("radio", { name: /^Tháng sau/ });
+      /** Nhãn `MM/yyyy` trong ngoặc của label bọc radio — "Tháng sau (11/2026) — …". */
+      const nhanCuaRadio = async (ten: RegExp) =>
+        /\((\d{2}\/\d{4})\)/.exec(
+          (await dialog.locator("label", { has: page.getByRole("radio", { name: ten }) }).textContent()) ?? ""
+        )?.[1];
+      const nhanThangSau = await nhanCuaRadio(/^Tháng sau/);
+      const nhanThangNay = await nhanCuaRadio(/^Tháng này/);
+      expect(nhanThangSau).toMatch(/^\d{2}\/\d{4}$/);
+      expect(nhanThangNay).toMatch(/^\d{2}\/\d{4}$/);
+      expect(nhanThangSau).not.toBe(nhanThangNay);
+
+      await radioThangSau.check();
+      await expect(dialog.getByTestId("bat-lai-dinh-ky-giai-thich")).toContainText(`từ tháng ${nhanThangSau}`);
+      await dialog.getByRole("button", { name: "Bật lại" }).click();
+
+      // DB e2e dùng chung có thể còn mẫu "fixed" khác đang chạy ⇒ server đòi xác nhận trùng lần hai.
+      const toast = page.getByText(`Đã bật lại — sinh chi phí từ tháng ${nhanThangSau}`);
+      const canhBao = dialog.getByTestId("bat-lai-dinh-ky-canh-bao-trung");
+      await expect(toast.or(canhBao)).toBeVisible();
+      if (await canhBao.isVisible()) await dialog.getByRole("button", { name: "Vẫn bật lại" }).click();
+      await expect(toast).toBeVisible();
+
+      await expect(row.getByText("Đang chạy", { exact: true })).toBeVisible();
+      await expect(row).toContainText(`từ ${nhanThangSau}`);
     });
   });
 });

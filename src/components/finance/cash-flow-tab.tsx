@@ -8,7 +8,7 @@ import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 import type { DoiChieuSoDuChot } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
 import { cn } from "@/lib/utils";
-import type { ViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu";
+import type { ViTiktokConLaiHienThi } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu";
 
 import { CashMovementSection } from "./cash-movement-section";
 import { demKhoanVayCoKyCho } from "./dem-khoan-vay-co-ky-cho";
@@ -120,7 +120,7 @@ export function CashFlowTab({
   /** Σ lãi tiết kiệm ĐÃ NHẬN trong KỲ ĐANG XEM — dòng tổng của bảng, không phải cả lịch sử. */
   laiTietKiemTrongKy: number;
   /** Ô "Còn ở ví TikTok" (thông tin, ngoài số quỹ) — chỉ truyền tiếp cho thẻ Quỹ. */
-  viTiktok: ViTiktokConLaiToiThieu | null;
+  viTiktok: ViTiktokConLaiHienThi | null;
 }) {
   const balanceNegative = flow.balance < 0;
   const { tiktok, shopee } = flow.actualIn;

@@ -59,3 +59,20 @@ export function getPageTitle(pathname: string): string {
   const match = ALL_NAV_ITEMS.find((item) => isNavItemActive(pathname, item.href));
   return match?.label ?? "HogiKids";
 }
+
+/**
+ * 4 mục có tab riêng trên thanh tab dưới (mobile) — MỘT nguồn cho `BottomTabBar` và bộ lọc ngăn
+ * kéo "Thêm" (ngăn kéo chỉ liệt kê mục KHÔNG có ở đây). Chủ shop chốt 26/09 từ ảnh iPhone thật.
+ */
+export const TAB_CHINH_HREFS: readonly string[] = ["/", "/tai-chinh", "/don-hang", "/ton-kho"];
+
+export const TAB_CHINH_ITEMS: readonly NavItem[] = TAB_CHINH_HREFS.map((href) => {
+  const item = NAV_ITEMS.find((i) => i.href === href);
+  if (!item) throw new Error(`TAB_CHINH_HREFS có ${href} không nằm trong NAV_ITEMS`);
+  return item;
+});
+
+/** Route hiện tại thuộc một trong 4 tab chính? Không ⇒ tab "Thêm" active. */
+export function laTrangTabChinh(pathname: string): boolean {
+  return TAB_CHINH_HREFS.some((href) => isNavItemActive(pathname, href));
+}

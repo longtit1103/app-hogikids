@@ -71,9 +71,12 @@ function ReturnBomDelta({ current, previous }: { current: number | null; previou
   );
 }
 
-function CardShell({ href, children }: { href: string; children: React.ReactNode }) {
+function CardShell({ href, className, children }: { href: string; className?: string; children: React.ReactNode }) {
   return (
-    <Link href={href} className="block rounded-xl bg-surface-card p-4 transition-colors hover:bg-surface-soft">
+    <Link
+      href={href}
+      className={cn("block rounded-xl bg-surface-card p-4 transition-colors hover:bg-surface-soft", className)}
+    >
       {children}
     </Link>
   );
@@ -95,86 +98,95 @@ export function KpiCards({
   const ghiChuBienRong = chuThichBienRongCoThuNhap(thisMonth.financialIncome);
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      {/* ① Doanh thu gộp — nhãn CỐ Ý trùng dòng "Doanh thu gộp" của bảng Lãi/Lỗ và dải tổng
-          màn Đơn hàng: cùng một số (Σ itemsTotal) thì phải mang cùng một tên ở mọi màn, nếu
-          không chủ shop đọc hai màn ra hai khái niệm.
-          Dòng dưới là `netRevenue` = doanh thu gộp − phí sàn − voucher, mang ĐÚNG nhãn "Thực
-          nhận từ sàn" đã dùng ở bảng Lãi/Lỗ. KHÔNG gọi "Sau phí sàn": kỳ nào voucher ≠ 0 là
-          nhãn đó mô tả thiếu một vế của công thức.
-          Nó đứng đây để đối chiếu Pancake POS: Pancake gọi "Doanh thu" cho Σ `cod` — phần sàn
-          đã cắt phí — nên thiếu dòng này thì so hai màn luôn thấy lệch dù cả hai đều đúng (đo
-          22/08: gộp 4.458.500 so Pancake 3.074.872).
-          Cả hai số lấy THẲNG từ PnlBreakdown của `calcPnl` — KHÔNG cộng trừ lại ở UI, để định
-          nghĩa tiền chỉ tồn tại một chỗ là `pnl.ts`. Hai dòng tháng đứng liền nhau (không chèn
-          margin) để đọc thành một cặp: cả hai đều là số THÁNG NÀY, không phải hôm nay. */}
-      <CardShell href="/tai-chinh?tab=loi-lo">
-        <p className="text-sm text-muted-foreground">Doanh thu gộp</p>
-        <p className="mt-1 font-serif text-2xl text-ink">{formatVnd(today.revenue)}</p>
-        <p className="mt-1 text-xs text-muted-foreground">Tháng này: {formatVnd(thisMonth.revenue)}</p>
-        <p className="text-xs text-muted-foreground">Thực nhận từ sàn: {formatVnd(thisMonth.netRevenue)}</p>
-        <div className="mt-1">
-          <RevenueDelta current={thisMonth.revenue} previous={lastMonthSameDays.revenue} />
-        </div>
-      </CardShell>
-
-      {/* ② Số đơn hợp lệ */}
-      <CardShell href="/don-hang">
-        <p className="text-sm text-muted-foreground">Số đơn hợp lệ</p>
-        <p className="mt-1 font-serif text-2xl text-ink">{today.orderCount.toLocaleString("vi-VN")}</p>
-        <p className="mt-1 text-xs text-muted-foreground">Tháng: {thisMonth.orderCount.toLocaleString("vi-VN")}</p>
-      </CardShell>
-
-      {/* ③ LN ròng ước tính tháng — card dark nổi bật. Body (label/value/biên) là 1
-          Link duy nhất; dòng cảnh báo SKU thiếu giá vốn là Link RIÊNG bên ngoài —
-          tránh lồng <a> trong <a> (HTML không hợp lệ). */}
-      <div className="rounded-xl bg-surface-dark p-4 text-on-dark">
-        <Link href="/tai-chinh?tab=loi-lo" className="block">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm text-on-dark/70">LN ròng ước tính tháng</p>
-            <Badge className="border-none bg-on-dark/15 text-on-dark">tạm tính</Badge>
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* ① Doanh thu gộp HÔM NAY — số lớn CỐ Ý là hôm nay (`buildKpiRanges`, độc lập bộ chọn kỳ);
+            chữ "hôm nay" thêm 26/09 vì ảnh iPhone thật cho thấy nút "Tháng này" đang sáng mà số là
+            hôm nay ⇒ dễ đọc nhầm. Mobile chiếm đủ 2 cột (số tiền dài không vừa nửa màn).
+            Nhãn CỐ Ý giữ chữ "Doanh thu gộp" trùng dòng của bảng Lãi/Lỗ và dải tổng
+            màn Đơn hàng: cùng một số (Σ itemsTotal) thì phải mang cùng một tên ở mọi màn, nếu
+            không chủ shop đọc hai màn ra hai khái niệm.
+            Dòng dưới là `netRevenue` = doanh thu gộp − phí sàn − voucher, mang ĐÚNG nhãn "Thực
+            nhận từ sàn" đã dùng ở bảng Lãi/Lỗ. KHÔNG gọi "Sau phí sàn": kỳ nào voucher ≠ 0 là
+            nhãn đó mô tả thiếu một vế của công thức.
+            Nó đứng đây để đối chiếu Pancake POS: Pancake gọi "Doanh thu" cho Σ `cod` — phần sàn
+            đã cắt phí — nên thiếu dòng này thì so hai màn luôn thấy lệch dù cả hai đều đúng (đo
+            22/08: gộp 4.458.500 so Pancake 3.074.872).
+            Cả hai số lấy THẲNG từ PnlBreakdown của `calcPnl` — KHÔNG cộng trừ lại ở UI, để định
+            nghĩa tiền chỉ tồn tại một chỗ là `pnl.ts`. Hai dòng tháng đứng liền nhau (không chèn
+            margin) để đọc thành một cặp: cả hai đều là số THÁNG NÀY, không phải hôm nay. */}
+        <CardShell href="/tai-chinh?tab=loi-lo" className="col-span-2 sm:col-span-1">
+          <p className="text-sm text-muted-foreground">Doanh thu gộp hôm nay</p>
+          <p className="mt-1 font-serif text-2xl text-ink">{formatVnd(today.revenue)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Tháng này: {formatVnd(thisMonth.revenue)}</p>
+          <p className="text-xs text-muted-foreground">Thực nhận từ sàn: {formatVnd(thisMonth.netRevenue)}</p>
+          <div className="mt-1">
+            <RevenueDelta current={thisMonth.revenue} previous={lastMonthSameDays.revenue} />
           </div>
-          <p className={cn("mt-1 font-serif text-2xl", isNegative ? "text-error" : "text-on-dark")}>
-            {formatVnd(thisMonth.netProfit)}
-          </p>
-          <p className="mt-1 text-xs text-on-dark/70">Biên ròng {marginPct === null ? "—" : formatPct1(marginPct)}</p>
-          {/* Công thức biên ròng KHÔNG đổi (quyết định #10) — nhưng tháng tất toán sổ thì tử số có
-              thêm lãi tiết kiệm, biên nhảy vọt. Thiếu câu này là đọc thành bán hàng lãi hơn. */}
-          {ghiChuBienRong && <p className="text-xs text-on-dark/70">{ghiChuBienRong}</p>}
-        </Link>
-        {/* Link trỏ bộ lọc ĐÃ BÁN, không phải lọc thiếu-giá-vốn cả kho: cảnh báo này đếm SKU ĐÃ
-            BÁN, nên dẫn sang danh sách cả kho (đo prod 12/08: 1391 biến thể, chỉ 38 từng bán) là
-            bắt chủ shop mò trong đống không liên quan — nhập giá cho biến thể chưa bán ngày nào
-            không làm đổi một đồng P&L.
-            Hai nhánh CÓ CHỦ ĐÍCH: còn SKU có tên thì Link dẫn tới màn lọc nhập giá vốn; chỉ còn
-            dòng KHÔNG rõ SKU thì hiện chữ thường KHÔNG link — nhóm này KHÔNG có Variant nên mọi
-            màn Sản phẩm đều không chứa nó, dẫn sang đó chỉ ra danh sách rỗng trong khi cảnh báo
-            vẫn đỏ; và nhập giá vốn cũng không sửa được (nguồn Pancake thiếu display_id). */}
-        {thisMonth.skuMissingCount > 0 ? (
-          <Link
-            href="/san-pham?loc=da_ban_thieu_gia_von"
-            className="mt-2 inline-block text-xs text-warning hover:underline"
-          >
-            ⚠ {thisMonth.skuMissingCount} SKU thiếu giá vốn
-            {thisMonth.skuUnknownLineCount > 0 && ` + ${thisMonth.skuUnknownLineCount} dòng không khớp SP`}
-          </Link>
-        ) : thisMonth.skuUnknownLineCount > 0 ? (
-          <span className="mt-2 inline-block text-xs text-warning">
-            ⚠ {thisMonth.skuUnknownLineCount} dòng hàng không khớp sản phẩm nào — nhập giá vốn không sửa được COGS của chúng
-          </span>
-        ) : null}
-      </div>
+        </CardShell>
 
-      {/* ④ Tỷ lệ hoàn/bom tháng */}
-      <CardShell href="/don-hang?trang_thai=hoan_hang,huy_bom">
-        <p className="text-sm text-muted-foreground">Tỷ lệ hoàn/bom tháng</p>
-        <p className={cn("mt-1 font-serif text-2xl", thisRate === null ? "text-ink" : rateTone(thisRate))}>
-          {thisRate === null ? "—" : formatPct1(thisRate)}
-        </p>
-        <div className="mt-1">
-          <ReturnBomDelta current={thisRate} previous={prevRate} />
+        {/* ② Đơn hợp lệ hôm nay */}
+        <CardShell href="/don-hang">
+          <p className="text-sm text-muted-foreground">Đơn hợp lệ hôm nay</p>
+          <p className="mt-1 font-serif text-2xl text-ink">{today.orderCount.toLocaleString("vi-VN")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Tháng: {thisMonth.orderCount.toLocaleString("vi-VN")}</p>
+        </CardShell>
+
+        {/* ③ Tỷ lệ hoàn/bom tháng — đứng TRƯỚC LN ròng trong DOM: mobile 2 cột thì thẻ này nằm cạnh
+            "Đơn hôm nay" (cùng 1 cột), LN ròng rộng đủ hàng bên dưới. Thứ tự DOM = thứ tự nhìn ở MỌI
+            khổ — KHÔNG `grid-flow-dense`/`order-*` (VoiceOver đọc theo DOM). */}
+        <CardShell href="/don-hang?trang_thai=hoan_hang,huy_bom">
+          <p className="text-sm text-muted-foreground">Tỷ lệ hoàn/bom tháng</p>
+          <p className={cn("mt-1 font-serif text-2xl", thisRate === null ? "text-ink" : rateTone(thisRate))}>
+            {thisRate === null ? "—" : formatPct1(thisRate)}
+          </p>
+          <div className="mt-1">
+            <ReturnBomDelta current={thisRate} previous={prevRate} />
+          </div>
+        </CardShell>
+        {/* ④ LN ròng ước tính tháng — card dark nổi bật. Body (label/value/biên) là 1
+            Link duy nhất; dòng cảnh báo SKU thiếu giá vốn là Link RIÊNG bên ngoài —
+            tránh lồng <a> trong <a> (HTML không hợp lệ). */}
+        <div className="col-span-2 rounded-xl bg-surface-dark p-4 text-on-dark sm:col-span-1">
+          <Link href="/tai-chinh?tab=loi-lo" className="block">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm text-on-dark/70">LN ròng ước tính tháng</p>
+              <Badge className="border-none bg-on-dark/15 text-on-dark">tạm tính</Badge>
+            </div>
+            <p className={cn("mt-1 font-serif text-2xl", isNegative ? "text-error" : "text-on-dark")}>
+              {formatVnd(thisMonth.netProfit)}
+            </p>
+            <p className="mt-1 text-xs text-on-dark/70">Biên ròng {marginPct === null ? "—" : formatPct1(marginPct)}</p>
+            {/* Công thức biên ròng KHÔNG đổi (quyết định #10) — nhưng tháng tất toán sổ thì tử số có
+                thêm lãi tiết kiệm, biên nhảy vọt. Thiếu câu này là đọc thành bán hàng lãi hơn. */}
+            {ghiChuBienRong && <p className="text-xs text-on-dark/70">{ghiChuBienRong}</p>}
+          </Link>
+          {/* Link trỏ bộ lọc ĐÃ BÁN, không phải lọc thiếu-giá-vốn cả kho: cảnh báo này đếm SKU ĐÃ
+              BÁN, nên dẫn sang danh sách cả kho (đo prod 12/08: 1391 biến thể, chỉ 38 từng bán) là
+              bắt chủ shop mò trong đống không liên quan — nhập giá cho biến thể chưa bán ngày nào
+              không làm đổi một đồng P&L.
+              Hai nhánh CÓ CHỦ ĐÍCH: còn SKU có tên thì Link dẫn tới màn lọc nhập giá vốn; chỉ còn
+              dòng KHÔNG rõ SKU thì hiện chữ thường KHÔNG link — nhóm này KHÔNG có Variant nên mọi
+              màn Sản phẩm đều không chứa nó, dẫn sang đó chỉ ra danh sách rỗng trong khi cảnh báo
+              vẫn đỏ; và nhập giá vốn cũng không sửa được (nguồn Pancake thiếu display_id). */}
+          {thisMonth.skuMissingCount > 0 ? (
+            <Link
+              href="/san-pham?loc=da_ban_thieu_gia_von"
+              className="mt-2 inline-block text-xs text-warning hover:underline"
+            >
+              ⚠ {thisMonth.skuMissingCount} SKU thiếu giá vốn
+              {thisMonth.skuUnknownLineCount > 0 && ` + ${thisMonth.skuUnknownLineCount} dòng không khớp SP`}
+            </Link>
+          ) : thisMonth.skuUnknownLineCount > 0 ? (
+            <span className="mt-2 inline-block text-xs text-warning">
+              ⚠ {thisMonth.skuUnknownLineCount} dòng hàng không khớp sản phẩm nào — nhập giá vốn không sửa được COGS của chúng
+            </span>
+          ) : null}
         </div>
-      </CardShell>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Các thẻ trên tính hôm nay / tháng này — bộ chọn kỳ chỉ áp dụng cho biểu đồ và phân tích bên dưới.
+      </p>
     </div>
   );
 }

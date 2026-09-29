@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { format } from "date-fns";
 
 import { ingestPancake, resetRawPancake } from "./ingest-raw";
@@ -75,14 +75,14 @@ test.describe("Phase 5 smoke — Dashboard / Báo cáo / Kênh", () => {
   });
 
   test("Dashboard hiện 4 KPI card + card Tình trạng đồng bộ", async ({ page }) => {
-    // Neo vào ĐÚNG nhãn "Doanh thu gộp". Bản cũ neo `getByText("Doanh thu", { exact: true })`
+    // Neo vào ĐÚNG nhãn "Doanh thu gộp hôm nay" (thêm "hôm nay" 26/09). Bản cũ neo `getByText("Doanh thu", { exact: true })`
     // — chú giải biểu đồ bên dưới cũng có đúng chuỗi "Doanh thu", nên phép kiểm đó vẫn XANH kể
     // cả khi card KPI đổi nhãn hay biến mất hoàn toàn; `.first()` chỉ giấu chuyện đó kỹ hơn.
-    await expect(page.getByText("Doanh thu gộp", { exact: true })).toBeVisible();
+    await expect(page.getByText("Doanh thu gộp hôm nay", { exact: true })).toBeVisible();
     // Dòng đối chiếu Pancake: `netRevenue` (gộp − phí sàn − voucher), cùng nhãn với bảng Lãi/Lỗ
     // và ứng với ô "Doanh thu" bên Pancake POS. Mất dòng ⇒ chủ shop lại so hai màn ra hai số lệch.
     await expect(page.getByText(/^Thực nhận từ sàn:/)).toBeVisible();
-    await expect(page.getByText("Số đơn hợp lệ")).toBeVisible();
+    await expect(page.getByText("Đơn hợp lệ hôm nay", { exact: true })).toBeVisible();
     await expect(page.getByText("LN ròng ước tính tháng")).toBeVisible();
     await expect(page.getByText("Tỷ lệ hoàn/bom tháng")).toBeVisible();
     await expect(page.getByText("Tình trạng đồng bộ")).toBeVisible();
@@ -176,10 +176,10 @@ test.describe("Phase 5 smoke — Dashboard / Báo cáo / Kênh", () => {
 
     // Guard: drill soft-nav CHỈ đổi nhãn hiển thị, KHÔNG ghi range vào
     // localStorage (nếu ghi, phiên sau mở app URL sạch sẽ kẹt range drill thay
-    // vì "Tháng này"). localStorage vẫn giữ preset mặc định.
-    const stored = await page.evaluate(() => window.localStorage.getItem("hogikids_date_range"));
-    expect(stored).toContain('"this_month"');
-    expect(stored).not.toContain("custom");
+    // vì "Tháng này"). localStorage chỉ giữ lựa chọn CÓ CHỦ Ý trong bộ chọn —
+    // test này chưa chọn gì (context mới) ⇒ phải còn TRỐNG.
+    const stored = await page.evaluate(() => window.localStorage.getItem("hogikids_date_range_v2"));
+    expect(stored).toBeNull();
   });
 
   test("giữ lựa chọn preset khi soft-nav sang route URL sạch (không âm thầm reset về Tháng này)", async ({
@@ -187,7 +187,7 @@ test.describe("Phase 5 smoke — Dashboard / Báo cáo / Kênh", () => {
   }) => {
     // Chốt chặn nhánh "URL sạch → GIỮ lựa chọn in-memory" của effect sync: dễ
     // hồi quy nếu ai đó thêm else-branch reset. Dùng /kenh ↔ "/" (Dashboard) vì
-    // cả hai KHÔNG auto-snap range (khác /bao-cao, /tai-chinh có month-picker).
+    // cả hai đều có bộ chọn ngày toàn cục và điều hướng giữa chúng giữ URL sạch.
     await page.goto("/kenh");
     const sevenDays = page.getByRole("button", { name: "7 ngày" });
     await sevenDays.click();

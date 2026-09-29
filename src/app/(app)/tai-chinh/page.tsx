@@ -30,6 +30,7 @@ import {
   tongLaiDaNhanTrongKy,
 } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 import { cn } from "@/lib/utils";
+import { PageTitle } from "@/components/shell/page-title";
 
 type FinanceTab = "loi-lo" | "dong-tien" | "so-quy" | "so-chi-phi";
 
@@ -283,12 +284,12 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="print:hidden">
-        <h1 className="font-serif text-2xl text-ink">Tài chính</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
+      {/* Tiêu đề trang Tài chính ẨN khi in (như trước) — ngoại lệ duy nhất của PageTitle. */}
+      <PageTitle title="Tài chính" className="print:hidden">
+        <p className="text-xs text-muted-foreground">
           Lãi/lỗ · dòng tiền vào–ra · sổ quỹ · sổ chi phí — toàn cảnh tiền của shop
         </p>
-      </div>
+      </PageTitle>
 
       <nav className="flex gap-1 rounded-lg bg-surface-soft p-1 print:hidden" aria-label="Lăng kính tài chính">
         {TAB_ITEMS.map((t) => (

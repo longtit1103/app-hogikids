@@ -143,12 +143,28 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+  Chiều cao tối thiểu "một màn hình" TRỪ phần đệm safe-area của body (PWA iPhone): `min-h-screen`
+  cộng với đệm body làm trang ngắn vẫn cuộn dư đúng bằng inset trên + dưới. Máy tính inset = 0 ⇒
+  bằng đúng `min-h-screen`. Lưới: tests/e2e/pwa-vo.spec.ts.
+*/
+@utility min-h-man-hinh {
+  min-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
+    /*
+      PWA iPhone (`viewport-fit=cover` ở app/layout.tsx): nội dung được vẽ tới mép màn hình, phần
+      bị tai thỏ / thanh home / cạnh khi xoay ngang che được bù ở đây. Máy tính mọi inset = 0 nên
+      bố cục desktop không đổi (lưới: tests/e2e/pwa-vo.spec.ts).
+    */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
   }
   html {
     @apply font-sans;

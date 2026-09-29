@@ -8,13 +8,14 @@ import type { TrangThaiLechGiaVon } from "@/lib/gia-von/trang-thai-lech-gia-von"
 import { cauNhacPhieuNhap, type TrangThaiPhieuNhap } from "@/lib/nhap-hang/trang-thai-phieu-nhap";
 import type { CanhBaoSapCan } from "@/lib/so-quy/du-bao-quy-types";
 
+import { BottomTabBar } from "./bottom-tab-bar";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 
 /**
- * Owns the mobile nav sheet's open state so the hamburger button (rendered
- * in `Topbar`) and the sheet content (rendered in `Sidebar`) share one
- * source of truth without prop-drilling through the server-only layout.
+ * Giữ state mở/đóng ngăn kéo điều hướng mobile để tab "Thêm" (trong `BottomTabBar`) và nội dung
+ * ngăn kéo (trong `Sidebar`) dùng chung một nguồn — không phải truyền qua layout server-only.
+ * (Trước 26/09 là nút ☰ ở Topbar; thanh tab dưới đã thay nút đó.)
  */
 export function ShellChrome({
   shopName,
@@ -56,7 +57,7 @@ export function ShellChrome({
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-canvas md:grid md:grid-cols-[240px_minmax(0,1fr)]">
+    <div className="min-h-man-hinh bg-canvas md:grid md:grid-cols-[240px_minmax(0,1fr)]">
       <Sidebar
         shopName={shopName}
         missingCostCount={missingCostCount}
@@ -64,9 +65,11 @@ export function ShellChrome({
         mobileOpen={mobileNavOpen}
         onMobileOpenChange={setMobileNavOpen}
       />
-      <div className="flex min-h-screen min-w-0 flex-col">
-        <Topbar onOpenMobileNav={() => setMobileNavOpen(true)} />
-        <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 md:px-6">
+      <div className="flex min-h-man-hinh min-w-0 flex-col">
+        <Topbar />
+        {/* `pb-16` dưới md: chừa đáy ≥ chiều cao thanh tab (~3.5rem) để dòng cuối không bị che. KHÔNG
+            cộng `env(safe-area-inset-bottom)` lần nữa — `body` đã đệm inset đáy (globals.css). */}
+        <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 pt-6 pb-16 md:px-6 md:pb-6">
           {/*
             Lưới an toàn TOÀN APP: khi Bronze còn backlog hoặc đồng bộ gần đây có lỗi,
             số liệu có thể sai/thiếu. Trước đây cảnh báo chỉ nằm ở trang Cài đặt nên chủ
@@ -247,6 +250,11 @@ export function ShellChrome({
           {children}
         </main>
       </div>
+      <BottomTabBar
+        lowStockWarning={lowStockWarning}
+        moreOpen={mobileNavOpen}
+        onOpenMore={() => setMobileNavOpen(true)}
+      />
     </div>
   );
 }

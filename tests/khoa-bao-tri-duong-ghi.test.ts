@@ -85,7 +85,7 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["expenses.updateExpense", () => updateExpense("id-gia", {})],
   ["expenses.deleteExpense", () => deleteExpense("id-gia", "only")],
   ["expenses.stopRecurring", () => stopRecurring("id-gia")],
-  ["expenses.batLaiDinhKy", () => batLaiDinhKy("id-gia")],
+  ["expenses.batLaiDinhKy", () => batLaiDinhKy("id-gia", { thangBatDau: "2026-09" })],
   // Khoản tiền khác ghi tay (tab Dòng tiền) — cùng số phận với Expense nhập tay nếu lùi mất giữa lượt phục hồi.
   ["cash-movements.createCashMovement", () => createCashMovement({})],
   ["cash-movements.updateCashMovement", () => updateCashMovement("id-gia", {})],

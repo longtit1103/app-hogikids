@@ -1,20 +1,35 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  startTransition,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import {
   clampDateRange,
-  isRangePreset,
+  isSameDateRangeSelection,
   normalizeCustomRange,
   parseDateRange,
   resolveRangePreset,
+  selectionFromQuery,
   serializeDateRange,
   type DateRange,
+  type DateRangeSelection,
   type RangePreset,
 } from "@/lib/date-range";
 
-const STORAGE_KEY = "hogikids_date_range";
+// `_v2` từ 29/09: khoá cũ có thể đang giữ khoảng ngày drill bị ghi nhầm (lỗi race sau #246, LIVE
+// 28/09 17:2x → bản vá) — đổi khoá để mọi máy về "Tháng này" đúng một lần thay vì mang tiếp giá trị
+// bẩn; khoá cũ bị xoá ở lượt khởi động.
+const STORAGE_KEY = "hogikids_date_range_v2";
+const STORAGE_KEY_CU = "hogikids_date_range";
 const DEFAULT_PRESET: RangePreset = "this_month";
 
 /** Shape persisted to localStorage — either a named preset or a custom range. */
@@ -32,7 +47,8 @@ type DateRangeContextValue = {
   /**
    * Applies a validated custom range from the "Tùy chọn" popover. Normalizes
    * `from`/`to` to full-day boundaries before applying — callers do not need
-   * to pre-normalize (see `normalizeCustomRange`).
+   * to pre-normalize (see `normalizeCustomRange`). Chỉ gọi khi người dùng CHỌN
+   * (bộ chọn chung, bộ chọn tháng P&L) — nó ghi localStorage.
    */
   applyCustomRange: (range: DateRange) => void;
 };
@@ -55,14 +71,65 @@ function isApplicablePathname(pathname: string): boolean {
 }
 
 /**
+ * Lựa chọn khởi động phía client: `?tu=&den=` > `?range=` > localStorage.
+ * `null` = không nguồn nào nói gì ⇒ giữ mặc định. Chỉ gọi trong effect (cần window).
+ */
+function readInitialSelection(): DateRangeSelection | null {
+  const query = new URLSearchParams(window.location.search);
+  const fromUrl = selectionFromQuery({
+    tu: query.get("tu") ?? undefined,
+    den: query.get("den") ?? undefined,
+    range: query.get("range") ?? undefined,
+  });
+  if (fromUrl) {
+    return fromUrl;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const stored = JSON.parse(raw) as StoredSelection;
+    if (stored.preset === "custom") {
+      const parsed = parseDateRange({ tu: stored.tu, den: stored.den });
+      return parsed ? { preset: "custom", range: parsed } : null;
+    }
+    return { preset: stored.preset, range: resolveRangePreset(stored.preset) };
+  } catch {
+    // Malformed localStorage payload — fall back to the default.
+    return null;
+  }
+}
+
+/** Ghi lựa chọn CÓ CHỦ Ý của người dùng. Chỉ gọi từ selectPreset/applyCustomRange. */
+function ghiLuaChonCoChuY(toStore: StoredSelection): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+  } catch {
+    // Trình duyệt chặn storage (chế độ riêng tư…) — lựa chọn vẫn áp cho phiên này.
+  }
+}
+
+/**
  * Holds the single, app-wide date-range selection shared by every screen
  * that has the global picker. Mounted once in `(app)/layout.tsx` so
  * client-side navigation between applicable routes keeps the same
  * in-memory selection — no per-page state.
  *
+ * HỢP ĐỒNG LƯU (chủ shop chốt 29/09): URL là NGỮ CẢNH điều hướng/chia sẻ, localStorage
+ * CHỈ phản ánh lựa chọn CÓ CHỦ Ý trong bộ chọn.
+ * - `?tu=&den=` / `?range=` (link chia sẻ, drill, F5 khi URL còn tham số) quyết định nhãn
+ *   đang hiển thị cho lần mở đó nhưng KHÔNG BAO GIỜ ghi localStorage ⇒ mở lại app URL sạch
+ *   về lựa chọn đã lưu, chưa lưu gì thì "Tháng này".
+ * - localStorage chỉ được ghi TRỰC TIẾP trong selectPreset/applyCustomRange (người dùng bấm),
+ *   KHÔNG qua effect: effect lưu "mọi thay đổi selection" từng phải đoán thay đổi nào đến từ
+ *   URL bằng cờ, và cờ đó bị tiêu nhầm khi drill bấm trước khi lượt khởi động (startTransition)
+ *   commit ⇒ khoảng ngày drill dính sang phiên sau.
+ *
  * Persistence strategy (deliberate, see Task 5 report for the "why"):
  * - Named presets (today/7d/this_month/last_month) persist to localStorage
- *   only. They resolve relative to "now", so the URL never needs to carry
+ *   only (on explicit selection). They resolve relative to "now", so the URL never needs to carry
  *   raw dates for them — and NOT touching the URL for the common case keeps
  *   a plain page load at "/" free of query-string noise.
  * - A custom ("Tùy chọn") range additionally syncs into `?tu=&den=`, since
@@ -71,76 +138,57 @@ function isApplicablePathname(pathname: string): boolean {
  * - Switching FROM a custom range back to a named preset actively strips
  *   any `tu`/`den` left over in the URL, so a later refresh can't
  *   accidentally resurrect the stale custom dates over the preset.
+ *
+ * Provider nằm TRÊN boundary `(app)/loading.tsx`. Mọi cập nhật do effect tự
+ * phát (không phải người dùng bấm) CHỈ xảy ra khi giá trị THẬT SỰ khác
+ * (`isSameDateRangeSelection`), và lượt khởi động đi qua `startTransition`:
+ * context đổi bằng cập nhật thường khi boundary còn khử nước sẽ khiến React bỏ
+ * HTML server và render lại cả trang ở client; cập nhật transition thì React
+ * chờ boundary khử nước xong rồi mới áp.
  */
 export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [preset, setPreset] = useState<RangePreset | "custom">(DEFAULT_PRESET);
-  const [range, setRangeState] = useState<DateRange>(() => resolveRangePreset(DEFAULT_PRESET));
+  const [selection, setSelection] = useState<DateRangeSelection>(() => ({
+    preset: DEFAULT_PRESET,
+    range: resolveRangePreset(DEFAULT_PRESET),
+  }));
   const [hasHydrated, setHasHydrated] = useState(false);
 
-  // Đánh dấu lần cập nhật state gần nhất là do ĐỒNG BỘ TỪ URL (điều hướng
-  // client-side, vd drill-down) — KHÔNG phải user chủ động chọn ở picker. Effect
-  // persist đọc cờ này để KHÔNG ghi range drill vào localStorage (tránh biến một
-  // lần drill thoáng qua thành lựa chọn mặc định dính cho phiên sau). selectPreset
-  // /applyCustomRange set state TRỰC TIẾP nên persist chạy trước echo-URL → vẫn lưu.
-  const adoptedFromUrlRef = useRef(false);
-
-  // Runs once on mount: `?tu=&den=` in the current URL wins over
-  // localStorage, which wins over the "this_month" default. Deferred to an
-  // effect (not the useState initializer) so the very first client render
-  // matches the server-rendered default — no hydration mismatch — since
-  // window/localStorage aren't available during SSR anyway. Deliberately
-  // does NOT write back to the URL here — only explicit user actions
-  // (selectPreset/applyCustomRange) do that; see file header.
+  // Bản sao lựa chọn ĐÃ COMMIT, để các effect so giá trị mà không phải khai
+  // `selection` vào deps (khai vào thì effect đồng bộ URL chạy lại mỗi lần user
+  // chọn và kéo ngược về tham số URL cũ). Effect này khai TRƯỚC các effect đọc
+  // nó ⇒ trong cùng một lượt commit, bản sao luôn mới trước khi bị đọc.
+  const selectionRef = useRef(selection);
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
-    const fromQuery = parseDateRange({
-      tu: query.get("tu") ?? undefined,
-      den: query.get("den") ?? undefined,
-    });
-    if (fromQuery) {
-      setPreset("custom");
-      setRangeState(fromQuery);
-      setHasHydrated(true);
-      return;
-    }
+    selectionRef.current = selection;
+  }, [selection]);
 
-    // `?range=<preset>` trong URL thắng localStorage (chia sẻ link/refresh giữ đúng preset).
-    const rangeParam = query.get("range");
-    if (isRangePreset(rangeParam)) {
-      setPreset(rangeParam);
-      setRangeState(resolveRangePreset(rangeParam));
-      setHasHydrated(true);
-      return;
-    }
-
+  // Runs once on mount: `?tu=&den=` in the current URL wins over `?range=`,
+  // which wins over localStorage, which wins over the "this_month" default.
+  // Deferred to an effect (not the useState initializer) so the very first
+  // client render matches the server-rendered default — no hydration
+  // mismatch — since window/localStorage aren't available during SSR anyway.
+  // Deliberately does NOT write back to the URL here — only explicit user
+  // actions (selectPreset/applyCustomRange) do that; see file header. Cũng KHÔNG
+  // ghi localStorage: lựa chọn đọc từ URL chỉ là ngữ cảnh của lần mở này.
+  useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const stored = JSON.parse(raw) as StoredSelection;
-        if (stored.preset === "custom") {
-          const parsed = parseDateRange({ tu: stored.tu, den: stored.den });
-          if (parsed) {
-            setPreset("custom");
-            setRangeState(parsed);
-            setHasHydrated(true);
-            return;
-          }
-        } else {
-          setPreset(stored.preset);
-          setRangeState(resolveRangePreset(stored.preset));
-          setHasHydrated(true);
-          return;
-        }
-      }
+      window.localStorage.removeItem(STORAGE_KEY_CU); // dọn khoá cũ (xem STORAGE_KEY)
     } catch {
-      // Malformed localStorage payload — fall through to the default below.
+      // storage bị chặn — không có gì để dọn.
     }
-
-    setHasHydrated(true);
+    const next = readInitialSelection();
+    startTransition(() => {
+      if (next && !isSameDateRangeSelection(selectionRef.current, next)) {
+        setSelection(next);
+      }
+      // Cùng transition với lựa chọn ⇒ hai effect bên dưới (đều chờ cờ này)
+      // thấy ngay lựa chọn khởi động, không thấy mặc định tạm.
+      setHasHydrated(true);
+    });
     // Intentionally mount-only (deps: []).
   }, []);
 
@@ -154,51 +202,26 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   // in-memory (tính "dính" khi điều hướng bằng nav thường giữa các trang có
   // picker) — chỉ nhận khi URL MANG tham số ngày rõ ràng. Idempotent với chính
   // selectPreset/applyCustomRange (chúng cũng ghi URL rồi effect này đọc lại ra
-  // đúng lựa chọn đó) nên không tạo vòng lặp.
+  // đúng lựa chọn đó ⇒ trùng giá trị ⇒ bỏ qua) nên không tạo vòng lặp.
   useEffect(() => {
     if (!hasHydrated) {
       return; // để effect mount quyết trước (URL > localStorage > default).
     }
-    const fromQuery = parseDateRange({
+    const next = selectionFromQuery({
       tu: searchParams.get("tu") ?? undefined,
       den: searchParams.get("den") ?? undefined,
+      range: searchParams.get("range") ?? undefined,
     });
-    if (fromQuery) {
-      adoptedFromUrlRef.current = true;
-      setPreset("custom");
-      setRangeState(fromQuery);
-      return;
+    if (!next || isSameDateRangeSelection(selectionRef.current, next)) {
+      return; // URL sạch, hoặc đã khớp lựa chọn hiện tại → không đụng state.
     }
-    const rangeParam = searchParams.get("range");
-    if (isRangePreset(rangeParam)) {
-      adoptedFromUrlRef.current = true;
-      setPreset(rangeParam);
-      setRangeState(resolveRangePreset(rangeParam));
-    }
-    // URL sạch → không đụng state (giữ lựa chọn hiện tại).
+    setSelection(next); // chỉ hiển thị — KHÔNG ghi localStorage (hợp đồng lưu ở header).
   }, [searchParams, hasHydrated]);
-
-  // Persists every selection to localStorage (never touches the URL —
-  // see selectPreset/applyCustomRange for the URL-sync side of this).
-  useEffect(() => {
-    if (!hasHydrated) {
-      return;
-    }
-    // Lựa chọn vừa đồng bộ TỪ URL (drill-down/link chia sẻ) không phải ý định
-    // đổi range toàn cục của user → bỏ qua 1 lần, không ghi localStorage.
-    if (adoptedFromUrlRef.current) {
-      adoptedFromUrlRef.current = false;
-      return;
-    }
-    const toStore: StoredSelection =
-      preset === "custom" ? { preset: "custom", ...serializeDateRange(range) } : { preset };
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
-  }, [preset, range, hasHydrated]);
 
   const selectPreset = useCallback(
     (nextPreset: RangePreset) => {
-      setPreset(nextPreset);
-      setRangeState(resolveRangePreset(nextPreset));
+      setSelection({ preset: nextPreset, range: resolveRangePreset(nextPreset) });
+      ghiLuaChonCoChuY({ preset: nextPreset });
 
       if (!isApplicablePathname(pathname)) {
         return;
@@ -225,8 +248,8 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const applyCustomRange = useCallback(
     (nextRange: DateRange) => {
       const clamped = clampDateRange(normalizeCustomRange(nextRange));
-      setPreset("custom");
-      setRangeState(clamped);
+      setSelection({ preset: "custom", range: clamped });
+      ghiLuaChonCoChuY({ preset: "custom", ...serializeDateRange(clamped) });
 
       if (isApplicablePathname(pathname)) {
         const { tu, den } = serializeDateRange(clamped);
@@ -241,13 +264,13 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<DateRangeContextValue>(
     () => ({
-      preset,
-      range,
+      preset: selection.preset,
+      range: selection.range,
       isApplicableRoute: isApplicablePathname(pathname),
       selectPreset,
       applyCustomRange,
     }),
-    [preset, range, pathname, selectPreset, applyCustomRange]
+    [selection, pathname, selectPreset, applyCustomRange]
   );
 
   return <DateRangeContext.Provider value={value}>{children}</DateRangeContext.Provider>;

@@ -14,6 +14,7 @@ import {
 import { slugToStatus } from "@/lib/orders/order-status-meta";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { PageTitle } from "@/components/shell/page-title";
 
 type SearchParams = {
   q?: string;
@@ -55,10 +56,9 @@ export default async function DonHangPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="font-serif text-2xl text-ink">Đơn hàng</h1>
+      <PageTitle title="Đơn hàng">
         <p className="text-sm text-muted-foreground">{total} đơn</p>
-      </div>
+      </PageTitle>
 
       <SyncBanner lastSyncAt={lastSyncAt} />
       <OrderFilters channels={channelOptions} />

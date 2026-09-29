@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
-import { endOfMonth, startOfMonth } from "date-fns";
 
 import type { CashMovementKind } from "@/lib/cash-movements/cash-movement-kinds";
+import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { duNoSauKhiGhi, tienGuiDangGiu } from "@/lib/so-quy/vi-tu-du-no";
 import { soDuDangGui } from "@/lib/tiet-kiem/vi-tu-so-tiet-kiem";
 import {
@@ -267,12 +267,14 @@ async function duDoanSoDuAm(
  * một khoản chi.
  *
  * Đường đi thật: xoá dòng tháng 9 bằng mode "only" (mẫu VẪN active) ⇒ bất kỳ ai mở trang phủ tháng 9
- * đều làm `ensureRecurringExpensesForMonths` tự sinh lại dòng đó với id mới (cổng idempotent của nó
- * là `findFirst({recurringId, date trong tháng})`, KHÔNG có unique dưới DB). Bấm Khôi phục sau đó là
- * cộng đôi một khoản chi — mà chủ shop vừa bấm đúng cái nút app bảo là an toàn.
+ * đều làm `ensureRecurringExpensesForMonths` tự sinh lại dòng đó với id mới. Bấm Khôi phục sau đó là
+ * cộng đôi một khoản chi — mà chủ shop vừa bấm đúng cái nút app bảo là an toàn. UNIQUE
+ * `(recurringId, recurringMonth)` dưới DB nay cũng chặn câu ghi đó (cổng cuối cho lượt sinh chen vào
+ * SAU phép dò này — `khoi-phuc-ban-ghi.ts` dịch va chạm về cùng một câu); phép dò ở đây vẫn cần để
+ * cột "Trạng thái" nói thật TRƯỚC khi chủ shop bấm.
  *
- * Kẹp tháng theo `startOfMonth`/`endOfMonth` đúng như hàm tự sinh, để hai bên hiểu "trong tháng" y
- * hệt nhau. Loại trừ chính id đang khôi phục: bản ghi đó chưa tồn tại (nếu có thì `idDaTonTaiLai`
+ * So theo ĐÚNG khoá của ràng buộc (`khoaThangDinhKy(date)`), để phép dò và UNIQUE hiểu "trong tháng"
+ * y hệt nhau. Loại trừ chính id đang khôi phục: bản ghi đó chưa tồn tại (nếu có thì `idDaTonTaiLai`
  * mới là lý do đúng), nhưng bỏ điều kiện đó ra là màn liệt kê báo sai ngay sau một lượt khôi phục.
  */
 async function trungKhoanDinhKy(
@@ -288,7 +290,7 @@ async function trungKhoanDinhKy(
   const trung = await tx.expense.findFirst({
     where: {
       recurringId,
-      date: { gte: startOfMonth(ngay), lte: endOfMonth(ngay) },
+      recurringMonth: khoaThangDinhKy(ngay),
       id: { not: String(data.id) },
     },
     select: { id: true },

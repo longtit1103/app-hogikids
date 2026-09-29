@@ -32,7 +32,7 @@ export function LowStockCard({ rows, total }: { rows: LowStockPreviewRow[]; tota
                   <span className="block truncate text-sm text-ink">
                     {v.productName} — {v.label}
                   </span>
-                  <span className="font-mono text-xs text-muted-foreground">{v.sku}</span>
+                  <span className="block font-mono text-xs break-all text-muted-foreground">{v.sku}</span>
                 </span>
                 {v.stock === 0 ? (
                   <Badge className="shrink-0 bg-error text-white">Hết hàng</Badge>

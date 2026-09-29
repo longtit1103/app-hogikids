@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { ngayMoSoTrongRequest } from "@/lib/so-quy/so-quy-queries";
 import {
   tinhViTiktokConLaiToiThieu,
-  type ViTiktokConLaiToiThieu,
+  type ViTiktokConLaiHienThi,
 } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu";
 
 /**
@@ -15,7 +15,8 @@ import {
  * Cái giá phải biết: n8n chỉ kéo lại statement trong cửa sổ 7 ngày theo `statement_time`. Một statement
  * lúc kéo còn trạng thái khác rồi mới SETTLED sau 7 ngày sẽ KẸT trạng thái cũ và bị bỏ khỏi ô này tới
  * khi kéo lại rộng hơn (key `tiktokShopManualDays` ở bảng Setting — xem `n8n/tiktokshop-nightly.json`).
- * Bỏ một khoản vào DƯƠNG chỉ làm số hiển thị THẤP đi — vẫn là cận dưới.
+ * Bỏ một khoản vào DƯƠNG chỉ làm số hiển thị THẤP đi — vẫn là cận dưới. Để không bỏ IM LẶNG, số dòng +
+ * tổng các statement chưa chốt đi kèm kết quả (`chuaChot`) và ô hiện một dòng cảnh báo.
  */
 const STATEMENT_DA_VAO_VI = "SETTLED";
 
@@ -32,11 +33,18 @@ const STATEMENT_DA_VAO_VI = "SETTLED";
  * Mọi `TiktokPayment` ≠ FAILED đều là tiền rời ví — chủ shop xác nhận 25/09 cả hai tài khoản nhận
  * (`****4017`, `****4025`) đều thuộc quỹ, nên KHÔNG lọc theo tài khoản.
  */
-export async function docViTiktokConLaiToiThieu(): Promise<ViTiktokConLaiToiThieu | null> {
-  const [statement, lenhRut, d0] = await Promise.all([
+export async function docViTiktokConLaiToiThieu(): Promise<ViTiktokConLaiHienThi | null> {
+  const [statement, chuaChot, lenhRut, d0] = await Promise.all([
     prisma.tiktokSettlement.findMany({
       where: { paymentStatus: STATEMENT_DA_VAO_VI },
       select: { statementTime: true, paymentTime: true, settlementAmount: true },
+    }),
+    // Phần bị loại ở trên — đếm để ô CẢNH BÁO, không cộng vào số nào. `paymentStatus` NOT NULL nên
+    // `not` không nuốt dòng nào (chuỗi rỗng khi sàn không báo trạng thái vẫn được đếm).
+    prisma.tiktokSettlement.aggregate({
+      where: { paymentStatus: { not: STATEMENT_DA_VAO_VI } },
+      _count: { _all: true },
+      _sum: { settlementAmount: true },
     }),
     prisma.tiktokPayment.findMany({
       where: { status: { not: "FAILED" } },
@@ -46,7 +54,7 @@ export async function docViTiktokConLaiToiThieu(): Promise<ViTiktokConLaiToiThie
     ngayMoSoTrongRequest(),
   ]);
 
-  return tinhViTiktokConLaiToiThieu(
+  const vi = tinhViTiktokConLaiToiThieu(
     // Tiền vào ví lúc sàn ghi có (`paymentTime`); thiếu thì lùi về ngày sao kê.
     statement.map((s) => ({ thoiDiem: s.paymentTime ?? s.statementTime, soTien: s.settlementAmount })),
     lenhRut.map((p) => ({
@@ -56,6 +64,10 @@ export async function docViTiktokConLaiToiThieu(): Promise<ViTiktokConLaiToiThie
     })),
     d0
   );
+  // Chưa có statement SETTLED nào ⇒ ô ẩn như chưa đồng bộ (cảnh báo đi theo ô, không có ô thì không có
+  // chỗ đặt — prod luôn có hàng nghìn statement SETTLED nên ca này chỉ gặp lúc mới nối sàn).
+  if (vi === null) return null;
+  return { ...vi, chuaChot: { soDong: chuaChot._count._all, tong: chuaChot._sum.settlementAmount ?? 0 } };
 }
 
 /**

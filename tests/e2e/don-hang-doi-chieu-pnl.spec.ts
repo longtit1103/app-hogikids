@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { format } from "date-fns";
 
 import { ingestPancake, resetRawPancake } from "./ingest-raw";
@@ -98,7 +98,9 @@ async function readPnlAmount(page: Page, label: string): Promise<number> {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const labelEl = page.getByText(new RegExp(`^(?:− |= )?${escaped}$`));
   const row = page.locator("table tbody tr").filter({ has: labelEl }).first();
-  return parseVndText((await row.locator("td").nth(1).textContent()) ?? "");
+  // `innerText`: ô "Số tiền" còn chứa dòng phụ mobile `md:hidden` (% · so tháng trước) — xem
+  // `readPnlAmount` ở acceptance.spec.ts.
+  return parseVndText(await row.locator("td").nth(1).innerText());
 }
 
 /**

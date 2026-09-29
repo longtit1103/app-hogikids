@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { hasValidMagicBytes, LOGO_FILENAME_RE } from "@/lib/branding/logo-file";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 
@@ -19,29 +20,6 @@ const LOGO_EXT_BY_MIME: Record<string, "png" | "jpg"> = {
   "image/jpeg": "jpg",
 };
 const INVALID_LOGO_ERROR = "Ảnh phải là PNG/JPG dưới 2MB";
-
-/**
- * Magic bytes THẬT của từng định dạng — `File.type` chỉ là MIME do TRÌNH DUYỆT
- * tự khai báo trong request, giả được (đổi tên field/Content-Type tuỳ ý qua
- * request thủ công, file không hề là ảnh). Đây là lớp kiểm THỨ HAI, đọc thẳng
- * vài byte đầu buffer thật — không tin bất cứ gì client khai báo. Cố ý KHÔNG
- * dùng thư viện xử lý ảnh (sharp/jimp…) cho việc này: chỉ so vài byte đầu,
- * thêm dependency là over-engineering và mở thêm bề mặt tấn công không cần.
- */
-const MAGIC_BYTES_BY_EXT: Record<"png" | "jpg", readonly number[]> = {
-  png: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
-  jpg: [0xff, 0xd8, 0xff],
-};
-
-function hasValidMagicBytes(buffer: Buffer, ext: "png" | "jpg"): boolean {
-  return MAGIC_BYTES_BY_EXT[ext].every((byte, i) => buffer[i] === byte);
-}
-
-// Phải khớp allowlist filename ở route handler đọc logo
-// (`src/app/api/uploads/[name]/route.ts`) — dùng lại đúng mẫu tên mà
-// `saveLogoFile` sinh ra, để nhận diện + xoá an toàn file logo CŨ (chặn path
-// traversal dù chuỗi này do chính app từng ghi vào DB — phòng thủ hai lớp).
-const LOGO_FILENAME_RE = /^logo-\d+\.(png|jpg)$/;
 
 /**
  * Xoá file logo CŨ trên đĩa sau khi đã ghi xong file mới + lưu DB thành công

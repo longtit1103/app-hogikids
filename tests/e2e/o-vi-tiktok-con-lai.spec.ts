@@ -1,11 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 
 import { testPrisma } from "./ingest-raw";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 /**
  * E2E ô "Còn ở ví TikTok" trong thẻ Quỹ (tab Dòng tiền): có statement TikTok + sổ đã mở ⇒ ô hiện,
- * mang nhãn "≈ tối thiểu" và câu "Không cộng vào quỹ".
+ * mang nhãn "≈ tối thiểu" và câu "Không cộng vào quỹ"; có statement chưa chốt ⇒ ô có dòng cảnh báo.
  *
  * CHỈ kiểm nhánh HIỆN. Nhánh ẩn (0 statement) cần xoá TẠM cả bảng `TiktokSettlement` của DB e2e dùng
  * chung — tiến trình chết giữa chừng thì không khôi phục được; nhánh đó do test tích hợp phủ
@@ -23,6 +23,7 @@ async function login(page: Page): Promise<void> {
 
 test.describe("Ô Còn ở ví TikTok — tab Dòng tiền", () => {
   const STATEMENT_ID = `e2e-vi-tiktok-${Date.now()}`;
+  const STATEMENT_CHUA_CHOT_ID = `e2e-vi-tiktok-chua-chot-${Date.now()}`;
   const DESC_MO_SO = `E2E vi tiktok mo so ${Date.now()}`;
 
   test.beforeAll(async () => {
@@ -46,12 +47,29 @@ test.describe("Ô Còn ở ví TikTok — tab Dòng tiền", () => {
         shippingCostAmount: 0,
       },
     });
+    // Statement chưa chốt: bị loại khỏi số ví nhưng phải hiện thành dòng cảnh báo. Số tiền 0 để không
+    // xê dịch con số nào mà spec khác có thể đang đọc trên DB e2e dùng chung.
+    await prisma.tiktokSettlement.create({
+      data: {
+        statementId: STATEMENT_CHUA_CHOT_ID,
+        shopId: "100975192",
+        statementTime: new Date(),
+        paymentTime: null,
+        paymentStatus: "PROCESSING",
+        settlementAmount: 0,
+        revenueAmount: 0,
+        feeAmount: 0,
+        adjustmentAmount: 0,
+        netSalesAmount: 0,
+        shippingCostAmount: 0,
+      },
+    });
     await prisma.$disconnect();
   });
 
   test.afterAll(async () => {
     const prisma = testPrisma();
-    await prisma.tiktokSettlement.deleteMany({ where: { statementId: STATEMENT_ID } });
+    await prisma.tiktokSettlement.deleteMany({ where: { statementId: { in: [STATEMENT_ID, STATEMENT_CHUA_CHOT_ID] } } });
     await prisma.cashMovement.deleteMany({ where: { description: DESC_MO_SO } });
     await prisma.$disconnect();
   });
@@ -67,5 +85,7 @@ test.describe("Ô Còn ở ví TikTok — tab Dòng tiền", () => {
     await expect(o).toContainText("Không cộng vào quỹ");
     await expect(o).toContainText("từ ngày mở sổ (đã chốt, chưa rút về quỹ)");
     await expect(o).not.toContainText("dữ liệu ví không khớp");
+    await expect(o).toContainText("statement TikTok chưa chốt");
+    await expect(o).toContainText("chưa tính vào số trên");
   });
 });

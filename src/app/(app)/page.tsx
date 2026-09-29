@@ -21,6 +21,7 @@ import { calcPnl, computeChannelPnl } from "@/lib/reports/pnl";
 import { computeDailySeries } from "@/lib/reports/daily-series";
 import { computeProductReport } from "@/lib/reports/product-report";
 import { requireUser } from "@/lib/session";
+import { PageTitle } from "@/components/shell/page-title";
 
 import type { SyncKind } from "@prisma/client";
 
@@ -103,10 +104,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="font-serif text-2xl text-ink">Dashboard</h1>
+      <PageTitle title="Dashboard">
         <p className="text-sm text-muted-foreground">Sức khỏe kinh doanh 30 giây — bấm vào bất kỳ số nào để đi sâu</p>
-      </div>
+      </PageTitle>
 
       <KpiCards today={todayPnl} thisMonth={thisMonthPnl} lastMonthSameDays={lastMonthSameDaysPnl} />
 

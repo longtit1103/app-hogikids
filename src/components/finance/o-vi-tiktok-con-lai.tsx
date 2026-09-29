@@ -1,5 +1,5 @@
 import { formatVnd } from "@/lib/format";
-import type { ViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu";
+import type { ViTiktokConLaiHienThi } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu";
 
 /**
  * Ô nhỏ CHỈ ĐỌC "Còn ở ví TikTok" trong thẻ Quỹ — tiền sàn đã chốt mà chủ shop chưa rút về. Số
@@ -8,7 +8,7 @@ import type { ViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-
  *
  * `null` (chưa có statement nào, hoặc đọc lỗi) ⇒ không render gì: in "0 ₫" là nói dối.
  */
-export function OViTiktokConLai({ vi }: { vi: ViTiktokConLaiToiThieu | null }) {
+export function OViTiktokConLai({ vi }: { vi: ViTiktokConLaiHienThi | null }) {
   if (vi === null) return null;
 
   return (
@@ -33,6 +33,14 @@ export function OViTiktokConLai({ vi }: { vi: ViTiktokConLaiToiThieu | null }) {
             </p>
           )}
         </>
+      )}
+      {vi.chuaChot.soDong > 0 && (
+        // Statement ≠ SETTLED đã bị loại khỏi số trên (chưa làm ví đổi đồng nào). Statement kẹt trạng thái
+        // cũ ngoài cửa sổ kéo lại thì bị loại mãi — dòng này là dấu vết DUY NHẤT; KHÔNG đổi con số.
+        <p className="mt-1 text-xs text-amber-700">
+          ⚠️ {vi.chuaChot.soDong} statement TikTok chưa chốt (tổng {formatVnd(vi.chuaChot.tong)}) —
+          chưa tính vào số trên. Để lâu vẫn thế thì kiểm lại đồng bộ TikTok.
+        </p>
       )}
       <p className="mt-1 text-xs text-muted-foreground">
         Cận dưới: số dư ví trước 15/01/2026 không có trong dữ liệu; số thật trên Seller Center ≥ số

@@ -8,6 +8,7 @@ import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
 import { getProductListPage, PRODUCT_PAGE_SIZE } from "@/lib/queries/products";
 import { getDefaultThreshold } from "@/lib/queries/variants";
 import { requireUser } from "@/lib/session";
+import { PageTitle } from "@/components/shell/page-title";
 
 export default async function SanPhamPage({
   searchParams,
@@ -34,12 +35,11 @@ export default async function SanPhamPage({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="font-serif text-2xl text-ink">Sản phẩm</h1>
+        <PageTitle title="Sản phẩm">
           <p className="text-sm text-muted-foreground">
             {kpi.totalProducts.toLocaleString("vi-VN")} sản phẩm · {kpi.totalVariants.toLocaleString("vi-VN")} SKU
           </p>
-        </div>
+        </PageTitle>
         <div className="flex flex-wrap items-center gap-2">
           {/*
             Đường vào CỐ ĐỊNH cho màn đồng bộ giá vốn. Không dựa vào dải cảnh báo: dải đó im khi

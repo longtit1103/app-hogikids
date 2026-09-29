@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { format, subDays } from "date-fns";
 
 import { testPrisma } from "./ingest-raw";

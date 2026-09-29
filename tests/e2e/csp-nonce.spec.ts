@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
@@ -46,6 +46,16 @@ const CAC_TRANG = [
   "/duong-dan-khong-ton-tai-de-thu-csp",
 ];
 
+/**
+ * Trang chuyển hướng ⇒ URL cuối phải tới. `redirect()` trong page nằm DƯỚI khung chờ `loading.tsx`
+ * chạy SAU khi HTML đã bắt đầu stream (HTTP 200 đã gửi) nên Next không trả được 307: nó đổi sang
+ * chuyển hướng phía client, trình duyệt tải một TÀI LIỆU MỚI với nonce MỚI. Nonce phải so với
+ * response của tài liệu đang hiện, không phải response mà `page.goto` trả về.
+ */
+const CHUYEN_HUONG: Record<string, RegExp> = {
+  "/chi-phi": /\/tai-chinh\?tab=so-chi-phi$/,
+};
+
 async function login(page: Page): Promise<void> {
   await page.goto("/dang-nhap");
   await page.getByLabel("Email").fill(TEST_USER_EMAIL);
@@ -81,6 +91,23 @@ function docNonce(csp: string | undefined): string | null {
 }
 
 /**
+ * Theo dõi nonce của tài liệu (điều hướng khung chính) GẦN NHẤT — kể cả tài liệu do chuyển hướng
+ * phía client nạp sau `page.goto`. Trả hàm đọc giá trị hiện tại.
+ */
+function theoDoiNonceTaiLieu(page: Page): () => string | null {
+  let nonce: string | null = null;
+  page.on("response", (r) => {
+    const req = r.request();
+    // Bỏ response 3xx (không có tài liệu); GIỮ 404 — trang 404 cũng là tài liệu mang nonce.
+    const laChuyenHuong = r.status() >= 300 && r.status() < 400;
+    if (req.isNavigationRequest() && req.frame() === page.mainFrame() && !laChuyenHuong) {
+      nonce = docNonce(r.headers()["content-security-policy"]);
+    }
+  });
+  return () => nonce;
+}
+
+/**
  * Chứng minh script của Next THỰC SỰ chạy dưới CSP (không chỉ HTML hiện ra): script bootstrap có
  * mang đúng nonce của header, và runtime client của Next đã khởi động.
  */
@@ -89,7 +116,7 @@ async function kiemScriptNextDaChay(page: Page, nonceHeader: string | null): Pro
   const nonceTrongTrang = await page.evaluate(() =>
     Array.from(document.querySelectorAll("script")).map((s) => s.nonce)
   );
-  expect(nonceTrongTrang).toContain(nonceHeader);
+  expect(nonceTrongTrang, `script của tài liệu ${page.url()} phải mang nonce của header`).toContain(nonceHeader);
   await expect
     .poll(() => page.evaluate(() => Boolean((window as unknown as { next?: { version?: string } }).next?.version)))
     .toBe(true);
@@ -129,9 +156,15 @@ test.describe("Content-Security-Policy có nonce", () => {
 
     await login(page);
 
+    const nonceTaiLieu = theoDoiNonceTaiLieu(page);
     for (const duong of CAC_TRANG) {
-      const res = await page.goto(duong, { waitUntil: "networkidle" });
-      await kiemScriptNextDaChay(page, docNonce(res?.headers()["content-security-policy"]));
+      await page.goto(duong, { waitUntil: "networkidle" });
+      const dich = CHUYEN_HUONG[duong];
+      if (dich) {
+        await expect(page).toHaveURL(dich);
+        await page.waitForLoadState("networkidle");
+      }
+      await kiemScriptNextDaChay(page, nonceTaiLieu());
     }
 
     // Trang chi tiết kênh: id kênh tuỳ DB e2e ⇒ đi theo thẻ đầu tiên trên /kenh (nếu có).
@@ -139,8 +172,8 @@ test.describe("Content-Security-Policy có nonce", () => {
     const theKenh = page.locator('a[href^="/kenh/"]').first();
     if ((await theKenh.count()) > 0) {
       const href = await theKenh.getAttribute("href");
-      const res = await page.goto(href!, { waitUntil: "networkidle" });
-      await kiemScriptNextDaChay(page, docNonce(res?.headers()["content-security-policy"]));
+      await page.goto(href!, { waitUntil: "networkidle" });
+      await kiemScriptNextDaChay(page, nonceTaiLieu());
     }
 
     expect(viPham, JSON.stringify(viPham, null, 2)).toEqual([]);

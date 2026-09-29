@@ -102,11 +102,12 @@ function VariantCardItem({ variant, defaultThreshold }: { variant: VariantRow; d
         )}
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate text-sm text-ink">{variant.productName}</span>
-          <span className="flex items-center gap-1.5">
-            <Badge variant="outline" className="w-fit">
-              {variant.label}
+          {/* SKU dài không dấu cách phải được ngắt, không thì tràn ngang thẻ (cùng lỗi thẻ Tồn kho 28/09). */}
+          <span className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline" className="w-fit max-w-full">
+              <span className="truncate">{variant.label}</span>
             </Badge>
-            <span className="font-mono text-xs text-muted-foreground">{variant.sku}</span>
+            <span className="min-w-0 font-mono text-xs break-all text-muted-foreground">{variant.sku}</span>
           </span>
         </div>
       </div>

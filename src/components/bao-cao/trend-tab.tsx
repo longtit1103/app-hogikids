@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { endOfMonth, parse, startOfMonth } from "date-fns";
 
 import { TrendChart } from "@/components/bao-cao/trend-chart";
-import { useDateRange } from "@/components/shell/date-range-provider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { normalizeCustomRange, serializeDateRange } from "@/lib/date-range";
@@ -46,7 +45,6 @@ function netProfitDelta(current: MonthlyTrendRow, prev: MonthlyTrendRow | undefi
 export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { applyCustomRange } = useDateRange();
 
   const [windowSize, setWindowSize] = useState<6 | 12>(6);
 
@@ -59,8 +57,8 @@ export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
   function handleRowClick(monthStr: string) {
     const monthDate = parse(monthStr, "yyyy-MM", new Date());
     const monthRange = normalizeCustomRange({ from: startOfMonth(monthDate), to: endOfMonth(monthDate) });
-    applyCustomRange(monthRange); // đồng bộ context toàn cục (P&L month-picker đọc từ đây)
-
+    // Bấm dòng tháng là DRILL: chỉ mang tu/den trên URL — bộ chọn ngày toàn cục tự nhận khoảng này
+    // từ URL để HIỂN THỊ (P&L month-picker đọc từ đó) và KHÔNG lưu sang phiên sau (hợp đồng 29/09).
     const { tu, den } = serializeDateRange(monthRange);
     // P&L đã dời sang hub Tài chính → click dòng tháng mở /tai-chinh?tab=loi-lo.
     const params = new URLSearchParams(searchParams);

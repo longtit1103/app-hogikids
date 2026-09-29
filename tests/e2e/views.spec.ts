@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import * as XLSX from "xlsx";
 
 import { ingestPancake, resetRawPancake, testPrisma } from "./ingest-raw";
@@ -16,10 +16,35 @@ import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 const fixture = (name: string) =>
   JSON.parse(readFileSync(path.resolve(process.cwd(), "tests/fixtures/pancake", name), "utf8")) as unknown[];
 
+/**
+ * Đặt giá vốn app của mọi biến thể fixture về ĐÚNG giá Pancake trong fixture (cùng luật với màn
+ * đồng bộ: giá TB, không có thì giá nhập lần cuối). File này sửa giá vốn của 5 biến thể "Set Bộ Baby
+ * Girl" (sửa tại chỗ + import Excel) mà `costPrice` là APP-OWNED — ingest không bao giờ đè lại. Không
+ * trả lại thì lượt chạy SAU bắt đầu với 5 mã lệch: `dong-bo-gia-von.spec.ts` áp 6 mã thay vì 1 (#251),
+ * còn chính test đầu file này giả định "5 biến thể cùng giá 100.000" chỉ đúng nhờ spec khác đã áp hộ.
+ */
+async function datGiaVonTheoFixture(): Promise<void> {
+  const prisma = testPrisma();
+  const sanPham = fixture("products-sample.json") as {
+    variations?: { id: string; average_imported_price?: number; last_imported_price?: number }[];
+  }[];
+  for (const sp of sanPham) {
+    for (const v of sp.variations ?? []) {
+      const gia = v.average_imported_price || v.last_imported_price || 0;
+      if (gia > 0) await prisma.variant.updateMany({ where: { pancakeId: v.id }, data: { costPrice: gia } });
+    }
+  }
+}
+
 test.beforeAll(async () => {
   // Xoá Bronze trước: raw sót lại từ lần chạy trước sẽ dedupe → không transform → Silver rỗng.
   await resetRawPancake();
   await ingestPancake({ products: fixture("products-sample.json"), orders: fixture("orders-sample.json") });
+  await datGiaVonTheoFixture();
+});
+
+test.afterAll(async () => {
+  await datGiaVonTheoFixture();
 });
 
 async function login(page: Page): Promise<void> {

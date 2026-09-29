@@ -129,10 +129,11 @@ describe("docViTiktokConLaiToiThieu", () => {
       b0ToiThieu: 30_000_000,
       viHienTai: 10_500_000,
       tangTuD0: 7_500_000,
+      chuaChot: { soDong: 0, tong: 0 },
     });
   });
 
-  it("statement chưa SETTLED chưa vào ví ⇒ không tính, cả khoản dương lẫn âm", async () => {
+  it("statement chưa SETTLED chưa vào ví ⇒ không tính vào số ví, nhưng ĐẾM riêng để ô cảnh báo", async () => {
     await prisma.tiktokSettlement.createMany({
       data: [
         statement("vt-s10", new Date(2026, 6, 1), new Date(2026, 6, 1), 10_000_000),
@@ -142,10 +143,14 @@ describe("docViTiktokConLaiToiThieu", () => {
         statement("vt-s12", new Date(2026, 6, 3), null, 5_000_000, ""),
       ],
     });
+    // Số ví KHÔNG đổi (vẫn cận dưới từ statement SETTLED); hai statement bị loại hiện thành cảnh báo
+    // thay vì biến mất im lặng — statement kẹt trạng thái cũ ngoài cửa sổ kéo lại 7 ngày thì chỉ còn
+    // dòng cảnh báo này cho chủ shop biết số trên đang thiếu một khoản.
     expect(await docViTiktokConLaiToiThieu()).toEqual({
       b0ToiThieu: 0,
       viHienTai: 10_000_000,
       tangTuD0: null,
+      chuaChot: { soDong: 2, tong: -25_000_000 },
     });
   });
 
@@ -164,6 +169,7 @@ describe("docViTiktokConLaiToiThieu", () => {
       b0ToiThieu: 0,
       viHienTai: 3_000_000,
       tangTuD0: null,
+      chuaChot: { soDong: 0, tong: 0 },
     });
   });
 });

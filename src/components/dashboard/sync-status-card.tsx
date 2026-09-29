@@ -67,7 +67,7 @@ export function SyncStatusCard({ rows }: { rows: SyncStatusRow[] }) {
         })}
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-2 border-t border-hairline pt-3">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3">
         <SyncNowButton />
         <Link href="/cai-dat" className="text-xs text-primary hover:underline">
           Cài đặt kết nối

@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { addMonths, format, getDaysInMonth, setDate, startOfMonth, subMonths } from "date-fns";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ensureRecurringExpenses,
@@ -7,6 +10,7 @@ import {
   mauDinhKySinhChoThang,
   monthStartsInRange,
 } from "@/lib/expenses/ensure-recurring-expenses";
+import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { prisma } from "@/lib/prisma";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
@@ -125,6 +129,192 @@ describe("ensureRecurringExpenses", () => {
     expect(expense!.channelId).toBeNull();
   });
 });
+
+describe("lượt kiểm chỉ-đọc trước câu chèn", () => {
+  // Render trang (cả lượt tải sẵn tab) gọi hàm này MỖI lần — gần như lần nào tháng cũng đã đủ dòng,
+  // nên lượt đó chỉ được ĐỌC: không transaction, không câu INSERT nào.
+  it("tháng đã đủ dòng ⇒ KHÔNG phát câu chèn nào, không mở transaction", async () => {
+    await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 1_000_000, dayOfMonth: 5, description: "Điện" },
+    });
+    expect(await ensureRecurringExpenses(pastMonth)).toBe(1);
+    const spyChen = vi.spyOn(prisma, "$executeRaw");
+    const spyTx = vi.spyOn(prisma, "$transaction");
+    try {
+      expect(await ensureRecurringExpenses(pastMonth)).toBe(0);
+      expect(spyChen).not.toHaveBeenCalled();
+      expect(spyTx).not.toHaveBeenCalled();
+    } finally {
+      spyChen.mockRestore();
+      spyTx.mockRestore();
+    }
+    expect(await prisma.expense.count()).toBe(1);
+  });
+
+  it("thiếu 1 trong 2 mẫu ⇒ chèn ĐÚNG dòng thiếu", async () => {
+    const a = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 1_000_000, dayOfMonth: 5, description: "Điện" },
+    });
+    await ensureRecurringExpenses(pastMonth);
+    const b = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 2_000_000, dayOfMonth: 7, description: "Nước" },
+    });
+    expect(await ensureRecurringExpenses(pastMonth)).toBe(1);
+    const rows = await prisma.expense.findMany({ select: { recurringId: true } });
+    expect(rows.map((r) => r.recurringId).sort()).toEqual([a.id, b.id].sort());
+  });
+});
+
+describe("ràng buộc 1 dòng/mẫu/tháng dưới DB", () => {
+  it("2 lượt ĐỒNG THỜI cùng thấy thiếu ⇒ đúng 1 dòng/mẫu, không ném, tổng created = số mẫu", async () => {
+    const mau = await Promise.all(
+      [5, 7, 9].map((dayOfMonth) =>
+        prisma.recurringExpense.create({
+          data: { categoryId: "fixed", amount: 1_000_000 * dayOfMonth, dayOfMonth, description: `Mẫu ${dayOfMonth}` },
+        })
+      )
+    );
+    // Rào: cả hai lượt phải qua lượt kiểm chỉ-đọc (cùng thấy thiếu 3 dòng) rồi mới được chèn — không
+    // có rào thì lượt sau có thể tới khi lượt đầu đã chèn xong và thử nghiệm không đua thật.
+    const goc = prisma.$executeRaw.bind(prisma);
+    let soLuotToi = 0;
+    let moRao!: () => void;
+    const rao = new Promise<void>((r) => (moRao = r));
+    const spy = vi.spyOn(prisma, "$executeRaw").mockImplementation((async (
+      mau: TemplateStringsArray,
+      ...giaTri: unknown[]
+    ) => {
+      soLuotToi++;
+      if (soLuotToi === 2) moRao();
+      await rao;
+      return goc(mau, ...giaTri);
+    }) as never);
+    let ketQua: number[];
+    try {
+      ketQua = await Promise.all([ensureRecurringExpenses(pastMonth), ensureRecurringExpenses(pastMonth)]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(soLuotToi).toBe(2);
+    expect(ketQua[0] + ketQua[1]).toBe(mau.length);
+    const rows = await prisma.expense.findMany({ select: { recurringId: true, recurringMonth: true } });
+    expect(rows).toHaveLength(mau.length);
+    expect(rows.map((r) => r.recurringId).sort()).toEqual(mau.map((m) => m.id).sort());
+    expect(new Set(rows.map((r) => r.recurringMonth))).toEqual(new Set([format(pastMonth, "yyyy-MM")]));
+  });
+
+  it("chèn thẳng trùng (recurringId, recurringMonth) ⇒ P2002 — ràng buộc nằm ở DB, không ở app", async () => {
+    const r = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 1_000_000, dayOfMonth: 5, description: "Điện" },
+    });
+    expect(await ensureRecurringExpenses(pastMonth)).toBe(1);
+    const ngayKhac = setDate(pastMonth, 20); // khác ngày, CÙNG tháng
+    await expect(
+      prisma.expense.create({
+        data: {
+          date: ngayKhac,
+          categoryId: "fixed",
+          description: "Điện (trùng)",
+          amount: 1_000_000,
+          source: "RECURRING",
+          recurringId: r.id,
+          recurringMonth: khoaThangDinhKy(ngayKhac),
+        },
+      })
+    ).rejects.toMatchObject({ code: "P2002" });
+    expect(await prisma.expense.count()).toBe(1);
+  });
+
+  it("CHECK: dòng định kỳ thiếu khoá tháng, hoặc khoá lệch tháng của ngày ⇒ DB từ chối", async () => {
+    const r = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 1_000_000, dayOfMonth: 5, description: "Điện" },
+    });
+    const ngay = setDate(pastMonth, 5);
+    const goc = {
+      date: ngay,
+      categoryId: "fixed",
+      description: "Điện",
+      amount: 1_000_000,
+      source: "RECURRING" as const,
+      recurringId: r.id,
+    };
+    await expect(prisma.expense.create({ data: goc })).rejects.toThrow(/Expense_recurringMonth_chi_cho_dinh_ky/);
+    await expect(
+      prisma.expense.create({ data: { ...goc, recurringMonth: format(subMonths(ngay, 1), "yyyy-MM") } })
+    ).rejects.toThrow(/Expense_recurringMonth_khop_ngay/);
+    // Dòng THƯỜNG mang khoá tháng cũng bị chặn (khoá chỉ dành cho dòng định kỳ).
+    await expect(
+      prisma.expense.create({
+        data: { ...goc, source: "MANUAL", recurringId: null, recurringMonth: khoaThangDinhKy(ngay) },
+      })
+    ).rejects.toThrow(/Expense_recurringMonth_chi_cho_dinh_ky/);
+    expect(await prisma.expense.count()).toBe(0);
+  });
+});
+
+describe("mốc tháng của khoá định kỳ theo GIỜ VN", () => {
+  // Cột `date` là timestamp không múi giờ chứa giờ UTC. 00:00 VN ngày 1 = 17:00 UTC ngày cuối tháng
+  // TRƯỚC ⇒ tính khoá theo UTC là lệch sang tháng trước; 23:30 VN ngày cuối tháng bắt ca dịch QUÁ tay
+  // (cộng +7 hai lần ⇒ nhảy sang tháng sau).
+  const cuoiThang = new Date(2026, 7, 31, 23, 30); // 31/08/2026 23:30 giờ VN
+  const dauThang = new Date(2026, 8, 1, 0, 0); // 01/09/2026 00:00 giờ VN
+
+  it("khoaThangDinhKy: 23:30 VN ngày cuối tháng thuộc tháng đó; 00:00 VN ngày 1 thuộc tháng mới", () => {
+    expect(khoaThangDinhKy(cuoiThang)).toBe("2026-08");
+    expect(khoaThangDinhKy(dauThang)).toBe("2026-09");
+  });
+
+  it("DB đồng ý với app ở cả 2 biên — CHECK nhận khoá, câu backfill của migration ra ĐÚNG khoá đó", async () => {
+    const r = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 1_000_000, dayOfMonth: 1, description: "Điện" },
+    });
+    const r2 = await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 1_000_000, dayOfMonth: 31, description: "Nước" },
+    });
+    for (const [recurringId, date] of [
+      [r2.id, cuoiThang],
+      [r.id, dauThang],
+    ] as const) {
+      await prisma.expense.create({
+        data: {
+          date,
+          categoryId: "fixed",
+          description: "Biên tháng",
+          amount: 1_000_000,
+          source: "RECURRING",
+          recurringId,
+          recurringMonth: khoaThangDinhKy(date),
+        },
+      });
+    }
+    // Chạy lại NGUYÊN VĂN câu backfill trong file migration: sai chiều múi giờ thì hoặc CHECK (viết
+    // đúng chiều) từ chối, hoặc khoá đổi khác khoá app ⇒ phép so dưới đỏ.
+    await prisma.$executeRawUnsafe(cauBackfillTrongMigration());
+    const rows = await prisma.expense.findMany({ select: { date: true, recurringMonth: true }, orderBy: { date: "asc" } });
+    expect(rows.map((e) => e.recurringMonth)).toEqual(["2026-08", "2026-09"]);
+  });
+
+  it("bộ sinh: mẫu ngày 1 (00:00 VN = 17:00 UTC tháng trước) mang khoá đúng tháng VN", async () => {
+    await prisma.recurringExpense.create({
+      data: { categoryId: "fixed", amount: 1_000_000, dayOfMonth: 1, description: "Mặt bằng" },
+    });
+    expect(await ensureRecurringExpenses(pastMonth)).toBe(1);
+    const e = await prisma.expense.findFirstOrThrow();
+    expect(e.recurringMonth).toBe(format(pastMonth, "yyyy-MM"));
+    expect(format(e.date, "yyyy-MM")).toBe(format(pastMonth, "yyyy-MM"));
+  });
+});
+
+/** Câu `UPDATE … SET "recurringMonth" = …` nguyên văn trong migration thêm ràng buộc. */
+function cauBackfillTrongMigration(): string {
+  const file = path.resolve(
+    process.cwd(),
+    "prisma/migrations/20260928160000_mot_dong_dinh_ky_moi_thang_rang_buoc_duy_nhat/migration.sql"
+  );
+  const cau = readFileSync(file, "utf8").match(/UPDATE "Expense"[\s\S]*?;/);
+  if (!cau) throw new Error("Không tìm thấy câu backfill trong migration");
+  return cau[0];
+}
 
 describe("ensureRecurringExpensesForMonths", () => {
   // dayOfMonth=1 để tháng hiện tại LUÔN đã tới hạn (hôm nay ≥ ngày 1) — test

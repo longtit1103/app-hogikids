@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixture-cho-trang-stream-xong";
 
 import { INGEST_SECRET_TEST } from "./test-constants";
 import { ingestPancake, postRaw, resetRawPancake, SHOP_KHO, SHOP_TIKTOK, testPrisma } from "./ingest-raw";

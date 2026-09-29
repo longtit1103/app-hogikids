@@ -2,6 +2,7 @@ import { addMonths, endOfMonth, format, getDaysInMonth, setDate, startOfDay, sta
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { ngayDenHanDinhKy } from "@/lib/expenses/ensure-recurring-expenses";
+import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { prisma } from "@/lib/prisma";
 import { demKhoanVayCoKyChoDuyet, listKhoanVay } from "@/lib/so-quy/khoan-vay-queries";
 import { tinhSoQuyThang } from "@/lib/so-quy/so-quy-queries";
@@ -468,7 +469,7 @@ describe("tinhSoQuyThang — canhBao.dinhKyChuaGhi", () => {
 
   async function sinhExpenseDinhKy(recurringId: string, ngay: Date, amount: number): Promise<void> {
     await prisma.expense.create({
-      data: { date: ngay, categoryId: "fixed", description: "x", amount, source: "RECURRING", recurringId },
+      data: { date: ngay, categoryId: "fixed", description: "x", amount, source: "RECURRING", recurringId, recurringMonth: khoaThangDinhKy(ngay) },
     });
   }
 

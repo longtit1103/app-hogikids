@@ -1,5 +1,5 @@
 import { WEBHOOK_PANCAKE_PATH } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { format } from "date-fns";
 
 import { ingestPancake, resetRawPancake, testPrisma, type IngestInput } from "./ingest-raw";

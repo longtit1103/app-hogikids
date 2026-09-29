@@ -4,6 +4,7 @@ import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
 import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
 import { getVariantListPage, VARIANT_PAGE_SIZE } from "@/lib/queries/variants";
 import { requireUser } from "@/lib/session";
+import { PageTitle } from "@/components/shell/page-title";
 
 export default async function TonKhoPage({
   searchParams,
@@ -25,10 +26,9 @@ export default async function TonKhoPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="font-serif text-2xl text-ink">Tồn kho</h1>
+      <PageTitle title="Tồn kho">
         <p className="text-sm text-muted-foreground">Tồn realtime từ Pancake — điều chỉnh tồn tại Pancake</p>
-      </div>
+      </PageTitle>
 
       <InventoryKpiCards kpi={kpi} />
       <InventoryToolbar />
