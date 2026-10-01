@@ -20,7 +20,8 @@
     "@prisma/config": {
       "deepmerge-ts": "^8.0.2"
     },
-    "ip-address": "10.5.1",
+    "brace-expansion": "5.0.12",
+    "ip-address": "10.7.1",
     "undici": "7.29.1"
   },
   "dependencies": {
