@@ -1,6 +1,6 @@
 "use server";
 
-import type { SyncKind } from "@prisma/client";
+import type { SyncKind } from "@/generated/prisma/client";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import type { LatestSync } from "@/lib/actions/sync-types";

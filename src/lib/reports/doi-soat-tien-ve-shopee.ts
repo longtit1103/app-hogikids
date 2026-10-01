@@ -1,4 +1,4 @@
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus } from "@/generated/prisma/client";
 import { endOfDay } from "date-fns";
 
 import { isProvisionalPlatformFee } from "@/lib/orders/provisional-fee";

@@ -14,7 +14,7 @@ import { coQuyen, type NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
 import type { DateRange } from "@/lib/date-range";
 import { computeProductReport } from "@/lib/reports/product-report";
 
-import type { SyncKind } from "@prisma/client";
+import type { SyncKind } from "@/generated/prisma/client";
 
 export const SYNC_KINDS_DASHBOARD: SyncKind[] = [
   "PANCAKE",

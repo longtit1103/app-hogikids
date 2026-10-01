@@ -1,6 +1,6 @@
 import { format } from "date-fns";
 
-import type { CashMovement, Expense, Loan, SoTietKiem, ThuNhap } from "@prisma/client";
+import type { CashMovement, Expense, Loan, SoTietKiem, ThuNhap } from "@/generated/prisma/client";
 
 import { CASH_MOVEMENT_KIND_META } from "@/lib/cash-movements/cash-movement-kinds";
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";

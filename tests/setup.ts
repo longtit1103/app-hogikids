@@ -57,7 +57,7 @@ delete process.env.BRONZE_ONLY;
 // Một câu ON CONFLICT DO UPDATE nguyên tử: nhiều worker chạy song song không đua nhau P2002.
 {
   const { prisma } = await import("@/lib/prisma");
-  const { Prisma } = await import("@prisma/client");
+  const { Prisma } = await import("@/generated/prisma/client");
   const { SEED_SHOP_ID } = await import("./helpers/shop-ids-fixture");
   await prisma.$executeRaw`
     INSERT INTO "Setting" (key, value)

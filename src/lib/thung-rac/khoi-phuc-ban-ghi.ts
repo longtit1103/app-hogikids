@@ -1,8 +1,13 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { laLoiTrungDongDinhKyThang } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { prisma } from "@/lib/prisma";
+import {
+  laLoiDongTienBan,
+  OPT_TX_DONG_TIEN,
+  THONG_BAO_KHOA_DONG_TIEN_BAN,
+} from "@/lib/so-quy/khoa-dong-tien-co-han";
 import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
 import {
   chanDuNoAm,
@@ -129,9 +134,6 @@ async function noiLaiSoTietKiem(
   return `Không nối lại được ${boQua.length} sổ tiết kiệm (${ten}) — sổ đó nay đang trỏ sang khoản vay khác`;
 }
 
-/** Nới hạn transaction: cụm khoản vay có thể vài chục câu, và DB test/dev đi qua Tailscale. */
-const OPT_TX = { timeout: 10_000, maxWait: 5_000 } as const;
-
 /**
  * Thiếu quyền của loại bản ghi ⇒ NÉM `LoiThieuQuyenThungRac` ra ngoài (không dịch thành `lyDo`):
  * tầng action cần phân biệt để ghi nhật ký `TU_CHOI_QUYEN` + trả `code: "KHONG_CO_QUYEN"`.
@@ -198,11 +200,14 @@ export async function khoiPhucBanGhiDaXoa(id: string, actor: NguoiDung): Promise
       });
 
       return canhBao;
-    }, OPT_TX);
+    }, OPT_TX_DONG_TIEN);
 
     return { ok: true, canhBao };
   } catch (e) {
     if (e instanceof LoiKhongKhoiPhuc) return { ok: false, lyDo: e.message };
+    // Chờ khoá khoản vay / sổ tiết kiệm quá hạn, hoặc transaction quá hạn (P2028) — đã lùi (con dấu "đã
+    // khôi phục" tan theo).
+    if (laLoiDongTienBan(e)) return { ok: false, lyDo: THONG_BAO_KHOA_DONG_TIEN_BAN };
     // Ba vị từ hậu kiểm ném câu gốc kiểu "kiểm lại số tiền hoặc khoản vay" — đúng cho form nhập tay,
     // sai ở đây (chủ shop có nhập số nào đâu, họ bấm Khôi phục). Dịch sang ĐÚNG ba câu mà cột "Trạng
     // thái" đang dùng, để một sự cố không được kể thành hai chuyện khác nhau.

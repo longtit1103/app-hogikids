@@ -277,7 +277,7 @@ describe("file đặc biệt Next không chạm lớp dữ liệu", () => {
           `import { ImageResponse } from "next/og";`,
           `import { Skeleton } from "@/components/ui/skeleton";`,
           `import { formatVnd } from "@/lib/format";`,
-          `import type { Order } from "@prisma/client";`,
+          `import type { Order } from "@/generated/prisma/client";`,
           `export default function L() { return null; }`,
         ].join("\n"),
       ),

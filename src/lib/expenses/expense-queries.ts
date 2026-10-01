@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { differenceInCalendarDays, endOfDay, subDays } from "date-fns";
 
 import { type DateRange } from "@/lib/date-range";

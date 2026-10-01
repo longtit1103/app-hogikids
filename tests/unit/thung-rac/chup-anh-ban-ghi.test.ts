@@ -1,7 +1,10 @@
-import { Prisma } from "@prisma/client";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import { Prisma } from "@/generated/prisma/client";
 import { describe, expect, it } from "vitest";
 
-import type { CashMovement, Expense, Loan, SoTietKiem, ThuNhap } from "@prisma/client";
+import type { CashMovement, Expense, Loan, SoTietKiem, ThuNhap } from "@/generated/prisma/client";
 
 import {
   BANG_THUNG_RAC,
@@ -218,25 +221,42 @@ describe("ảnh chụp dựng lại được nguyên trạng", () => {
  * đó, và khôi phục trả về một bản ghi KHÁC bản gốc — lệch im lặng, không test số nào khác đỏ.
  * Đối chiếu với schema Prisma bằng máy thay vì bằng trí nhớ.
  */
+/**
+ * Cột kiểu `DateTime` của một model, đọc thẳng từ `prisma/schema.prisma`. Prisma 7 bỏ
+ * `Prisma.dmmf` khỏi client sinh ra nên kiểu cột không còn tra được lúc chạy — đọc file schema (hợp
+ * đồng gốc) là nguồn máy duy nhất còn lại. Model không tìm thấy ⇒ ném, không trả mảng rỗng (rỗng
+ * sẽ làm test xanh giả khi đổi tên bảng).
+ */
+function cotDateTimeTrongSchema(model: string): string[] {
+  const schema = readFileSync(path.resolve(process.cwd(), "prisma/schema.prisma"), "utf8");
+  const khoi = schema.match(new RegExp(`^model ${model} \\{\\n([\\s\\S]*?)^\\}`, "m"));
+  if (!khoi) throw new Error(`Không thấy model ${model} trong prisma/schema.prisma`);
+  return khoi[1]
+    .split("\n")
+    .map((dong) => dong.replace(/\/\/.*$/, "").trim())
+    .filter((dong) => dong !== "" && !dong.startsWith("@@"))
+    .map((dong) => dong.split(/\s+/))
+    .filter(([, kieu]) => kieu?.replace(/[?[\]]/g, "") === "DateTime")
+    .map(([ten]) => ten);
+}
+
 describe("bảng cột được chụp phải khớp schema Prisma", () => {
   it.each(BANG_THUNG_RAC)("%s: chụp đủ mọi cột vô hướng", (bang) => {
-    const model = Prisma.dmmf.datamodel.models.find((m) => m.name === bang);
-    const cotThat = (model?.fields ?? [])
-      .filter((f) => f.kind !== "object")
-      .map((f) => f.name);
+    // `<Model>ScalarFieldEnum` = mọi cột vô hướng (kể cả enum, khoá ngoại), KHÔNG có quan hệ — đúng
+    // tập `kind !== "object"` của DMMF trước đây, do chính client sinh ra từ schema.
+    const cotThat = Object.values(Prisma[`${bang}ScalarFieldEnum`]);
 
     expect(
       [...TRUONG_CHUP[bang]].sort(),
       `Cột của ${bang} đã đổi — cập nhật TRUONG_CHUP (và TRUONG_NGAY nếu là cột ngày).`
-    ).toEqual(cotThat.sort());
+    ).toEqual([...cotThat].sort());
   });
 
   it.each(BANG_THUNG_RAC)("%s: khai đủ mọi cột kiểu DateTime", (bang) => {
-    const model = Prisma.dmmf.datamodel.models.find((m) => m.name === bang);
-    const cotNgay = (model?.fields ?? [])
-      .filter((f) => f.type === "DateTime")
-      .map((f) => f.name);
-
+    const cotNgay = cotDateTimeTrongSchema(bang);
+    // Chặn parser tự hỏng thành "không thấy cột ngày nào" rồi xanh giả: 5 bảng tiền đều có ít nhất
+    // một cột ngày (createdAt/ngày phát sinh).
+    expect(cotNgay.length).toBeGreaterThan(0);
     expect([...TRUONG_NGAY[bang]].sort()).toEqual(cotNgay.sort());
   });
 });

@@ -1,4 +1,4 @@
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus } from "@/generated/prisma/client";
 import { endOfMonth, format, startOfMonth } from "date-fns";
 
 import { ORDER_STATUS_META } from "@/lib/orders/order-status-meta";
@@ -38,7 +38,7 @@ const PNL_EXCLUDED_STATUSES: readonly OrderStatus[] = ["RETURNED", "CANCELLED"];
  * vào `ORDER_STATUS_META` là nó tự vào đây, đúng như P&L cũng sẽ tự tính nó —
  * hai bên không thể lệch định nghĩa "hợp lệ".
  *
- * (`ORDER_STATUS_META` chỉ import KIỂU từ `@prisma/client` nên module này vẫn
+ * (`ORDER_STATUS_META` chỉ import KIỂU từ `@/generated/prisma/client` nên module này vẫn
  * thuần, không kéo Prisma runtime vào.)
  */
 export const VALID_ORDER_STATUS_SLUGS: readonly string[] = (

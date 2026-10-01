@@ -9,7 +9,7 @@
  * đúng file phục hồi của chính mình. Kiểu hỏng này im lặng cho tới lúc cần dùng nhất.
  *
  * Cách dùng — chạy TRONG container app, ngay sau khi dựng ảnh:
- *   docker compose run --rm app npx tsx scripts/kiem-chot-chan-nhan-dump-cua-chinh-minh.ts
+ *   docker compose run --rm app npx --no-install tsx scripts/kiem-chot-chan-nhan-dump-cua-chinh-minh.ts
  * Hoặc kiểm một file có sẵn:
  *   npx tsx scripts/kiem-chot-chan-nhan-dump-cua-chinh-minh.ts /duong/dan/file.sql[.gz] [schema]
  *

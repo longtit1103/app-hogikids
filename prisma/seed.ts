@@ -4,11 +4,13 @@
  *
  * Logic tài khoản chủ shop nằm ở `prisma/seed-lib.ts` (test gọi thẳng được); file này chỉ đọc env.
  */
-import { PrismaClient } from "@prisma/client";
+// Dựng client qua nhà máy chung (Prisma 7: driver adapter + ép schema theo `?schema=`). `prisma db seed`
+// nhận DATABASE_URL từ CLI — `prisma.config.ts` đã nạp `.env` nếu biến chưa có sẵn.
+import { taoPrismaClient } from "../src/lib/tao-prisma-client";
 
 import { damBaoShopProfile, seedChuShop } from "./seed-lib";
 
-const prisma = new PrismaClient();
+const prisma = taoPrismaClient(process.env.DATABASE_URL);
 
 /**
  * Mode CHỈ-TẠO-MỚI (env `SEED_CHI_TAO_MOI=1` — `scripts/setup-clone.ts` luôn bật): upsert với

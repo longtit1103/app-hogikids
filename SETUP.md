@@ -25,7 +25,11 @@ cp .env.example .env
 `http://hogikids-app:3000`). Lượt đầu thêm `INIT_EMAIL`/`INIT_PASSWORD` (tài khoản đăng nhập) —
 **xoá 2 dòng này khỏi `.env` ngay sau khi setup xong**.
 
-Supabase cloud: lấy DSN **direct 5432** (không phải pooler 6543), giữ `?schema=app`.
+Supabase cloud: lấy DSN **direct 5432** (không phải pooler 6543), giữ `?schema=app` và THÊM
+`&sslmode=require` (TLS, không kiểm chứng chỉ) hoặc `&sslmode=verify-full` (kiểm chứng chỉ theo kho CA
+hệ thống — CA riêng của Supabase phải được máy tin). KHÔNG khai `sslmode` thì app nối KHÔNG mã hoá —
+chỉ chấp nhận khi DB nằm cùng mạng nội bộ (docker network, Tailscale). Giá trị khác (`prefer`, `allow`,
+`verify-ca`…) và `sslcert`/`sslrootcert`/`sslkey` bị từ chối lúc khởi động.
 
 ## 2. Dựng database — một lệnh
 
@@ -41,6 +45,9 @@ npm run setup -- \
   đừng ghi vào `.env`** — compose nạp `.env` vào container app mọi lần chạy. Không có admin DSN
   thì script in sẵn khối SQL để nhờ người có quyền chạy tay.
 - Script idempotent: chạy lại vô hại, không đè giá trị bạn đã sửa trong app.
+- Script tự chạy `prisma generate` (sinh client Prisma vào `src/generated/prisma`) trước bước seed —
+  Prisma 7 KHÔNG tự sinh client lúc `npm install`. Chạy app mà chưa qua `npm run setup` (hoặc sau khi
+  `prisma/schema.prisma` đổi) thì tự chạy `npx --no-install prisma generate` trước `npm run dev`.
 
 ## 3. Dựng n8n
 

@@ -46,14 +46,24 @@ srv="$(psql15 -Atc 'SHOW server_version_num')"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# $1 = bo-m1 | du — chép migrations sang thư mục tạm (Prisma đọc migrations/ CẠNH file schema).
+# $1 = bo-m1 | du — chép migrations sang thư mục tạm rồi áp bằng một prisma.config.ts TẠM trỏ đúng
+# thư mục đó. Prisma 7 đọc thư mục migrations từ file cấu hình (`prisma.config.ts` của repo trỏ CỨNG
+# prisma/migrations) — chỉ đổi `--schema` là lặng lẽ áp bộ ĐẦY ĐỦ, fixture "trước M1" mang luôn M1.
+# File tạm không import gì (nằm ngoài repo, không resolve được package).
 ap_migrations() {
   local d="$TMP/$1"
   rm -rf "$d"; mkdir -p "$d"
   cp -R prisma/migrations "$d/migrations"
   if [ "$1" = "bo-m1" ]; then rm -rf "$d/migrations/$M1"; fi
   cp prisma/schema.prisma "$d/schema.prisma"
-  DATABASE_URL="${FIXTURE_DB_URL}?schema=app" npx prisma migrate deploy --schema "$d/schema.prisma" >"$TMP/migrate-$1.log" 2>&1 \
+  cat >"$d/prisma.config.ts" <<EOF
+export default {
+  schema: "$d/schema.prisma",
+  migrations: { path: "$d/migrations" },
+  datasource: { url: process.env.DATABASE_URL ?? "" },
+};
+EOF
+  DATABASE_URL="${FIXTURE_DB_URL}?schema=app" npx prisma migrate deploy --config "$d/prisma.config.ts" >"$TMP/migrate-$1.log" 2>&1 \
     || { cat "$TMP/migrate-$1.log" >&2; die "prisma migrate deploy ($1) thất bại"; }
 }
 

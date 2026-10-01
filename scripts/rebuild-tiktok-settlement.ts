@@ -4,7 +4,8 @@
  * đụng Order/Product Silver). Idempotent. Chạy 1 lần sau khi migrate deploy;
  * nightly sau đó tự dựng incremental. In tổng để đối chiếu scout.
  *
- *   DATABASE_URL đọc từ .env (= PROD) → chạy: `npx tsx scripts/rebuild-tiktok-settlement.ts`
+ *   Prisma 7 KHÔNG tự nạp .env — phải nạp tường minh (DATABASE_URL trong .env = PROD) → chạy:
+ *   `npx tsx --env-file=.env scripts/rebuild-tiktok-settlement.ts`
  */
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
 import { prisma } from "@/lib/prisma";

@@ -67,10 +67,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
  * to the test DB and the schema exists.
  */
 async function seedTestUser(): Promise<void> {
-  const { PrismaClient } = await import("@prisma/client");
+  const { taoPrismaClient } = await import("../../src/lib/tao-prisma-client");
   const { hashPassword } = await import("../../src/lib/password");
 
-  const prisma = new PrismaClient();
+  const prisma = taoPrismaClient(process.env.DATABASE_URL);
   try {
     const passwordHash = await hashPassword(TEST_USER_PASSWORD);
     await prisma.$transaction(async (tx) => {
@@ -92,10 +92,11 @@ async function seedTestUser(): Promise<void> {
  * Cùng bộ giá trị với vitest (tests/setup.ts) — nguồn duy nhất: tests/helpers/shop-ids-fixture.ts.
  */
 async function seedShopIds(): Promise<void> {
-  const { PrismaClient, Prisma } = await import("@prisma/client");
+  const { Prisma } = await import("../../src/generated/prisma/client");
+  const { taoPrismaClient } = await import("../../src/lib/tao-prisma-client");
   const { SEED_SHOP_ID } = await import("../helpers/shop-ids-fixture");
 
-  const prisma = new PrismaClient();
+  const prisma = taoPrismaClient(process.env.DATABASE_URL);
   try {
     await prisma.$executeRaw`
       INSERT INTO "Setting" (key, value)
@@ -113,10 +114,10 @@ async function seedShopIds(): Promise<void> {
  * e2e mới tinh.
  */
 async function seedDoGiaVonVaoDbE2e(): Promise<void> {
-  const { PrismaClient } = await import("@prisma/client");
+  const { taoPrismaClient } = await import("../../src/lib/tao-prisma-client");
   const { seedDoGiaVon } = await import("./fixture-gia-von-do");
 
-  const prisma = new PrismaClient();
+  const prisma = taoPrismaClient(process.env.DATABASE_URL);
   try {
     await prisma.channel.upsert({
       where: { id: "shopee" },

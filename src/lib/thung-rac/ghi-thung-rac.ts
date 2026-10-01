@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { dungAnhBanGhi, type NguonAnh } from "@/lib/thung-rac/chup-anh-ban-ghi";
 

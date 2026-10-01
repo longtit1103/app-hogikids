@@ -8,7 +8,7 @@ import {
 import { type DateRange } from "@/lib/date-range";
 import { prisma } from "@/lib/prisma";
 
-import type { CashMovementKind as PrismaCashMovementKind } from "@prisma/client";
+import type { CashMovementKind as PrismaCashMovementKind } from "@/generated/prisma/client";
 
 /**
  * Query "khoản tiền khác" ghi tay (bảng `CashMovement`) cho tab Dòng tiền. Biên phải của kỳ luôn

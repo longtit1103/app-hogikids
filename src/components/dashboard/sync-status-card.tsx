@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { coTheVaoHref } from "@/components/shell/nav-config";
 import { SyncNowButton } from "@/components/shell/sync-now-button";
 
-import type { SyncKind, SyncStatus } from "@prisma/client";
+import type { SyncKind, SyncStatus } from "@/generated/prisma/client";
 
 export type SyncStatusRow = {
   kind: SyncKind;

@@ -1,4 +1,4 @@
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus } from "@/generated/prisma/client";
 import { differenceInCalendarDays, endOfDay, startOfDay } from "date-fns";
 
 import type { DateRange } from "@/lib/date-range";

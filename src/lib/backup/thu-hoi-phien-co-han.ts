@@ -18,8 +18,11 @@ import { HAN_THU_HOI_PHIEN_MS } from "./han-chay-lenh-pg";
  * lượt phục hồi khác đang thay schema. `SET LOCAL` sống đúng trong transaction này nên không rò
  * sang truy vấn khác dùng chung connection pool.
  *
- * `timeout`/`maxWait` của Prisma là lớp ngoài cho ca DB không phản hồi tới mức chính câu `SET`
- * cũng không chạy được.
+ * `maxWait` chỉ chặn ca KHÔNG LẤY ĐƯỢC kết nối để mở transaction (cùng `connectionTimeoutMillis` của
+ * pool). `timeout` KHÔNG phải lớp ngoài cho câu đang treo: runtime Prisma 7 chỉ đánh dấu transaction
+ * hết hạn cho câu KẾ TIẾP, câu đang chạy không bị huỷ và lời hứa không tự từ chối (đo bằng runtime thật
+ * trên pool giả: câu `SET` treo ⇒ `$transaction` vẫn chờ sau gấp 15 lần hạn). Ca DB treo tới mức chính
+ * câu `SET` không trả lời thì app KHÔNG có hạn nào cắt — chỉ tới khi TCP của hệ điều hành bỏ kết nối.
  */
 export async function thuHoiMoiPhienCoHan(): Promise<void> {
   await prisma.$transaction(

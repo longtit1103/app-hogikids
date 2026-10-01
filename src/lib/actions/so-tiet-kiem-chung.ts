@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { LoiHopDong } from "@/lib/actions/khoan-vay-chung";
 import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
+import { laLoiDongTienBan, THONG_BAO_KHOA_DONG_TIEN_BAN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import { LoiSoDuTietKiemAm } from "@/lib/tiet-kiem/vi-tu-so-tiet-kiem";
 
 /**
@@ -80,6 +81,9 @@ export const soTietKiemSchema = z
 export function loiSoTietKiem(e: unknown, macDinh: string): { error: string; field?: string } {
   if (e instanceof LoiHopDong) return { error: e.message, field: e.field };
   if (e instanceof LoiSoDuTietKiemAm) return { error: e.message };
+  // Chờ khoá dòng `SoTietKiem`/`Loan` quá hạn (lượt khác đang giữ) hoặc transaction quá hạn (P2028) — đã
+  // lùi, không ghi gì.
+  if (laLoiDongTienBan(e)) return { error: THONG_BAO_KHOA_DONG_TIEN_BAN };
   const code = (e as { code?: string })?.code;
   if (code === "P2025") return { error: "Không tìm thấy sổ tiết kiệm" };
   if (code === "P2002") return { error: "Sổ này đã ghi lãi rồi" };

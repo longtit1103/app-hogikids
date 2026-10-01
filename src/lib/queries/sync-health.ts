@@ -1,4 +1,4 @@
-import type { SyncKind } from "@prisma/client";
+import type { SyncKind } from "@/generated/prisma/client";
 
 import { prisma } from "@/lib/prisma";
 

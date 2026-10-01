@@ -1,5 +1,5 @@
 import { format } from "date-fns";
-import type { SyncKind, SyncLog, SyncStatus } from "@prisma/client";
+import type { SyncKind, SyncLog, SyncStatus } from "@/generated/prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";

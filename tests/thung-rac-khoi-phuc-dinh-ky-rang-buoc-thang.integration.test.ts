@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { deleteExpense } from "@/lib/actions/expenses";
 import { khoiPhucBanGhi } from "@/lib/actions/thung-rac";

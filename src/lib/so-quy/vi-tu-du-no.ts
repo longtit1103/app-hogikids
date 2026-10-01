@@ -1,6 +1,7 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { formatVnd } from "@/lib/format";
+import { HAN_CHO_KHOA_DONG_TIEN_MS, khoaDongTienCoHan } from "@/lib/so-quy/khoa-dong-tien-co-han";
 
 /**
  * VỊ TỪ DƯ NỢ DUY NHẤT, dùng chung cho MỌI đường ghi chạm dòng gốc vay:
@@ -39,21 +40,34 @@ const KIND_TIEN_GUI = ["DEPOSIT_OUT", "DEPOSIT_IN"] as const;
  *
  * Khoá NHIỀU khoản trong một transaction (sửa dòng từ khoản A sang khoản B) thì PHẢI theo thứ tự id
  * tăng dần ở mọi nơi, nếu không hai lượt giữ chéo nhau rồi Postgres huỷ một bên.
+ *
+ * Chờ khoá CÓ HẠN (`khoa-dong-tien-co-han.ts`, 10s cho CẢ transaction — dùng chung ngân sách với mọi lần
+ * khoá khác trong cùng `tx`, kể cả `khoaCacSoTietKiem`): quá hạn ⇒ ném `LoiKhoaDongTienBan`, transaction lùi
+ * trọn, caller trả câu "đang bận, thử lại". `hanChoMs` chỉ để test rút ngắn.
  */
 export async function khoaKhoanVay(
   tx: Prisma.TransactionClient,
-  loanId: string
+  loanId: string,
+  hanChoMs: number = HAN_CHO_KHOA_DONG_TIEN_MS
 ): Promise<void> {
-  // Không có dòng ⇒ 0 hàng, không khoá gì: caller vẫn tự báo "Không tìm thấy khoản vay" ngay sau đó.
-  await tx.$queryRaw`SELECT id FROM "Loan" WHERE id = ${loanId} FOR UPDATE`;
+  await khoaCacKhoanVay(tx, [loanId], hanChoMs);
 }
 
 /** Khoá nhiều khoản theo THỨ TỰ ID tăng dần — cùng thứ tự ở mọi đường ghi thì không kẹt chéo. */
 export async function khoaCacKhoanVay(
   tx: Prisma.TransactionClient,
-  loanIds: string[]
+  loanIds: string[],
+  hanChoMs: number = HAN_CHO_KHOA_DONG_TIEN_MS
 ): Promise<void> {
-  for (const id of [...new Set(loanIds)].sort()) await khoaKhoanVay(tx, id);
+  const ids = [...new Set(loanIds)].sort();
+  // Mảng rỗng ⇒ không câu nào, kể cả câu đặt hạn — gọi vô điều kiện không tốn vòng DB.
+  if (ids.length === 0) return;
+  // Không có dòng ⇒ 0 hàng, không khoá gì: caller vẫn tự báo "Không tìm thấy khoản vay" ngay sau đó.
+  await khoaDongTienCoHan(
+    tx,
+    ids.map((id) => () => tx.$queryRaw`SELECT id FROM "Loan" WHERE id = ${id} FOR UPDATE`),
+    hanChoMs
+  );
 }
 
 /** Dư nợ gốc còn lại của khoản vay, tính lại từ chính các dòng tiền (không có cột dư nợ để lệch). */

@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 import { shopIdsChoVai } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";

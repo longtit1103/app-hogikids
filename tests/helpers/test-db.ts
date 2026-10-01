@@ -44,7 +44,7 @@ const EXPENSE_CATEGORIES = [
  * Nhớ kèm `xoaCacheCauHinhShop()` phía caller nếu suite đã lỡ mồi cache bằng giá trị khác.
  */
 export async function seedShopIdSetting(): Promise<void> {
-  const { Prisma } = await import("@prisma/client");
+  const { Prisma } = await import("@/generated/prisma/client");
   const { SEED_SHOP_ID } = await import("./shop-ids-fixture");
   await prisma.$executeRaw`
     INSERT INTO "Setting" (key, value)

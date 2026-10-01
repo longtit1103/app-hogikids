@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { addMonths, endOfDay, format, getDaysInMonth, setDate, startOfMonth } from "date-fns";
 
 import { dangPhucHoi } from "@/lib/backup/khoa-bao-tri";

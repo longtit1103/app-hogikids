@@ -2,7 +2,7 @@
  * Backfill kết cục Silver cho kho dữ liệu cũ (`RawPancakeOrder.silverOutcome = 'LEGACY'`).
  *
  * Thử (KHÔNG ghi gì):  npx tsx scripts/backfill-ket-cuc-legacy.ts
- * Ghi thật (prod):     docker compose run --rm app npx tsx scripts/backfill-ket-cuc-legacy.ts --ghi --yes
+ * Ghi thật (prod):     docker compose run --rm app npx --no-install tsx scripts/backfill-ket-cuc-legacy.ts --ghi --yes
  * Ghi thật (local):    npx tsx scripts/backfill-ket-cuc-legacy.ts --ghi     (hỏi y/N trước khi ghi)
  *
  * MẶC ĐỊNH LÀ LƯỢT THỬ. Không có `--ghi` thì script chỉ ĐỌC và in ra sẽ làm gì — chạy nhầm trên

@@ -28,7 +28,8 @@
  * Chạy: `npx tsx scripts/don-db-e2e.ts` (chạy thử) → soát số liệu → `npx tsx scripts/don-db-e2e.ts --yes`.
  */
 
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
+import { taoPrismaClient } from "@/lib/tao-prisma-client";
 
 const TEN_DB_E2E = "hogikids_e2e_test";
 const SCHEMA_BAT_BUOC = "app";
@@ -125,7 +126,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const db = new PrismaClient({ datasources: { db: { url: urlE2e } } });
+  const db = taoPrismaClient(urlE2e);
   try {
     const [hang] = await db.$queryRaw<{ db: string; schema: string }[]>(
       Prisma.sql`SELECT current_database() AS db, current_schema() AS schema`,

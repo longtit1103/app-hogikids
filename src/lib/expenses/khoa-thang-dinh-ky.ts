@@ -1,5 +1,7 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { format } from "date-fns";
+
+import { rangBuocTrungKhoa } from "@/lib/prisma-loi-adapter";
 
 /**
  * Khoá tháng `yyyy-MM` (giờ VN — container/test đều ghim `TZ=Asia/Ho_Chi_Minh`) của một dòng chi phí
@@ -20,11 +22,12 @@ export function khoaThangDinhKy(date: Date): string {
 /**
  * Lỗi là va chạm ràng buộc "1 dòng/mẫu/tháng" (P2002 trên `(recurringId, recurringMonth)`)? Dùng để
  * dịch lỗi đó thành câu tiếng Việt ở các đường ghi tay, thay vì câu lỗi chung hay trang 500.
- * Prisma 6 trả `meta.target` là mảng tên cột; so thêm tên index phòng khi engine trả tên ràng buộc.
+ * Prisma 7 không còn `meta.target`; ràng buộc đọc từ nguyên nhân adapter — tên index
+ * `Expense_recurringId_recurringMonth_key`, hoặc danh sách cột khi Postgres không gửi tên.
  */
 export function laLoiTrungDongDinhKyThang(e: unknown): boolean {
   if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") return false;
-  const target = e.meta?.target;
-  if (Array.isArray(target)) return target.includes("recurringMonth");
-  return typeof target === "string" && target.includes("recurringMonth");
+  const rb = rangBuocTrungKhoa(e);
+  if (!rb) return false;
+  return (rb.index?.includes("recurringMonth") ?? false) || (rb.fields?.includes("recurringMonth") ?? false);
 }

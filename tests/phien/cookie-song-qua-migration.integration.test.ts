@@ -1,4 +1,3 @@
-import { PrismaClient } from "@prisma/client";
 import { sealData } from "iron-session";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -31,6 +30,7 @@ vi.mock("next/headers", () => ({
 
 import { kiemPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { getSession, type SessionData } from "@/lib/session";
+import { taoPrismaClient } from "@/lib/tao-prisma-client";
 
 import {
   apMigrations,
@@ -69,7 +69,7 @@ async function kiemCookie(cookie: string) {
   const session = await getSession();
   // Client mới cho mỗi lượt kiểm: schema vừa DROP/CREATE ⇒ enum `Role` mang OID mới, client cũ có
   // thể giữ câu lệnh đã chuẩn bị trên kiểu cũ.
-  const client = new PrismaClient({ datasources: { db: { url: db.url } } });
+  const client = taoPrismaClient(db.url);
   try {
     return await kiemPhien(session, client);
   } finally {

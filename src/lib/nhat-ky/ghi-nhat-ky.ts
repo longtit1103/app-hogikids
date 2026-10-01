@@ -11,7 +11,7 @@
  * KHÔNG ghi giá trị trước/sau, IP, hay bất kỳ bí mật nào — `ghiChu` chỉ nhận khoá trong allowlist
  * (kiểu chặn lúc biên dịch, runtime lọc lại phòng khi có ép kiểu).
  */
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import type { HanhDong } from "@/lib/nhat-ky/hanh-dong";

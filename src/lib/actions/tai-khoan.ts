@@ -12,7 +12,7 @@
  * - Nhật ký OK ghi CÙNG transaction với mutation; thất bại ghi LOI bằng client gốc sau rollback.
  *   Nhật ký KHÔNG BAO GIỜ chứa mật khẩu tạm/hash — mật khẩu tạm chỉ đi ra đúng một lần trong `data`.
  */
-import { Prisma, type Role } from "@prisma/client";
+import { Prisma, type Role } from "@/generated/prisma/client";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";

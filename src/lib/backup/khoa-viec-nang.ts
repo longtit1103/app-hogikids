@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
@@ -18,7 +18,7 @@ import { prisma } from "@/lib/prisma";
  * tiên không được coi là hàng rào nữa, và trả khoá phía đó là best-effort (xem route).
  *
  * VÌ SAO PHẢI Ở DB, không phải cờ trong bộ nhớ: cờ `globalThis` chỉ có hiệu lực TRONG container
- * app, mà script dựng lại chạy ở TIẾN TRÌNH RIÊNG (`docker compose run --rm app npx tsx ...`).
+ * app, mà script dựng lại chạy ở TIẾN TRÌNH RIÊNG (`docker compose run --rm app npx --no-install tsx ...`).
  * Kịch bản hỏng đã chỉ ra: script đang chạy → chủ shop bấm "Xóa dữ liệu giao dịch" → lượt xoá vẫn
  * giành được cờ trong app, đóng dấu đã-xoá-tay rồi xoá Sổ → script chạy tiếp với quyền ghi đè của
  * lượt tay và dựng dữ liệu trở lại. Nút xoá báo thành công nhưng bị hoàn tác ngầm.

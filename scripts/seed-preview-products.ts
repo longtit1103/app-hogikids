@@ -6,7 +6,7 @@
  * Chạy: DATABASE_URL="<...hogikids_test...>" npx tsx scripts/seed-preview-products.ts
  * (guard từ chối nếu DATABASE_URL không trỏ DB *_test — tránh đụng data thật).
  */
-import { PrismaClient } from "@prisma/client";
+import { taoPrismaClient } from "@/lib/tao-prisma-client";
 
 const dbUrl = process.env.DATABASE_URL ?? "";
 const dbName = dbUrl.replace(/.*\/([^/?]+)(\?.*)?$/, "$1");
@@ -15,7 +15,7 @@ if (!/_test$/.test(dbName)) {
   process.exit(1);
 }
 
-const prisma = new PrismaClient();
+const prisma = taoPrismaClient(dbUrl);
 
 type V = { sku: string; label: string; sellPrice: number; stock: number; costPrice: number };
 type P = { pancakeId: string; name: string; categoryName: string; variants: V[] };

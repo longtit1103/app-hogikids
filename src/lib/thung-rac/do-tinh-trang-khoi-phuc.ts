@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import type { CashMovementKind } from "@/lib/cash-movements/cash-movement-kinds";
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";

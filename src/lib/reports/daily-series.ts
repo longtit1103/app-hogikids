@@ -10,7 +10,7 @@ import {
   type PnlIncomeInput,
 } from "@/lib/reports/pnl";
 
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus } from "@/generated/prisma/client";
 
 /**
  * Chuỗi thời gian theo NGÀY cho các biểu đồ Dashboard/Kênh/Báo cáo. Mọi hàm ở

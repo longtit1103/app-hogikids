@@ -1,5 +1,5 @@
-import type { CashMovement, Prisma } from "@prisma/client";
-import { Prisma as P } from "@prisma/client";
+import type { CashMovement, Prisma } from "@/generated/prisma/client";
+import { Prisma as P } from "@/generated/prisma/client";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { prisma } from "@/lib/prisma";

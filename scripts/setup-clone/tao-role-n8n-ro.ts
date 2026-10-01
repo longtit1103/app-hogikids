@@ -1,8 +1,7 @@
 import { randomBytes } from "node:crypto";
 
-import { PrismaClient } from "@prisma/client";
-
 import { N8N_RO_ROLE, N8N_SETTING_VIEW } from "@/lib/n8n/role-doc-kho-khoa";
+import { taoPrismaClient } from "@/lib/tao-prisma-client";
 
 /**
  * Tạo role chỉ-đọc cho n8n bằng ADMIN DSN (role app không có CREATEROLE). Không có admin DSN thì
@@ -40,10 +39,10 @@ export async function taoRoleN8nRo(opts: {
   // HAI kết nối admin: CREATE/ALTER ROLE là việc mức CỤM (chạy ở db nào cũng được — dùng đúng
   // DSN người dùng đưa, thường trỏ db `postgres`); còn GRANT USAGE/SELECT trên schema/view phải
   // nối vào ĐÚNG database đích — chạy nhầm db là `relation does not exist` (diễn tập 22/08 bắt).
-  const admin = new PrismaClient({ datasources: { db: { url: opts.adminUrl } } });
+  const admin = taoPrismaClient(opts.adminUrl);
   const urlDbDich = new URL(opts.adminUrl);
   urlDbDich.pathname = `/${opts.tenDb}`;
-  const adminTrenDbDich = new PrismaClient({ datasources: { db: { url: urlDbDich.toString() } } });
+  const adminTrenDbDich = taoPrismaClient(urlDbDich.toString());
   try {
     const [role] = await admin.$queryRaw<{ n: bigint }[]>`
       SELECT count(*)::bigint AS n FROM pg_roles WHERE rolname = ${N8N_RO_ROLE}

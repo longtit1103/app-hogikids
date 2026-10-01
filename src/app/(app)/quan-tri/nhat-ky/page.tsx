@@ -1,4 +1,4 @@
-import type { AuditLog } from "@prisma/client";
+import type { AuditLog } from "@/generated/prisma/client";
 import { endOfDay, isValid, parse, startOfDay } from "date-fns";
 import Link from "next/link";
 

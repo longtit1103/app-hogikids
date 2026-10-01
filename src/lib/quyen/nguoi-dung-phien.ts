@@ -5,7 +5,7 @@
  * iron-session là cookie KÝ, không có bản ghi phiên phía máy chủ — thu hồi phiên = đổi
  * `User.sessionEpoch` của người đó; cookie mang epoch khác ⇒ coi như chưa đăng nhập.
  */
-import type { Role } from "@prisma/client";
+import type { Role } from "@/generated/prisma/client";
 import { cache } from "react";
 
 import { prisma } from "@/lib/prisma";

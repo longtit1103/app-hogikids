@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus } from "@/generated/prisma/browser";
 import { format } from "date-fns";
 
 import { OrderStatusBadge } from "@/components/orders/order-status-badge";

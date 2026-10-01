@@ -1,4 +1,4 @@
-import type { ThuNhapKind } from "@prisma/client";
+import type { ThuNhapKind } from "@/generated/prisma/client";
 import { startOfDay } from "date-fns";
 
 import { CASH_MOVEMENT_KIND_META, isInflow } from "@/lib/cash-movements/cash-movement-kinds";

@@ -1,11 +1,10 @@
 "use server";
 
-import { Prisma } from "@prisma/client";
 import { startOfDay } from "date-fns";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { LoiHopDong, maLoiNhatKy, OPT_TX } from "@/lib/actions/khoan-vay-chung";
+import { LoiHopDong, maLoiNhatKy } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { loiSoTietKiem, soTietKiemSchema } from "@/lib/actions/so-tiet-kiem-chung";
@@ -13,6 +12,8 @@ import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { congAction } from "@/lib/quyen/cong-action";
+import { laXungDotGhi } from "@/lib/prisma-loi-adapter";
+import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import { lyDoKhongXoaSoTietKiem } from "@/lib/tiet-kiem/ly-do-khong-xoa-so-tiet-kiem";
 import { chupVaoThungRac } from "@/lib/thung-rac/ghi-thung-rac";
 import { chanSoDuTietKiemAm, khoaSoTietKiem } from "@/lib/tiet-kiem/vi-tu-so-tiet-kiem";
@@ -44,18 +45,19 @@ import { chanSoDuTietKiemAm, khoaSoTietKiem } from "@/lib/tiet-kiem/vi-tu-so-tie
  */
 
 /**
- * P2034 = write conflict / deadlock → retry ĐÚNG 1 lần (khuôn `chayGhiKyCoRetry`). Cần vì mọi
+ * Xung đột ghi (`laXungDotGhi`: P2034, 40001/40P01 cả lúc COMMIT) → retry ĐÚNG 1 lần
+ * (khuôn `chayGhiKyCoRetry`). Cần vì mọi
  * transaction ở đây đều giành khoá dòng `SoTietKiem`, mà khoá dòng vẫn deadlock được khi chạy chồng
  * một lượt ghi tay cũng chạm sổ đó.
  *
- * An toàn khi chạy lại: P2034 nghĩa là transaction ĐÃ rollback trọn — không có dòng nào sót lại để
+ * An toàn khi chạy lại: xung đột ghi nghĩa là transaction ĐÃ rollback trọn — không có dòng nào sót lại để
  * lượt thứ hai ghi đè lên.
  */
 async function chayCoRetry<T>(chay: () => Promise<T>): Promise<T> {
   try {
     return await chay();
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034") {
+    if (laXungDotGhi(e)) {
       return await chay();
     }
     throw e;
@@ -111,7 +113,7 @@ export async function taoSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
         });
         await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_TAO", doiTuong: { loai: "SoTietKiem", id: so.id } });
         return so.id;
-      }, OPT_TX)
+      }, OPT_TX_DONG_TIEN)
     );
 
     lamMoiTrang();
@@ -213,7 +215,7 @@ export async function suaSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
         await chanSoDuTietKiemAm(tx, id);
         // Câu CUỐI, cùng transaction giữ khoá dòng `SoTietKiem`: nhật ký ném ⇒ bản sửa rollback.
         await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_SUA", doiTuong: { loai: "SoTietKiem", id } });
-      }, OPT_TX)
+      }, OPT_TX_DONG_TIEN)
     );
 
     lamMoiTrang();
@@ -282,7 +284,7 @@ export async function xoaSoTietKiem(input: unknown): Promise<ActionResult<null>>
         await tx.cashMovement.deleteMany({ where: { savingsId: id } });
         await tx.soTietKiem.delete({ where: { id } });
         await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_XOA", doiTuong: { loai: "SoTietKiem", id } });
-      }, OPT_TX)
+      }, OPT_TX_DONG_TIEN)
     );
 
     lamMoiTrang();

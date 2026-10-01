@@ -1,4 +1,4 @@
-import type { OrderStatus, ProductStatus } from "@prisma/client";
+import type { OrderStatus, ProductStatus } from "@/generated/prisma/client";
 
 import { KENH_BAN_TRUC_TIEP } from "@/lib/channels/kenh-ban-truc-tiep";
 import { usesRealPlatformFee } from "@/lib/channels/real-fee-channels";

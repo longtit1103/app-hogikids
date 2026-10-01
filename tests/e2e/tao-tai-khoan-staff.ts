@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../src/generated/prisma/client";
 
 // Import TƯƠNG ĐỐI (không alias `@/`): file dùng chung cho Playwright runner (TS transform riêng,
 // không chắc giải được alias) lẫn Vitest.

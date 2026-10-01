@@ -1,6 +1,6 @@
 "use server";
 
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { format, startOfDay } from "date-fns";
 import { z } from "zod";
 
@@ -10,7 +10,6 @@ import {
   LoiHopDong,
   loiKhoanVay,
   maLoiNhatKy,
-  OPT_TX,
   soTienKySchema,
 } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
@@ -22,6 +21,8 @@ import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { congAction } from "@/lib/quyen/cong-action";
 import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
+import { laXungDotGhi } from "@/lib/prisma-loi-adapter";
+import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import { listKhoanVay, type KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { lyDoKhongXoaKhoanVay } from "@/lib/so-quy/ly-do-khong-xoa-khoan-vay";
 import { chupVaoThungRac } from "@/lib/thung-rac/ghi-thung-rac";
@@ -292,7 +293,7 @@ export async function taoKhoanVay(input: unknown): Promise<ActionResult<{ id: st
       }
       await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_TAO", doiTuong: { loai: "Loan", id: loan.id } });
       return loan.id;
-    }, OPT_TX);
+    }, OPT_TX_DONG_TIEN);
 
     lamMoiTrang();
     return { ok: true, data: { id } };
@@ -404,7 +405,7 @@ export async function suaKhoanVay(id: string, input: unknown): Promise<ActionRes
       await chanDuNoAm(tx, id);
       // Câu CUỐI, vẫn trong transaction đang giữ khoá dòng `Loan`: nhật ký ném ⇒ bản sửa rollback.
       await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_SUA", doiTuong: { loai: "Loan", id } });
-    }, OPT_TX);
+    }, OPT_TX_DONG_TIEN);
 
     lamMoiTrang();
     return { ok: true, data: undefined };
@@ -475,7 +476,7 @@ export async function xoaKhoanVay(id: string): Promise<ActionResult> {
       await tx.cashMovement.deleteMany({ where: { loanId: id } });
       await tx.loan.delete({ where: { id } });
       await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_XOA", doiTuong: { loai: "Loan", id } });
-    }, OPT_TX);
+    }, OPT_TX_DONG_TIEN);
 
     lamMoiTrang();
     return { ok: true, data: undefined };
@@ -591,7 +592,7 @@ export async function tatToanKhoanVay(id: string, input?: unknown): Promise<Acti
 
       await tx.loan.update({ where: { id }, data: { closedAt: new Date() } });
       await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_TAT_TOAN", doiTuong: { loai: "Loan", id } });
-    }, OPT_TX);
+    }, OPT_TX_DONG_TIEN);
 
     lamMoiTrang();
     return { ok: true, data: undefined };
@@ -635,7 +636,7 @@ type ThamSoGhiKy = {
  * chống ghi trùng DUY NHẤT của nó. Tách sang một đường ghi khác = mỗi lần bấm lại đẻ thêm 300k.
  *
  * Isolation để MẶC ĐỊNH (ReadCommitted), chỗ dựa đúng đắn là khoá dòng `Loan` + điều kiện con dấu
- * nằm trong chính câu UPDATE — lý do đầy đủ ở khối chú thích cạnh `OPT_TX` bên dưới.
+ * nằm trong chính câu UPDATE — lý do đầy đủ ở khối chú thích cạnh `OPT_TX_DONG_TIEN` bên dưới.
  */
 async function chayGhiKy({
   nguoiDung,
@@ -753,19 +754,20 @@ async function chayGhiKy({
     // commit. Cái đỡ tính đúng đắn ở đây là khoá dòng `Loan` (`khoaKhoanVay` ngay đầu) + điều kiện
     // con dấu nằm trong chính câu UPDATE — cả hai đều KHÔNG phụ thuộc isolation.
     // Nới timeout vì DB test/dev đi qua Tailscale và lượt sau còn phải chờ khoá (mặc định 5s quá sát).
-    OPT_TX
+    OPT_TX_DONG_TIEN
   );
 }
 
 /**
- * P2034 = write conflict / deadlock → retry ĐÚNG 1 lần. Vẫn giữ dù không còn Serializable: khoá dòng
- * vẫn có thể deadlock khi chạy chồng lượt ghi khác.
+ * Xung đột ghi (`laXungDotGhi`: P2034, 40001/40P01 cả lúc COMMIT) → retry ĐÚNG 1 lần
+ * (khuôn `ensure-recurring-expenses.ts`).
+ * Vẫn giữ dù không còn Serializable: khoá dòng vẫn có thể deadlock khi chạy chồng lượt ghi khác.
  */
 async function chayGhiKyCoRetry(tham: ThamSoGhiKy): Promise<number> {
   try {
     return await chayGhiKy(tham);
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034") {
+    if (laXungDotGhi(e)) {
       return await chayGhiKy(tham);
     }
     throw e;

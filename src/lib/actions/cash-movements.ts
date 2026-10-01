@@ -1,6 +1,6 @@
 "use server";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 import { format, startOfDay } from "date-fns";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -23,6 +23,11 @@ import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { congAction, kiemThemQuyen, type KetQuaCong } from "@/lib/quyen/cong-action";
 import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
 import { chupVaoThungRac } from "@/lib/thung-rac/ghi-thung-rac";
+import {
+  laLoiDongTienBan,
+  OPT_TX_DONG_TIEN,
+  THONG_BAO_KHOA_DONG_TIEN_BAN,
+} from "@/lib/so-quy/khoa-dong-tien-co-han";
 import {
   chanSoDuTietKiemAm,
   khoaCacSoTietKiem,
@@ -78,12 +83,6 @@ const KIND_KHOAN_VAY: readonly CashMovementKind[] = KIND_GAN_KHOAN_VAY;
  * tiền chủ shop TỰ NGUYỆN gửi lấy lãi, và phần LÃI không bao giờ đi đường này — nó đi bảng `ThuNhap`.
  */
 const KIND_SO_TIET_KIEM: readonly CashMovementKind[] = KIND_GAN_SO_TIET_KIEM;
-
-/**
- * Nới hạn transaction: DB test/dev đi qua Tailscale, và lượt thứ hai còn phải CHỜ khoá dòng `Loan`
- * của lượt trước nhả ra — mặc định 5s quá sát. Cùng bộ số với `khoan-vay.ts`.
- */
-const OPT_TX = { timeout: 10_000, maxWait: 5_000 } as const;
 
 const cashMovementSchema = z
   .object({
@@ -164,6 +163,9 @@ function loiGhi(e: unknown): { error: string; field?: string } {
   // `LoiHopDong` — nó là vị từ thuần, không biết gì về tầng action. Quên nhánh này là câu "Sổ tiết
   // kiệm đã tất toán…" rơi xuống câu chung "Lỗi khi ghi khoản tiền" và chủ shop không biết vì sao.
   if (e instanceof LoiSoTietKiemKhongHopLe) return { error: e.message, field: e.field };
+  // Chờ khoá dòng khoản vay / sổ quá hạn, hoặc transaction quá hạn (P2028) — đã lùi, không ghi gì.
+  // Không `field` ⇒ rơi về toast.
+  if (laLoiDongTienBan(e)) return { error: THONG_BAO_KHOA_DONG_TIEN_BAN };
   const code = (e as { code?: string })?.code;
   return { error: code === "P2025" ? "Không tìm thấy khoản tiền" : "Lỗi khi ghi khoản tiền" };
 }
@@ -419,7 +421,7 @@ export async function createCashMovement(input: unknown): Promise<ActionResult> 
           // Câu CUỐI của transaction: mọi cổng dư nợ/số đang gửi đã qua ⇒ chỉ lượt ghi thật có dấu vết.
           await ghiNhatKyDongTien(tx, nguoiDung, "DONG_TIEN_TAO", row.id);
         },
-        OPT_TX
+        OPT_TX_DONG_TIEN
       );
       lamMoiTrang();
     }
@@ -500,7 +502,7 @@ export async function updateCashMovement(id: string, input: unknown): Promise<Ac
           for (const so of soCanKiem) await chanSoDuTietKiemAm(tx, so);
           await ghiNhatKyDongTien(tx, nguoiDung, "DONG_TIEN_SUA", id);
         },
-        OPT_TX
+        OPT_TX_DONG_TIEN
       );
       lamMoiTrang();
     }
@@ -564,7 +566,7 @@ export async function deleteCashMovement(id: string): Promise<ActionResult> {
           if (savingsId !== null) await chanSoDuTietKiemAm(tx, savingsId);
           await ghiNhatKyDongTien(tx, nguoiDung, "DONG_TIEN_XOA", id);
         },
-        OPT_TX
+        OPT_TX_DONG_TIEN
       );
       lamMoiTrang();
     }

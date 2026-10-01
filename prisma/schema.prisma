@@ -1,10 +1,18 @@
+// Prisma 7: client sinh ra thành mã TS trong `src/generated/prisma` (không commit — `.gitignore`),
+// import qua `@/generated/prisma/client`. Dựng client DUY NHẤT qua `src/lib/tao-prisma-client.ts`
+// (driver adapter `pg` + ép schema `app`), KHÔNG `new PrismaClient()` trần.
+// `moduleFormat = "cjs"`: bản ESM chèn `import.meta.url` vào `client.ts`, mà repo KHÔNG khai
+// `"type": "module"` ⇒ tsx (scripts, seed) và bộ biên dịch TS của Playwright nạp file dưới dạng
+// CommonJS. Bản cjs chỉ khác đúng dòng đó; Next/Vitest nạp được cả hai.
 generator client {
-  provider = "prisma-client-js"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
 }
 
+// URL kết nối cho CLI (migrate/seed/db execute) nay khai ở `prisma.config.ts` — Prisma 7 bỏ `url` ở đây.
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum Role {

@@ -1,4 +1,5 @@
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../src/generated/prisma/client";
+import { taoPrismaClient } from "../../src/lib/tao-prisma-client";
 import { expect, request as pwRequest, type APIResponse } from "./fixture-cho-trang-stream-xong";
 
 import { INGEST_SECRET_TEST } from "./test-constants";
@@ -38,7 +39,7 @@ export function testPrisma(): PrismaClient {
   if (!url || !mongDoi || url !== mongDoi) {
     throw new Error("DATABASE_URL không trỏ DB test của e2e — từ chối đụng DB (DB dev = DB thật).");
   }
-  return new PrismaClient();
+  return taoPrismaClient(url);
 }
 
 /**

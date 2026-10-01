@@ -337,9 +337,10 @@ describe("M1 nguyên tử — prisma migrate deploy thật", () => {
         db.prisma.$executeRawUnsafe(
           `INSERT INTO "User" ("id", "email", "passwordHash") VALUES ('FX-u2', 'owner@fixture.test', 'h2')`,
         ),
-        // Postgres không nêu tên index trong câu lỗi mà nêu BIỂU THỨC khoá — `lower(email)` chỉ có thể
-        // đến từ `User_email_lower_key` (unique `email` thường không chặn 2 chuỗi khác hoa/thường).
-      ).rejects.toThrow(/Code: `23505`[\s\S]*Key \(lower\(email\)\)=\(owner@fixture\.test\) already exists/);
+        // Prisma 7 (driver `pg`) đưa NGUYÊN câu lỗi Postgres — có tên ràng buộc — chứ không đưa phần
+        // DETAIL "Key (lower(email))=…" như engine Prisma 6. Tên index đủ khẳng định: unique `email`
+        // thường (`User_email_key`) không chặn 2 chuỗi chỉ khác hoa/thường.
+      ).rejects.toThrow(/Code: `23505`[\s\S]*unique constraint \\?"User_email_lower_key\\?"/);
       expect(await soDong(`"User"`)).toBe(1);
     },
     HAN,

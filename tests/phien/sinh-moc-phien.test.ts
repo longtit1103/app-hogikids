@@ -50,7 +50,7 @@ describe("thuHoiPhienCuaNguoi", () => {
   it("kiểu: chỉ nhận client transaction — client gốc bị chặn lúc biên dịch (`tsc --noEmit`)", () => {
     // Không gọi thật: chỉ để `tsc` kiểm dòng `@ts-expect-error` (bỏ kiểu chặn ⇒ tsc báo "unused directive").
     const khongGoi = () =>
-      // @ts-expect-error — `PrismaClient` gốc có `$transaction`, không phải client trong transaction.
+      // @ts-expect-error — `PrismaClient` gốc có `$connect`, không phải client trong transaction.
       thuHoiPhienCuaNguoi(prisma, "x");
     expect(typeof khongGoi).toBe("function");
   });

@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { taoPrismaClient } from "../../src/lib/tao-prisma-client";
 
 /**
  * KHOÁ ĐỘC QUYỀN cho một lượt chạy test trên MỘT database test.
@@ -28,6 +28,12 @@ import { PrismaClient } from "@prisma/client";
  * Vá: kéo `max_connection_lifetime` + `max_idle_connection_lifetime` (tham số URL quaint đọc, Prisma
  * không ghi trong docs — engine 6.19 có chuỗi này, đã đo có tác dụng) lên 24 giờ cho RIÊNG kết nối
  * giữ khoá; nhịp 60s bên dưới chỉ còn là phép KIỂM "session này còn giữ khoá không".
+ *
+ * Từ Prisma 7 (driver `pg` thay engine Rust): ba tham số URL trên KHÔNG còn do engine đọc mà do
+ * `cauHinhKetNoiTuUrl()` (`src/lib/tao-prisma-client.ts`) dịch sang `pg.Pool` — `connection_limit`
+ * → `max`, `max_idle_connection_lifetime` → `idleTimeoutMillis`, `max_connection_lifetime` →
+ * `maxLifetimeSeconds`. Bắt buộc phải dịch: `pg` mặc định ĐÓNG kết nối rảnh sau 10 giây, tức khoá
+ * sẽ tuột còn sớm hơn mốc 300s cũ. Giữ hình dạng URL để test `motKetNoi` bên cạnh vẫn đúng nghĩa.
  */
 
 /** Số khoá tuỳ chọn, phải DUY NHẤT trong toàn hệ (khác `khoa-ghi-chi-tieu-ads.ts`, `khoa-land-don.ts`). */
@@ -78,7 +84,7 @@ export async function giuKhoaDocQuyenDbTest(
   khoa: number,
   ten: string,
 ): Promise<KhoaDaGiu> {
-  const db = new PrismaClient({ datasources: { db: { url: motKetNoi(url) } } });
+  const db = taoPrismaClient(motKetNoi(url));
 
   // `$queryRaw` chứ KHÔNG `$executeRaw` ở đây — và đây KHÔNG phải phá lệ của
   // `khoa-ghi-chi-tieu-ads.ts`. Lệ đó có vì `pg_advisory_xact_lock` trả kiểu `void`, mà `$queryRaw`

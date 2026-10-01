@@ -1,4 +1,4 @@
-import { type LoanKind } from "@prisma/client";
+import { type LoanKind } from "@/generated/prisma/client";
 import { startOfDay } from "date-fns";
 
 import { type CashMovementKind } from "@/lib/cash-movements/cash-movement-kinds";

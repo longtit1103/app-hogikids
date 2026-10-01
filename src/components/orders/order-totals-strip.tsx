@@ -1,5 +1,5 @@
 import { endOfMonth, format, startOfMonth } from "date-fns";
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus } from "@/generated/prisma/client";
 
 import { formatVnd } from "@/lib/format";
 import { ORDER_STATUS_META } from "@/lib/orders/order-status-meta";

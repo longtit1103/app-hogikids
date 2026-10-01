@@ -3,7 +3,7 @@
  *
  * Chỉ chọn trường hiển thị: KHÔNG `passwordHash`, KHÔNG `sessionEpoch` — hàng này đi thẳng vào props RSC.
  */
-import type { Role } from "@prisma/client";
+import type { Role } from "@/generated/prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { laQuyen, type Quyen } from "@/lib/quyen/danh-muc-quyen";

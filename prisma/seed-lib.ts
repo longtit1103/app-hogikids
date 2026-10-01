@@ -4,7 +4,7 @@
  *
  * Import TƯƠNG ĐỐI (không alias `@/`): file chạy bằng `tsx prisma/seed.ts` — ngoài bundler của Next.
  */
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../src/generated/prisma/client";
 
 // Trần độ dài + hàm băm lấy TỪ nguồn duy nhất của app (seed từng tự khai bản băm riêng — hai bản
 // trôi lệch là mọi lượt đăng nhập tài khoản seed hỏng câm). Trần phải trùng màn đăng nhập: màn đó

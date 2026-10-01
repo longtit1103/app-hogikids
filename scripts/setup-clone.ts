@@ -1,6 +1,6 @@
 /**
  * `npm run setup` — MỘT lệnh dựng phần Supabase/DB cho bản clone (và vô hại khi chạy lại):
- *   kiểm .env → chốt chặn DB thật → `prisma migrate deploy` → seed CHỈ-TẠO-MỚI → ghi shop ID
+ *   kiểm .env → chốt chặn DB thật → `prisma migrate deploy` → `prisma generate` → seed CHỈ-TẠO-MỚI → ghi shop ID
  *   (qua đúng lưới chặn-đổi của app) → tạo role đọc kho khoá cho n8n → ghi bộ `n8nDb*` → in bước kế.
  *
  * KHÔNG có nhánh reset/drop nào. Mọi bước là upsert / migrate deploy / tạo-nếu-chưa-có.
@@ -28,7 +28,7 @@ const truot = (s: string) => console.error(`  ✕ ${s}`);
 async function main(): Promise<void> {
   const thamSo = parseThamSo(process.argv.slice(2));
 
-  buoc("1/7 Kiểm biến môi trường (.env)");
+  buoc("1/8 Kiểm biến môi trường (.env)");
   const thieu = kiemEnv();
   if (thieu.length > 0) {
     truot(`Thiếu: ${thieu.join(", ")} — xem chú thích trong .env.example.`);
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL as string;
   const { db: tenDb } = tenDbTu(databaseUrl);
 
-  buoc("2/7 Chốt chặn DB thật");
+  buoc("2/8 Chốt chặn DB thật");
   if (!(await chanDbThat(databaseUrl, thamSo))) {
     process.exitCode = 1;
     return;
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   }
   dat("Được phép ghi.");
 
-  buoc("3/7 prisma migrate deploy");
+  buoc("3/8 prisma migrate deploy");
   try {
     execFileSync("npx", ["prisma", "migrate", "deploy"], { stdio: "inherit", env: process.env });
     dat("Schema đã ở bản mới nhất.");
@@ -64,7 +64,28 @@ async function main(): Promise<void> {
     return;
   }
 
-  buoc("4/7 Seed dữ liệu khởi tạo (chỉ-tạo-mới — không đè giá trị đã sửa tay)");
+  // Prisma 7 (generator `prisma-client`) KHÔNG còn tự sinh client lúc `npm install` (Prisma 6 có postinstall
+  // của @prisma/client) ⇒ bản clone mới chưa có `src/generated/prisma`: seed (và mọi module `@/lib/*` nạp ở
+  // dưới) chết vì thiếu module. Luôn sinh lại — kể cả khi đã có — để client khớp schema của commit đang
+  // checkout (sau `git pull` đổi schema). KHÔNG dùng `postinstall`: Dockerfile `npm ci` chạy trước `COPY . .`
+  // nên lúc đó chưa có schema.prisma, build ảnh sẽ gãy.
+  buoc("4/8 prisma generate (sinh client Prisma vào src/generated/prisma)");
+  if (process.env.SETUP_CLONE_BO_QUA_GENERATE === "1") {
+    // CHỈ cho test tích hợp: `prisma generate` XOÁ rồi ghi lại từng file client — chạy giữa bộ Vitest song
+    // song làm worker khác đọc trúng ENOENT (đo 01/10). Test đã có client sinh sẵn; thứ tự bước khoá tĩnh.
+    dat("Bỏ qua (SETUP_CLONE_BO_QUA_GENERATE=1 — chỉ dùng trong test).");
+  } else {
+    try {
+      execFileSync("npx", ["--no-install", "prisma", "generate"], { stdio: "inherit", env: process.env });
+      dat("Đã sinh client Prisma.");
+    } catch {
+      truot("Sinh client thất bại — chạy `npm install` trước (thiếu gói prisma), rồi đọc lỗi Prisma phía trên.");
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  buoc("5/8 Seed dữ liệu khởi tạo (chỉ-tạo-mới — không đè giá trị đã sửa tay)");
   try {
     execFileSync("npx", ["tsx", "prisma/seed.ts"], {
       stdio: "inherit",
@@ -83,7 +104,7 @@ async function main(): Promise<void> {
   const { prisma } = await import("@/lib/prisma");
 
   try {
-    buoc("5/7 Ghi shop ID vào kho cấu hình");
+    buoc("6/8 Ghi shop ID vào kho cấu hình");
     const kq = await ghiShopIdBanDau(thamSo);
     if (kq.loi) {
       truot(kq.loi);
@@ -93,7 +114,7 @@ async function main(): Promise<void> {
     if (kq.daGhi.length > 0) dat(`Đã ghi: ${kq.daGhi.join(", ")}.`);
     else dat("Không truyền cờ --shop-* — giữ nguyên (điền/sửa được ở /cai-dat).");
 
-    buoc("6/7 Role đọc kho khoá cho n8n");
+    buoc("7/8 Role đọc kho khoá cho n8n");
     const role = await taoRoleN8nRo({ adminUrl: thamSo.adminUrl, tenDb, schema: "app", rotate: thamSo.rotateRoPassword });
     if (role.ket === "skip") {
       console.warn(`  ⚠ Bỏ qua: ${role.lyDo}\n${sqlTaoRoleChayTay(tenDb, "app")}`);
@@ -107,7 +128,7 @@ async function main(): Promise<void> {
       );
     }
 
-    buoc("7/7 Ghi địa chỉ DB cho credential n8n");
+    buoc("8/8 Ghi địa chỉ DB cho credential n8n");
     const keys = await ghiN8nDb(databaseUrl, thamSo, role.ket === "skip" ? null : role.matKhauMoi);
     dat(`Đã ghi: ${keys.join(", ")}.`);
 

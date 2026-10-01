@@ -34,6 +34,16 @@ describe("docker-compose.yml: cảnh báo replica + healthcheck", () => {
     expect(compose).toMatch(/KHÔNG scale service này ra nhiều replica/);
   });
 
+  it("service app KHÔNG đè CMD: không có `command:`/`entrypoint:` (CMD Dockerfile chạy next trực tiếp, PID 1 = node)", () => {
+    const compose = boDongComment(doc("docker-compose.yml"));
+    const batDau = compose.search(/^ {2}app:\s*$/m);
+    expect(batDau, "thiếu service app").toBeGreaterThan(-1);
+    const tuDongSau = compose.indexOf("\n", batDau) + 1; // bỏ dòng `  app:` để regex không tự khớp chính nó
+    const sau = compose.slice(tuDongSau).search(/^ {0,2}[A-Za-z][\w-]*:/m); // service/khoá cấp trên kế tiếp
+    const khoiApp = sau === -1 ? compose.slice(batDau) : compose.slice(batDau, tuDongSau + sau);
+    expect(khoiApp).not.toMatch(/^\s+(?:command|entrypoint):/m);
+  });
+
   it("có ĐÚNG dòng lệnh healthcheck trỏ /dang-nhap (không phải chỉ nhắc tới trong comment)", () => {
     const semComment = boDongComment(doc("docker-compose.yml"));
     expect(semComment).toMatch(/healthcheck:/);

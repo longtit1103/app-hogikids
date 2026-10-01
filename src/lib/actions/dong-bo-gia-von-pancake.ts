@@ -2,7 +2,7 @@
 
 import path from "node:path";
 
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { revalidatePath } from "next/cache";
 
 import type { ActionResult } from "@/lib/actions/action-result";

@@ -1,6 +1,7 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { formatVnd } from "@/lib/format";
+import { HAN_CHO_KHOA_DONG_TIEN_MS, khoaDongTienCoHan } from "@/lib/so-quy/khoa-dong-tien-co-han";
 
 /**
  * VỊ TỪ SỔ TIẾT KIỆM — dùng chung cho MỌI đường ghi chạm dòng `SAVINGS_*`: `taoSoTietKiem` ·
@@ -31,9 +32,17 @@ const KIND_TIET_KIEM = ["SAVINGS_OUT", "SAVINGS_IN"] as const;
  * nên sau khi giành khoá vẫn đọc thiếu dòng ghi tay vừa commit — đo thật ở đường khoản vay.
  *
  * Không có dòng ⇒ 0 hàng, không khoá gì: caller vẫn tự báo "Không tìm thấy sổ" ngay sau đó.
+ *
+ * Chờ khoá CÓ HẠN (`src/lib/so-quy/khoa-dong-tien-co-han.ts`, 10s cho CẢ transaction — chung ngân sách
+ * với `khoaCacKhoanVay` gọi trước trong cùng `tx`): quá hạn ⇒ ném `LoiKhoaDongTienBan`,
+ * transaction lùi trọn, caller trả câu "đang bận, thử lại". `hanChoMs` chỉ để test rút ngắn.
  */
-export async function khoaSoTietKiem(tx: Tx, id: string): Promise<void> {
-  await tx.$queryRaw`SELECT id FROM "SoTietKiem" WHERE id = ${id} FOR UPDATE`;
+export async function khoaSoTietKiem(
+  tx: Tx,
+  id: string,
+  hanChoMs: number = HAN_CHO_KHOA_DONG_TIEN_MS
+): Promise<void> {
+  await khoaCacSoTietKiem(tx, [id], hanChoMs);
 }
 
 /**
@@ -41,8 +50,18 @@ export async function khoaSoTietKiem(tx: Tx, id: string): Promise<void> {
  * thì không kẹt chéo. Mảng rỗng ⇒ vòng lặp không chạy câu nào, đúng ý: gọi vô điều kiện ở đầu
  * transaction mà không phải rắc `if` khắp nơi.
  */
-export async function khoaCacSoTietKiem(tx: Tx, ids: string[]): Promise<void> {
-  for (const id of [...new Set(ids)].sort()) await khoaSoTietKiem(tx, id);
+export async function khoaCacSoTietKiem(
+  tx: Tx,
+  ids: string[],
+  hanChoMs: number = HAN_CHO_KHOA_DONG_TIEN_MS
+): Promise<void> {
+  const thuTu = [...new Set(ids)].sort();
+  if (thuTu.length === 0) return;
+  await khoaDongTienCoHan(
+    tx,
+    thuTu.map((id) => () => tx.$queryRaw`SELECT id FROM "SoTietKiem" WHERE id = ${id} FOR UPDATE`),
+    hanChoMs
+  );
 }
 
 /**

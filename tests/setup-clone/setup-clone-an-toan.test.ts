@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -62,6 +63,9 @@ describe("setup-clone — chạy thật trên DB test (đuôi _test nên qua ch�
   it("2 lượt liên tiếp: lượt sau không đòi INIT_*, KHÔNG đè giá trị đã sửa tay; role đọc được VIEW, bị chặn ở BẢNG", { timeout: 300_000 }, async () => {
     const env = {
       ...ENV_DU,
+      // `prisma generate` xoá-rồi-ghi file client đang được các worker Vitest khác nạp ⇒ bỏ qua trong lượt
+      // chạy thật này; thứ tự + lệnh của bước generate khoá tĩnh ở describe "bước prisma generate" dưới.
+      SETUP_CLONE_BO_QUA_GENERATE: "1",
       DATABASE_URL: process.env.TEST_DATABASE_URL,
       TEST_DATABASE_URL: process.env.TEST_DATABASE_URL,
       INIT_EMAIL: "setup-test@hogikids.test",
@@ -109,5 +113,29 @@ describe("setup-clone — chạy thật trên DB test (đuôi _test nên qua ch�
     // Bộ khoá n8nDb* đã sẵn cho lượt "Cài workflows".
     const dbUser = await prisma.setting.findUniqueOrThrow({ where: { key: "n8nDbUser" } });
     expect(dbUser.value).toBe(N8N_RO_ROLE);
+  });
+});
+
+describe("setup-clone — bước prisma generate (Prisma 7 không tự sinh client lúc npm install)", () => {
+  const nguon = readFileSync(SCRIPT, "utf8");
+  const LENH_GENERATE = 'execFileSync("npx", ["--no-install", "prisma", "generate"]';
+
+  it("chạy `npx --no-install prisma generate` TRƯỚC seed (seed import client sinh) và trước mọi import `@/lib/*`", () => {
+    const iGenerate = nguon.indexOf(LENH_GENERATE);
+    const iSeed = nguon.indexOf('"prisma/seed.ts"');
+    const iImportLib = nguon.indexOf('await import("@/lib/');
+    expect(iGenerate, "thiếu lệnh generate").toBeGreaterThan(-1);
+    expect(iSeed).toBeGreaterThan(iGenerate);
+    expect(iImportLib).toBeGreaterThan(iGenerate);
+  });
+
+  it("chỉ bỏ qua khi biến test đặt ĐÚNG \"1\" — mặc định luôn sinh", () => {
+    const boQua = nguon.match(/process\.env\.SETUP_CLONE_BO_QUA_GENERATE\b[^\n]*/g) ?? [];
+    expect(boQua).toEqual(['process.env.SETUP_CLONE_BO_QUA_GENERATE === "1") {']);
+  });
+
+  it("không dựa vào `postinstall` (Dockerfile `npm ci` chạy trước `COPY . .` — chưa có schema.prisma)", () => {
+    const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
+    expect(pkg.scripts?.postinstall).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import type { OrderStatus, Prisma } from "@prisma/client";
+import type { OrderStatus, Prisma } from "@/generated/prisma/client";
 
 import { REAL_FEE_CHANNELS } from "@/lib/channels/real-fee-channels";
 import { sumPnlPlatformFee } from "@/lib/orders/order-list-totals";

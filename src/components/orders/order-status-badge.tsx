@@ -1,4 +1,4 @@
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus } from "@/generated/prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { ORDER_STATUS_META } from "@/lib/orders/order-status-meta";

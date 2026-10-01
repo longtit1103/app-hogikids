@@ -50,6 +50,10 @@ public/uploads/*
 *.tsbuildinfo
 next-env.d.ts
 
+# Prisma 7: client sinh bởi `npx prisma generate` (output khai ở prisma/schema.prisma) — dựng lại
+# mỗi lần cài/CI/Docker, không commit.
+/src/generated/
+
 # claude code local settings
 .claude/
 

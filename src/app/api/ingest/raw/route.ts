@@ -1,4 +1,4 @@
-import type { SyncKind } from "@prisma/client";
+import type { SyncKind } from "@/generated/prisma/client";
 
 import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { hasBronzeBacklog, isBronzeOnly, markBronzeBacklog } from "@/lib/bronze/bronze-only";

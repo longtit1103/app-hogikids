@@ -4,13 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
 
-import { PrismaClient } from "@prisma/client";
 import { sealData, unsealData } from "iron-session";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { kiemPhien } from "@/lib/quyen/nguoi-dung-phien";
 import type { SessionData } from "@/lib/session";
+import { taoPrismaClient } from "@/lib/tao-prisma-client";
 
 import {
   apMigrations,
@@ -91,7 +91,7 @@ async function sealCookie(userId: string, mocPhien: string): Promise<string> {
  */
 async function kiemCookie(cookie: string) {
   const session = await unsealData<SessionData>(cookie, { password: matKhauPhien() });
-  const client = new PrismaClient({ datasources: { db: { url: db.url } } });
+  const client = taoPrismaClient(db.url);
   try {
     return await kiemPhien(session, client);
   } finally {

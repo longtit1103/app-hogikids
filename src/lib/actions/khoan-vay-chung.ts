@@ -2,6 +2,7 @@ import { startOfDay } from "date-fns";
 import { z } from "zod";
 
 import { LoiDuNoAm } from "@/lib/so-quy/vi-tu-du-no";
+import { laLoiDongTienBan, THONG_BAO_KHOA_DONG_TIEN_BAN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 
 /**
  * Phần DÙNG CHUNG của hai file action khoản vay (`khoan-vay.ts` · `tat-toan-thau-chi.ts`).
@@ -42,6 +43,8 @@ export class LoiHopDong extends Error {
 export function loiKhoanVay(e: unknown, macDinh: string): { error: string; field?: string } {
   if (e instanceof LoiHopDong) return { error: e.message, field: e.field };
   if (e instanceof LoiDuNoAm) return { error: e.message };
+  // Chờ khoá dòng `Loan` quá hạn (lượt khác đang giữ) hoặc transaction quá hạn (P2028) — đã lùi, không ghi gì.
+  if (laLoiDongTienBan(e)) return { error: THONG_BAO_KHOA_DONG_TIEN_BAN };
   const code = (e as { code?: string })?.code;
   if (code === "P2025") return { error: "Không tìm thấy khoản vay" };
   if (code === "P2002") return { error: "Kỳ này đã được ghi" };
@@ -51,12 +54,6 @@ export function loiKhoanVay(e: unknown, macDinh: string): { error: string; field
 export function cungNgay(a: Date, b: Date): boolean {
   return startOfDay(a).getTime() === startOfDay(b).getTime();
 }
-
-/**
- * Nới hạn transaction: DB test/dev đi qua Tailscale, và lượt thứ hai còn phải CHỜ khoá dòng `Loan`
- * của lượt trước nhả ra — mặc định 5s quá sát.
- */
-export const OPT_TX = { timeout: 10_000, maxWait: 5_000 } as const;
 
 /**
  * Mã lỗi NGẮN cho `ghiChu.lyDo` của dòng nhật ký LOI (lượt ghi tiền bị từ chối / hỏng): mã Prisma

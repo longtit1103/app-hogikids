@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 /**
  * KHOÁ TƯ VẤN POSTGRES cho mọi lượt GHI chi tiêu quảng cáo vào sổ `Expense`.

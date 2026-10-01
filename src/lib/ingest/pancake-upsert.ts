@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 
 import { dongDauKetCuc, dongDauKetCucBoiLuotTay, KET_CUC, KetCucDaXoaTay } from "@/lib/bronze/ket-cuc-silver";
 import { prisma } from "@/lib/prisma";

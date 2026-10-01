@@ -1,6 +1,6 @@
 import { cache } from "react";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 import { addMonths, endOfDay, endOfMonth, format, startOfDay, startOfMonth, subDays } from "date-fns";
 
 import { isInflow } from "@/lib/cash-movements/cash-movement-kinds";

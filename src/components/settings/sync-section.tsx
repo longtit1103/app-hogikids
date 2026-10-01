@@ -1,4 +1,4 @@
-import type { SyncLog } from "@prisma/client";
+import type { SyncLog } from "@/generated/prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { hasBronzeBacklog } from "@/lib/bronze/bronze-only";

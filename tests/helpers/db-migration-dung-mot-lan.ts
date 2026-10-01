@@ -3,7 +3,8 @@ import { copyFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@/generated/prisma/client";
+import { taoPrismaClient } from "@/lib/tao-prisma-client";
 
 import { giuKhoaDocQuyenDbTest, type KhoaDaGiu } from "./khoa-doc-quyen-db-test";
 
@@ -81,7 +82,7 @@ export async function moDbMigration(): Promise<DbMigration> {
   kiemUrlMigration(url);
 
   const khoa: KhoaDaGiu = await giuKhoaDocQuyenDbTest(url, KHOA_VITEST_MIGRATION, "Vitest migration");
-  const prisma = new PrismaClient({ datasources: { db: { url } } });
+  const prisma = taoPrismaClient(url);
 
   return {
     url,
@@ -129,19 +130,38 @@ export function xoaThuMucMigrationsTam(thuMucMigrations: string): void {
 }
 
 /**
- * `prisma migrate deploy` (đúng bản Prisma của repo) với thư mục migrations chỉ định. Prisma tìm
- * `migrations/` CẠNH file schema ⇒ chép `schema.prisma` vào thư mục cha của `thuMucMigrations`.
+ * `prisma migrate deploy` (đúng bản Prisma của repo) với thư mục migrations chỉ định.
+ *
+ * Prisma 7 đọc thư mục migrations từ file cấu hình (`migrations.path` trong `prisma.config.ts` của
+ * repo trỏ CỨNG `prisma/migrations`) — cờ `--schema` không còn kéo theo thư mục migrations cạnh
+ * schema. Chỉ đổi `--schema` là lặng lẽ áp bộ migration ĐẦY ĐỦ của repo thay cho bộ tạm (bỏ M1 /
+ * M1 bị chèn lỗi) ⇒ test "đời trước M1" xanh giả. Vì vậy dựng một `prisma.config.ts` TẠM cạnh bộ
+ * migration tạm (đường dẫn tuyệt đối, URL đọc từ `DATABASE_URL` của tiến trình con) và gọi
+ * `--config`. File tạm cố ý không import gì: nó nằm ngoài repo nên không resolve được package.
  * Lệnh thất bại (exit ≠ 0) ⇒ ném Error kèm stdout/stderr của Prisma.
  */
 export function apMigrations(url: string, thuMucMigrations: string): void {
   kiemUrlMigration(url);
   if (path.basename(thuMucMigrations) !== "migrations") {
-    throw new Error(`apMigrations: thư mục phải tên "migrations" (Prisma đọc cạnh schema) — nhận ${thuMucMigrations}`);
+    throw new Error(`apMigrations: thư mục phải tên "migrations" — nhận ${thuMucMigrations}`);
   }
-  const schemaTam = path.join(path.dirname(thuMucMigrations), "schema.prisma");
+  const thuMucGoc = path.dirname(thuMucMigrations);
+  const schemaTam = path.join(thuMucGoc, "schema.prisma");
   copyFileSync(SCHEMA_PRISMA_REPO, schemaTam);
+  const configTam = path.join(thuMucGoc, "prisma.config.ts");
+  writeFileSync(
+    configTam,
+    [
+      "export default {",
+      `  schema: ${JSON.stringify(schemaTam)},`,
+      `  migrations: { path: ${JSON.stringify(thuMucMigrations)} },`,
+      '  datasource: { url: process.env.DATABASE_URL ?? "" },',
+      "};",
+      "",
+    ].join("\n"),
+  );
   try {
-    execFileSync("npx", ["prisma", "migrate", "deploy", "--schema", schemaTam], {
+    execFileSync("npx", ["prisma", "migrate", "deploy", "--config", configTam], {
       env: { ...process.env, DATABASE_URL: url },
       stdio: "pipe",
       encoding: "utf8",

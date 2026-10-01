@@ -183,6 +183,7 @@ describe("taoTaiKhoan", () => {
     await expect(
       prisma.$executeRaw`INSERT INTO "User" ("id","email","passwordHash","role")
         VALUES ('owner-thu-hai', ${`owner2${DUOI_EMAIL}`}, 'x:y', 'OWNER')`,
-    ).rejects.toThrow(/23505[\s\S]*Key \(role\)=\(OWNER\) already exists/);
+      // Prisma 7 (driver `pg`) đưa câu lỗi Postgres có TÊN ràng buộc, không đưa DETAIL "Key (role)=…".
+    ).rejects.toThrow(/23505[\s\S]*unique constraint \\?"User_owner_duy_nhat\\?"/);
   });
 });

@@ -133,7 +133,7 @@ describe("kiemTraE2e (chính bộ phân tích)", () => {
           "a.spec.ts": DUNG + 'import { f } from "./helper";\n' + THAN,
         },
       ],
-      ["import động module khác", { "a.spec.ts": DUNG + 'const m = await import("@prisma/client");\n' + THAN }],
+      ["import động module khác", { "a.spec.ts": DUNG + 'const m = await import("../../src/generated/prisma/client");\n' + THAN }],
     ])("%s", (_ten, files) => {
       expect(kiem(files)).toEqual([]);
     });

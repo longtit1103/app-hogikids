@@ -2,7 +2,7 @@
  * Dựng lại Silver từ Bronze — KHÔNG fetch lại Pancake.
  * Dùng sau khi sửa mapping / luật lọc mirror / thêm field.
  *
- * Prod:  docker compose run --rm app npx tsx scripts/rebuild-from-raw.ts --yes
+ * Prod:  docker compose run --rm app npx --no-install tsx scripts/rebuild-from-raw.ts --yes
  * Local: npx tsx scripts/rebuild-from-raw.ts        (hỏi y/N trước khi ghi)
  *
  * AN TOÀN: KHÔNG đụng Variant.costPrice / lowStockThreshold, cũng KHÔNG đụng chi phí chủ shop NHẬP

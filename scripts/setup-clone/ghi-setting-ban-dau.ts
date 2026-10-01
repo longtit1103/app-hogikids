@@ -42,7 +42,7 @@ export async function ghiShopIdBanDau(thamSo: ThamSo): Promise<{ daGhi: string[]
 export async function ghiN8nDb(databaseUrl: string, thamSo: ThamSo, matKhauMoi: string | null): Promise<string[]> {
   const { db, host, port } = tenDbTu(databaseUrl);
   const hostN8n = thamSo.n8nDbHost?.trim() || host;
-  const sslRequire = hostN8n.endsWith(".supabase.co") || /sslmode=require/.test(databaseUrl);
+  const sslRequire = hostN8n.endsWith(".supabase.co") || /[?&]sslmode=(?:require|verify-full)(?:&|$)/.test(databaseUrl);
 
   if (port === "6543") {
     console.warn(

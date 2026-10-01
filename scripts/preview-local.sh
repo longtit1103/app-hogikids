@@ -37,6 +37,9 @@ esac
 export DATABASE_URL="$TEST_URL"
 echo "🔒 Preview LOCAL trỏ DB test an toàn: $DB_NAME (không đụng prod)"
 echo "   Đảm bảo schema + tài khoản đăng nhập + data mẫu…"
+# Prisma 7 không còn tự sinh client lúc `npm install` — sinh lại (không chạm DB) để dev server có
+# `src/generated/prisma` khớp schema hiện tại.
+npx prisma generate >/dev/null
 npx prisma migrate deploy >/dev/null
 npx prisma db seed >/dev/null 2>&1 || true            # tạo login INIT_EMAIL nếu chưa có (idempotent)
 npx tsx scripts/seed-preview-products.ts >/dev/null 2>&1 || true  # 5 SP mẫu để xem UI ngay (idempotent, không đè giá vốn)

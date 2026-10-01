@@ -11,7 +11,7 @@ ENV TZ=Asia/Ho_Chi_Minh
 # một đời pg_dump khác và đời mới có thể phát ra cú pháp mà chốt chặn file phục hồi chưa biết (đã
 # xảy ra: bản vá 08/2025 thêm \restrict/\unrestrict vào mọi dump plain, chốt chặn coi là file bị sửa
 # tay ⇒ từ chối đúng file của chính mình). Chốt lại bằng lệnh kiểm sau khi dựng ảnh:
-#   docker compose run --rm app npx tsx scripts/kiem-chot-chan-nhan-dump-cua-chinh-minh.ts
+#   docker compose run --rm app npx --no-install tsx scripts/kiem-chot-chan-nhan-dump-cua-chinh-minh.ts
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg gzip tzdata \
  && ln -fs /usr/share/zoneinfo/Asia/Ho_Chi_Minh /etc/localtime && dpkg-reconfigure -f noninteractive tzdata \
  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
@@ -33,7 +33,24 @@ RUN npm ci
 # KHÔNG đè node_modules host (Mac arm64) lên npm ci (A4)
 COPY . .
 # next build (npm run build = next build)
-RUN npx prisma generate && npm run build
+# `--no-install`: prisma PHẢI có sẵn từ lockfile — thiếu thì build ĐỎ, không để npx tự tải bản mới nhất.
+RUN npx --no-install prisma generate && npm run build
+# Bỏ devDependencies TRƯỚC khi runner chép /app (#261): ảnh chạy không còn mang vitest/jsdom/shadcn/vite…
+# cùng cảnh báo bảo mật của chúng (ip-address, undici ở #259). Phải đứng SAU generate + build (hai bước đó
+# cần devDeps). Prisma 7 (generator `prisma-client`) sinh client TS vào `src/generated/prisma` — NGOÀI
+# node_modules nên prune không đụng tới; không còn query engine nhị phân (`node_modules/.prisma/client`
+# không tồn tại nữa). `.dockerignore` loại `src/generated` của máy host ⇒ client trong ảnh LUÔN do generate
+# ở trên sinh, khớp schema của commit. Runner chép trọn /app ⇒ có cả client sinh lẫn `prisma.config.ts`
+# (CLI `migrate`/`db seed` trong container đọc schema, migrations, lệnh seed từ file này).
+# `prisma` + `tsx` là DEPENDENCIES (không phải devDeps) vì runbook/DR chạy chúng TRONG container này:
+# `npx --no-install prisma migrate status|deploy`, `prisma db seed` (= tsx prisma/seed.ts, khai ở
+# `prisma.config.ts` → `migrations.seed`), bước ③b
+# `npx --no-install tsx scripts/kiem-chot-chan-nhan-dump-cua-chinh-minh.ts`, rebuild-from-raw, backfill.
+# ĐỪNG chuyển chúng về devDeps: prune sẽ gỡ, lệnh vận hành gãy đúng lúc DR (đo 30/09: `npx` thiếu gói còn
+# đòi tải bản mới từ npm — prisma@8.0.0-rc.19). Còn lại sau prune là optional peer (`typescript`,
+# `@types/react` của @prisma/client; `@playwright/test` của next, không kèm trình duyệt) — npm giữ theo luật
+# devOptional, chấp nhận, đừng `rm -rf` tay. Test khoá: tests/unit/backup/anh-docker-bo-devdeps-hop-dong.test.ts.
+RUN npm prune --omit=dev
 
 FROM base AS runner
 ENV NODE_ENV=production
@@ -48,4 +65,7 @@ COPY --from=build --chown=node:node /app ./
 # (pre-restore dump, logo shop) giữ nguyên. Đổi host khác thì kiểm lại uid trước khi deploy.
 USER node
 EXPOSE 3000
-CMD ["npx", "next", "start", "-p", "3000"]
+# Gọi thẳng bin của next, KHÔNG qua `npx` (#261): `npx` để lại tiến trình vỏ `npm exec` thường trực (~80 MiB
+# RAM, đo amd64 30/09: 198,5 → 115,8 MiB) và chặn SIGTERM — `docker stop` làm container thoát 1 kèm
+# `npm error signal SIGTERM`; gọi thẳng thì Next nhận tín hiệu, thoát 143 sạch.
+CMD ["node_modules/.bin/next", "start", "-p", "3000"]

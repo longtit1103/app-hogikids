@@ -13,6 +13,8 @@ node_modules
 .next
 out
 build
+# Prisma client sinh sẵn trên máy host — image tự `npx prisma generate` lại
+src/generated
 
 # Git + lịch sử
 .git

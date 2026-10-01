@@ -26,10 +26,11 @@
  * app đang có (xem TY_LE_PHI_SHOPEE). Đây là số ƯỚC TÍNH, được đánh dấu trong `raw._buTuDonKho` để
  * sau này lọc ra được.
  *
- * Chạy thử (mặc định, KHÔNG ghi):  npx tsx scripts/bu-don-shopee-tu-don-kho.ts
- * Ghi thật:                        npx tsx scripts/bu-don-shopee-tu-don-kho.ts --ghi
+ * Prisma 7 KHÔNG tự nạp .env — phải nạp tường minh (DATABASE_URL trong .env = PROD):
+ * Chạy thử (mặc định, KHÔNG ghi):  npx tsx --env-file=.env scripts/bu-don-shopee-tu-don-kho.ts
+ * Ghi thật:                        npx tsx --env-file=.env scripts/bu-don-shopee-tu-don-kho.ts --ghi
  */
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { formatVnd } from "@/lib/format";

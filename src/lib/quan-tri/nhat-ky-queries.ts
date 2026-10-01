@@ -2,7 +2,7 @@
  * Đọc nhật ký thao tác cho tab Nhật ký của `/quan-tri` (CHỈ chủ shop — trang gọi `yeuCauChuShopTrang`
  * trước). Bảng `AuditLog` vốn không chứa bí mật (lưới `tests/luoi/nhat-ky-an-toan.test.ts`).
  */
-import type { AuditLog, Prisma } from "@prisma/client";
+import type { AuditLog, Prisma } from "@/generated/prisma/client";
 
 import { prisma } from "@/lib/prisma";
 

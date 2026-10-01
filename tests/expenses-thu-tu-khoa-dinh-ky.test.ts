@@ -1,7 +1,7 @@
 import { format, subMonths, startOfMonth } from "date-fns";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { batLaiDinhKy, deleteExpense } from "@/lib/actions/expenses";
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";

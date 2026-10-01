@@ -4,7 +4,7 @@ import { type DateRange } from "@/lib/date-range";
 import { prisma } from "@/lib/prisma";
 import { pnlPercentBase } from "@/lib/reports/pnl-percent-base";
 
-import type { OrderStatus, Prisma } from "@prisma/client";
+import type { OrderStatus, Prisma } from "@/generated/prisma/client";
 
 /**
  * NGUỒN CÔNG THỨC P&L DUY NHẤT toàn app. Mọi màn phase 5 + phase 6 đọc từ đây,

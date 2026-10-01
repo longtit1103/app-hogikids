@@ -121,7 +121,10 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - name: Tạo schema app trong DB test
-        run: echo 'CREATE SCHEMA IF NOT EXISTS app;' | npx prisma db execute --stdin --url "postgresql://ci:ci@localhost:5432/hogikids_test?schema=app"
+        # Prisma 7 bỏ cờ `--url` của `db execute` — URL đi qua `prisma.config.ts` (đọc DATABASE_URL).
+        run: echo 'CREATE SCHEMA IF NOT EXISTS app;' | npx prisma db execute --stdin
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/hogikids_test?schema=app
       - name: Tạo DB migration dùng một lần + schema app
         # CREATE DATABASE không chạy được trong transaction ⇒ dùng psql (runner ubuntu có sẵn client).
         run: |
@@ -164,7 +167,10 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - name: Tạo schema app trong DB test
-        run: echo 'CREATE SCHEMA IF NOT EXISTS app;' | npx prisma db execute --stdin --url "postgresql://ci:ci@localhost:5432/hogikids_test?schema=app"
+        # Prisma 7 bỏ cờ `--url` của `db execute` — URL đi qua `prisma.config.ts` (đọc DATABASE_URL).
+        run: echo 'CREATE SCHEMA IF NOT EXISTS app;' | npx prisma db execute --stdin
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/hogikids_test?schema=app
       - name: Migrate + seed reference data (Channel/Category/Setting) vào DB test
         run: |
           npx prisma migrate deploy
@@ -193,6 +199,22 @@ jobs:
     # cho tới lúc mở log từng bước. Lượt NGUỘI đo thật trên runner: 1m19s (npm ci 21,4s ·
     # prisma generate + next build 22,7s) ⇒ quá 25 phút là treo, không phải chậm.
     timeout-minutes: 25
+    # Postgres tạm cho bước chạy Prisma 7 TRONG ảnh đã prune với DB thật (migrate deploy/status + truy vấn
+    # qua adapter-pg). Cùng khuôn service của job unit/e2e; container ảnh nối qua `--network host`.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: hogikids_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d hogikids_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
       # VÌ SAO CÓ JOB NÀY: ba job trên đều chạy trên repo ĐÃ CHECKOUT ĐỦ nên mù với trọn lớp lỗi
@@ -200,10 +222,73 @@ jobs:
       # nhầm, kho apt/PGDG đổi. Ca thật 19/08: `npm ci` chết ENOENT vì tarball vendor
       # (package.json trỏ xlsx vào file:./third-party/...) chưa được chép trước, trong khi CI xanh
       # 3/3 suốt hơn một ngày — lỗi chỉ lộ đúng lúc bấm deploy, lúc prod đã tụt lại 1 commit.
-      # Không cần chạy thử ảnh: dựng được là đủ để đóng lớp lỗi đó.
+      # Từ #261 ảnh bị prune devDependencies nên "dựng được" KHÔNG còn đủ: ba bước sau build CHẠY ảnh để
+      # chứng minh ảnh đã prune vẫn đủ công cụ vận hành, chạy được Prisma 7 với Postgres thật (service tạm
+      # ở trên) và khởi động được — job e2e chạy `npm run dev` trên cây đầy đủ nên mù với lớp lỗi này. Tốn
+      # thêm ~20–40 s/PR (chủ shop duyệt 30/09) + vài chục giây cho migrate trên DB trống.
       - name: Dựng ảnh (không push)
         # Tag mang SHA, KHÔNG BAO GIỜ `latest`: trên máy thật `latest` là ảnh đang chạy, dựng đè lên
         # là mất bản ghi để lùi (đã xảy ra 19/08 — cả `docker tag` lẫn `docker commit` đều không cứu
         # lại được). Runner ubuntu-latest cùng kiến trúc amd64 với minipc nên đây là phép thử thật.
         # --progress=plain: log đầy đủ từng bước, đọc được ngay dòng chết mà không phải mở lại ảnh.
-        run: docker build --progress=plain -t hogikids-app:ci-${{ github.sha }} .
+        run: |
+          docker build --progress=plain -t hogikids-app:ci-${{ github.sha }} .
+          docker image inspect -f 'Kích thước ảnh: {{.Size}} byte' hogikids-app:ci-${{ github.sha }}
+      - name: Ảnh đủ công cụ vận hành, không còn devDependencies
+        # Luôn `npx --no-install`: thiếu gói thì bước này ĐỎ — KHÔNG BAO GIỜ để npx tự tải từ npm (đo
+        # 30/09: `npx prisma` thiếu gói đòi tải prisma@8.0.0-rc.19). prisma/tsx là thứ runbook/DR chạy
+        # trong container; tsx nạp ĐÚNG hai module bước ③b dùng, qua alias `@/` như script thật.
+        # Prisma 7: không còn query engine nhị phân — client là mã TS sinh vào `src/generated/prisma` (generate
+        # trong Dockerfile, TRƯỚC prune), CLI đọc `prisma.config.ts`; tsx nạp nhà máy client (kéo client sinh +
+        # @prisma/adapter-pg + pg) như seed/rebuild-from-raw, không mở kết nối. Schema engine (migrate) vẫn nhị phân.
+        run: |
+          docker run --rm --entrypoint sh hogikids-app:ci-${{ github.sha }} -c '
+            set -e
+            npx --no-install prisma --version
+            npx --no-install tsx --version
+            for p in vitest jsdom shadcn vite @testing-library/react; do
+              if [ -e "node_modules/$p" ]; then echo "✗ ảnh còn devDependency $p"; exit 1; fi
+            done
+            test -e src/generated/prisma/client.ts
+            test -e prisma.config.ts
+            test -x node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
+            npx --no-install tsx -e "import(\"@/lib/tao-prisma-client\").then((m) => { if (typeof m.taoPrismaClient !== \"function\") process.exit(1); console.log(\"tsx nạp client Prisma OK\"); })"
+            npx --no-install tsx -e "Promise.all([import(\"@/lib/backup/run-pg-dump\"), import(\"@/lib/backup/assert-plain-sql-only-schema\")]).then(([a, b]) => { if (typeof a.pgDumpArgsFromUrl !== \"function\" || typeof b.assertPlainSqlOnlySchema !== \"function\") process.exit(1); console.log(\"tsx nạp module ③b OK\"); })"
+          '
+      - name: Ảnh đã prune chạy Prisma 7 với Postgres thật
+        # Bước trên chỉ NẠP module, không mở kết nối — lệnh vận hành đầu tiên chạy Prisma 7 trong ảnh prune với
+        # DB thật sẽ là lúc deploy PROD (`docker compose run --rm app npx --no-install prisma migrate deploy|status`).
+        # Ở đây chạy đúng các lệnh đó trên DB trống: CLI đọc `prisma.config.ts` (prisma/config) + schema engine
+        # nhị phân, rồi tsx dựng client qua `taoPrismaClient` (client sinh + adapter-pg + pg) và truy vấn thật —
+        # bảng `_prisma_migrations` không ghi schema ⇒ đọc được là `?schema=app` đã thành search_path.
+        # Schema `app` tạo trước bằng psql của runner, như job unit (prod: schema đã có sẵn).
+        run: |
+          psql "postgresql://ci:ci@localhost:5432/hogikids_ci" -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS app;'
+          docker run --rm --network host \
+            -e DATABASE_URL='postgresql://ci:ci@127.0.0.1:5432/hogikids_ci?schema=app' \
+            --entrypoint sh hogikids-app:ci-${{ github.sha }} -c '
+            set -e
+            npx --no-install prisma migrate deploy
+            npx --no-install prisma migrate status
+            npx --no-install tsx -e "import(\"@/lib/tao-prisma-client\").then(async (m) => { const p = m.taoPrismaClient(process.env.DATABASE_URL); const r = await p.\$queryRawUnsafe(\"SELECT 1 AS ok, count(*)::int AS n FROM _prisma_migrations\"); await p.\$disconnect(); if (r[0].ok !== 1 || !(r[0].n > 0)) process.exit(1); console.log(\"client Prisma 7 trong ảnh truy vấn DB OK:\", r[0].n, \"migration\"); })"
+          '
+      - name: Ảnh khởi động bằng CMD mặc định và dừng sạch
+        # CMD mặc định (không override) ⇒ kiểm luôn CMD không qua npx. /dang-nhap là route healthcheck
+        # của compose, không chạm DB ⇒ DATABASE_URL trỏ cổng chết là đủ. Dừng phải thoát 143 (Next nhận
+        # SIGTERM); qua vỏ `npx` thì thoát 1 kèm `npm error signal SIGTERM` (đo amd64 30/09).
+        run: |
+          docker run -d --name ci-app \
+            -e SESSION_SECRET=ci-khong-phai-secret-that-0123456789abcdef0123456789 \
+            -e INGEST_SECRET=ci-khong-phai-secret \
+            -e DATABASE_URL=postgresql://ci:ci@127.0.0.1:1/ci \
+            hogikids-app:ci-${{ github.sha }}
+          ok=0
+          for i in $(seq 1 60); do
+            if docker exec ci-app curl -fsS -o /dev/null http://127.0.0.1:3000/dang-nhap; then ok=1; break; fi
+            sleep 1
+          done
+          docker stop -t 15 ci-app >/dev/null
+          code=$(docker inspect -f '{{.State.ExitCode}}' ci-app)
+          docker logs ci-app 2>&1 | tail -20
+          [ "$ok" = 1 ] || { echo "✗ /dang-nhap không lên trong 60 s"; exit 1; }
+          [ "$code" = 143 ] || { echo "✗ dừng thoát $code, mong 143"; exit 1; }

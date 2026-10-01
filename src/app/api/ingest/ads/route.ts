@@ -1,4 +1,4 @@
-import type { SyncKind } from "@prisma/client";
+import type { SyncKind } from "@/generated/prisma/client";
 
 import { chuanBiDongAdsHoacBoQua, type PreparedAdsExpense } from "@/lib/ingest/ads-expense-row";
 import {

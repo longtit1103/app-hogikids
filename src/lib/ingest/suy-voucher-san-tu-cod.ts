@@ -36,7 +36,7 @@
  * sàn gánh trọn. Hai đường độc lập (dấu âm của Pancake · trọng tài cod) cùng ra một số. Đừng thêm
  * cổng chặn dựa trên phỏng đoán về ý nghĩa một field — đọc payload thật trước.
  */
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus } from "@/generated/prisma/client";
 
 export type KetQuaSuyVoucherSan = {
   /** Khoản sàn tài trợ suy ra được, CỘNG thêm vào voucher sàn đã khai. 0 = không đụng gì. */

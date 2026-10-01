@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../../src/generated/prisma/client";
 
 /**
  * Dữ liệu "dò giá vốn" cho e2e che payload. Giá vốn `7331117` là con số DUY NHẤT trong DB e2e mang

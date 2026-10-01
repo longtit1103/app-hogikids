@@ -1,6 +1,5 @@
 "use server";
 
-import { Prisma } from "@prisma/client";
 import { format, startOfDay } from "date-fns";
 import { z } from "zod";
 
@@ -9,7 +8,6 @@ import {
   LoiHopDong,
   loiKhoanVay,
   maLoiNhatKy,
-  OPT_TX,
   soTienKySchema,
 } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
@@ -21,6 +19,8 @@ import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { congAction } from "@/lib/quyen/cong-action";
 import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
+import { laXungDotGhi } from "@/lib/prisma-loi-adapter";
+import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import { chanDuNoAm, duNoSauKhiGhi, khoaKhoanVay } from "@/lib/so-quy/vi-tu-du-no";
 
 /**
@@ -202,18 +202,19 @@ async function chayTatToan({
     });
 
     return { lai, goc };
-  }, OPT_TX);
+  }, OPT_TX_DONG_TIEN);
 }
 
 /**
- * P2034 = write conflict / deadlock → retry ĐÚNG 1 lần (khuôn `chayGhiKyCoRetry`). Khoá dòng vẫn có
+ * Xung đột ghi (`laXungDotGhi`: P2034, 40001/40P01 cả lúc COMMIT) → retry ĐÚNG 1 lần
+ * (khuôn `chayGhiKyCoRetry`). Khoá dòng vẫn có
  * thể deadlock khi chạy chồng một lượt ghi khác cũng chạm khoản vay.
  */
 async function chayTatToanCoRetry(tham: ThamSoTatToan): Promise<{ lai: number; goc: number }> {
   try {
     return await chayTatToan(tham);
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034") {
+    if (laXungDotGhi(e)) {
       return await chayTatToan(tham);
     }
     throw e;

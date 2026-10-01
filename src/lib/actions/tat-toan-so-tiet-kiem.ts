@@ -1,11 +1,10 @@
 "use server";
 
-import { Prisma } from "@prisma/client";
 import { format, startOfDay } from "date-fns";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { LoiHopDong, maLoiNhatKy, OPT_TX, soTienKySchema } from "@/lib/actions/khoan-vay-chung";
+import { LoiHopDong, maLoiNhatKy, soTienKySchema } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
@@ -15,6 +14,8 @@ import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { congAction } from "@/lib/quyen/cong-action";
+import { laXungDotGhi } from "@/lib/prisma-loi-adapter";
+import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import {
   chanSoDuTietKiemAm,
   khoaSoTietKiem,
@@ -39,18 +40,19 @@ import {
 const idSchema = z.object({ id: z.string().min(1, "Chọn sổ tiết kiệm") });
 
 /**
- * P2034 = write conflict / deadlock → retry ĐÚNG 1 lần (khuôn `chayGhiKyCoRetry`). Bản sao cục bộ
+ * Xung đột ghi (`laXungDotGhi`: P2034, 40001/40P01 cả lúc COMMIT) → retry ĐÚNG 1 lần
+ * (khuôn `chayGhiKyCoRetry`). Bản sao cục bộ
  * chứ không import chung: `so-tiet-kiem-chung.ts` CỐ Ý không có `export async function` nào (lưới
  * bảo trì quét `src/lib/actions/` fail-closed, mọi export async đều phải khai vào bảng đường ghi) —
  * cùng lý do khiến `khoan-vay.ts` và `tat-toan-thau-chi.ts` mỗi file giữ một bản retry riêng.
  *
- * An toàn khi chạy lại: P2034 nghĩa là transaction ĐÃ rollback trọn — không có dòng nào sót lại.
+ * An toàn khi chạy lại: xung đột ghi nghĩa là transaction ĐÃ rollback trọn — không có dòng nào sót lại.
  */
 async function chayCoRetry<T>(chay: () => Promise<T>): Promise<T> {
   try {
     return await chay();
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034") {
+    if (laXungDotGhi(e)) {
       return await chay();
     }
     throw e;
@@ -217,7 +219,7 @@ export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ 
           data: { closedAt: ngay },
         });
         if (dong.count === 0) throw new LoiHopDong("Sổ này đã tất toán");
-      }, OPT_TX)
+      }, OPT_TX_DONG_TIEN)
     );
 
     lamMoiTrang();
@@ -291,7 +293,7 @@ export async function moLaiSoTietKiem(input: unknown): Promise<ActionResult<{ id
         // "vị từ chạy SAU MỌI lượt ghi" (§8): sổ có dòng ghi tay lệch phải chặn ngay tại đây.
         await chanSoDuTietKiemAm(tx, id);
         await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_MO_LAI", doiTuong: { loai: "SoTietKiem", id } });
-      }, OPT_TX)
+      }, OPT_TX_DONG_TIEN)
     );
 
     lamMoiTrang();

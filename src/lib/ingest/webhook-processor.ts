@@ -8,7 +8,7 @@ import { transformFromRaw, type TransformStats } from "@/lib/bronze/transform-fr
 import { shopIdsChoVai } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import { parseVnDate } from "./pancake-mapping";
 import { xuLyTonKho } from "./webhook-stock";

@@ -1,4 +1,4 @@
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus } from "@/generated/prisma/client";
 
 /**
  * Phí sàn THỰC vào P&L của 1 tập đơn (nhóm theo status, vd `prisma.order.groupBy`):

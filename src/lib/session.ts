@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import { cookies } from "next/headers";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { getIronSession, sealData, type SessionOptions } from "iron-session";
 
 import { prisma } from "@/lib/prisma";
@@ -27,9 +27,12 @@ export type ClientPhien = PrismaClient | Prisma.TransactionClient;
 
 /**
  * CHỈ client bên trong `$transaction`. `PrismaClient` gốc gán được sang `Prisma.TransactionClient` (thừa
- * thuộc tính vẫn khớp kiểu cấu trúc), nên phải chặn thêm `$transaction`: client gốc có, client tx không.
+ * thuộc tính vẫn khớp kiểu cấu trúc), nên phải chặn thêm một thuộc tính client gốc có mà client tx
+ * không có. Chọn `$connect` (nằm trong danh sách Prisma cấm ở client tx — `ITXClientDenyList`). KHÔNG
+ * dùng `$transaction`: từ Prisma 7 client tx CŨNG có `$transaction` (transaction lồng bằng savepoint),
+ * chặn nó là biến cả kiểu này thành `never`.
  */
-export type ClientTrongTransaction = Prisma.TransactionClient & { $transaction?: never };
+export type ClientTrongTransaction = Prisma.TransactionClient & { $connect?: never };
 
 /**
  * Epoch phiên mới: 16 byte ngẫu nhiên MẬT MÃ, 32 hex. KHÔNG dùng mốc thời gian — epoch đoán được thì

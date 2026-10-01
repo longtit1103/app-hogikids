@@ -59,7 +59,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 import type { DeXuatGiaVon } from "./doi-chieu-gia-von";
 

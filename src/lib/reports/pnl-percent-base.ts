@@ -10,7 +10,7 @@
  * Module RIÊNG, THUẦN (không import gì): hàm này được Client Component gọi
  * (`pnl-tab.tsx`, `report-export-buttons.tsx`) — đặt trong `pnl.ts` là kéo cả
  * `@/lib/prisma` vào browser bundle. Tham số structural (không `Pick<PnlBreakdown>`)
- * cũng vì lý do đó — type của `pnl.ts` kéo theo `@prisma/client`.
+ * cũng vì lý do đó — type của `pnl.ts` kéo theo `@/generated/prisma/client`.
  */
 export function pnlPercentBase(b: { revenue: number; voucher: number }): number {
   return Math.max(0, b.revenue - b.voucher);

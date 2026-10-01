@@ -2,7 +2,7 @@ import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { WEBHOOK_PANCAKE_PATH } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
 import { prisma } from "@/lib/prisma";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@/generated/prisma/client";
 
 /**
  * Webhook Pancake trong khối "Khóa kết nối": chặng Pancake → n8n KHÔNG có khóa nào để điền
