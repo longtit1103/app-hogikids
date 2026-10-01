@@ -32,7 +32,7 @@ const THAM_SO_NGAY = ["tu", "den", "range"] as const;
  */
 const KENH_DONG_BO_TAB = "hogikids_khoang_ngay";
 
-/** Lỗi chuyển hướng của Next (vd hết phiên ⇒ `requireUser` redirect) — router tự điều hướng. */
+/** Lỗi chuyển hướng của Next — router tự điều hướng, không phải lỗi mạng. (Hết phiên thì action trả `ok: false`.) */
 function laLoiChuyenHuong(loi: unknown): boolean {
   return (
     typeof loi === "object" &&
@@ -153,7 +153,7 @@ export function DateRangeProvider({
         try {
           kq = await luuLuaChonKhoangNgay(giaTri);
         } catch (loi) {
-          // Hết phiên: action redirect sang /dang-nhap — router tự điều hướng, không báo "mất mạng".
+          // Lượt chuyển hướng của Next: router tự điều hướng, không báo "mất mạng".
           if (!laLoiChuyenHuong(loi)) toast.error("Không lưu được khoảng ngày — kiểm tra mạng rồi chọn lại.");
           return;
         }

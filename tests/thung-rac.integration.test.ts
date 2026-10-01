@@ -28,9 +28,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  *     trúc bảng snapshot riêng (xoá vẫn là xoá CỨNG), nên phải có lưới đóng đinh nó: ai đổi sang
  *     soft-delete bằng cột `deletedAt` mà quên sửa một trong hơn 20 query đọc tiền sẽ thấy đỏ ở đây.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 /** Kỳ đo: tháng 7/2026 — đã qua, nên mọi mốc ngày đều là quá khứ với đồng hồ thật. */
@@ -384,7 +389,7 @@ describe("khôi phục KHÔNG được vượt cổng tiền", () => {
 
   /** Lý do mà cột "Trạng thái" của màn thùng rác đang in cho mục này. */
   async function lyDoTrenBang(id: string): Promise<string | null | undefined> {
-    return (await listThungRac(1)).rows.find((r) => r.id === id)?.lyDo;
+    return (await listThungRac({ bang: ["Expense", "CashMovement", "ThuNhap", "Loan", "SoTietKiem"], xemDongTienGanSoQuy: true, page: 1 })).rows.find((r) => r.id === id)?.lyDo;
   }
 
   it("dòng trả gốc đã được ghi lại bằng dòng khác → khôi phục KHÔNG làm dư nợ âm", async () => {

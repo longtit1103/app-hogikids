@@ -1,21 +1,14 @@
 /**
- * Seed dữ liệu khởi tạo: 1 user chủ shop, 4 kênh bán, 8 danh mục chi phí hệ
- * thống, và các Setting mặc định. Idempotent (upsert) — chạy lại không tạo
- * trùng dòng.
+ * Seed dữ liệu khởi tạo: 1 user chủ shop (OWNER) + hồ sơ shop, các kênh bán, danh mục chi phí hệ
+ * thống, và các Setting mặc định. Idempotent (upsert) — chạy lại không tạo trùng dòng.
+ *
+ * Logic tài khoản chủ shop nằm ở `prisma/seed-lib.ts` (test gọi thẳng được); file này chỉ đọc env.
  */
 import { PrismaClient } from "@prisma/client";
-import { randomBytes, scrypt as scryptCallback } from "node:crypto";
-import { promisify } from "node:util";
 
-// Trần độ dài mật khẩu lấy TỪ nguồn duy nhất của app (`src/lib/password.ts`) — seed KHÔNG được
-// tự khai một số riêng: seed rộng hơn màn đăng nhập nghĩa là lượt go-live/phục hồi thảm hoạ có
-// thể tạo tài khoản thành công rồi KHÔNG BAO GIỜ đăng nhập được (xem `seedUser`).
-import { MAX_PASSWORD_LENGTH } from "../src/lib/password";
+import { damBaoShopProfile, seedChuShop } from "./seed-lib";
 
-const scrypt = promisify(scryptCallback);
 const prisma = new PrismaClient();
-
-const SCRYPT_KEY_LENGTH = 64;
 
 /**
  * Mode CHỈ-TẠO-MỚI (env `SEED_CHI_TAO_MOI=1` — `scripts/setup-clone.ts` luôn bật): upsert với
@@ -26,18 +19,6 @@ const SCRYPT_KEY_LENGTH = 64;
  * (DB trắng) giữ hành vi cũ.
  */
 const CHI_TAO_MOI = process.env.SEED_CHI_TAO_MOI === "1";
-
-/**
- * Băm mật khẩu bằng crypto.scrypt (Node built-in, không cần thêm dependency).
- * Định dạng lưu trữ: "<salt-hex>:<derivedKey-hex>" — verifyPassword() (auth,
- * task 4) tách theo dấu ":", scrypt lại mật khẩu nhập vào với salt đã lưu rồi
- * so sánh derivedKey bằng timingSafeEqual.
- */
-async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString("hex");
-  const derivedKey = (await scrypt(password, salt, SCRYPT_KEY_LENGTH)) as Buffer;
-  return `${salt}:${derivedKey.toString("hex")}`;
-}
 
 const CHANNELS = [
   { id: "shopee", name: "Shopee", color: "#cc785c", platformFeePct: 10, paymentFeePct: 2.5, sortOrder: 1 },
@@ -65,9 +46,11 @@ const SETTINGS = [
 ] as const;
 
 async function seedUser(): Promise<void> {
-  // Mode chỉ-tạo-mới: đã có tài khoản thì bỏ qua hẳn — lượt setup chạy LẠI không được đòi
-  // INIT_EMAIL/INIT_PASSWORD (hai biến này phải xoá khỏi .env ngay sau lượt đầu).
+  // Mode chỉ-tạo-mới: đã có tài khoản thì bỏ qua tạo user — lượt setup chạy LẠI không được đòi
+  // INIT_EMAIL/INIT_PASSWORD (hai biến này phải xoá khỏi .env ngay sau lượt đầu). Hồ sơ shop vẫn
+  // đảm bảo có (chỉ tạo khi thiếu, không ghi đè).
   if (CHI_TAO_MOI && (await prisma.user.count()) > 0) {
+    await damBaoShopProfile(prisma);
     console.log("Đã có tài khoản — bỏ qua seed user (mode chỉ-tạo-mới).");
     return;
   }
@@ -78,27 +61,9 @@ async function seedUser(): Promise<void> {
     );
   }
 
-  // DỪNG NGAY thay vì tạo được tài khoản không đăng nhập nổi. Màn đăng nhập từ chối mật khẩu dài
-  // quá `MAX_PASSWORD_LENGTH` và chỉ trả đúng một thông báo chung ("Email hoặc mật khẩu không
-  // đúng" — cố ý không nói lý do, chống dò tài khoản), nên nếu seed cho qua thì người vận hành sẽ
-  // thấy seed BÁO THÀNH CÔNG rồi đăng nhập hoài không được mà không có manh mối nào; đường thoát
-  // duy nhất lúc đó là sửa tay trong DB. Nguy nhất ở lượt go-live/phục hồi thảm hoạ, đúng lúc
-  // không ai muốn phải mò.
-  if (INIT_PASSWORD.length > MAX_PASSWORD_LENGTH) {
-    throw new Error(
-      `INIT_PASSWORD dài ${INIT_PASSWORD.length} ký tự, vượt trần ${MAX_PASSWORD_LENGTH} của màn ` +
-        `đăng nhập — tài khoản seed ra sẽ KHÔNG đăng nhập được. Rút ngắn mật khẩu rồi chạy lại seed.`
-    );
-  }
-
-  const passwordHash = await hashPassword(INIT_PASSWORD);
-  await prisma.user.upsert({
-    where: { email: INIT_EMAIL },
-    // Không ghi đè passwordHash nếu user đã tồn tại — tránh đổi mật khẩu
-    // ngoài ý muốn mỗi lần re-seed (đổi mật khẩu là việc của màn Cài đặt).
-    update: {},
-    create: { email: INIT_EMAIL, passwordHash },
-  });
+  // Tài khoản chủ shop = OWNER, email chuẩn hoá, không ghi đè hash nếu đã có; trần độ dài mật khẩu
+  // kiểm TRƯỚC khi ghi (tài khoản không đăng nhập nổi là tệ hơn seed thất bại) — xem seed-lib.
+  await seedChuShop(prisma, { email: INIT_EMAIL, password: INIT_PASSWORD });
 }
 
 async function seedChannels(): Promise<void> {
@@ -146,7 +111,10 @@ async function main(): Promise<void> {
   await seedExpenseCategories();
   await seedSettings();
   await seedUser();
-  console.log("Seed hoàn tất: 1 User, 4 Channel, 7 ExpenseCategory, 2 Setting.");
+  console.log(
+    `Seed hoàn tất: 1 User OWNER + ShopProfile, ${CHANNELS.length} Channel, ` +
+      `${EXPENSE_CATEGORIES.length} ExpenseCategory, ${SETTINGS.length} Setting.`
+  );
 }
 
 main()

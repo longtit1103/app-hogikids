@@ -7,9 +7,12 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
  * bằng cách mock `giuKhoaViecNang` ném lỗi, giữ nguyên `traKhoaViecNang` thật (không được gọi vì
  * `theViec` chưa từng có).
  */
-vi.mock("@/lib/session", () => ({
-  getAuthenticatedUserId: vi.fn(async () => "test-user-id"),
-}));
+// Route gác bằng `congChuShopRoute()` — chủ shop giả, không cần cookie/DB phiên.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (importActual) => {
+  const that = await importActual<typeof import("@/lib/quyen/nguoi-dung-phien")>();
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return { ...that, docNguoiDungPhien: vi.fn(async () => nguoiDungGia()) };
+});
 vi.mock("@/lib/backup/run-pg-dump", () => ({
   runPgDump: vi.fn(async () => Buffer.from("PGDMP giả")),
 }));

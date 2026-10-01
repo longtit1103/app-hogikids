@@ -13,7 +13,7 @@ import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
  *  3. Dialog "Xóa dữ liệu giao dịch" bước 2 gõ SAI tên shop → nút "Xóa vĩnh viễn" vẫn khoá.
  *     TUYỆT ĐỐI không xác nhận xóa thật.
  *
- * Chạy SERIAL: test 1 đổi `shopName` (dialog xóa dữ liệu giao dịch đọc `shopName` hiện tại để so khớp
+ * Chạy SERIAL: test 1 đổi `ShopProfile.shopName` (dialog xóa dữ liệu giao dịch đọc `shopName` hiện tại để so khớp
  * xác nhận) và test 2 đổi ngưỡng tồn MẶC ĐỊNH (ảnh hưởng badge của MỌI SKU chưa có ngưỡng
  * riêng) — cả hai là state TOÀN CỤC, chạy song song trong cùng file sẽ đá nhau.
  */
@@ -65,7 +65,7 @@ test.describe("Cài đặt", () => {
       page.locator("aside").getByRole("button").filter({ hasText: name });
 
     await saveShopName(newName);
-    // Khối user cuối sidebar (desktop `<aside>`) đọc `User.shopName` qua `(app)/layout.tsx` —
+    // Khối user cuối sidebar (desktop `<aside>`) đọc `ShopProfile.shopName` qua `(app)/layout.tsx` —
     // action `updateShopInfo` gọi `revalidatePath("/", "layout")` nên đổi ngay, không cần F5.
     await expect(khoiUser(newName)).toBeVisible();
 

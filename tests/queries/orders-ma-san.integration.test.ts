@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { getOrderDetail, getOrderListPage } from "@/lib/queries/orders";
 import { prisma } from "@/lib/prisma";
+import { DAY } from "../helpers/nhanh-quyen-gia-von";
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
 
 /**
@@ -98,8 +99,8 @@ describe("getOrderDetail — Mã sàn trong drawer", () => {
     const shopeeId = rows.find((r) => r.code === "91")!.id;
     const mirrorId = rows.find((r) => r.code === "21")!.id;
 
-    const shopee = await getOrderDetail(shopeeId);
-    const mirror = await getOrderDetail(mirrorId);
+    const shopee = await getOrderDetail(shopeeId, DAY);
+    const mirror = await getOrderDetail(mirrorId, DAY);
     expect(shopee!.maSan).toBe(SHOPEE_MA_SAN);
     expect(mirror!.maSan).toBeNull();
   });

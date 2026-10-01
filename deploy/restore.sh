@@ -29,6 +29,8 @@
 #     → hỏng auth/storage/PostgREST. Hậu kỳ trả quyền CHỈ trong schema đích:
 #     `ALTER SCHEMA <schema> OWNER TO hogikids` + đổi owner từng object (bảng/sequence/view/
 #     ENUM/routine) + cấp lại 2 quyền đọc của role n8n (USAGE schema + SELECT bảng `Setting`).
+#   ✱ Bước CUỐI thu hồi MỌI phiên đăng nhập (`deploy/thu-hoi-phien-sau-phuc-hoi.sql`) — không thì
+#     cookie cấp trong đời bản dump sống lại. Dump đời trước phân quyền: in hướng dẫn migrate + chạy tay.
 #
 # CHỈ nhận bản `pg_dump -Fc` STANDALONE 1-DB (custom .dump) hoặc plain `.sql.gz`.
 # TỪ CHỐI `.tar.gz` backup-toàn-server (chặn TRƯỚC mọi thao tác DB — C1).
@@ -50,6 +52,12 @@ DB_DEFAULT=postgres
 SCHEMA_DEFAULT=app
 CONTAINER=supabase-db
 OWNER_ROLE=hogikids
+
+# Mã thoát RIÊNG cho ca "dữ liệu đã nạp nhưng quy trình CHƯA XONG": dump đời trước phân quyền (chưa có
+# cột `User.sessionEpoch`) ⇒ còn phải `migrate deploy` + thu hồi phiên trước khi mở app. ≠ 0 để mọi
+# khối `bash deploy/restore.sh … && docker compose up -d` tự dừng; khác 1 để §4.2 bắt đúng ca này
+# (`|| [ $? -eq 3 ]`) mà không nuốt lỗi thật.
+MA_THOAT_CHUA_XONG=3
 
 # Hạn chờ (giây) của `LOCK TABLE … ACCESS EXCLUSIVE` trong cổng khoá việc nặng (xem
 # `sql_cong_khoa_viec_nang`). Đây là lock CẤP POSTGRES — khác khoá logic ở giá trị cột `Setting.value`
@@ -86,6 +94,11 @@ KEY_N8N_DUOC_DOC="n8nAppUrl n8nIngestSecret n8nTokenVaultSecret pancakeApiKeyKho
 # src/lib/backup/assert-plain-sql-only-schema.ts (bản twin TS). Sửa một bên PHẢI sửa bên kia;
 # tests/unit/backup/system-schemas-twin-shell-vs-ts.test.ts so hai DANH SÁCH, đỏ ngay khi lệch.
 SYSTEM_SCHEMAS="auth storage vault realtime graphql extensions supabase_functions _realtime pgbouncer net cron pgsodium supabase_migrations"
+
+# Script thu hồi mọi phiên chạy ở bước CUỐI (xem `thu_hoi_phien_sau_phuc_hoi`) — nằm CẠNH file này.
+# Nạp chính file đó thay vì chép câu SQL vào đây: một nguồn duy nhất cho cả đường tự động lẫn đường
+# chạy tay của runbook. `main()` kiểm file tồn tại TRƯỚC mọi thao tác DB.
+THU_HOI_PHIEN_SQL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/thu-hoi-phien-sau-phuc-hoi.sql"
 
 # ---------------------------------------------------------------------------
 # GUARD 1 — TOC custom dump (đường .dump). Hàm THUẦN: đọc output `pg_restore -l`
@@ -664,6 +677,61 @@ END
 \$\$;"
 }
 
+# ---------------------------------------------------------------------------
+# HẬU KỲ 2 — THU HỒI MỌI PHIÊN (spec phân quyền §7.4 bước 4). Chạy SAU `reassign_owner_scoped`.
+#
+# Vì sao BẮT BUỘC với MỌI dump, không riêng dump đời trước phân quyền: cookie phiên là cookie KÝ, không
+# có bản ghi phía máy chủ — hợp lệ khi `mocPhien` trong cookie = `User.sessionEpoch`. Dump mang epoch
+# của ĐỜI CHỤP ⇒ nạp xong mà không đổi epoch là mọi cookie cấp trong đời đó (kể cả cookie đã bị thu hồi
+# SAU lúc chụp — đổi mật khẩu, khoá tài khoản) SỐNG LẠI. Đường phục hồi trong app đã tự làm việc này
+# (`thuHoiMoiPhienCoHan`); đường host thì trước đây không.
+#
+# Dump đời TRƯỚC migration phân quyền: `User` chưa có cột `sessionEpoch` ⇒ file SQL sẽ lỗi. Không tự
+# `migrate deploy` ở đây (cần ảnh app đang lên, và app phải còn dừng) ⇒ in hướng dẫn rồi trả
+# `MA_THOAT_CHUA_XONG` (3): `set -e` dừng main TRƯỚC dòng ✓, script thoát 3 — KHÔNG thoát 0, vì mọi
+# khối `restore.sh && up -d` sẽ mở app trên schema chưa migrate và cookie đời dump chưa bị thu hồi.
+# Runbook §4.2 bắt đúng mã này rồi chạy tiếp migrate + chính file thu hồi.
+#
+# Schema ≠ app: file cố định `SET search_path = app;` và app chỉ đọc schema `app` ⇒ bỏ qua, cảnh báo.
+# ---------------------------------------------------------------------------
+thu_hoi_phien_sau_phuc_hoi() {
+  local db=$1 schema=$2 co_cot
+  if [[ "$schema" != "app" ]]; then
+    echo "!!! Schema '$schema' ≠ app: KHÔNG thu hồi phiên ($THU_HOI_PHIEN_SQL cố định search_path = app; app chỉ đọc schema app)." >&2
+    return 0
+  fi
+  echo ">> Thu hồi mọi phiên đăng nhập (đổi User.sessionEpoch từng người)..." >&2
+  co_cot=$(docker exec "$CONTAINER" psql -U supabase_admin -d "$db" -X -tA -v ON_ERROR_STOP=1 -c \
+    "SELECT count(*) FROM information_schema.columns WHERE table_schema = '$schema' AND table_name = 'User' AND column_name = 'sessionEpoch'") || {
+    echo "✗ LỖI: không kiểm được cột User.sessionEpoch — CHƯA thu hồi phiên. Dữ liệu ĐÃ nạp xong." >&2
+    echo "    GIỮ APP DỪNG, xử lý lỗi kết nối rồi chạy tay:" >&2
+    echo "      docker exec -i $CONTAINER psql -U supabase_admin -d $db -X -v ON_ERROR_STOP=1 < deploy/thu-hoi-phien-sau-phuc-hoi.sql" >&2
+    return 1
+  }
+  case "$co_cot" in
+    1) ;;
+    0)
+      echo "✗ CHƯA XONG — dump đời TRƯỚC phân quyền (User chưa có cột sessionEpoch): dữ liệu ĐÃ nạp, CHƯA thu hồi phiên." >&2
+      echo "    GIỮ APP DỪNG (KHÔNG 'up -d'), làm tiếp theo runbook §4.2 'Phục hồi dump đời trước phân quyền':" >&2
+      echo "      docker compose run --rm app npx --no-install prisma migrate deploy" >&2
+      echo "      docker exec -i $CONTAINER psql -U supabase_admin -d $db -X -v ON_ERROR_STOP=1 < deploy/thu-hoi-phien-sau-phuc-hoi.sql" >&2
+      echo "    rồi mới 'docker compose up -d'. (Thoát mã $MA_THOAT_CHUA_XONG.)" >&2
+      return "$MA_THOAT_CHUA_XONG"
+      ;;
+    *)
+      echo "✗ LỖI: kiểm cột User.sessionEpoch trả kết quả lạ ('$co_cot') — CHƯA thu hồi phiên. GIỮ APP DỪNG, kiểm tay." >&2
+      return 1
+      ;;
+  esac
+  docker exec -i "$CONTAINER" psql -U supabase_admin -d "$db" -X -v ON_ERROR_STOP=1 < "$THU_HOI_PHIEN_SQL" || {
+    echo "✗ LỖI: thu hồi phiên THẤT BẠI — cookie cấp trong đời bản dump có thể SỐNG LẠI. Dữ liệu ĐÃ nạp xong." >&2
+    echo "    GIỮ APP DỪNG, đọc lỗi psql phía trên, sửa rồi chạy tay:" >&2
+    echo "      docker exec -i $CONTAINER psql -U supabase_admin -d $db -X -v ON_ERROR_STOP=1 < deploy/thu-hoi-phien-sau-phuc-hoi.sql" >&2
+    return 1
+  }
+  echo "✓ Đã thu hồi mọi phiên — mọi người phải đăng nhập lại." >&2
+}
+
 main() {
   # --- 0) Tham số --------------------------------------------------------
   if [[ $# -lt 1 || $# -gt 3 ]]; then
@@ -678,6 +746,11 @@ main() {
 
   if [[ ! -f "$F" ]]; then
     echo "Lỗi: không thấy file '$F'." >&2
+    exit 1
+  fi
+  # Kiểm TRƯỚC khi đụng DB: thiếu file này thì bước cuối hỏng SAU KHI schema đã bị thay.
+  if [[ ! -r "$THU_HOI_PHIEN_SQL" ]]; then
+    echo "Lỗi: thiếu '$THU_HOI_PHIEN_SQL' (bước thu hồi phiên sau phục hồi) — chạy restore.sh từ repo đầy đủ. DB KHÔNG bị đụng." >&2
     exit 1
   fi
   # DB/SCHEMA được nội suy thẳng vào SQL + tên container → chỉ cho phép identifier an toàn.
@@ -870,6 +943,12 @@ main() {
   # workflow chết trong im lặng), enum/function ở lại owner cũ (migration sau này bị từ chối).
   # Trả owner + cấp lại quyền CHỈ trong schema đích (KHÔNG REASSIGN OWNED).
   reassign_owner_scoped "$DB" "$SCHEMA"
+
+  # --- 6) Thu hồi mọi phiên (BƯỚC CUỐI) ----------------------------------
+  # Lỗi ⇒ `set -e` dừng script, exit ≠ 0 — dữ liệu đã nạp nhưng cookie đời dump chưa bị chặn. Dump đời
+  # trước phân quyền ⇒ thoát `MA_THOAT_CHUA_XONG`. Gọi TRẦN (không `||`, không `if`): đặt trong ngữ cảnh
+  # điều kiện là `set -e` tắt bên trong hàm và mã lỗi bị nuốt — dòng ✓ in ra dù chưa thu hồi.
+  thu_hoi_phien_sau_phuc_hoi "$DB" "$SCHEMA"
 
   echo "✓ Phục hồi schema '$SCHEMA' của '$DB' xong. Đăng nhập app bằng mật khẩu tại thời điểm bản backup." >&2
 }

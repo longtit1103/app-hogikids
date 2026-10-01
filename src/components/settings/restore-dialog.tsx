@@ -28,8 +28,9 @@ import { BackupButton } from "./backup-button";
  *   khớp → POST /api/restore (FormData) + spinner.
  * - Thành công → toast + điều hướng /dang-nhap; route tự đẩy mốc phiên nên MỌI thiết bị phải đăng
  *   nhập lại, và mật khẩu là mật khẩu đời backup (phải đổi ngay).
- * - 400 (file sai) và 409 (đang bận: lượt phục hồi khác / lượt đồng bộ đang chạy) → DB nguyên vẹn;
- *   500 → gợi ý khôi phục thủ công.
+ * - 400 (file sai), 409 (đang bận: lượt phục hồi khác / lượt đồng bộ đang chạy) và 422 (dump đời
+ *   trước bản phân quyền — phải phục hồi trên host) → DB nguyên vẹn, toast nói rõ điều đó và KHÔNG
+ *   gợi ý bản lùi; 500 → gợi ý khôi phục thủ công.
  */
 export function RestoreDialog({ shopName }: { shopName: string }) {
   const router = useRouter();
@@ -88,6 +89,11 @@ export function RestoreDialog({ shopName }: { shopName: string }) {
         // 409 = từ chối TRƯỚC khi đụng DB (đang có lượt phục hồi khác, hoặc đang có lượt đồng bộ
         // chạy). Câu "khôi phục thủ công/bản lùi" ở nhánh dưới sẽ làm chủ shop tưởng dữ liệu đã bị phá.
         toast.error(message);
+      } else if (res.status === 422) {
+        // 422 = dump đời trước bản phân quyền, route từ chối TRƯỚC khi giành khoá/chụp bản lùi ⇒ không
+        // gì bị đụng. Tách khỏi nhánh 500: câu "khôi phục thủ công/bản lùi" ở đó xui chủ shop đi lùi
+        // về `pre-restore-*.dump` trong khi dữ liệu còn nguyên. Câu server đã chỉ đường runbook.
+        toast.error(`${message.replace(/[.\s]+$/, "")}. Dữ liệu hiện tại không bị đụng tới.`);
       } else {
         toast.error(
           `${message} Khôi phục thủ công/bản lùi: xem hướng dẫn deploy.`,
@@ -184,7 +190,8 @@ export function RestoreDialog({ shopName }: { shopName: string }) {
                   lại bằng <strong className="text-ink">mật khẩu tại thời điểm bản backup</strong> (mật
                   khẩu đã đổi sau đó không còn dùng được, và mật khẩu cũ sống lại).{" "}
                   <strong className="text-ink">Đổi mật khẩu ngay sau khi phục hồi.</strong> Mọi thiết bị
-                  khác cũng bị đăng xuất.
+                  khác cũng bị đăng xuất. Tài khoản nhân sự, quyền, trạng thái khoá và mật khẩu lùi về
+                  đời backup — kiểm lại /quan-tri và đổi mật khẩu.
                 </p>
               )}
 

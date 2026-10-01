@@ -5,6 +5,7 @@ import { feeBadgeLabel, formatPct1, formatRoas } from "@/components/kenh/channel
 import { Badge } from "@/components/ui/badge";
 import { formatVnd } from "@/lib/format";
 import type { ChannelPnl } from "@/lib/reports/pnl";
+import { coLaiKenh, type ChannelPnlChe } from "@/lib/reports/pnl-che";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,22 +21,27 @@ export function ChannelCardGrid({
   prevChannels,
   feePctByChannel,
   compareOn,
+  coQuyenGiaVon,
 }: {
-  /** Kênh ĐANG BẬT, đã zero-fill — xem ghi chú đầu file. */
-  channels: ChannelPnl[];
+  /** Kênh ĐANG BẬT, đã zero-fill — xem ghi chú đầu file. DTO che (không lãi) khi thiếu quyền giá vốn. */
+  channels: readonly (ChannelPnl | ChannelPnlChe)[];
   /** Kết quả `computeChannelPnl(previousRange(range))` — KHÔNG zero-fill (kênh vắng = không có dữ liệu kỳ trước → "Mới"). */
-  prevChannels: ChannelPnl[];
+  prevChannels: readonly (ChannelPnl | ChannelPnlChe)[];
   feePctByChannel: Record<string, number>;
   compareOn: boolean;
+  /** Thiếu quyền giá vốn: không ô LN ròng/Tỷ suất LN, không badge "DẪN ĐẦU" (xếp theo lãi). */
+  coQuyenGiaVon: boolean;
 }) {
   const prevById = new Map(prevChannels.map((c) => [c.channelId, c]));
-  const leaderId = findLeaderChannelId(channels);
+  const leaderId = coQuyenGiaVon ? findLeaderChannelId(channels.filter(coLaiKenh)) : null;
 
   return (
     <div className={cn("grid grid-cols-1 gap-4", channels.length > 1 && "sm:grid-cols-2")}>
       {channels.map((c) => {
         const prev = prevById.get(c.channelId) ?? null;
         const dark = c.channelId === leaderId;
+        const lai = coLaiKenh(c) ? c : null;
+        const laiTruoc = prev && coLaiKenh(prev) ? prev : null;
 
         return (
           <Link
@@ -115,13 +121,15 @@ export function ChannelCardGrid({
                   )
                 }
               />
-              <MetricCell
-                label="LN ròng kênh"
-                value={formatVnd(c.netProfit)}
-                valueClassName={c.netProfit < 0 ? "text-error" : undefined}
-                dark={dark}
-                delta={compareOn && <DeltaLine current={c.netProfit} previous={prev?.netProfit ?? null} dark={dark} />}
-              />
+              {lai && (
+                <MetricCell
+                  label="LN ròng kênh"
+                  value={formatVnd(lai.netProfit)}
+                  valueClassName={lai.netProfit < 0 ? "text-error" : undefined}
+                  dark={dark}
+                  delta={compareOn && <DeltaLine current={lai.netProfit} previous={laiTruoc?.netProfit ?? null} dark={dark} />}
+                />
+              )}
               <MetricCell
                 label="ROAS"
                 value={c.roas === null ? "—" : formatRoas(c.roas)}
@@ -129,12 +137,14 @@ export function ChannelCardGrid({
                 dark={dark}
                 delta={compareOn && <DeltaLine current={c.roas} previous={prev?.roas ?? null} dark={dark} />}
               />
-              <MetricCell
-                label="Tỷ suất LN"
-                value={c.marginPct === null ? "—" : formatPct1(c.marginPct)}
-                dark={dark}
-                delta={compareOn && <DeltaLine current={c.marginPct} previous={prev?.marginPct ?? null} dark={dark} />}
-              />
+              {lai && (
+                <MetricCell
+                  label="Tỷ suất LN"
+                  value={lai.marginPct === null ? "—" : formatPct1(lai.marginPct)}
+                  dark={dark}
+                  delta={compareOn && <DeltaLine current={lai.marginPct} previous={laiTruoc?.marginPct ?? null} dark={dark} />}
+                />
+              )}
             </div>
 
             <p className={cn("mt-4 text-sm", dark ? "text-on-dark" : "text-primary")}>Xem chi tiết →</p>

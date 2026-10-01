@@ -9,6 +9,7 @@ import {
   cungNgay,
   LoiHopDong,
   loiKhoanVay,
+  maLoiNhatKy,
   OPT_TX,
   soTienKySchema,
 } from "@/lib/actions/khoan-vay-chung";
@@ -18,7 +19,9 @@ import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
+import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
 import { listKhoanVay, type KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { lyDoKhongXoaKhoanVay } from "@/lib/so-quy/ly-do-khong-xoa-khoan-vay";
 import { chupVaoThungRac } from "@/lib/thung-rac/ghi-thung-rac";
@@ -248,7 +251,9 @@ const ghiKySchema = z.object({
 });
 
 export async function taoKhoanVay(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = khoanVaySchema.safeParse(input);
@@ -285,6 +290,7 @@ export async function taoKhoanVay(input: unknown): Promise<ActionResult<{ id: st
           },
         });
       }
+      await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_TAO", doiTuong: { loai: "Loan", id: loan.id } });
       return loan.id;
     }, OPT_TX);
 
@@ -303,7 +309,9 @@ export async function taoKhoanVay(input: unknown): Promise<ActionResult<{ id: st
  * `moLai = true` gỡ `closedAt` (nút "Mở lại" ở khoản đã tất toán) — xem `moLaiSchema`.
  */
 export async function suaKhoanVay(id: string, input: unknown): Promise<ActionResult> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = khoanVaySchema.safeParse(input);
@@ -394,6 +402,8 @@ export async function suaKhoanVay(id: string, input: unknown): Promise<ActionRes
       }
 
       await chanDuNoAm(tx, id);
+      // Câu CUỐI, vẫn trong transaction đang giữ khoá dòng `Loan`: nhật ký ném ⇒ bản sửa rollback.
+      await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_SUA", doiTuong: { loai: "Loan", id } });
     }, OPT_TX);
 
     lamMoiTrang();
@@ -404,7 +414,9 @@ export async function suaKhoanVay(id: string, input: unknown): Promise<ActionRes
 }
 
 export async function xoaKhoanVay(id: string): Promise<ActionResult> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   try {
@@ -462,13 +474,28 @@ export async function xoaKhoanVay(id: string): Promise<ActionResult> {
       // FK `onDelete: Restrict` là hàng rào cuối: phải dọn dòng LOAN_IN TRƯỚC rồi mới xoá hồ sơ.
       await tx.cashMovement.deleteMany({ where: { loanId: id } });
       await tx.loan.delete({ where: { id } });
+      await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_XOA", doiTuong: { loai: "Loan", id } });
     }, OPT_TX);
 
     lamMoiTrang();
     return { ok: true, data: undefined };
   } catch (e) {
+    await ghiLoiKhoanVay(nguoiDung, "VAY_XOA", id, e);
     return { ok: false, ...loiKhoanVay(e, "Lỗi khi xoá khoản vay") };
   }
+}
+
+/**
+ * Dòng nhật ký LOI của lượt ghi tiền khoản vay bị từ chối / hỏng (sau khi transaction rollback). Chỉ
+ * mã lỗi ngắn (`maLoiNhatKy`), không câu báo — câu báo có thể mang số tiền.
+ */
+async function ghiLoiKhoanVay(
+  nguoiDung: NguoiDung,
+  hanhDong: "VAY_XOA" | "VAY_TAT_TOAN" | "VAY_GHI_KY",
+  id: string,
+  e: unknown
+): Promise<void> {
+  await ghiNhatKyLoi({ actor: nguoiDung, hanhDong, doiTuong: { loai: "Loan", id }, ghiChu: { lyDo: maLoiNhatKy(e) } });
 }
 
 /**
@@ -485,7 +512,9 @@ const tatToanInputSchema = z
   .optional();
 
 export async function tatToanKhoanVay(id: string, input?: unknown): Promise<ActionResult> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = tatToanInputSchema.safeParse(input);
@@ -561,11 +590,13 @@ export async function tatToanKhoanVay(id: string, input?: unknown): Promise<Acti
       }
 
       await tx.loan.update({ where: { id }, data: { closedAt: new Date() } });
+      await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_TAT_TOAN", doiTuong: { loai: "Loan", id } });
     }, OPT_TX);
 
     lamMoiTrang();
     return { ok: true, data: undefined };
   } catch (e) {
+    await ghiLoiKhoanVay(nguoiDung, "VAY_TAT_TOAN", id, e);
     return { ok: false, ...loiKhoanVay(e, "Lỗi khi tất toán khoản vay") };
   }
 }
@@ -585,6 +616,7 @@ function themVetBoQua(cu: string, nhan: string): string {
 }
 
 type ThamSoGhiKy = {
+  nguoiDung: NguoiDung;
   loan: KhoanVayRow;
   ngayKy: Date;
   nhan: string;
@@ -606,6 +638,7 @@ type ThamSoGhiKy = {
  * nằm trong chính câu UPDATE — lý do đầy đủ ở khối chú thích cạnh `OPT_TX` bên dưới.
  */
 async function chayGhiKy({
+  nguoiDung,
   loan,
   ngayKy,
   nhan,
@@ -696,7 +729,15 @@ async function chayGhiKy({
         });
       }
 
-      return chanDuNoAm(tx, loan.id);
+      const duNo = await chanDuNoAm(tx, loan.id);
+      // Câu CUỐI, cùng transaction giữ khoá `Loan` + con dấu: nhật ký ném ⇒ cả kỳ rollback.
+      await ghiNhatKy(tx, {
+        actor: nguoiDung,
+        hanhDong: "VAY_GHI_KY",
+        doiTuong: { loai: "Loan", id: loan.id },
+        ghiChu: { ky: format(ngayKy, "yyyy-MM-dd"), ...(boQua ? { lyDo: "BO_QUA_KY" } : {}) },
+      });
+      return duNo;
     },
     // CỐ Ý ĐỂ ISOLATION MẶC ĐỊNH (ReadCommitted), KHÔNG Serializable — spec §5.3 viết Serializable,
     // đo lại 08/09 cho thấy chọn thế là SAI ở đúng chỗ nó định đỡ:
@@ -738,7 +779,9 @@ async function chayGhiKyCoRetry(tham: ThamSoGhiKy): Promise<number> {
  * này: chỉ đóng dấu + để vết.
  */
 export async function ghiKyTraNo(input: unknown): Promise<ActionResult<{ duNoConLai: number }>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = ghiKySchema.safeParse(input);
@@ -773,10 +816,11 @@ export async function ghiKyTraNo(input: unknown): Promise<ActionResult<{ duNoCon
   const nhan = format(ngayKy, "dd/MM/yyyy");
 
   try {
-    const duNoConLai = await chayGhiKyCoRetry({ loan, ngayKy, nhan, lai, goc, tienGui, boQua });
+    const duNoConLai = await chayGhiKyCoRetry({ nguoiDung, loan, ngayKy, nhan, lai, goc, tienGui, boQua });
     lamMoiTrang();
     return { ok: true, data: { duNoConLai } };
   } catch (e) {
+    await ghiLoiKhoanVay(nguoiDung, "VAY_GHI_KY", loanId, e);
     return { ok: false, ...loiKhoanVay(e, "Lỗi khi ghi kỳ trả nợ") };
   }
 }

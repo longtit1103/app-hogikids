@@ -11,14 +11,34 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * tham số truyền vào một hàm giả.
  */
 vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "chu-shop"),
   docGhiNhoCuaPhien: vi.fn(async () => true),
-  thuHoiMoiPhien: vi.fn(async () => undefined),
+  thuHoiPhienCuaNguoi: vi.fn(async () => "moc-moi"),
   createSession: vi.fn(async () => undefined),
+}));
+// Người đang gọi đổi mật khẩu = chủ shop giả, epoch "0" (khớp dòng khoá `FOR UPDATE` bên dưới).
+vi.mock("@/lib/quyen/cong-action", () => ({
+  congAction: vi.fn(async () => ({
+    ok: true,
+    nguoiDung: {
+      id: "chu-shop",
+      email: "tach-namespace-khoa@hogikids.test",
+      tenHienThi: "",
+      role: "OWNER",
+      quyen: new Set(),
+      phaiDoiMatKhau: false,
+      mocPhien: "0",
+    },
+  })),
+}));
+// Nhật ký không phải thứ bài này đo — tắt để không cần bảng `AuditLog` trong prisma giả.
+vi.mock("@/lib/nhat-ky/ghi-nhat-ky", () => ({
+  ghiNhatKy: vi.fn(async () => undefined),
+  ghiNhatKyLoi: vi.fn(async () => undefined),
 }));
 vi.mock("@/lib/prisma", () => {
   const prisma = {
     user: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    $queryRaw: vi.fn(async () => [{ sessionEpoch: "0", mustChangePassword: false, isActive: true }]),
     $transaction: vi.fn(),
   };
   prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
@@ -38,7 +58,7 @@ import { prisma } from "@/lib/prisma";
 
 const EMAIL = "tach-namespace-khoa@hogikids.test";
 const KHOA_DOI_MK = `doimatkhau:${EMAIL}`;
-const USER = { id: "chu-shop", email: EMAIL, passwordHash: "hash-current" };
+const USER = { id: "chu-shop", email: EMAIL, passwordHash: "hash-current", sessionEpoch: "0", isActive: true };
 
 function formDoiMk(current: string, next: string): FormData {
   const fd = new FormData();

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { format } from "date-fns";
 
 import {
+  dangPhucHoi,
   giaHanKhoaPhucHoi,
   laChuKhoaPhucHoi,
   LoiMatKhoaPhucHoi,
@@ -18,15 +19,33 @@ import {
   type TheKhoa,
   traKhoaViecNang,
 } from "@/lib/backup/khoa-viec-nang";
+import { LoiBackupTruocPhanQuyen } from "@/lib/backup/kiem-migration-trong-dump";
 import { runPgDump } from "@/lib/backup/run-pg-dump";
-import { assertNotArchive, detectRestoreFormat, gunzipHead, runRestore } from "@/lib/backup/run-restore";
+import {
+  assertNotArchive,
+  detectRestoreFormat,
+  gunzipHead,
+  kiemDumCoM1,
+  runRestore,
+} from "@/lib/backup/run-restore";
 import { thuHoiMoiPhienCoHan } from "@/lib/backup/thu-hoi-phien-co-han";
 import { chanRequestKhacOrigin } from "@/lib/chan-request-khac-origin";
 import { coLuotDangChay } from "@/lib/ingest/sync-log";
-import { getAuthenticatedUserId } from "@/lib/session";
+import { ghiNhatKy, ghiNhatKyLoi, type ActorNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
+import { prisma } from "@/lib/prisma";
+import { congChuShopRoute } from "@/lib/quyen/cong-route";
 
-const BACKUP_DIR = "/backups";
 const KEEP_PRE_RESTORE = 3;
+
+/**
+ * Thư mục bản lùi `pre-restore-*.dump`. Container mount `/backups`; `BACKUP_DIR` chỉ để test/dev
+ * trỏ sang thư mục tạm (cùng biến với lượt ghi giá vốn). Đọc lúc GỌI, không lúc nạp module — thứ tự
+ * import ESM quyết định giá trị đọc lúc nạp, khó thấy và chỉ vỡ trong test.
+ */
+function thuMucBackup(): string {
+  return process.env.BACKUP_DIR ?? "/backups";
+}
 
 /**
  * Câu cảnh báo cho ca "nạp xong rồi mới phát hiện mất khoá". Dùng chung 3 nhánh (mất trước khi thu
@@ -71,9 +90,10 @@ const VIEC_PHUC_HOI = "phục hồi dữ liệu từ bản sao lưu";
  *
  * TÍNH NĂNG NGUY HIỂM NHẤT app: sai thứ tự = DROP schema rồi mới fail nạp → xoá
  * đúng DB đang cần cứu. THỨ TỰ GUARD LÀ SỐNG-CÒN (C1):
- *   401 (không phiên) → cap size 200MB (413, chưa đọc bytes) → detect (chưa đụng
+ *   401 (không phiên) / 403 (không phải chủ shop) → cap size 200MB (413, chưa đọc bytes) → detect (chưa đụng
  *   DB) → (plain-gzip) gunzip HEAD bounded + assertNotArchive (chặn .tar.gz
- *   toàn-server TRƯỚC mọi DROP) → GIÀNH KHOÁ BẢO TRÌ (409 nếu bận) → GIÀNH KHOÁ
+ *   toàn-server TRƯỚC mọi DROP) → guard schema (400) rồi cổng "dump đời trước phân quyền" (422), cả hai
+ *   chỉ đọc file → GIÀNH KHOÁ BẢO TRÌ (409 nếu bận) → GIÀNH KHOÁ
  *   VIỆC NẶNG (409 kèm tên việc nếu một writer chạy dài còn sống thật — xem (3b)) →
  *   DRAIN SyncLog: còn lượt đồng bộ đang chạy thì 409 (khoá chỉ chặn request MỚI,
  *   lượt vào trước vẫn đang ghi) → pre-restore backup (không có bản lùi thì KHÔNG
@@ -98,11 +118,105 @@ const VIEC_PHUC_HOI = "phục hồi dữ liệu từ bản sao lưu";
  * DATABASE_URL. `/backups` là volume mount (`./backups` host) — bền qua rebuild.
  */
 export async function POST(request: Request): Promise<Response> {
-  const userId = await getAuthenticatedUserId();
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Chỉ chủ shop: phục hồi thay TOÀN BỘ dữ liệu, kể cả tài khoản nhân sự và quyền của họ.
+  const cong = await congChuShopRoute();
+  if (!cong.ok) return cong.response;
 
+  // Nhật ký ghi SAU khi `phucHoi` trả về — lúc đó `finally` của nó đã nhả khoá bảo trì + khoá việc
+  // nặng. Kết cục thu hồi phiên đi qua `vet.thuHoiPhien` (không suy từ mã HTTP). Xem `ghiNhatKyPhucHoi`.
+  const vet: VetPhucHoi = { thuHoiPhien: "KHONG_TOI" };
+  const response = await phucHoi(request, vet);
+  await ghiNhatKyPhucHoi(response, vet, { id: cong.nguoiDung.id, email: cong.nguoiDung.email });
+  return response;
+}
+
+/**
+ * Kết cục bước thu hồi phiên — căn cứ DUY NHẤT để nhật ký ghi OK hay LOI cho lượt đã nạp xong.
+ * - `KHONG_TOI`: dừng trước bước nạp (mọi nhánh 4xx/5xx) — dữ liệu còn nguyên.
+ * - `XONG`: nạp xong, đã đẩy mốc phiên VÀ vẫn là chủ khoá sau đó.
+ * - `MAT_KHOA`: nạp xong nhưng mất khoá bảo trì trước/sau/trong lúc thu hồi phiên.
+ * - `LOI`: nạp xong, vẫn giữ khoá, nhưng câu thu hồi phiên ném.
+ */
+type KetQuaThuHoiPhien = "KHONG_TOI" | "XONG" | "MAT_KHOA" | "LOI";
+
+/** Điều `phucHoi` biết được về file + kết cục, để ghi nhật ký sau khi đã nhả khoá. */
+type VetPhucHoi = { dinhDang?: string; kichThuoc?: number; thuHoiPhien: KetQuaThuHoiPhien };
+
+/**
+ * Mã lý do CỐ ĐỊNH cho ca "nạp xong nhưng chưa thu hồi được phiên" — HTTP vẫn 200 kèm `canhBao`
+ * (dữ liệu đã bị thay, nói "chưa làm gì" là xui chủ shop bấm lại), còn nhật ký phải là LOI: thiết bị
+ * khác có thể còn đăng nhập bằng phiên đời backup. Mã thay vì câu tự do để lọc/đếm được.
+ */
+const LY_DO_CHUA_THU_HOI_PHIEN: Readonly<Record<"MAT_KHOA" | "LOI", string>> = {
+  MAT_KHOA: "CHUA_THU_HOI_PHIEN_MAT_KHOA",
+  LOI: "CHUA_THU_HOI_PHIEN_LOI",
+};
+
+/**
+ * Lý do từ chối theo mã HTTP — chuỗi CỐ ĐỊNH, không chép câu lỗi (câu guard có thể trích tên object lấy
+ * từ file tải lên; `ghiChu` nhật ký không nhận chuỗi tự do từ đầu vào).
+ */
+const LY_DO_THEO_MA: Readonly<Record<number, string>> = {
+  400: "File sao lưu không hợp lệ",
+  403: "Request khác origin",
+  409: "Đang bận hoặc mất khoá giữa chừng — dữ liệu còn nguyên",
+  413: "File quá lớn",
+  422: "Bản sao lưu đời trước phân quyền",
+  500: "Phục hồi thất bại",
+};
+
+/**
+ * Nhật ký `PHUC_HOI` — gọi SAU khi `phucHoi` đã trả (khoá đã nhả).
+ *
+ * Quyết định theo `vet.thuHoiPhien`, KHÔNG theo `response.ok`: nhánh nạp xong mà chưa thu hồi được
+ * phiên vẫn trả 200 (kèm `canhBao`), dựa vào mã HTTP là ghi nhầm OK.
+ *
+ * - OK (chỉ `XONG`): ghi vào DB VỪA phục hồi — đúng chỗ: đó là sự kiện của DB hiện hành, và ghi TRƯỚC
+ *   lúc nạp là bị chính bản sao lưu xoá mất. Không có cổng tự bỏ qua như `ghiNhatKyLoi` nên tự kiểm
+ *   `dangPhucHoi()`: một lượt khác đang giữ khoá ⇒ ghi lúc này là chen vào schema lượt kia đang thay —
+ *   bỏ dòng (log console). Lỗi ghi bị nuốt: dữ liệu đã nạp xong, không được biến lượt phục hồi thành
+ *   công thành 500.
+ * - LOI `MAT_KHOA`/`LOI`: nạp xong nhưng chưa thu hồi phiên — mã lý do cố định.
+ * - LOI `KHONG_TOI` (mọi mã ≥ 400 sau cổng chủ shop): lý do theo mã HTTP.
+ * Mọi dòng LOI đi qua `ghiNhatKyLoi` — nó tự bỏ qua khi đang có lượt phục hồi giữ khoá (vd 409 "lượt
+ * khác đang chạy", hoặc lượt khác đã giành khoá lượt này đánh rơi) và tự nuốt lỗi ghi.
+ */
+async function ghiNhatKyPhucHoi(response: Response, vet: VetPhucHoi, actor: ActorNhatKy): Promise<void> {
+  const doiTuong =
+    vet.dinhDang !== undefined
+      ? { loai: "BanSaoLuu", moTa: `${vet.dinhDang} · ${vet.kichThuoc ?? 0} byte` }
+      : undefined;
+  if (vet.thuHoiPhien === "XONG") {
+    if (dangPhucHoi()) {
+      console.error("[nhat-ky] Bỏ dòng PHUC_HOI OK: một lượt phục hồi khác đang giữ khoá bảo trì.");
+      return;
+    }
+    try {
+      await ghiNhatKy(prisma, {
+        hanhDong: HANH_DONG.PHUC_HOI,
+        actor,
+        doiTuong,
+      });
+    } catch (loi) {
+      console.error("[nhat-ky] Không ghi được dòng PHUC_HOI OK sau khi đã nạp xong:", loi);
+    }
+    return;
+  }
+  await ghiNhatKyLoi({
+    hanhDong: HANH_DONG.PHUC_HOI,
+    actor,
+    doiTuong,
+    ghiChu: {
+      lyDo:
+        vet.thuHoiPhien === "KHONG_TOI"
+          ? (LY_DO_THEO_MA[response.status] ?? `Mã ${response.status}`)
+          : LY_DO_CHUA_THU_HOI_PHIEN[vet.thuHoiPhien],
+    },
+  });
+}
+
+/** Thân phục hồi (sau cổng chủ shop). Ghi `vet` để `POST` ghi nhật ký sau khi khoá đã nhả. */
+async function phucHoi(request: Request, vet: VetPhucHoi): Promise<Response> {
   // Next KHÔNG tự so Origin/Host cho Route Handler (chỉ cho Server Action) — route phá huỷ nhất
   // của app phải tự gác. Xem lý do đầy đủ ở `chanRequestKhacOrigin`.
   const khacOrigin = chanRequestKhacOrigin(request);
@@ -140,6 +254,8 @@ export async function POST(request: Request): Promise<Response> {
   // (1) Nhận diện định dạng — CHƯA đụng DB. Không hợp lệ → 400.
   const head = fileBuf.subarray(0, 512);
   const fmt = detectRestoreFormat(head);
+  vet.kichThuoc = fileBuf.length;
+  if (fmt !== null) vet.dinhDang = fmt;
   if (fmt === null) {
     return Response.json(
       { error: "File backup không hợp lệ (chỉ nhận .dump hoặc .sql.gz)" },
@@ -158,6 +274,30 @@ export async function POST(request: Request): Promise<Response> {
       const message = err instanceof Error ? err.message : "File backup không hợp lệ.";
       return Response.json({ error: message }, { status: 400 });
     }
+  }
+
+  // (2b) TOÀN BỘ guard chỉ-đọc-file — guard schema (mục lục `pg_restore -l` + `assertDumpOnlySchema`
+  // / bung có trần + `assertPlainSqlOnlySchema`) RỒI MỚI cổng "dump đời trước phân quyền" (M1).
+  // Không đụng DB. Đặt TRƯỚC khoá bảo trì, khoá việc nặng, bản lùi và prune: đặt sau thì mỗi lần chủ
+  // shop chọn nhầm file, route chụp một bản lùi rác rồi prune đẩy một bản lùi THẬT ra ngoài (chỉ giữ
+  // KEEP_PRE_RESTORE bản) — nhầm đủ số lần là mất sạch lưới an toàn của các lượt phục hồi trước.
+  // `runRestore` vẫn tự kiểm lại (phòng thủ nhiều lớp), nên nhánh 422 trong catch của bước (5) giữ.
+  //
+  // Thứ tự guard quyết định MÃ LỖI: file không phải backup của app (schema khác, nhiều schema) phải
+  // ra 400 kèm câu guard, KHÔNG phải 422 "đời trước phân quyền" chỉ sang quy trình host. Chỉ file
+  // đúng schema `app` mà thiếu/chưa hoàn tất M1 mới là 422.
+  //
+  // Lỗi khác (file .dump hỏng pg_restore không đọc được, .sql.gz vượt trần bung nén, lệnh đọc quá
+  // hạn) cũng dừng ở đây với 400: chưa giành khoá, chưa ghi gì — dữ liệu hiện tại còn nguyên, đúng
+  // câu modal hiện cho 400. Để chúng rơi xuống bước (5) là 500 kèm gợi ý đi lùi bản lùi — sai.
+  try {
+    await kiemDumCoM1(fileBuf, fmt);
+  } catch (err) {
+    if (err instanceof LoiBackupTruocPhanQuyen) {
+      return Response.json({ error: err.message }, { status: 422 });
+    }
+    const message = err instanceof Error ? err.message : "Không đọc được file backup.";
+    return Response.json({ error: message }, { status: 400 });
   }
 
   // (3) KHOÁ BẢO TRÌ — giành TRƯỚC pre-backup. Giành sau sẽ để hai lượt cùng chụp
@@ -251,14 +391,15 @@ export async function POST(request: Request): Promise<Response> {
     // KHÔNG restore (không phá khi chưa có bản lùi).
     try {
       const preRestore = await runPgDump();
-      await mkdir(BACKUP_DIR, { recursive: true });
+      const thuMuc = thuMucBackup();
+      await mkdir(thuMuc, { recursive: true });
       // Giây + hậu tố ngẫu nhiên: mốc giây một mình KHÔNG đủ tách hai lượt phục hồi
       // (khoá bảo trì cho phép lượt sau chạy ngay khi lượt trước xong, vẫn có thể rơi
       // vào cùng giây) — trùng tên là ghi đè mất đúng điểm rollback vừa tạo. Tên vẫn
       // giữ tiền tố thời gian nên sort lexicographic vẫn ra thứ tự thời gian.
       const preName = `pre-restore-${format(new Date(), "yyyyMMdd-HHmmss")}-${randomBytes(3).toString("hex")}.dump`;
-      await writeFile(join(BACKUP_DIR, preName), preRestore);
-      await prunePreRestoreBackups();
+      await writeFile(join(thuMuc, preName), preRestore);
+      await prunePreRestoreBackups(thuMuc);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Không tạo được bản lùi trước khi phục hồi.";
       return Response.json(
@@ -305,9 +446,9 @@ export async function POST(request: Request): Promise<Response> {
         },
       });
 
-      // Phục hồi nạp lại CẢ dòng `sessionEpoch` đời backup ⇒ mốc phiên bị LÙI, nên cookie cấp trong
-      // khoảng thời gian đó lại khớp mốc và vào được. Đẩy mốc lên hiện tại để mọi thiết bị phải đăng
-      // nhập lại. Đây KHÔNG phải vá bảo mật: `User.passwordHash` cũng bị lùi nên mật khẩu đời backup
+      // Phục hồi nạp lại CẢ cột `User.sessionEpoch` đời backup ⇒ mốc phiên từng người bị LÙI, nên
+      // cookie cấp trong khoảng thời gian đó lại khớp mốc và vào được. Đẩy mốc MỌI người sang giá trị
+      // mới để mọi thiết bị phải đăng nhập lại. Đây KHÔNG phải vá bảo mật: `User.passwordHash` cũng bị lùi nên mật khẩu đời backup
       // sống lại — chủ shop phải tự đổi mật khẩu, xem cảnh báo ở modal phục hồi.
       //
       // Lỗi ở bước này KHÔNG được biến lượt phục hồi thành công thành 500 (dữ liệu đã nạp xong rồi;
@@ -315,9 +456,9 @@ export async function POST(request: Request): Promise<Response> {
       //
       // FENCING lần 4, và từ đây CỐ Ý KHÔNG trả 409 nữa: bước nạp đã chạy xong, dữ liệu đã bị thay —
       // trả 409 ("bận, chưa làm gì") là nói dối theo hướng nguy hiểm nhất, chủ shop sẽ bấm phục hồi
-      // lại lần nữa. Mất khoá ở đây thì bỏ luôn `thuHoiMoiPhien()`: nó là một câu GHI, mà mất khoá
-      // nghĩa là có thể một lượt khác đang drop + nạp chính schema đó — ghi thêm vào là đúng kiểu
-      // xen kẽ khoá này sinh ra để chặn. Trả `ok` kèm cảnh báo nói thẳng cả hai chuyện: phiên chưa
+      // lại lần nữa. Mất khoá ở đây thì bỏ luôn `thuHoiMoiPhienCoHan()` (đẩy `User.sessionEpoch` của
+      // MỌI người): nó là một câu GHI, mà mất khoá nghĩa là có thể một lượt khác đang drop + nạp
+      // chính schema đó — ghi thêm vào là đúng kiểu xen kẽ khoá này sinh ra để chặn. Trả `ok` kèm cảnh báo nói thẳng cả hai chuyện: phiên chưa
       // thu hồi, VÀ dữ liệu vừa nạp có thể đã bị lượt khác đè.
       //
       // GIA HẠN (không chỉ kiểm) trước khi bắt đầu: giữa lệnh nạp và đây còn `unlink` file tạm và
@@ -340,15 +481,26 @@ export async function POST(request: Request): Promise<Response> {
             "ghi vào schema mà lượt kia đang thay. Kiểm log phía trên xem treo ở đâu.",
         );
         canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
+        vet.thuHoiPhien = "MAT_KHOA";
       } else {
         try {
           await thuHoiMoiPhienCoHan();
-          if (!laChuKhoaPhucHoi(thePhien)) canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
+          if (laChuKhoaPhucHoi(thePhien)) {
+            vet.thuHoiPhien = "XONG";
+          } else {
+            canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
+            vet.thuHoiPhien = "MAT_KHOA";
+          }
         } catch {
-          canhBao = laChuKhoaPhucHoi(thePhien)
-            ? "Đã phục hồi xong nhưng KHÔNG đẩy được mốc thu hồi phiên — thiết bị khác có thể còn đăng nhập. " +
-              "Khởi động lại container app rồi đổi mật khẩu ngay."
-            : CANH_BAO_MAT_KHOA_SAU_NAP;
+          if (laChuKhoaPhucHoi(thePhien)) {
+            canhBao =
+              "Đã phục hồi xong nhưng KHÔNG đẩy được mốc thu hồi phiên — thiết bị khác có thể còn đăng nhập. " +
+              "Khởi động lại container app rồi đổi mật khẩu ngay.";
+            vet.thuHoiPhien = "LOI";
+          } else {
+            canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
+            vet.thuHoiPhien = "MAT_KHOA";
+          }
         }
       }
 
@@ -360,6 +512,12 @@ export async function POST(request: Request): Promise<Response> {
       // duy nhất ném nó nằm trước lệnh phá huỷ đầu tiên.
       if (err instanceof LoiMatKhoaPhucHoi) return traLoiMatKhoa(err.buoc);
       if (err instanceof MatKhoaViecNang) return traLoiMatKhoaViecNang("chuẩn bị file để nạp");
+      // Dump chụp trước migration phân quyền: `runRestore` từ chối TRƯỚC chốt phá huỷ ⇒ dữ liệu còn
+      // nguyên. 422 (file hợp lệ nhưng không nạp qua giao diện được) kèm lối đi quy trình trên host.
+      // Cổng (2b) đã chặn trường hợp này trước khi chụp bản lùi; nhánh này là lớp phòng thủ thứ hai.
+      if (err instanceof LoiBackupTruocPhanQuyen) {
+        return Response.json({ error: err.message }, { status: 422 });
+      }
 
       const message = err instanceof Error ? err.message : "Phục hồi thất bại.";
       return Response.json(
@@ -372,7 +530,7 @@ export async function POST(request: Request): Promise<Response> {
   } finally {
     // Trả cờ bảo trì (RAM, đồng bộ) TRƯỚC MỌI I/O: bước trả lease dưới đây là một câu ghi DB có
     // thể TREO (không chỉ ném) — để nó đứng trước thì một cú treo giữ cả app ở chế độ chỉ-đọc tới
-    // hết TTL 46' và response không bao giờ về tay chủ shop. Cờ RAM trả xong thì cú treo (nếu có)
+    // hết TTL (~50') và response không bao giờ về tay chủ shop. Cờ RAM trả xong thì cú treo (nếu có)
     // chỉ còn kéo dài response, app đã ghi lại được, và lease tự hết hạn sau tối đa 5'.
     traKhoaPhucHoi(thePhien);
     if (khoaViec) {
@@ -467,13 +625,13 @@ function traLoiMatKhoa(buoc: string): Response {
 }
 
 /** Giữ ~KEEP_PRE_RESTORE bản `pre-restore-*.dump` mới nhất, xoá phần cũ hơn. */
-async function prunePreRestoreBackups(): Promise<void> {
+async function prunePreRestoreBackups(thuMuc: string): Promise<void> {
   try {
-    const names = (await readdir(BACKUP_DIR))
+    const names = (await readdir(thuMuc))
       .filter((n) => n.startsWith("pre-restore-") && n.endsWith(".dump"))
       .sort(); // tên yyyyMMdd-HHmmss sort lexicographic = theo thời gian.
     const stale = names.slice(0, Math.max(0, names.length - KEEP_PRE_RESTORE));
-    await Promise.all(stale.map((n) => unlink(join(BACKUP_DIR, n)).catch(() => {})));
+    await Promise.all(stale.map((n) => unlink(join(thuMuc, n)).catch(() => {})));
   } catch {
     // Prune lỗi không được chặn phục hồi — bỏ qua.
   }

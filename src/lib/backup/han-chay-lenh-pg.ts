@@ -61,12 +61,28 @@ export const HAN_PG_DUMP_MS = 10 * 60_000;
 export const HAN_NAP_PHUC_HOI_MS = 20 * 60_000;
 
 /**
- * Tổng hạn TỐI ĐA của chuỗi lệnh trong một lượt phục hồi, tính theo nhánh dài nhất (plain-gzip):
- * `pg_dump` bản lùi → hỏi quyền tạo schema → dọn schema → nạp `psql -f` → cấp lại quyền n8n.
- * Nhánh custom ngắn hơn (đọc mục lục → nạp → cấp lại quyền) nên vẫn nằm trong hạn này.
+ * Ngân sách số lệnh NHANH (`HAN_LENH_NHANH_MS`) trong vùng giữ khoá phục hồi, dùng để tính TTL.
+ *
+ * Đếm 01/10/2026 (test `restore-dem-lenh-nhanh-trong-vung-khoa.test.ts` đếm lệnh thật): MỖI nhánh
+ * của `runRestore` chạy đúng 3 lệnh nhanh —
+ *  - custom: `pg_restore -l` (mục lục) + `pg_restore -a … -f -` (bung `_prisma_migrations`) + GRANT n8n;
+ *  - plain: hỏi quyền tạo schema + dọn schema + GRANT n8n.
+ * Cổng sớm `kiemDumCoM1` của route cũng chạy `-l`/`-a` nhưng TRƯỚC khi giành khoá ⇒ không tính.
+ *
+ * 5 = 3 đo được + biên 2. Trước đây hệ số gõ cứng đúng bằng số đo (biên 0): thêm một lệnh nhanh vào
+ * một nhánh là TTL hụt mà không test nào đỏ. Nay test đếm đòi `số lệnh + 2 ≤ ngân sách` — thêm lệnh
+ * mà không nới con số này là đỏ ngay. Nới thêm 1 = TTL dài thêm 2 phút (chỉ ảnh hưởng ca app chết
+ * giữa lượt phục hồi: cờ kẹt lâu hơn chừng đó).
+ */
+export const NGAN_SACH_LENH_NHANH = 5;
+
+/**
+ * Tổng hạn TỐI ĐA của chuỗi lệnh trong một lượt phục hồi: `pg_dump` bản lùi (route) + bước nạp +
+ * `NGAN_SACH_LENH_NHANH` lệnh nhanh. Hai nhánh (custom / plain-gzip) đều có đúng 1 lệnh nạp và
+ * cùng số lệnh nhanh, nên một công thức phủ cả hai.
  */
 export const TONG_HAN_LENH_TOI_DA_MS =
-  HAN_PG_DUMP_MS + HAN_NAP_PHUC_HOI_MS + 3 * HAN_LENH_NHANH_MS;
+  HAN_PG_DUMP_MS + HAN_NAP_PHUC_HOI_MS + NGAN_SACH_LENH_NHANH * HAN_LENH_NHANH_MS;
 
 /**
  * `statement_timeout` cho câu đẩy mốc thu hồi phiên chạy SAU khi nạp xong. Prisma KHÔNG có hạn
@@ -74,7 +90,7 @@ export const TONG_HAN_LENH_TOI_DA_MS =
  * lượt phục hồi giữ cờ tới hết TTL rồi mới nhả.
  *
  * Phải NGẮN HƠN NHIỀU so với phần TTL còn lại tại thời điểm đó: khoá vừa được gia hạn ngay trước
- * bước nạp, nên khi tới đây còn ít nhất `TTL − HAN_NAP_PHUC_HOI_MS − HAN_LENH_NHANH_MS` (≈24 phút).
+ * bước nạp, nên khi tới đây còn ít nhất `TTL − HAN_NAP_PHUC_HOI_MS − HAN_LENH_NHANH_MS` (≈28 phút với TTL 50 phút).
  * Một `upsert` đúng một dòng chạy trong vài mili giây, nên 30s đã là rộng gấp hàng nghìn lần.
  *
  * ⚠️ Hạn này ĐỨNG NGOÀI chuỗi `lock_timeout < statement_timeout < hạn lệnh` ở đầu file — đừng xếp

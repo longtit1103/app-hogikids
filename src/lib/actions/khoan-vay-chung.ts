@@ -57,3 +57,15 @@ export function cungNgay(a: Date, b: Date): boolean {
  * của lượt trước nhả ra — mặc định 5s quá sát.
  */
 export const OPT_TX = { timeout: 10_000, maxWait: 5_000 } as const;
+
+/**
+ * Mã lỗi NGẮN cho `ghiChu.lyDo` của dòng nhật ký LOI (lượt ghi tiền bị từ chối / hỏng): mã Prisma
+ * (`P2025`…) nếu có, không thì tên lớp lỗi (`LoiDuNoAm`, `LoiHopDong`…). CỐ Ý không ghi `message` —
+ * câu báo có thể chứa số tiền / dữ liệu form, nhật ký chỉ cần biết LOẠI lỗi.
+ */
+export function maLoiNhatKy(e: unknown): string {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code)) return code;
+  if (e instanceof Error && /^[A-Za-z0-9_]{1,60}$/.test(e.name)) return e.name;
+  return "KHONG_RO";
+}

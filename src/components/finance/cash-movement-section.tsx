@@ -1,4 +1,4 @@
-import type { CashMovementRow } from "@/lib/cash-movements/cash-movement-queries";
+import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
 import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
@@ -22,16 +22,22 @@ export function CashMovementSection({
   loans,
   soTietKiem,
   d0,
+  choPhepSua = false,
+  choPhepSuaDongSoQuy = false,
 }: {
   inTotal: number;
   outTotal: number;
-  rows: CashMovementRow[];
+  rows: readonly (CashMovementRow | CashMovementRowCoBan)[];
   /** Danh sách khoản vay cho ô chọn trong modal ghi tay (dòng Vay vốn / Trả nợ gốc). */
   loans: KhoanVayRow[];
   /** Sổ tiết kiệm cho ô chọn ở form ghi tay khi loại dòng là `SAVINGS_OUT`/`SAVINGS_IN`. */
   soTietKiem: SoTietKiemRow[];
   /** Ngày mở sổ quỹ (`soQuy.d0`); null = chưa mở sổ. Modal cần để hỏi lại khi ghi lùi trước D0. */
   d0: Date | null;
+  /** Có quyền sửa khối này? `false` ⇒ ẩn nút ghi/sửa (server vẫn chặn ở cổng action). */
+  choPhepSua?: boolean;
+  /** Có `tai-chinh-so-quy:sua`? Thiếu ⇒ dòng gắn khoản vay / sổ tiết kiệm không có nút sửa/xoá. */
+  choPhepSuaDongSoQuy?: boolean;
 }) {
   return (
     <div id="ghi-tay" className="scroll-mt-20 rounded-xl border border-hairline p-4">
@@ -43,7 +49,14 @@ export function CashMovementSection({
             không vào Lãi/Lỗ
           </p>
         </div>
-        <CashMovementAddButton loans={loans} soTietKiem={soTietKiem} d0={d0} />
+        {choPhepSua && (
+          <CashMovementAddButton
+            loans={loans}
+            soTietKiem={soTietKiem}
+            d0={d0}
+            choPhepLoaiSoQuy={choPhepSuaDongSoQuy}
+          />
+        )}
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3">
@@ -58,7 +71,14 @@ export function CashMovementSection({
       </div>
 
       <div className="mt-3">
-        <CashMovementTable rows={rows} loans={loans} soTietKiem={soTietKiem} d0={d0} />
+        <CashMovementTable
+          rows={rows}
+          loans={loans}
+          soTietKiem={soTietKiem}
+          d0={d0}
+          choPhepSua={choPhepSua}
+          choPhepSuaDongSoQuy={choPhepSuaDongSoQuy}
+        />
       </div>
     </div>
   );

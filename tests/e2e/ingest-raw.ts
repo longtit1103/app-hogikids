@@ -97,7 +97,8 @@ async function postRawPayload(
   payload: string,
   opts: { auth?: boolean; ngay?: string } = {}
 ): Promise<RawResponse> {
-  const ctx = await pwRequest.newContext({ baseURL: "http://localhost:3000" });
+  // Config production chạy server ở cổng khác (playwright.prod.config.ts đặt E2E_BASE_URL).
+  const ctx = await pwRequest.newContext({ baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000" });
   try {
     const res: APIResponse = await ctx.post("/api/ingest/raw", {
       headers: opts.auth === false ? {} : { Authorization: `Bearer ${INGEST_SECRET_TEST}` },

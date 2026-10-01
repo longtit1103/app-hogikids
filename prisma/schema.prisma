@@ -7,14 +7,57 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  OWNER
+  STAFF
+}
+
+enum KetQuaNhatKy {
+  OK
+  LOI
+}
+
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String // crypto.scrypt
-  shopName     String   @default("HogiKids")
+  id                 String    @id @default(cuid())
+  email              String    @unique // lưu lower(trim); DB còn unique index lower(email) (raw SQL M1)
+  passwordHash       String // crypto.scrypt
+  role               Role      @default(STAFF)
+  tenHienThi         String    @default("")
+  quyen              String[]  @default([])
+  isActive           Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  sessionEpoch       String    @default("0") // 32 hex ngẫu nhiên khi thu hồi; "0" = chưa từng
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  // 3 cột dưới GIỮ đến M2 (binary cũ còn đọc) — code mới KHÔNG đọc/ghi, xem ShopProfile.
+  shopName           String    @default("HogiKids")
+  shopPhone          String?
+  shopLogoPath       String?
+}
+
+// Singleton — DB CHECK (id = 1) trong M1.
+model ShopProfile {
+  id           Int     @id @default(1)
+  shopName     String  @default("HogiKids")
   shopPhone    String?
   shopLogoPath String?
-  createdAt    DateTime @default(now())
+}
+
+model AuditLog {
+  id              String       @id @default(cuid())
+  thoiDiem        DateTime     @default(now())
+  actorId         String? // KHÔNG FK — id gốc bất biến, sống qua hard delete; null = chưa xác thực
+  actorEmail      String? // snapshot email của actor ĐÃ xác thực
+  danhTinhKhaiBao String? // email người gọi KHAI lúc đăng nhập sai — không phải actor
+  hanhDong        String // mã trong src/lib/nhat-ky/hanh-dong.ts
+  doiTuongLoai    String?
+  doiTuongId      String?
+  doiTuongMoTa    String?
+  ketQua          KetQuaNhatKy
+  ghiChu          Json? // object khoá allowlist có kiểu — KHÔNG chuỗi tự do từ form
+
+  @@index([thoiDiem(sort: Desc)])
+  @@index([actorId, thoiDiem])
 }
 
 model Channel {

@@ -28,7 +28,7 @@ export function hasValidMagicBytes(buffer: Uint8Array, ext: DuoiLogo): boolean {
 }
 
 /**
- * `User.shopLogoPath` → tên file logo AN TOÀN để ghép với `public/uploads`, hoặc `null`.
+ * `ShopProfile.shopLogoPath` → tên file logo AN TOÀN để ghép với `public/uploads`, hoặc `null`.
  * Chấp nhận cả dạng hiện hành `/api/uploads/logo-…` lẫn dữ liệu cũ `/uploads/logo-…`: CHỈ lấy
  * basename (đổi `\` thành `/` trước để chuỗi kiểu Windows cũng bị cắt) rồi bắt buộc khớp
  * allowlist — thư mục đọc do người gọi cố định, nên phần đầu path không bao giờ được tin.

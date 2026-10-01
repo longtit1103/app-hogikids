@@ -25,8 +25,8 @@ build
 tests
 test-results
 playwright-report
-playwright.config.ts
-vitest.config.ts
+playwright*.config.ts
+vitest*.config.ts
 plans
 docs
 .superpowers

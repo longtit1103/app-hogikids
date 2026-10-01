@@ -2,10 +2,14 @@ import * as XLSX from "xlsx";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user"),
-  getAuthenticatedUserId: vi.fn(async () => "test-user"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("../helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 
 // Bọc passthrough để MỘT case mô phỏng lớp bug "transform tưởng xong mà không ghi" (nuốt im lặng:
 // không upsert, không đếm skipped) — kịch bản duy nhất ép cổng đủ-dòng phải TỰ đứng ra bắt, vì mọi
@@ -165,6 +169,19 @@ describe("importShopeeWallet — import lại sau lượt hỏng dở phải t�
     expect(await prisma.shopeeSettlement.count()).toBe(2);
     const tong = await prisma.shopeeSettlement.aggregate({ _sum: { amount: true } });
     expect(tong._sum.amount).toBe(350000);
+  });
+
+  it("import thành công ⇒ đúng một dòng nhật ký VI_SHOPEE_IMPORT kèm số dòng; lượt đỏ không ghi OK", async () => {
+    await prisma.auditLog.deleteMany({ where: { hanhDong: "VI_SHOPEE_IMPORT" } });
+    const tuChoi = await importShopeeWallet(formCoFile(FILE_LOC_THIEU_DONG()));
+    expect(tuChoi.ok).toBe(false);
+    expect(await prisma.auditLog.count({ where: { hanhDong: "VI_SHOPEE_IMPORT" } })).toBe(0);
+
+    expect((await importShopeeWallet(formCoFile(FILE_2_DONG()))).ok).toBe(true);
+
+    const dong = await prisma.auditLog.findMany({ where: { hanhDong: "VI_SHOPEE_IMPORT" } });
+    expect(dong).toMatchObject([{ ketQua: "OK", actorId: "test-user", ghiChu: { soDong: 2 } }]);
+    await prisma.auditLog.deleteMany({ where: { hanhDong: "VI_SHOPEE_IMPORT" } });
   });
 
   it("cổng đủ-dòng TỰ ĐỨNG: transform 'tưởng xong' mà không ghi (skipped=0) → vẫn không được ok:true", async () => {

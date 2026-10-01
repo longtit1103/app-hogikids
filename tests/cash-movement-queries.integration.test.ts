@@ -87,7 +87,7 @@ describe("getCashMovementSummary", () => {
 describe("listCashMovements", () => {
   it("chỉ dòng trong kỳ, sắp ngày giảm dần, đủ field hai trục", async () => {
     await seed();
-    const rows = await listCashMovements(RANGE);
+    const rows = await listCashMovements(RANGE, { coQuyenSoQuy: true });
     expect(rows.map((r) => r.kind)).toEqual([
       "DIRECT_SALE",
       "LOAN_REPAY",
@@ -102,7 +102,7 @@ describe("listCashMovements", () => {
   // Bảng hiện thẳng tên, khỏi bắt người đọc tra id; `savingsId` để form SỬA prefill đúng ô.
   it("dòng gắn sổ tiết kiệm mang savingsId + savingsName, dòng khác để null cả hai", async () => {
     await seed();
-    const rows = await listCashMovements(RANGE);
+    const rows = await listCashMovements(RANGE, { coQuyenSoQuy: true });
 
     const gui = rows.find((r) => r.kind === "SAVINGS_OUT");
     expect(gui?.savingsName).toBe("Sổ 6 tháng VCB");
@@ -113,6 +113,24 @@ describe("listCashMovements", () => {
     expect(vay?.savingsId).toBeNull();
     expect(vay?.savingsName).toBeNull();
     expect(vay?.loanName).toBe("Vay Techcombank");
+  });
+
+  // Người thiếu quyền Sổ quỹ: id khoản vay/sổ là chìa để gọi thẳng action ghi gốc vay, tên là thông
+  // tin của khối Sổ quỹ — KHÔNG có mặt trong kết quả (không phải null, mà không có khoá).
+  it("thiếu quyền Sổ quỹ ⇒ không trả loanId/loanName/savingsId/savingsName, vẫn đủ dòng + tiền", async () => {
+    await seed();
+    const rows = await listCashMovements(RANGE, { coQuyenSoQuy: false });
+
+    expect(rows.map((r) => r.kind)).toEqual(["DIRECT_SALE", "LOAN_REPAY", "SAVINGS_OUT", "LOAN_IN"]);
+    for (const r of rows) {
+      expect(Object.keys(r).sort()).toEqual(["amount", "date", "description", "id", "kind"]);
+    }
+    const loan = await prisma.loan.findFirstOrThrow();
+    const so = await prisma.soTietKiem.findFirstOrThrow();
+    const json = JSON.stringify(rows);
+    expect(json).not.toContain(loan.id);
+    expect(json).not.toContain(so.id);
+    expect(json).not.toContain("Sổ 6 tháng VCB");
   });
 });
 

@@ -42,11 +42,14 @@ export function ChannelAdsExpensesTab({
   categories,
   channels,
   roas,
+  choPhepSua,
 }: {
   rows: ExpenseRow[];
   categories: { id: string; name: string }[];
   channels: { id: string; name: string; color: string }[];
   roas: number | null;
+  /** `chi-phi:sua` — thiếu thì không nút sửa/xoá (action cũng tự từ chối). */
+  choPhepSua: boolean;
 }) {
   const [editingRow, setEditingRow] = useState<ExpenseRow | null>(null);
   const [deletingRow, setDeletingRow] = useState<ExpenseRow | null>(null);
@@ -54,6 +57,7 @@ export function ChannelAdsExpensesTab({
   const totalAds = rows.reduce((sum, r) => sum + r.amount, 0);
 
   function renderRowActions(row: ExpenseRow) {
+    if (!choPhepSua) return null;
     if (row.source === "ADS_API") {
       return (
         <div className="flex items-center justify-end gap-3">

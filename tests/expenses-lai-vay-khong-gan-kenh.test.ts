@@ -15,9 +15,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * Cổng chặn MỌI kênh khác null chứ không so kênh cũ — dòng lỡ mang kênh tự gỡ ở lượt sửa kế. Danh
  * mục khác vẫn gắn kênh bình thường (không siết oan).
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 // revalidatePath cần request scope (không có trong vitest) — no-op cho unit test.
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),

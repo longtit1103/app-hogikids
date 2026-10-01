@@ -5,7 +5,7 @@ import path from "node:path";
 import { ImageResponse } from "next/og";
 import type { ReactElement } from "react";
 
-import { prisma } from "@/lib/prisma";
+import { docShopProfileKhongCache } from "@/lib/shop-profile/doc-shop-profile";
 
 import { cssXoayTheoExif, docHuongXoayExif } from "./jpeg-exif-orientation";
 import { duoiLogo, hasValidMagicBytes, kichThuocAnh, tenFileLogoHopLe } from "./logo-file";
@@ -41,18 +41,12 @@ export const CANH_LOGO_TOI_DA = 2048;
 export type LogoChuShop = { bytes: Buffer; mime: "image/png" | "image/jpeg" };
 
 /**
- * Logo của CHỦ SHOP = `User` tạo sớm nhất. Route icon KHÔNG có phiên (iOS tải icon không qua
- * đăng nhập app) nên không dùng `requireUser`.
- *
- * NỢ KIẾN TRÚC: đúng vì app hiện có MỘT người dùng. Khi mở multi-user (Supabase Auth pha sau),
- * branding phải chuyển sang thực thể Shop/Organization — "user đầu tiên" hết đúng nghĩa.
+ * Logo của shop = `ShopProfile.shopLogoPath` (singleton, không thuộc riêng người dùng nào). Route
+ * icon KHÔNG có phiên (iOS tải icon không qua đăng nhập app) nên không qua cổng phiên, và chạy
+ * ngoài RSC nên đọc bản không cache.
  */
 export async function timLogoPathChuShop(): Promise<string | null> {
-  const chuShop = await prisma.user.findFirst({
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: { shopLogoPath: true },
-  });
-  return chuShop?.shopLogoPath ?? null;
+  return (await docShopProfileKhongCache()).shopLogoPath;
 }
 
 type DocLogoDeps = { timLogoPath: () => Promise<string | null>; thuMucUploads: string };

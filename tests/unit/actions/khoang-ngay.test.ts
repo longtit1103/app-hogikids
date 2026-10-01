@@ -6,16 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 const cookieJar = vi.hoisted(() => ({ set: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: vi.fn(async () => cookieJar) }));
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user-id") }));
+const cong = vi.hoisted(() => ({ congAction: vi.fn() }));
+vi.mock("@/lib/quyen/cong-action", () => ({ congAction: cong.congAction }));
 
 import { luuLuaChonKhoangNgay } from "@/lib/actions/khoang-ngay";
-import { requireUser } from "@/lib/session";
 
 const MOT_NAM = 365 * 24 * 60 * 60;
 
 beforeEach(() => {
   cookieJar.set.mockClear();
-  vi.mocked(requireUser).mockClear();
+  cong.congAction.mockReset();
+  cong.congAction.mockResolvedValue({ ok: true, nguoiDung: { id: "test-user-id" } });
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -24,7 +25,8 @@ describe("luuLuaChonKhoangNgay", () => {
     vi.stubEnv("NODE_ENV", "development");
     const kq = await luuLuaChonKhoangNgay("7d");
     expect(kq).toEqual({ ok: true, data: null });
-    expect(requireUser).toHaveBeenCalled();
+    // Chỉ cần đăng nhập — không đòi quyền module nào (cookie tuỳ chọn của chính trình duyệt).
+    expect(cong.congAction).toHaveBeenCalledWith();
     expect(cookieJar.set).toHaveBeenCalledWith("hogikids_khoang_ngay", "7d", {
       path: "/",
       httpOnly: true,
@@ -32,6 +34,15 @@ describe("luuLuaChonKhoangNgay", () => {
       secure: false,
       maxAge: MOT_NAM,
     });
+  });
+
+  it.each([
+    ["chưa đăng nhập", { ok: false, code: "CHUA_DANG_NHAP", error: "Phiên đăng nhập đã hết hạn — đăng nhập lại" }],
+    ["phải đổi mật khẩu", { ok: false, code: "PHAI_DOI_MAT_KHAU", error: "Bạn cần đổi mật khẩu trước khi thao tác" }],
+  ])("cổng từ chối (%s) ⇒ trả nguyên kết quả cổng, KHÔNG ghi cookie", async (_mo_ta, tuChoi) => {
+    cong.congAction.mockResolvedValue(tuChoi);
+    expect(await luuLuaChonKhoangNgay("7d")).toEqual(tuChoi);
+    expect(cookieJar.set).not.toHaveBeenCalled();
   });
 
   it("production ⇒ Secure bật", async () => {

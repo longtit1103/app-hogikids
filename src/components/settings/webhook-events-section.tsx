@@ -78,6 +78,7 @@ export function WebhookEventsSection({
   canXem,
   vaTonKho,
   lechGiaVon,
+  hienGiaVon = false,
   tenShop,
 }: {
   /** Map shop id → tên hiển thị (từ cấu hình `Setting` — page dựng, rỗng khi chưa cấu hình). */
@@ -90,6 +91,11 @@ export function WebhookEventsSection({
   vaTonKho: TinhTrangVaTonKho;
   /** Lệch giá vốn app ↔ Pancake — số do chính lượt đêm đó chốt. */
   lechGiaVon: TrangThaiLechGiaVon;
+  /**
+   * Người xem có `gia-von-loi-nhuan:xem` (server tính)? Số mã lệch giá vốn là tín hiệu thuộc vùng giá
+   * vốn (cùng luật banner layout) — thiếu/false ⇒ KHÔNG in dòng giá vốn (mặc định ẩn).
+   */
+  hienGiaVon?: boolean;
 }) {
   const tong = demTheoKetCuc.reduce((s, d) => s + d.soLuong, 0);
   const soCanChuY = demTheoKetCuc
@@ -142,15 +148,17 @@ export function WebhookEventsSection({
         với Pancake. Nó chết thì banner nhắc việc im lặng luôn — mà im lặng ở đó trông y hệt "đang
         khớp". Mốc này để chủ shop kiểm được cơ chế còn sống, không phải tin suông.
       */}
-      <p className={lechGiaVon.muc === "khop" ? "text-sm text-muted-foreground" : "text-sm font-medium text-error"}>
-        {lechGiaVon.muc === "chua-kiem"
-          ? "Giá vốn: CHƯA đối chiếu lần nào với Pancake — kiểm lượt chạy đêm (pancake-nightly)."
-          : lechGiaVon.muc === "tre"
-            ? `Giá vốn: đối chiếu gần nhất ${lucVN(lechGiaVon.mocLuc!)} — đã hơn ${GIO_TRE_GIA_VON} giờ, kiểm lượt chạy đêm.`
-            : lechGiaVon.muc === "co-lech"
-              ? `Giá vốn: ${lechGiaVon.soLech} mã đang lệch với Pancake (đối chiếu ${lucVN(lechGiaVon.mocLuc!)}).`
-              : `Giá vốn: khớp Pancake, đối chiếu lần cuối ${lucVN(lechGiaVon.mocLuc!)}.`}
-      </p>
+      {hienGiaVon && (
+        <p className={lechGiaVon.muc === "khop" ? "text-sm text-muted-foreground" : "text-sm font-medium text-error"}>
+          {lechGiaVon.muc === "chua-kiem"
+            ? "Giá vốn: CHƯA đối chiếu lần nào với Pancake — kiểm lượt chạy đêm (pancake-nightly)."
+            : lechGiaVon.muc === "tre"
+              ? `Giá vốn: đối chiếu gần nhất ${lucVN(lechGiaVon.mocLuc!)} — đã hơn ${GIO_TRE_GIA_VON} giờ, kiểm lượt chạy đêm.`
+              : lechGiaVon.muc === "co-lech"
+                ? `Giá vốn: ${lechGiaVon.soLech} mã đang lệch với Pancake (đối chiếu ${lucVN(lechGiaVon.mocLuc!)}).`
+                : `Giá vốn: khớp Pancake, đối chiếu lần cuối ${lucVN(lechGiaVon.mocLuc!)}.`}
+        </p>
+      )}
 
       {canXem.length > 0 && (
         <div className="flex flex-col gap-1 rounded-lg bg-error/10 p-3 text-sm">

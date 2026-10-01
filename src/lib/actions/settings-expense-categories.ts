@@ -9,8 +9,10 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/action-result";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { laDanhMucKhoaAn, LOI_DANH_MUC_KHOA_AN } from "@/lib/expenses/danh-muc-khoa-an";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congAction } from "@/lib/quyen/cong-action";
 
 // ---- Cài đặt › Danh mục chi phí (CRUD) --------------------------------------
 
@@ -33,7 +35,8 @@ async function hasDuplicateCategoryName(name: string, excludeId?: string): Promi
 
 /** Thêm danh mục tùy chỉnh — id tự sinh (schema KHÔNG có @default cho id). */
 export async function createExpenseCategory(name: string): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  const cong = await congAction("cai-dat:sua");
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = expenseCategoryNameSchema.safeParse(name);
@@ -46,8 +49,15 @@ export async function createExpenseCategory(name: string): Promise<ActionResult<
 
   const id = randomUUID();
   try {
-    await prisma.expenseCategory.create({
-      data: { id, name: parsed.data, isSystem: false, isHidden: false },
+    await prisma.$transaction(async (tx) => {
+      await tx.expenseCategory.create({
+        data: { id, name: parsed.data, isSystem: false, isHidden: false },
+      });
+      await ghiNhatKy(tx, {
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_TAO,
+        doiTuong: { loai: "ExpenseCategory", id, moTa: parsed.data },
+      });
     });
   } catch (e) {
     // Ràng buộc duy nhất trên tên là cổng CUỐI: phép kiểm phía trên đọc rồi mới ghi, nên hai submit
@@ -66,7 +76,8 @@ export async function createExpenseCategory(name: string): Promise<ActionResult<
 
 /** Đổi tên danh mục tùy chỉnh — danh mục hệ thống khóa tên (không sửa được). */
 export async function renameExpenseCategory(id: string, name: string): Promise<ActionResult> {
-  await requireUser();
+  const cong = await congAction("cai-dat:sua");
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = expenseCategoryNameSchema.safeParse(name);
@@ -86,7 +97,14 @@ export async function renameExpenseCategory(id: string, name: string): Promise<A
   }
 
   try {
-    await prisma.expenseCategory.update({ where: { id }, data: { name: parsed.data } });
+    await prisma.$transaction(async (tx) => {
+      await tx.expenseCategory.update({ where: { id }, data: { name: parsed.data } });
+      await ghiNhatKy(tx, {
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_SUA,
+        doiTuong: { loai: "ExpenseCategory", id, moTa: parsed.data },
+      });
+    });
   } catch (e) {
     // Đổi tên đụng đúng ràng buộc duy nhất đó — cùng lý do như lúc thêm mới.
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
@@ -107,7 +125,8 @@ export async function renameExpenseCategory(id: string, name: string): Promise<A
  * ở `@/lib/expenses/danh-muc-khoa-an`.
  */
 export async function toggleExpenseCategoryHidden(id: string, isHidden: boolean): Promise<ActionResult> {
-  await requireUser();
+  const cong = await congAction("cai-dat:sua");
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   if (laDanhMucKhoaAn(id)) {
@@ -115,7 +134,14 @@ export async function toggleExpenseCategoryHidden(id: string, isHidden: boolean)
   }
 
   try {
-    await prisma.expenseCategory.update({ where: { id }, data: { isHidden } });
+    await prisma.$transaction(async (tx) => {
+      await tx.expenseCategory.update({ where: { id }, data: { isHidden } });
+      await ghiNhatKy(tx, {
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_AN_HIEN,
+        doiTuong: { loai: "ExpenseCategory", id },
+      });
+    });
   } catch {
     return { ok: false, error: "Lỗi khi cập nhật danh mục" };
   }
@@ -135,7 +161,8 @@ export async function toggleExpenseCategoryHidden(id: string, isHidden: boolean)
  * cho user quan trọng hơn), rồi mới tới quy tắc định kỳ.
  */
 export async function deleteExpenseCategory(id: string): Promise<ActionResult> {
-  await requireUser();
+  const cong = await congAction("cai-dat:sua");
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const category = await prisma.expenseCategory.findUnique({ where: { id } });
@@ -163,7 +190,14 @@ export async function deleteExpenseCategory(id: string): Promise<ActionResult> {
   }
 
   try {
-    await prisma.expenseCategory.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.expenseCategory.delete({ where: { id } });
+      await ghiNhatKy(tx, {
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_XOA,
+        doiTuong: { loai: "ExpenseCategory", id, moTa: category.name },
+      });
+    });
   } catch {
     return { ok: false, error: "Lỗi khi xóa danh mục" };
   }

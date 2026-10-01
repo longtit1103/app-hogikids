@@ -26,6 +26,9 @@
  * ĐANG BAY, không phải thứ kẻ tấn công tích luỹ được.
  */
 
+// Cùng MỘT hàm chuẩn hoá với `login-lockout.ts` — hai bên PHẢI khoá theo cùng một chuỗi.
+import { chuanHoaEmail } from "@/lib/chuan-hoa-email";
+
 /** Trần số lượt cùng lúc cho MỘT email (đang chạy + đang chờ). Dư ⇒ từ chối ngay. */
 export const MAX_LUOT_CHO_MOI_EMAIL = 5;
 
@@ -45,11 +48,6 @@ type MucHangDoi = {
 };
 
 const hangDoiTheoEmail = new Map<string, MucHangDoi>();
-
-/** Cùng cách chuẩn hoá với `login-lockout.ts` — hai bên PHẢI khoá theo cùng một chuỗi. */
-function chuanHoaEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
 
 /** Số email đang có lượt bay — chỉ dùng cho test, không phải API cho mã chạy thật. */
 export function demEmailDangCoLuot(): number {

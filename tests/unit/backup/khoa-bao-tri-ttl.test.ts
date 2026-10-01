@@ -116,8 +116,8 @@ describe("cờ khoá phục hồi có hạn (TTL)", () => {
 
   /**
    * Đường hỏng mà chính TTL đẻ ra: hạn chỉ chặn được lệnh pg, còn `coLuotDangChay()` /
-   * `thuHoiMoiPhien()` là truy vấn Prisma không hạn — nên một lượt vẫn có thể treo QUÁ TTL rồi mới
-   * tỉnh và chạy `finally`. Thẻ phiên là thứ duy nhất chặn nó cướp cờ của lượt đang chạy.
+   * `thuHoiMoiPhienCoHan()` là truy vấn Prisma (hạn DB của câu sau không cứu được socket nửa chết) —
+   * nên một lượt vẫn có thể treo QUÁ TTL rồi mới tỉnh và chạy `finally`. Thẻ phiên là thứ duy nhất chặn nó cướp cờ của lượt đang chạy.
    */
   it("lượt CŨ về muộn sau khi TTL nhả KHÔNG được xoá cờ của lượt MỚI đang drop + nạp schema", () => {
     const theCu = thuGiuKhoaPhucHoi()!;

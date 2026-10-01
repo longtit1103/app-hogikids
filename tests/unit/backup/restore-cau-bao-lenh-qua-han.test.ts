@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Câu báo khi một lệnh pg bị dừng vì QUÁ HẠN phải nói ĐÚNG BẢN CHẤT của bước vừa chết.
  *
- * Trong 6 chỗ `runPgClient` được gọi thì chỉ 2 bước NẠP ghi được dữ liệu (`pg_restore <dump>` và
- * `psql -f <sql>`). Bốn câu ngắn còn lại — `pg_restore -l` đọc mục lục trong FILE (không mở kết nối
- * DB), câu SELECT hỏi quyền tạo schema, câu `DROP SCHEMA` mà lỗi lan ra trước khi xoá, và câu GRANT
+ * Trong 7 chỗ `runPgClient` được gọi thì chỉ 2 bước NẠP ghi được dữ liệu (`pg_restore <dump>` và
+ * `psql -f <sql>`). Năm câu ngắn còn lại — `pg_restore -l` đọc mục lục và `pg_restore -a … -f -` bung
+ * khối `_prisma_migrations`, đều trong FILE (không mở kết nối DB), câu SELECT hỏi quyền tạo schema, câu `DROP SCHEMA` mà lỗi lan ra trước khi xoá, và câu GRANT
  * cấp lại quyền đọc cho n8n (chạy SAU khi nạp xong) — tự chúng không để lại bản nạp dở. Doạ "dữ
  * liệu có thể đã nạp dở" ở mấy ca đó là xui chủ shop đi lùi về `pre-restore-*.dump` trong khi thử
  * lại là xong, tức đổi một lần thử lại vô hại lấy một lần mất dữ liệu thật. Ngược lại, khẳng định
@@ -18,10 +18,16 @@ const gia = vi.hoisted(() => {
   const ketQua = new Map<string, { stdout: string } | Error>();
   const buoc = (cmd: string, args: string[]): string => {
     if (args[0] === "-l") return `${cmd} doc-muc-luc`;
+    if (args[0] === "-a") return `${cmd} doc-migration`;
     if (args.includes("-c")) return `${cmd} cau-ngan`;
     return `${cmd} nap`;
   };
-  return { ketQua, buoc };
+  /** Khối COPY có migration phân quyền hoàn tất — dump đời mới, qua được cổng trước chốt phá huỷ. */
+  const copyM1 =
+    "COPY app._prisma_migrations (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count) FROM stdin;\n" +
+    "m1\tc\t2026-09-30 17:00:00+00\t20260930170000_tai_khoan_phu_phan_quyen\t\\N\t\\N\t2026-09-30 17:00:00+00\t1\n" +
+    "\\.\n";
+  return { ketQua, buoc, copyM1 };
 });
 
 vi.mock("node:child_process", () => ({
@@ -90,6 +96,7 @@ afterEach(() => {
 describe("câu báo quá hạn nói đúng bước nào có thể làm dữ liệu nạp dở", () => {
   it("bước NẠP quá hạn → cảnh báo nạp dở + chỉ đúng hạn của bước nạp", async () => {
     gia.ketQua.set("pg_restore doc-muc-luc", { stdout: "" }); // mục lục rỗng = không có object lạ
+    gia.ketQua.set("pg_restore doc-migration", { stdout: gia.copyM1 });
     gia.ketQua.set("pg_restore nap", loiQuaHan());
 
     const cau = await loiKhiPhucHoi();
@@ -117,8 +124,21 @@ describe("câu báo quá hạn nói đúng bước nào có thể làm dữ li�
     expect(cau).not.toContain("FATAL");
   });
 
+  it("ĐỌC KHỐI MIGRATION quá hạn → KHÔNG doạ nạp dở: `pg_restore -a … -f -` chỉ đọc file", async () => {
+    gia.ketQua.set("pg_restore doc-muc-luc", { stdout: "" });
+    gia.ketQua.set("pg_restore doc-migration", loiQuaHan());
+
+    const cau = await loiKhiPhucHoi();
+
+    expect(cau).toContain(`quá hạn ${giay(HAN_LENH_NHANH_MS)}`);
+    expect(cau).toContain("còn nguyên vẹn");
+    expect(cau).not.toContain("nạp dở");
+    expect(cau).not.toContain("supabase-db");
+  });
+
   it("bước GRANT quá hạn (chạy SAU khi nạp xong) → phục hồi VẪN thành công, câu log không nói dối", async () => {
     gia.ketQua.set("pg_restore doc-muc-luc", { stdout: "" });
+    gia.ketQua.set("pg_restore doc-migration", { stdout: gia.copyM1 });
     gia.ketQua.set("pg_restore nap", { stdout: "" });
     gia.ketQua.set("psql cau-ngan", loiQuaHan()); // nhánh custom chỉ có đúng 1 câu ngắn: GRANT
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -139,6 +159,7 @@ describe("câu báo quá hạn nói đúng bước nào có thể làm dữ li�
 
   it("bước nạp thất bại vì lý do KHÁC (không phải quá hạn) → câu báo cố định, KHÔNG kèm stderr", async () => {
     gia.ketQua.set("pg_restore doc-muc-luc", { stdout: "" });
+    gia.ketQua.set("pg_restore doc-migration", { stdout: gia.copyM1 });
     gia.ketQua.set(
       "pg_restore nap",
       Object.assign(new Error("exit 1"), { code: 1, killed: false, stderr: STDERR_NHAY_CAM }),

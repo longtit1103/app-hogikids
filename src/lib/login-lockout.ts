@@ -20,6 +20,8 @@
  *      của 1 email lâu không hoạt động còn hơn để Map phình vô hạn.
  */
 
+import { chuanHoaEmail } from "@/lib/chuan-hoa-email";
+
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 60_000;
 
@@ -40,10 +42,6 @@ type LockoutEntry = {
 
 const attemptsByEmail = new Map<string, LockoutEntry>();
 let writesSinceSweep = 0;
-
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
-}
 
 /**
  * Entry hết ý nghĩa khi: không (còn) bị khoá VÀ không có lượt thất bại nào
@@ -117,7 +115,7 @@ function enforceCapacity(now: number): void {
 
 /** Seconds remaining in the current lockout window, or 0 when not locked. */
 export function getLockoutSecondsRemaining(email: string, now: number = Date.now()): number {
-  const entry = attemptsByEmail.get(normalizeEmail(email));
+  const entry = attemptsByEmail.get(chuanHoaEmail(email));
   if (!entry?.lockedUntil || entry.lockedUntil <= now) {
     return 0;
   }
@@ -131,7 +129,7 @@ export function getLockoutSecondsRemaining(email: string, now: number = Date.now
  * lockout always reflects "N consecutive failures", not a lifetime total.
  */
 export function recordFailedAttempt(email: string, now: number = Date.now()): void {
-  const key = normalizeEmail(email);
+  const key = chuanHoaEmail(email);
 
   writesSinceSweep += 1;
   if (writesSinceSweep >= SWEEP_INTERVAL_WRITES) {
@@ -164,5 +162,5 @@ export function recordFailedAttempt(email: string, now: number = Date.now()): vo
 
 /** Clears failure history for an email — call on successful login. */
 export function resetAttempts(email: string): void {
-  attemptsByEmail.delete(normalizeEmail(email));
+  attemptsByEmail.delete(chuanHoaEmail(email));
 }

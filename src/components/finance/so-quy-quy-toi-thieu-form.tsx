@@ -30,7 +30,16 @@ function hienNguong(raw: string): string {
   return dau + formatAmountInput(so);
 }
 
-export function SoQuyQuyToiThieuForm({ nguong, nguongDaDat }: { nguong: number; nguongDaDat: boolean }) {
+/** `choPhepSua` (từ server, `tai-chinh-so-quy:sua`) false/thiếu ⇒ chỉ hiện ngưỡng, không nút "Sửa" — action vẫn tự chặn. */
+export function SoQuyQuyToiThieuForm({
+  nguong,
+  nguongDaDat,
+  choPhepSua = false,
+}: {
+  nguong: number;
+  nguongDaDat: boolean;
+  choPhepSua?: boolean;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [raw, setRaw] = useState("");
@@ -80,9 +89,11 @@ export function SoQuyQuyToiThieuForm({ nguong, nguongDaDat }: { nguong: number; 
             {nguongDaDat ? formatVnd(nguong) : "chưa đặt — đang dùng 0 đ"}
           </span>
         </span>
-        <Button type="button" variant="outline" size="sm" onClick={moSua} data-testid="so-quy-quy-toi-thieu-sua">
-          Sửa
-        </Button>
+        {choPhepSua && (
+          <Button type="button" variant="outline" size="sm" onClick={moSua} data-testid="so-quy-quy-toi-thieu-sua">
+            Sửa
+          </Button>
+        )}
       </div>
     );
   }

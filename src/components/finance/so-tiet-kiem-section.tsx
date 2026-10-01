@@ -31,6 +31,7 @@ export function SoTietKiemSection({
   loans,
   laiNhanTrongKy,
   d0,
+  choPhepSua = false,
 }: {
   sos: SoTietKiemRow[];
   loans: KhoanVayRow[];
@@ -39,6 +40,8 @@ export function SoTietKiemSection({
   /** Ngày mở sổ quỹ (`soQuy.d0`); null = chưa mở sổ. Nút thêm + modal Sửa cần để hỏi lại khi ghi
    *  ngày gửi trước D0. */
   d0: Date | null;
+  /** Có quyền sửa khối này? `false` ⇒ ẩn nút ghi/sửa (server vẫn chặn ở cổng action). */
+  choPhepSua?: boolean;
 }) {
   const denHan = sosDenHan(sos, new Date());
 
@@ -51,20 +54,18 @@ export function SoTietKiemSection({
             gửi ngân hàng lấy lãi — gốc vào/ra quỹ, lãi vào Lãi/Lỗ khi tất toán
           </p>
         </div>
-        <SoTietKiemAddButton loans={loans} d0={d0} />
+        {choPhepSua && <SoTietKiemAddButton loans={loans} d0={d0} />}
       </div>
 
       {sos.length === 0 ? (
         <p className="mt-3 text-xs text-muted-foreground">Chưa có sổ tiết kiệm nào.</p>
       ) : (
         <div className="mt-3">
-          <SoTietKiemTable rows={sos} loans={loans} laiNhanTrongKy={laiNhanTrongKy} d0={d0} />
+          <SoTietKiemTable rows={sos} loans={loans} laiNhanTrongKy={laiNhanTrongKy} d0={d0} choPhepSua={choPhepSua} />
         </div>
       )}
 
-      {denHan.map((so) => (
-        <SoDaoHanCard key={so.id} so={so} />
-      ))}
+      {choPhepSua && denHan.map((so) => <SoDaoHanCard key={so.id} so={so} />)}
     </div>
   );
 }

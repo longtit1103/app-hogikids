@@ -14,7 +14,8 @@ import {
   type PhieuNhapDeXuat,
 } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
 
 /**
  * Ghi chi phí nhập hàng từ phiếu nhập Pancake — bản BẤM DUYỆT của màn `/tai-chinh/chi-phi-nhap-hang`.
@@ -54,7 +55,9 @@ const ghiSchema = z.object({
 export async function ghiChiPhiNhapHang(
   input: unknown,
 ): Promise<ActionResult<{ daGhi: number; boQua: number; tongTien: number }>> {
-  await requireUser();
+  const c = await congAction("chi-phi:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
 
   // Cùng cổng với mọi action ghi khác. Literal `LOI_DANG_PHUC_HOI` là thứ lưới AST
   // `tests/khoa-bao-tri-duong-ghi.test.ts` soi để biết action này đã khai đúng đường ghi.
@@ -81,8 +84,8 @@ export async function ghiChiPhiNhapHang(
 
   const theoUuid = new Map(deXuat.map((d) => [d.uuid, d]));
   const dong: { phieu: PhieuNhapDeXuat; soTien: number }[] = [];
-  for (const c of chon) {
-    const phieu = theoUuid.get(c.uuid);
+  for (const muc of chon) {
+    const phieu = theoUuid.get(muc.uuid);
     // uuid lạ = client tự soạn (hoặc trang cũ tới mức vân tay lọt khe). Không ghi gì cả: một dòng
     // tiền không truy được về phiếu Pancake nào là dòng không ai đối chiếu lại được.
     if (!phieu) {
@@ -92,7 +95,7 @@ export async function ghiChiPhiNhapHang(
         code: "DANH_SACH_DA_DOI",
       };
     }
-    dong.push({ phieu, soTien: c.soTien });
+    dong.push({ phieu, soTien: muc.soTien });
   }
 
   // Phiếu đã có dòng trong sổ KHÔNG bao giờ nằm trong `deXuat` (hàm đối chiếu loại sẵn), nên ca
@@ -118,23 +121,35 @@ export async function ghiChiPhiNhapHang(
 
   let daGhi = 0;
   try {
-    // MỘT câu INSERT = một transaction ngầm: hoặc vào hết, hoặc không dòng nào. `skipDuplicates`
-    // dựa trên `Expense.refId @unique` — cổng chống ghi trùng ở tầng DB; không có nó thì một phiếu
-    // vừa được ghi ở tab khác sẽ làm HỎNG CẢ LƯỢT (P2002 abort transaction Postgres).
-    const kq = await prisma.expense.createMany({
-      data: canGhi.map((d) => ({
-        date: d.phieu.ngay,
-        categoryId: "purchase",
-        amount: d.soTien,
-        description: moTa(d.phieu),
-        source: "MANUAL" as const,
-        refId: d.phieu.refId,
-        // Nhập hàng là dòng tiền chung của shop, không thuộc kênh bán nào.
-        channelId: null,
-      })),
-      skipDuplicates: true,
+    // MỘT câu INSERT: hoặc vào hết, hoặc không dòng nào — nay nằm trong transaction tường minh chỉ để
+    // dòng nhật ký đi CÙNG (nhật ký ném ⇒ không dòng chi phí nào lưu). `skipDuplicates` dựa trên
+    // `Expense.refId @unique` — cổng chống ghi trùng ở tầng DB; không có nó thì một phiếu vừa được
+    // ghi ở tab khác sẽ làm HỎNG CẢ LƯỢT (P2002 abort transaction Postgres).
+    daGhi = await prisma.$transaction(async (tx) => {
+      const kq = await tx.expense.createMany({
+        data: canGhi.map((d) => ({
+          date: d.phieu.ngay,
+          categoryId: "purchase",
+          amount: d.soTien,
+          description: moTa(d.phieu),
+          source: "MANUAL" as const,
+          refId: d.phieu.refId,
+          // Nhập hàng là dòng tiền chung của shop, không thuộc kênh bán nào.
+          channelId: null,
+        })),
+        skipDuplicates: true,
+      });
+      // Không dòng nào vào (mọi phiếu vừa bị tab khác ghi) ⇒ không có gì để ghi dấu vết.
+      if (kq.count > 0) {
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "NHAP_HANG_GHI_CHI_PHI",
+          doiTuong: { loai: "Expense" },
+          ghiChu: { soDong: kq.count },
+        });
+      }
+      return kq.count;
     });
-    daGhi = kq.count;
   } catch (e) {
     // `skipDuplicates` đã nuốt P2002 nên tới đây là lỗi KHÁC (mất kết nối, out-of-range…). Vẫn dịch
     // riêng P2002 phòng khi driver đổi hành vi — im lặng ở đây là chủ shop tưởng đã ghi xong.

@@ -142,6 +142,7 @@ export function SoTietKiemTable({
   loans,
   laiNhanTrongKy,
   d0,
+  choPhepSua = false,
 }: {
   rows: SoTietKiemRow[];
   loans: KhoanVayRow[];
@@ -154,6 +155,8 @@ export function SoTietKiemTable({
   laiNhanTrongKy: number;
   /** Ngày mở sổ quỹ; null = chưa mở sổ. Modal Sửa cần để hỏi lại khi ghi ngày gửi trước D0. */
   d0: Date | null;
+  /** Có quyền sửa khối này? `false` ⇒ ẩn nút ghi/sửa (server vẫn chặn ở cổng action). */
+  choPhepSua?: boolean;
 }) {
   const homNay = new Date();
   const tong = tongBangSoTietKiem(rows);
@@ -171,7 +174,7 @@ export function SoTietKiemTable({
             <TableHead>Đáo hạn / Tất toán</TableHead>
             <TableHead>Lãi %/năm</TableHead>
             <TableHead>Lãi</TableHead>
-            <TableHead className="text-right">Thao tác</TableHead>
+            {choPhepSua && <TableHead className="text-right">Thao tác</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -194,9 +197,11 @@ export function SoTietKiemTable({
               <TableCell className="text-sm">
                 <LaiCell so={so} />
               </TableCell>
-              <TableCell className="text-right">
-                <SoTietKiemRowActions so={so} loans={loans} d0={d0} />
-              </TableCell>
+              {choPhepSua && (
+                <TableCell className="text-right">
+                  <SoTietKiemRowActions so={so} loans={loans} d0={d0} />
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>
@@ -211,7 +216,7 @@ export function SoTietKiemTable({
                 <p className="text-sm font-medium text-ink">{so.name}</p>
                 <p className="text-xs text-muted-foreground">{so.bank || "—"}</p>
               </div>
-              <SoTietKiemRowActions so={so} loans={loans} d0={d0} />
+              {choPhepSua && <SoTietKiemRowActions so={so} loans={loans} d0={d0} />}
             </div>
             <p className="font-serif text-xl text-ink tabular-nums">{formatVnd(so.principal)}</p>
             <p className="text-xs text-muted-foreground">

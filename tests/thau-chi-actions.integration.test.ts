@@ -11,7 +11,7 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 /**
  * Integration test (`hogikids_test`) cho khoản vay loại THẤU CHI (spec 260908 §5, §7): `kind` trong
- * `taoKhoanVay`/`suaKhoanVay` + action `tatToanThauChi`. Mock `requireUser` + `revalidatePath` cùng
+ * `taoKhoanVay`/`suaKhoanVay` + action `tatToanThauChi`. Mock `docNguoiDungPhien` + `revalidatePath` cùng
  * lý do với `khoan-vay-actions.integration.test.ts`.
  *
  * Mọi con số dưới đây là LITERAL tính tay theo bảng spec §4 (`Σ(dư nợ × ngày) × bp / 3.650.000`,
@@ -20,9 +20,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * Trọng tâm khác với vay kỳ hạn: tất toán ở đây GHI TIỀN (lãi + trọn gốc) chứ không chỉ đóng hồ sơ,
  * nên phải chốt được ba thứ — ghi đúng một lần, rollback trọn khi hỏng, và dư nợ sau lượt ghi = 0.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));

@@ -40,9 +40,10 @@
  * hạn SỚM ngay giữa lượt phục hồi thật.
  *
  * ⚠️ THẺ PHIÊN — cái giá bắt buộc phải trả khi có TTL. Hạn chỉ chặn được lệnh pg (`execFile` bắn
- * SIGTERM); phần việc còn lại trong cửa sổ giữ khoá KHÔNG có hạn nào: `coLuotDangChay()` và
- * `thuHoiMoiPhien()` là truy vấn Prisma, mà Prisma không đặt hạn truy vấn mặc định. Nên vẫn có
- * đường để một lượt treo QUÁ TTL rồi mới tỉnh dậy. Không có thẻ phiên thì kịch bản này mất dữ liệu:
+ * SIGTERM); phần việc còn lại trong cửa sổ giữ khoá không có hạn chắc chắn: `coLuotDangChay()` là
+ * truy vấn Prisma, mà Prisma không đặt hạn truy vấn mặc định; `thuHoiMoiPhienCoHan()` (đẩy
+ * `User.sessionEpoch` của mọi người) có `statement_timeout` nhưng hạn đó vô dụng khi socket nửa
+ * chết. Nên vẫn có đường để một lượt treo QUÁ TTL rồi mới tỉnh dậy. Không có thẻ phiên thì kịch bản này mất dữ liệu:
  * lượt #1 treo → TTL nhả cờ → chủ shop bấm lại → lượt #2 giành cờ và bắt đầu drop schema → lượt #1
  * chợt tỉnh, chạy `finally`, xoá cờ CỦA LƯỢT #2 → mọi đường ghi mở lại ngay giữa lúc #2 đang nạp
  * schema, đúng cái thảm hoạ khoá này sinh ra để chặn. Vì vậy `thuGiuKhoaPhucHoi()` phát một THẺ và

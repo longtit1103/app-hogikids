@@ -17,7 +17,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * Cách đo: ép chính câu chụp NÉM, rồi khẳng định bản ghi gốc VẪN CÒN và thùng rác trống. Phủ CẢ 5
  * đường xoá vì chúng chia sẻ đúng một luật, và mỗi đường là một chỗ để quên.
  */
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user-id") }));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 /** Mô phỏng lượt ghi `BanGhiDaXoa` hỏng giữa chừng (mất kết nối, hết chỗ, ràng buộc mới…). */

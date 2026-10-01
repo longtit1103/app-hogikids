@@ -2,12 +2,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user") }));
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
+// `$transaction(fn)` chạy callback với chính client giả (ghi + nhật ký cùng "transaction").
+vi.mock("@/lib/prisma", () => {
+  const client = {
     expenseCategory: { findMany: vi.fn(), create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
-  },
-}));
+    auditLog: { create: vi.fn(async () => ({})) },
+    $transaction: vi.fn(),
+  };
+  client.$transaction.mockImplementation(async (fn: (tx: typeof client) => unknown) => fn(client));
+  return { prisma: client };
+});
 
 import { createExpenseCategory, toggleExpenseCategoryHidden } from "@/lib/actions/settings-expense-categories";
 import { prisma } from "@/lib/prisma";

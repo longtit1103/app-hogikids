@@ -16,15 +16,29 @@ import type { ActionResult } from "@/lib/actions/action-result";
  * Chỉ giữ khoá TRỰC TIẾP thay vì chạy pg_dump/pg_restore thật: kết quả tất định, không đụng file.
  */
 vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-  getAuthenticatedUserId: vi.fn(async () => "test-user-id"),
   getSession: vi.fn(async () => ({ userId: "test-user-id" })),
   createSession: vi.fn(async () => {}),
   destroySession: vi.fn(async () => {}),
   docGhiNhoCuaPhien: vi.fn(async () => false),
-  thuHoiMoiPhien: vi.fn(async () => {}),
-  docMocPhien: vi.fn(async () => "0"),
+  sinhMocPhien: vi.fn(() => "0".repeat(32)),
+  thuHoiPhienCuaNguoi: vi.fn(async () => "0".repeat(32)),
+  thuHoiMoiPhienMoiNguoi: vi.fn(async () => {}),
 }));
+// Action đã chuyển sang cổng mới (`congAction`…) đọc ngữ cảnh người dùng ở đây — OWNER giả để lưới
+// chỉ đo khoá bảo trì, không đo quyền. Giữ bản thật của các hàm thuần (`coQuyen`, `laChuShop`…).
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (importActual) => {
+  const that = await importActual<typeof import("@/lib/quyen/nguoi-dung-phien")>();
+  const chuShopGia = {
+    id: "test-user-id",
+    email: "test-user@hogikids.test",
+    tenHienThi: "",
+    role: "OWNER" as const,
+    quyen: new Set<never>(),
+    phaiDoiMatKhau: false,
+    mocPhien: "0",
+  };
+  return { ...that, docNguoiDungPhien: vi.fn(async () => chuShopGia), kiemPhien: vi.fn(async () => chuShopGia) };
+});
 // revalidatePath cần request scope (không có trong vitest) — no-op cho unit test.
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -44,6 +58,15 @@ import {
   xoaKhoanVay,
 } from "@/lib/actions/khoan-vay";
 import { changePassword } from "@/lib/actions/security";
+import { doiMatKhauLanDau } from "@/lib/actions/doi-mat-khau-lan-dau";
+import {
+  datLaiMatKhau,
+  khoaTaiKhoan,
+  moKhoaTaiKhoan,
+  suaQuyenTaiKhoan,
+  taoTaiKhoan,
+  xoaTaiKhoan,
+} from "@/lib/actions/tai-khoan";
 import { recomputeFeesInRange, updateChannels } from "@/lib/actions/settings-channels";
 import {
   createExpenseCategory,
@@ -69,7 +92,9 @@ import { moLaiSoTietKiem, tatToanSoTietKiem } from "@/lib/actions/tat-toan-so-ti
 import { tatToanThauChi } from "@/lib/actions/tat-toan-thau-chi";
 import { LOI_DANG_PHUC_HOI, thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
+import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { donKhoaPhucHoi } from "./helpers/khoa-bao-tri-reset";
+import { nguoiDungGia } from "./helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 const RANGE = { from: new Date("2026-07-01T00:00:00+07:00"), to: new Date("2026-07-31T00:00:00+07:00") };
@@ -139,11 +164,28 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["n8n-ket-noi.luuKetNoiN8n", () => luuKetNoiN8n({ n8nBaseUrl: "http://n8n-gia:5678" })],
   ["n8n-ket-noi.caiWorkflowsN8n", () => caiWorkflowsN8n()],
   ["security.changePassword", () => changePassword(new FormData())],
+  // Quản lý tài khoản nhân sự: lượt phục hồi lùi cả bảng User — tài khoản vừa tạo/khoá/đặt lại mật
+  // khẩu trong cửa sổ đó biến mất hoặc sống lại, còn mật khẩu tạm đã đưa ra thì không còn giá trị.
+  ["tai-khoan.taoTaiKhoan", () => taoTaiKhoan(new FormData())],
+  ["tai-khoan.suaQuyenTaiKhoan", () => suaQuyenTaiKhoan("id-gia", [])],
+  ["tai-khoan.khoaTaiKhoan", () => khoaTaiKhoan("id-gia")],
+  ["tai-khoan.moKhoaTaiKhoan", () => moKhoaTaiKhoan("id-gia")],
+  ["tai-khoan.xoaTaiKhoan", () => xoaTaiKhoan("id-gia")],
+  ["tai-khoan.datLaiMatKhau", () => datLaiMatKhau("id-gia")],
+  // Đổi mật khẩu lần đầu chỉ mở cho người đang `phaiDoiMatKhau` — giả đúng trạng thái đó để lưới đo
+  // khoá bảo trì chứ không đo nhánh "không cần đổi".
+  [
+    "doi-mat-khau-lan-dau.doiMatKhauLanDau",
+    () => {
+      vi.mocked(docNguoiDungPhien).mockResolvedValueOnce(nguoiDungGia({ id: "test-user-id", phaiDoiMatKhau: true }));
+      return doiMatKhauLanDau(new FormData());
+    },
+  ],
   ["sync.triggerSyncNow", () => triggerSyncNow()],
   // 3 mục dưới đây do PHÉP QUÉT cuối file lôi ra 18/08: chúng gọi `dangPhucHoi()` từ lâu nhưng
   // KHÔNG có trong lưới, tức lời khai "chặn MỌI đường ghi" chưa từng được kiểm cho chúng.
   ["ads-import.importAdsExpenses", () => importAdsExpenses(new FormData())],
-  // Guard nằm ngay sau `requireUser()`, TRƯỚC mọi thao tác xoá — gọi trong lúc giữ khoá là an toàn.
+  // Guard nằm ngay sau cổng chủ shop, TRƯỚC mọi thao tác xoá — gọi trong lúc giữ khoá là an toàn.
   ["data-admin.deleteAllData", () => deleteAllData("ten-shop-sai")],
   ["data-admin.dungLaiTuKhoTho", () => dungLaiTuKhoTho()],
   // Nút "Áp giá vốn Pancake" — đường ghi `costPrice` thứ hai, song song với CLI. Lùi mất giữa
@@ -225,9 +267,12 @@ describe("đang phục hồi → mọi đường ghi nhập tay bị từ chối
  */
 const CHI_DOC: Record<string, string> = {
   "ads-import.previewAdsImport": "đọc file người dùng tải lên + tra trùng, không ghi",
-  "auth.login": "ghi phiên (cookie), không ghi DB — chặn đăng nhập lúc phục hồi không giúp giữ dữ liệu",
-  "auth.logout": "xoá phiên (cookie), không ghi DB",
+  "auth.login":
+    "ghi phiên (cookie); lastLoginAt + nhật ký là best-effort, TỰ BỎ QUA khi dangPhucHoi() — chặn đăng nhập lúc phục hồi không giúp giữ dữ liệu",
+  "auth.logout": "xoá phiên (cookie); nhật ký đăng xuất best-effort, TỰ BỎ QUA khi dangPhucHoi()",
   "cost-price.previewCostImport": "đọc file + đối chiếu, không ghi",
+  "cong-gia-von.kiemQuyenXemGiaVon":
+    "KHÔNG phải Server Action (file không \"use server\") — bước hai của cổng giá vốn, chỉ ghi dòng TU_CHOI_QUYEN qua ghiNhatKyLoi (tự bỏ qua lúc phục hồi)",
   "data-admin.coDuLieuGiaoDich": "đếm",
   "khoang-ngay.luuLuaChonKhoangNgay": "ghi cookie lựa chọn khoảng ngày của bộ chọn, không ghi DB",
   "data-admin.demChiPhiKhongDungLai": "đếm",

@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
  * này và chạy pass). Push lại mỗi lần vừa thừa vừa chậm.
  *
  * Cung cấp:
- *  - seedReference(): upsert 5 kênh + 8 danh mục chi phí hệ thống (dữ liệu
+ *  - seedReference(): upsert 5 kênh + 8 danh mục chi phí hệ thống + ShopProfile (dữ liệu
  *    tham chiếu, tồn tại suốt vòng đời suite; gọi 1 lần trong beforeAll).
  *  - truncateBusinessTables(): xoá các bảng nghiệp vụ theo thứ tự an toàn FK
  *    (gọi trong beforeEach để mỗi test khởi đầu sạch); GIỮ lại Channel +
@@ -53,8 +53,20 @@ export async function seedShopIdSetting(): Promise<void> {
   `;
 }
 
-/** Upsert dữ liệu tham chiếu (kênh + danh mục hệ thống). Idempotent. */
+/**
+ * Đặt dòng singleton `ShopProfile` (id=1) về đúng `data` (mặc định: HogiKids, không SĐT/logo).
+ * Idempotent; ghi đè cả ba trường để suite trước để lại gì cũng bị dọn.
+ */
+export async function seedShopProfile(
+  data: { shopName?: string; shopPhone?: string | null; shopLogoPath?: string | null } = {},
+): Promise<void> {
+  const full = { shopName: "HogiKids", shopPhone: null, shopLogoPath: null, ...data };
+  await prisma.shopProfile.upsert({ where: { id: 1 }, create: { id: 1, ...full }, update: full });
+}
+
+/** Upsert dữ liệu tham chiếu (kênh + danh mục hệ thống + ShopProfile). Idempotent. */
 export async function seedReference(): Promise<void> {
+  await seedShopProfile();
   for (const c of CHANNELS) {
     await prisma.channel.upsert({ where: { id: c.id }, create: c, update: {} });
   }

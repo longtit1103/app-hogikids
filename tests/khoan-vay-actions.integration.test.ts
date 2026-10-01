@@ -16,8 +16,8 @@ import { tinhSoQuyThang } from "@/lib/so-quy/so-quy-queries";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 /**
- * Integration test (`hogikids_test`) cho 5 server action khoản vay. Mock `requireUser` (gọi
- * `cookies()` — không có request scope trong vitest) + `revalidatePath` (cùng lý do), giống
+ * Integration test (`hogikids_test`) cho 5 server action khoản vay. Mock ngữ cảnh người dùng
+ * `docNguoiDungPhien` (đọc `cookies()` — không có request scope trong vitest) + `revalidatePath` (cùng lý do), giống
  * `cash-movements-actions.integration.test.ts`.
  *
  * Đây là logic TIỀN: mọi con số dưới đây là số LITERAL tính tay theo spec §5.2, không suy lại bằng
@@ -29,9 +29,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  *
  * `vi.useFakeTimers({ toFake: ["Date"] })` — CHỈ Date: fake luôn timer thì Prisma/pool treo.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));

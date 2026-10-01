@@ -3,7 +3,7 @@ import Link from "next/link";
 import { formatPct1 } from "@/components/kenh/channel-format";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatVnd } from "@/lib/format";
-import type { ProductReportRow } from "@/lib/reports/product-report";
+import type { ProductReport } from "@/lib/reports/product-report";
 
 /**
  * Khối "Sản phẩm bán chạy theo kênh" ở `/kenh/:id` — top 10 sản phẩm theo
@@ -16,14 +16,20 @@ import type { ProductReportRow } from "@/lib/reports/product-report";
  * khảo sát §2.6 #43: chủ shop dễ đọc nhầm biên gộp thành lãi thật).
  */
 export function SanPhamBanChayKenh({
-  rows,
+  bang,
   channelId,
   ky,
 }: {
-  rows: ProductReportRow[];
+  /** Đã cắt top N ở page. Nhánh che (thiếu quyền giá vốn): không cột Biên gộp. */
+  bang: ProductReport;
   channelId: string;
   ky: { tu: string; den: string };
 }) {
+  const coGiaVon = bang.coQuyenGiaVon;
+  // Narrow MỘT lần: dòng hiển thị + biên gộp (null ở nhánh che — server không tính).
+  const rows = bang.coQuyenGiaVon
+    ? bang.rows.map((row) => ({ row, marginPct: row.marginPct }))
+    : bang.rows.map((row) => ({ row, marginPct: null }));
   return (
     <div className="rounded-xl border border-hairline bg-canvas p-4">
       <h3 className="font-serif text-lg text-ink">Sản phẩm bán chạy theo kênh</h3>
@@ -38,11 +44,11 @@ export function SanPhamBanChayKenh({
                 <TableHead>Sản phẩm</TableHead>
                 <TableHead className="text-right">SL bán</TableHead>
                 <TableHead className="text-right">Doanh thu</TableHead>
-                <TableHead className="text-right">Biên gộp</TableHead>
+                {coGiaVon && <TableHead className="text-right">Biên gộp</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
+              {rows.map(({ row, marginPct }) => (
                 <TableRow key={row.productId}>
                   <TableCell>
                     <Link
@@ -54,9 +60,11 @@ export function SanPhamBanChayKenh({
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{row.soldQty.toLocaleString("vi-VN")}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatVnd(row.revenue)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {row.marginPct === null ? "—" : formatPct1(row.marginPct)}
-                  </TableCell>
+                  {coGiaVon && (
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {marginPct === null ? "—" : formatPct1(marginPct)}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -64,9 +72,11 @@ export function SanPhamBanChayKenh({
         </div>
       )}
 
-      <p className="mt-3 text-xs text-muted-foreground">
-        Biên gộp = (Doanh thu − Giá vốn) ÷ Doanh thu — chưa trừ phí sàn (25–36%). Lãi thật xem ở Lãi/Lỗ.
-      </p>
+      {coGiaVon && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Biên gộp = (Doanh thu − Giá vốn) ÷ Doanh thu — chưa trừ phí sàn (25–36%). Lãi thật xem ở Lãi/Lỗ.
+        </p>
+      )}
     </div>
   );
 }

@@ -107,6 +107,9 @@ jobs:
       # DATABASE_URL PHẢI khác TEST_DATABASE_URL (guard tests/setup.ts chống xoá nhầm DB thật).
       DATABASE_URL: postgresql://ci:ci@localhost:5432/postgres?schema=app
       TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/hogikids_test?schema=app
+      # DB dùng một lần cho test migration/rollback/restore (DROP/CREATE schema tự do) — KHÔNG
+      # bao giờ trùng TEST_DATABASE_URL.
+      TEST_DATABASE_URL_MIGRATION: postgresql://ci:ci@localhost:5432/hogikids_migration_test?schema=app
       SESSION_SECRET: ci-session-secret-not-for-prod-min-32-characters
       INGEST_SECRET: ci-ingest-secret
     steps:
@@ -119,6 +122,11 @@ jobs:
       - run: npx prisma generate
       - name: Tạo schema app trong DB test
         run: echo 'CREATE SCHEMA IF NOT EXISTS app;' | npx prisma db execute --stdin --url "postgresql://ci:ci@localhost:5432/hogikids_test?schema=app"
+      - name: Tạo DB migration dùng một lần + schema app
+        # CREATE DATABASE không chạy được trong transaction ⇒ dùng psql (runner ubuntu có sẵn client).
+        run: |
+          psql "postgresql://ci:ci@localhost:5432/hogikids_test" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE hogikids_migration_test;'
+          psql "postgresql://ci:ci@localhost:5432/hogikids_migration_test" -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS app;'
       - name: Migrate deploy vào DB test
         run: npx prisma migrate deploy
         env:

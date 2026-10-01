@@ -24,12 +24,31 @@ function taoCookieStoreGia() {
 
 vi.mock("next/headers", () => ({ cookies: async () => taoCookieStoreGia() }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { setting: { findUnique: vi.fn(async () => null) } },
+  prisma: {
+    user: {
+      // Mọi userId đều là một tài khoản đang hoạt động với epoch "0" — không đụng DB thật, chỉ cần
+      // ổn định giữa lượt tạo phiên và lượt đọc lại.
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => ({
+        id: where.id,
+        email: `${where.id}@hogikids.test`,
+        tenHienThi: "",
+        role: "OWNER",
+        quyen: [],
+        isActive: true,
+        mustChangePassword: false,
+        sessionEpoch: "0",
+      })),
+    },
+  },
 }));
 
 import { sealData } from "iron-session";
 
-import { createSession, getAuthenticatedUserId } from "@/lib/session";
+import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
+import { createSession } from "@/lib/session";
+
+/** `id` người dùng của phiên đang hiệu lực (qua đúng đường đọc của ba cổng), hoặc null. */
+const idPhien = async (): Promise<string | null> => (await docNguoiDungPhien())?.id ?? null;
 
 const SECRET_A = "a".repeat(32); // secret "đang sống trên prod" trước lượt xoay
 const SECRET_B = "b".repeat(32); // secret MỚI sau lượt xoay
@@ -66,14 +85,14 @@ describe("xoay SESSION_SECRET — cookie cũ vẫn mở được, cookie mới k
     khoCookie = new Map([["hogikids_session", { value: sealCu }]]);
 
     // Đọc bằng cấu hình MỚI (map `{"1": SECRET_A}` — chưa xoay, chưa đặt PREVIOUS).
-    expect(await getAuthenticatedUserId()).toBe("chu-shop-cu");
+    expect(await idPhien()).toBe("chu-shop-cu");
   });
 
   it("(b) có PREVIOUS: seal bằng secret CŨ vẫn mở được; seal MỚI dùng secret HIỆN HÀNH", async () => {
     // Trước lượt xoay: mọi cookie sống được ký bằng SECRET_A (chưa có PREVIOUS).
     delete process.env.SESSION_SECRET_PREVIOUS;
     process.env.SESSION_SECRET = SECRET_A;
-    await createSession("chu-shop-truoc-xoay", true);
+    await createSession("chu-shop-truoc-xoay", true, "0");
     const sealTruocXoay = khoCookie.get("hogikids_session")?.value;
     expect(sealTruocXoay).toBeTruthy();
 
@@ -83,11 +102,11 @@ describe("xoay SESSION_SECRET — cookie cũ vẫn mở được, cookie mới k
 
     // Cookie ký TRƯỚC lượt xoay vẫn mở được.
     khoCookie = new Map([["hogikids_session", { value: sealTruocXoay! }]]);
-    expect(await getAuthenticatedUserId()).toBe("chu-shop-truoc-xoay");
+    expect(await idPhien()).toBe("chu-shop-truoc-xoay");
 
     // Đăng nhập MỚI sau lượt xoay ký bằng secret HIỆN HÀNH (SECRET_B) — đọc lại vẫn ra đúng user.
-    await createSession("chu-shop-sau-xoay", true);
-    expect(await getAuthenticatedUserId()).toBe("chu-shop-sau-xoay");
+    await createSession("chu-shop-sau-xoay", true, "0");
+    expect(await idPhien()).toBe("chu-shop-sau-xoay");
 
     // Xác nhận seal MỚI THẬT SỰ dùng SECRET_B chứ không phải SECRET_A (còn PREVIOUS): thử mở
     // bằng bản đồ CHỈ có SECRET_A (bỏ hẳn SECRET_B) phải THẤT BẠI.
@@ -95,6 +114,6 @@ describe("xoay SESSION_SECRET — cookie cũ vẫn mở được, cookie mới k
     process.env.SESSION_SECRET = SECRET_A;
     process.env.SESSION_SECRET_PREVIOUS = SECRET_A;
     khoCookie = new Map([["hogikids_session", { value: sealSauXoay! }]]);
-    expect(await getAuthenticatedUserId()).toBeNull();
+    expect(await idPhien()).toBeNull();
   });
 });

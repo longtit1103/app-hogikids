@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import type { ActionResult } from "@/lib/actions/action-result";
+import { kiemQuyenXemGiaVon } from "@/lib/actions/cong-gia-von";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import {
   giuKhoaViecNang,
@@ -21,8 +22,10 @@ import {
   LoiDungGiuaChung,
   VIEC_GHI_GIA_VON,
 } from "@/lib/gia-von/ghi-gia-von-theo-pancake";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congAction } from "@/lib/quyen/cong-action";
 
 /**
  * Áp giá vốn Pancake cho các biến thể đang lệch — bản BẤM NÚT của
@@ -47,7 +50,10 @@ export async function apGiaVonTheoPancake(
   /** Dấu vân tay của danh sách chủ shop VỪA NHÌN. Khác đi ⇒ từ chối, bắt tải lại trang. */
   vanTayLucXem: string,
 ): Promise<ActionResult<{ daGhi: number; boQua: number; soDeXuat: number }>> {
-  await requireUser();
+  const cong = await congAction("san-pham:sua");
+  if (!cong.ok) return cong;
+  const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
+  if (!giaVon.ok) return giaVon;
 
   // Chuẩn hoá chế độ ở BIÊN: mọi chuỗi lạ phải rơi về chế độ AN TOÀN (chỉ điền ô trống), KHÔNG
   // rơi vào nhánh ĐÈ. Giá trị này còn đi vào tên file backup nên cũng không được để chuỗi tuỳ ý.
@@ -84,12 +90,13 @@ export async function apGiaVonTheoPancake(
   }
   const the = khoa.the;
 
+  let kq: Awaited<ReturnType<typeof ghiGiaVonTheoPancake>>;
   try {
     const ghiLuc = new Date();
     // Gọi thẳng lõi ghi (backup + CAS + hàng rào lease TRONG từng transaction) thay vì
     // `ghiGiaVonDuoiKhoaViecNang`: lease đã giành ở trên rồi, để hàm đó giành lần hai là tự chặn
     // chính mình. Hàng rào vẫn nguyên — đó mới là thứ đóng khe "lease hết hạn dưới chân".
-    const kq = await ghiGiaVonTheoPancake(prisma, deXuat, {
+    kq = await ghiGiaVonTheoPancake(prisma, deXuat, {
       duongDanBackup: duongDanBackup(ghiLuc, cheDo),
       cheDo,
       ghiLuc,
@@ -98,7 +105,6 @@ export async function apGiaVonTheoPancake(
 
     await dongBoLaiSoDem();
     dungLaiManTien();
-    return { ok: true, data: { daGhi: kq.daGhi, boQua: kq.boQua, soDeXuat: deXuat.length } };
   } catch (e) {
     // Lượt bị cắt giữa chừng: đã có k dòng vào DB. Nói thẳng con số — im lặng ở đây là để chủ shop
     // tưởng chưa ghi gì rồi bấm lại trên một trạng thái nửa vời.
@@ -106,6 +112,12 @@ export async function apGiaVonTheoPancake(
     // số cũ và tưởng chưa có gì xảy ra. Đây là ca dễ sót nhất: nhánh lỗi thường bị bỏ trống.
     await dongBoLaiSoDem();
     dungLaiManTien();
+    // Có thể đã có dòng vào DB ⇒ để lại dấu vết LOI (số dòng đã ghi, không giá trị).
+    await ghiNhatKyLoi({
+      actor: cong.nguoiDung,
+      hanhDong: HANH_DONG.GIA_VON_AP_THEO_PANCAKE,
+      ghiChu: e instanceof LoiDungGiuaChung ? { soDong: e.daGhi, lyDo: "dung-giua-chung" } : { lyDo: "loi-he-thong" },
+    });
     if (e instanceof LoiDungGiuaChung) {
       // `LoiDungGiuaChung.message` nhúng NGUYÊN VĂN message của lỗi gốc (Prisma…, có thể mang
       // hostname/role DB) — không được đẩy thẳng ra client. Log đủ phía server; dựng câu tiếng
@@ -153,6 +165,16 @@ export async function apGiaVonTheoPancake(
       console.error("Không trả được khoá việc nặng sau lượt áp giá vốn — tự hết hạn tối đa 5 phút.", e);
     }
   }
+
+  // Lõi ghi chia NHIỀU transaction (mỗi lô một CAS + hàng rào lease) — không có một transaction chung
+  // để ghi kèm ⇒ nhật ký ghi sau khi xong, NGOÀI `try` ở trên: nhật ký hỏng là lỗi hệ thống, không
+  // được biến thành câu "Không áp được giá vốn" (giá đã áp thật).
+  await ghiNhatKy(prisma, {
+    actor: cong.nguoiDung,
+    hanhDong: HANH_DONG.GIA_VON_AP_THEO_PANCAKE,
+    ghiChu: { soDong: kq.daGhi },
+  });
+  return { ok: true, data: { daGhi: kq.daGhi, boQua: kq.boQua, soDeXuat: deXuat.length } };
 }
 
 /**

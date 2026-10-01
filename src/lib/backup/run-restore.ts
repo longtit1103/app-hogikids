@@ -10,6 +10,7 @@ import { KEY_N8N_DUOC_DOC, N8N_RO_ROLE, N8N_SETTING_VIEW } from "@/lib/n8n/role-
 
 import { assertDumpOnlySchema } from "./assert-dump-schema";
 import { assertPlainSqlOnlySchema } from "./assert-plain-sql-only-schema";
+import { assertDumpCoM1HoanTat, docDongPrismaMigrationsTuCopy } from "./kiem-migration-trong-dump";
 import {
   giay,
   HAN_CAU_LENH_NHANH_MS,
@@ -276,9 +277,10 @@ async function runPgClient(
     // SIGTERM thường không để lại stderr, nên không tách nhánh thì câu báo ra "… thất bại (Command
     // failed)" — người đọc không biết là treo hay hỏng dữ liệu. Nói thẳng "quá hạn".
     //
-    // Vế sau tuỳ `coTheNapDo`, KHÔNG dùng chung một câu. Có 6 chỗ gọi: 2 bước NẠP (`HAN_NAP` —
-    // `pg_restore <dump>` và `psql -f <sql>`) và 4 câu ngắn (`HAN_NHANH`) — `pg_restore -l` chỉ đọc
-    // mục lục trong FILE (còn không mở kết nối DB), `coQuyenTaoSchema` là một SELECT thuần,
+    // Vế sau tuỳ `coTheNapDo`, KHÔNG dùng chung một câu. Có 7 chỗ gọi: 2 bước NẠP (`HAN_NAP` —
+    // `pg_restore <dump>` và `psql -f <sql>`) và 5 câu ngắn (`HAN_NHANH`) — `pg_restore -l` và
+    // `pg_restore -a … -f -` (bung khối `_prisma_migrations`) chỉ đọc FILE (còn không mở kết nối
+    // DB), `coQuyenTaoSchema` là một SELECT thuần,
     // `donSchemaChoDumpPlain` tuy có DROP nhưng cả chuỗi nằm trong MỘT câu `psql -c` (transaction
     // ngầm) nên bị dừng là quay lui sạch, và `capLaiQuyenDocChoN8n` là GRANT chạy SAU khi nạp xong.
     //
@@ -428,8 +430,106 @@ async function capLaiQuyenDocChoN8n(dbUrl: string, schema: string): Promise<void
 }
 
 /**
+ * Bung toàn phần một `.sql.gz` với trần `MAX_UNZIPPED_BYTES` (xem bảng số đo ở hằng đó). Vượt trần
+ * ⇒ câu báo tiếng Việt chỉ sang `deploy/restore.sh` thay vì `ERR_BUFFER_TOO_LARGE` trần trụi.
+ */
+async function bungSqlGzCoTran(fileBuf: Buffer): Promise<Buffer> {
+  try {
+    return await gunzipAsync(fileBuf, { maxOutputLength: MAX_UNZIPPED_BYTES });
+  } catch (err) {
+    // KHÔNG gọi đây là "gzip-bomb": trần nay đặt theo RAM mà bước KIỂM NỘI DUNG ngốn (~43× kích
+    // thước SQL, đo 22/09), nên một dump THẬT nhưng to cũng chạm trần — câu báo phải chỉ lối thoát,
+    // không buộc tội người dùng. (Bomb thật vẫn bị chặn: nó vượt trần từ lâu trước mức đó.)
+    if ((err as NodeJS.ErrnoException).code === "ERR_BUFFER_TOO_LARGE") {
+      throw new Error(
+        `File .sql.gz bung ra lớn hơn trần ${Math.round(MAX_UNZIPPED_BYTES / 1024 / 1024)}MB — ` +
+          `bước kiểm nội dung cần RAM gấp khoảng 43 lần kích thước SQL, vượt trần là tiến trình app ` +
+          `bị giết giữa lượt phục hồi. Hãy phục hồi bằng "deploy/restore.sh" chạy trên máy chủ ` +
+          `(đường đó soi bằng awk/grep, tốn RAM khoảng 2-7 lần kích thước thay vì 43 lần).`,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * MỌI guard chỉ-đọc-file của một `.dump` (custom) đã nằm trên đĩa, ĐÚNG THỨ TỰ LOẠI LỖI: mục lục
+ * `-l` + guard schema TRƯỚC, cổng M1 SAU. Ngược thứ tự thì file không phải backup của app (dump
+ * schema khác) bị báo 422 "đời trước phân quyền" — chỉ nhầm chủ shop sang quy trình host — còn dump
+ * nhiều schema có `app._prisma_migrations` đời mới thì lọt cổng M1.
+ *
+ * Cả hai lệnh chỉ đọc FILE, không mở kết nối DB. Mục lục `-l` không có dữ liệu nên cổng M1 phải
+ * bung đúng khối COPY của `_prisma_migrations` (`-a … -f -` ra stdout).
+ */
+async function kiemFileDumpCustom(
+  dumpPath: string,
+  schema: string,
+  env: { PGPASSWORD: string },
+): Promise<void> {
+  // Vẫn đi qua `runPgClient` để một file hỏng khiến pg_restore quay vòng cũng bị dừng theo hạn, và
+  // để câu báo lỗi đồng bộ.
+  const toc = await runPgClient("pg_restore", ["-l", dumpPath], env, HAN_NHANH);
+  assertDumpOnlySchema(toc, schema);
+  const copyMigrations = await runPgClient(
+    "pg_restore",
+    ["-a", "-n", schema, "-t", "_prisma_migrations", "-f", "-", dumpPath],
+    env,
+    HAN_NHANH,
+  );
+  assertDumpCoM1HoanTat(docDongPrismaMigrationsTuCopy(copyMigrations, schema));
+}
+
+/**
+ * MỌI guard nội dung của một `.sql.gz` đã bung, cùng thứ tự loại lỗi như `kiemFileDumpCustom`:
+ * guard schema toàn nội dung TRƯỚC, cổng M1 (đọc khối COPY `_prisma_migrations`) SAU.
+ */
+function kiemSqlPlain(sqlText: string, schema: string): void {
+  assertPlainSqlOnlySchema(sqlText, schema);
+  assertDumpCoM1HoanTat(docDongPrismaMigrationsTuCopy(sqlText, schema));
+}
+
+/**
+ * Cổng SỚM của route phục hồi: chạy TOÀN BỘ guard chỉ-đọc-file — guard archive, guard schema, rồi
+ * mới cổng "dump đời trước phân quyền" (M1). KHÔNG đụng DB (chỉ đọc file: `pg_restore -l`/`-f -`
+ * hoặc bung gzip trong RAM), nên route gọi được ngay sau bước nhận diện định dạng, TRƯỚC khi giành
+ * khoá bảo trì / khoá việc nặng, chụp bản lùi và prune — một file bị chọn nhầm (đời cũ, schema
+ * khác, nhiều schema) không được đốt suất nào trong các bản `pre-restore-*.dump`.
+ *
+ * Lỗi: `LoiBackupTruocPhanQuyen` (file đúng của app nhưng thiếu/chưa hoàn tất M1 — route 422), hoặc
+ * `Error` thường mang câu của guard (file không phải backup hợp lệ của app — route 400). Tên hàm giữ
+ * từ lúc nó chỉ kiểm M1 (các test route cũ mock đúng tên này).
+ *
+ * `runRestore` vẫn tự chạy lại đúng các guard này (phòng thủ nhiều lớp cho các đường gọi khác). Cái
+ * giá: `.sql.gz` bị bung hai lần và `.dump` đọc mục lục hai lần mỗi lượt phục hồi thành công — chấp
+ * nhận, trần 24 MiB giữ mỗi lần bung ở mức nhỏ, và mọi lệnh ở đây nằm NGOÀI vùng giữ khoá.
+ */
+export async function kiemDumCoM1(fileBuf: Buffer, format: RestoreFormat): Promise<void> {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    throw new Error("DATABASE_URL chưa được cấu hình — không thể phục hồi.");
+  }
+  const { schema } = parsePgUrl(dbUrl);
+
+  if (format === "custom") {
+    const { env } = restoreArgsFromUrl(dbUrl, format);
+    const dumpPath = tempPath(".dump");
+    try {
+      await writeFile(dumpPath, fileBuf);
+      await kiemFileDumpCustom(dumpPath, schema, env);
+    } finally {
+      await unlink(dumpPath).catch(() => {});
+    }
+    return;
+  }
+
+  assertNotArchive(gunzipHead(fileBuf)); // chưa bung full — TAR toàn-server dừng ở đây.
+  kiemSqlPlain((await bungSqlGzCoTran(fileBuf)).toString("utf8"), schema);
+}
+
+/**
  * Phục hồi DB từ buffer file backup. THỨ TỰ LÀ SỐNG-CÒN (C1):
- * detect → (plain-gzip) gunzip head → assertNotArchive → CHỈ SAU ĐÓ đụng DB.
+ * detect → (plain-gzip) gunzip head → assertNotArchive → guard schema → cổng "dump có migration phân
+ * quyền hoàn tất" (`LoiBackupTruocPhanQuyen`) → CHỈ SAU ĐÓ đụng DB.
  *
  * Chạy TRONG container app (`postgresql-client-15` trong image), nối Postgres
  * qua `-h supabase-db` lấy thẳng từ DATABASE_URL. `--clean/--if-exists` (custom)
@@ -491,10 +591,11 @@ export async function runRestore(
     const dumpPath = tempPath(".dump");
     try {
       await writeFile(dumpPath, fileBuf);
-      // `-l` chỉ đọc mục lục trong FILE, không mở kết nối DB — nhưng vẫn đi qua `runPgClient` để
-      // một file hỏng khiến pg_restore quay vòng cũng bị dừng theo hạn, và để câu báo lỗi đồng bộ.
-      const stdout = await runPgClient("pg_restore", ["-l", dumpPath], env, HAN_NHANH);
-      assertDumpOnlySchema(stdout, schema); // throw ở đây = KHÔNG đụng DB.
+      // Mục lục + assertDumpOnlySchema, rồi cổng M1 (dump đời trước phân quyền nạp vào là mất cột
+      // vai trò/quyền ⇒ `LoiBackupTruocPhanQuyen`, route trả 422). Chỉ đọc FILE — throw ở đây = KHÔNG
+      // đụng DB. Route đã chạy SỚM đúng các guard này bằng `kiemDumCoM1` trước khi giành khoá/chụp
+      // bản lùi; lặp lại ở đây là lớp phòng thủ cho mọi đường gọi `runRestore` khác.
+      await kiemFileDumpCustom(dumpPath, schema, env);
       // Chuẩn bị xong (ghi file tạm + đọc mục lục + kiểm nội dung), tất cả đều KHÔNG đụng dữ liệu.
       // Chốt cuối trước lệnh phá huỷ: `--clean` bắt đầu drop object từ đây.
       await opts.truocKhiPhaHuy?.();
@@ -515,26 +616,11 @@ export async function runRestore(
   // Nếu bất kỳ guard nào throw (TAR toàn-server / không-SQL / CREATE SCHEMA khác
   // đích) → propagate, DB NGUYÊN VẸN (chưa chạy DROP SCHEMA).
   assertNotArchive(gunzipHead(fileBuf)); // throw ở đây = KHÔNG đụng DB, CHƯA bung full.
-  let unzipped: Buffer;
-  try {
-    unzipped = await gunzipAsync(fileBuf, { maxOutputLength: MAX_UNZIPPED_BYTES });
-  } catch (err) {
-    // Vượt trần → message tiếng Việt rõ thay vì ERR_BUFFER_TOO_LARGE. KHÔNG gọi đây là
-    // "gzip-bomb": trần nay đặt theo RAM mà bước KIỂM NỘI DUNG ngốn (~43× kích thước SQL, đo
-    // 22/09), nên một dump THẬT nhưng to cũng chạm trần — câu báo phải chỉ lối thoát, không
-    // buộc tội người dùng. (Bomb thật vẫn bị chặn: nó vượt trần từ lâu trước mức đó.)
-    if ((err as NodeJS.ErrnoException).code === "ERR_BUFFER_TOO_LARGE") {
-      throw new Error(
-        `File .sql.gz bung ra lớn hơn trần ${Math.round(MAX_UNZIPPED_BYTES / 1024 / 1024)}MB — ` +
-          `bước kiểm nội dung cần RAM gấp khoảng 43 lần kích thước SQL, vượt trần là tiến trình app ` +
-          `bị giết giữa lượt phục hồi. Hãy phục hồi bằng "deploy/restore.sh" chạy trên máy chủ ` +
-          `(đường đó soi bằng awk/grep, tốn RAM khoảng 2-7 lần kích thước thay vì 43 lần).`,
-      );
-    }
-    throw err;
-  }
+  const unzipped = await bungSqlGzCoTran(fileBuf);
   const sqlText = unzipped.toString("utf8");
-  assertPlainSqlOnlySchema(sqlText, schema); // guard toàn nội dung.
+  // Guard toàn nội dung, rồi cùng cổng "dump đời trước phân quyền" như nhánh custom (đọc thẳng khối
+  // COPY trong SQL đã bung).
+  kiemSqlPlain(sqlText, schema);
 
   const sqlPath = tempPath(".sql");
   try {

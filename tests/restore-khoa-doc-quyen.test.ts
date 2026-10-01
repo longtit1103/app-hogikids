@@ -2,10 +2,16 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/session", () => ({
   getSession: async () => ({ userId: "test-user" }),
-  getAuthenticatedUserId: async () => "test-user",
   // Route đẩy mốc phiên sau khi nạp xong — các case dưới đều return trước đó, chỉ cần export tồn tại.
-  thuHoiMoiPhien: vi.fn(async () => undefined),
+  thuHoiMoiPhienMoiNguoi: vi.fn(async () => undefined),
 }));
+
+// Route gác bằng `congChuShopRoute()` — chủ shop giả, không cần cookie/DB.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (importActual) => {
+  const that = await importActual<typeof import("@/lib/quyen/nguoi-dung-phien")>();
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return { ...that, docNguoiDungPhien: vi.fn(async () => nguoiDungGia()) };
+});
 
 // Chặn `pg_dump` THẬT: case "log treo quá lâu" cố ý đi QUA cổng drain, mà ngay sau đó route chụp
 // bản lùi. Không chặn thì test mở kết nối tới DB test qua Tailscale và mất hàng chục giây — chậm,
@@ -15,6 +21,14 @@ vi.mock("@/lib/backup/run-pg-dump", () => ({
   runPgDump: vi.fn(async () => {
     throw new Error("pg_dump bị chặn trong test");
   }),
+}));
+
+// Cổng M1 sớm của route đọc file thật bằng `pg_restore`; "PGDMP dữ liệu giả" không phải dump thật ⇒
+// cho qua để tới được các cổng khoá cần đo (cổng M1 có suite riêng:
+// `restore-chan-dump-truoc-phan-quyen.integration.test.ts`).
+vi.mock("@/lib/backup/run-restore", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/backup/run-restore")>()),
+  kiemDumCoM1: vi.fn(async () => undefined),
 }));
 
 import { POST } from "@/app/api/restore/route";

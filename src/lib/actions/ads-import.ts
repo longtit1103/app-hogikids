@@ -8,8 +8,10 @@ import { dangDungLaiTuKhoTho, dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backu
 import { parseAdsFile, type AdsPreset, type ParsedAdsRow } from "@/lib/import/ads-csv";
 import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
 import { LoiFileQuaNhieuDong } from "@/lib/import/xlsx-shared";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congAction } from "@/lib/quyen/cong-action";
 
 /**
  * Server actions cho luồng Import CSV ads (nút "Import CSV ads" ở `/chi-phi`).
@@ -214,7 +216,8 @@ export async function previewAdsImport(formData: FormData): Promise<
     apiConflicts: { date: string; adsSource: string; apiAmount: number }[];
   }>
 > {
-  await requireUser();
+  const cong = await congAction("marketing:xem");
+  if (!cong.ok) return cong;
 
   const form = await readForm(formData);
   if (!form.ok) return form;
@@ -296,7 +299,8 @@ export async function importAdsExpenses(formData: FormData): Promise<
     overwrittenApiRows: number;
   }>
 > {
-  await requireUser();
+  const cong = await congAction("marketing:sua");
+  if (!cong.ok) return cong;
 
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
@@ -451,6 +455,11 @@ export async function importAdsExpenses(formData: FormData): Promise<
         });
       }
 
+      await ghiNhatKy(tx, {
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.ADS_IMPORT,
+        ghiChu: { soDong: toInsert.length },
+      });
       return { imported: toInsert.length, skippedDuplicates, overwrittenApiRows };
     },
     // Từ khi transaction phải GIÀNH KHOÁ ở lệnh đầu, thời gian NẰM CHỜ tính vào hạn transaction.

@@ -5,13 +5,15 @@ import { format, startOfMonth, subMonths } from "date-fns";
 import { ProductReportTab } from "@/components/bao-cao/product-report-tab";
 import { ReportExportButtons } from "@/components/bao-cao/report-export-buttons";
 import { TrendTab } from "@/components/bao-cao/trend-tab";
-import { khoangServerThuocTinh, resolveRangeFromParams } from "@/lib/date-range";
+import { khoangServerThuocTinh, resolveRangeFromParams, serializeDateRange } from "@/lib/date-range";
 import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import { ensureRecurringExpensesForMonths } from "@/lib/expenses/ensure-recurring-expenses";
 import { prisma } from "@/lib/prisma";
+import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
+import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
 import { computeMonthlyTrend } from "@/lib/reports/monthly-trend";
 import { computeProductReport } from "@/lib/reports/product-report";
-import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
 type ReportTab = "san-pham" | "xu-huong";
@@ -36,7 +38,11 @@ type SearchParams = { tu?: string; den?: string; range?: string; tab?: string; s
  * Mỗi tab dữ liệu khác nhau nên chỉ fetch đúng tab đang mở.
  */
 export default async function BaoCaoPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requireUser();
+  const nd = await yeuCauQuyenTrang("/bao-cao", "bao-cao:xem");
+  // Thiếu `gia-von-loi-nhuan:xem`: hai tab nhận DTO che từ server (không COGS/lãi/biên). File Excel dựng
+  // ở route `/api/export/bao-cao` (cùng cổng + che); thiếu `xuat-du-lieu` thì không có nút xuất.
+  const quyen = quyenGiaVonCua(nd);
+  const choPhepXuat = coQuyen(nd, "xuat-du-lieu");
 
   const sp = await searchParams;
   // P&L cũ đã dời về hub — bookmark/link cũ `?tab=pnl` không rơi nhầm tab Sản phẩm.
@@ -67,8 +73,8 @@ export default async function BaoCaoPage({ searchParams }: { searchParams: Promi
 
   if (tab === "san-pham") {
     const channelId = sp.kenh || undefined;
-    const [rows, channels, slowSetting] = await Promise.all([
-      computeProductReport(range, { channelId }),
+    const [bang, channels, slowSetting] = await Promise.all([
+      computeProductReport(range, { channelId }, quyen),
       prisma.channel.findMany({
         where: { isActive: true },
         orderBy: { sortOrder: "asc" },
@@ -80,11 +86,17 @@ export default async function BaoCaoPage({ searchParams }: { searchParams: Promi
       ? Number.parseInt(slowSetting.value, 10) || DEFAULT_SLOW_SELLER_MAX_ORDERS
       : DEFAULT_SLOW_SELLER_MAX_ORDERS;
 
-    content = <ProductReportTab rows={rows} channels={channels} slowSellerMaxOrders={slowSellerMaxOrders} />;
+    content = <ProductReportTab bang={bang} channels={channels} slowSellerMaxOrders={slowSellerMaxOrders} />;
     printPeriodLabel = `${format(range.from, "dd/MM/yyyy")} – ${format(range.to, "dd/MM/yyyy")}`;
 
-    const ky = `${format(range.from, "yyMMdd")}-${format(range.to, "yyMMdd")}`;
-    exportButtons = <ReportExportButtons ky={ky} hasData={rows.length > 0} data={{ tab: "san-pham", rows }} />;
+    const thamSo = new URLSearchParams({ tab: "san-pham", ...serializeDateRange(range) });
+    if (channelId) thamSo.set("kenh", channelId);
+    exportButtons = (
+      <ReportExportButtons
+        hasData={bang.rows.length > 0}
+        href={choPhepXuat ? `/api/export/bao-cao?${thamSo.toString()}` : null}
+      />
+    );
   } else {
     // Backfill chi phí định kỳ cho cả 12 tháng của cửa sổ trend (khớp cách
     // `computeMonthlyTrend` dựng danh sách tháng) TRƯỚC khi tính.
@@ -92,13 +104,13 @@ export default async function BaoCaoPage({ searchParams }: { searchParams: Promi
     await ensureRecurringExpensesForMonths(
       Array.from({ length: 12 }, (_, i) => startOfMonth(subMonths(trendNow, i)))
     );
-    const rows = await computeMonthlyTrend(12);
-    content = <TrendTab rows={rows} />;
+    const trend = await computeMonthlyTrend(12, quyen);
+    content = <TrendTab trend={trend} />;
     printPeriodLabel = "12 tháng gần nhất";
 
-    const hasData = rows.some((r) => r.orderCount > 0);
+    const hasData = trend.rows.some((r) => r.orderCount > 0);
     exportButtons = (
-      <ReportExportButtons ky={format(new Date(), "yyyy-MM")} hasData={hasData} data={{ tab: "xu-huong", rows }} />
+      <ReportExportButtons hasData={hasData} href={choPhepXuat ? "/api/export/bao-cao?tab=xu-huong" : null} />
     );
   }
 

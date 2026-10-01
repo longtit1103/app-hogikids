@@ -17,7 +17,13 @@ const transformControl = vi.hoisted(() => ({
 }));
 
 // Chỉ mock hai thứ cần request scope (`cookies()` / `revalidatePath`) — mọi đường ghi khác chạy THẬT.
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user-id") }));
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("../helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 vi.mock("@/lib/bronze/transform-from-raw", async (importOriginal) => {
@@ -42,7 +48,7 @@ import { KET_CUC } from "@/lib/bronze/ket-cuc-silver";
 import { SHOP_KHO, SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
-import { seedReference, truncateBusinessTables } from "../helpers/test-db";
+import { seedReference, seedShopProfile, truncateBusinessTables } from "../helpers/test-db";
 
 /**
  * Backfill kết cục cho kho dữ liệu cũ (`silverOutcome = 'LEGACY'`).
@@ -290,19 +296,19 @@ describe("backfill kết cục LEGACY", () => {
     await prisma.rawPancakeOrder.updateMany({
       data: { silverOutcome: KET_CUC.LEGACY, silverProcessedAt: null, silverNote: null },
     });
-    const user = await prisma.user.upsert({
+    await prisma.user.upsert({
       where: { id: "test-user-id" },
-      update: { shopName: "HogiKids Test" },
+      update: {},
       create: {
         id: "test-user-id",
         email: "backfill-xoa@hogikids.test",
         passwordHash: `${"0".repeat(32)}:${"0".repeat(128)}`,
-        shopName: "HogiKids Test",
       },
     });
+    await seedShopProfile(); // tên shop mặc định "HogiKids" = chuỗi xác nhận
 
     const { deleteAllData, dungLaiTuKhoTho } = await import("@/lib/actions/data-admin");
-    expect((await deleteAllData(user.shopName)).ok).toBe(true);
+    expect((await deleteAllData("HogiKids")).ok).toBe(true);
 
     // ① Lượt xoá phải đóng dấu CHỦ ĐÍCH lên cả dòng LEGACY, không riêng dòng còn dở.
     expect((await donTheoExternalId("ORD-BF-XOA-TAY")).silverOutcome).toBe(KET_CUC.DISCARDED);

@@ -18,8 +18,11 @@ const PILLS: { value: LocFilter; label: string }[] = [
   { value: "sap_het", label: "Sắp hết" },
 ];
 
+/** Pill lọc theo giá vốn — chỉ hiện cho người có `gia-von-loi-nhuan:xem` (server cũng bỏ qua bộ lọc này nếu thiếu). */
+const PILL_GIA_VON: ReadonlySet<LocFilter> = new Set(["da_ban_thieu_gia_von", "thieu_gia_von"]);
+
 /** Search debounce 300ms + 4 pill lọc. Cả 2 sync qua query, reset trang 1. */
-export function ProductToolbar() {
+export function ProductToolbar({ coQuyenGiaVon }: { coQuyenGiaVon: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -71,7 +74,7 @@ export function ProductToolbar() {
       </div>
 
       <div className="flex items-center gap-1 rounded-lg border border-hairline bg-canvas p-1">
-        {PILLS.map((pill) => (
+        {PILLS.filter((pill) => coQuyenGiaVon || !PILL_GIA_VON.has(pill.value)).map((pill) => (
           <button
             key={pill.value}
             type="button"

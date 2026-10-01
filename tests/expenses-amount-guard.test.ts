@@ -10,9 +10,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * Postgres out-of-range và user chỉ thấy "Lỗi khi tạo khoản chi" generic. Suite
  * này chốt: vượt trần 2 tỷ → chặn tại biên với message tiếng Việt rõ, đúng field.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 // revalidatePath cần request scope (không có trong vitest) — no-op cho unit test.
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),

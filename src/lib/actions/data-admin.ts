@@ -20,8 +20,11 @@ import { giuKhoaLandDon } from "@/lib/bronze/khoa-land-don";
 import { dungLaiGiaoDichTuKhoTho } from "@/lib/bronze/rebuild";
 import type { TransformStats } from "@/lib/bronze/transform-from-raw";
 import { coLuotDangChay, withSyncLog } from "@/lib/ingest/sync-log";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congChuShopAction } from "@/lib/quyen/cong-action";
+import { docShopProfileKhongCache } from "@/lib/shop-profile/doc-shop-profile";
 
 /**
  * VÙNG NGUY HIỂM — xoá VĨNH VIỄN sổ sách GIAO DỊCH: đơn + dòng hàng trong đơn,
@@ -40,7 +43,7 @@ import { requireUser } from "@/lib/session";
  *    đồng bộ chỉ prefill giá lúc CREATE, nên xoá đi là đốt công nhập giá vốn
  *    của chủ shop, trong khi bản thân sản phẩm thì lượt đồng bộ đêm dựng lại
  *    được.
- *  - `User`, `Channel`, `ExpenseCategory` và TOÀN BỘ `Setting`: đó là cấu hình,
+ *  - `User`, `ShopProfile`, `AuditLog`, `Channel`, `ExpenseCategory` và TOÀN BỘ `Setting`: đó là cấu hình,
  *    không phải giao dịch.
  *  - `SyncLog` kind BACKUP: đó là NGUỒN SỰ THẬT DUY NHẤT của dòng trạng thái
  *    "Sao lưu" ở màn Cài đặt (`lib/backup/trang-thai-sao-luu.ts`) — không phải
@@ -50,18 +53,16 @@ import { requireUser } from "@/lib/session";
  *    điểm phục hồi hợp lệ. (Mốc này từng nằm ở `Setting.lastBackupAt` và cũng
  *    từng bị xoá kèm — lý do giữ y hệt, chỉ đổi nơi lưu.)
  *
- * `requireUser()` trả về userId (STRING), không phải object user → phải
- * `findUnique` để lấy `shopName`.
+ * Chuỗi xác nhận = `ShopProfile.shopName` (thông tin shop, không còn nằm trên `User`). Lượt xoá KHÔNG
+ * đụng `ShopProfile`, `User`, `AuditLog`.
  */
 export async function deleteAllData(shopNameConfirm: string): Promise<ActionResult> {
-  const userId = await requireUser();
+  const cong = await congChuShopAction();
+  if (!cong.ok) return cong;
 
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) {
-    return { ok: false, error: "Không tìm thấy tài khoản" };
-  }
-  if (shopNameConfirm !== user.shopName) {
+  const shop = await docShopProfileKhongCache();
+  if (shopNameConfirm !== shop.shopName) {
     return { ok: false, error: "Tên shop không khớp" };
   }
 
@@ -131,6 +132,10 @@ export async function deleteAllData(shopNameConfirm: string): Promise<ActionResu
       if (daChot > 0) {
         console.info(`Xoá dữ liệu giao dịch: chốt ${daChot} dòng kho thô còn dở thành đã-xoá-tay`);
       }
+
+      // Nhật ký CÙNG transaction (bảng `AuditLog` không nằm trong danh sách xoá): ghi hỏng ⇒ lượt
+      // xoá rollback, không bao giờ có lượt xoá sạch sổ mà thiếu dấu vết ai bấm.
+      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.DU_LIEU_XOA_TOAN_BO });
     });
   } finally {
     await traKhoaViecNang(khoa.the);
@@ -141,6 +146,16 @@ export async function deleteAllData(shopNameConfirm: string): Promise<ActionResu
 }
 
 /**
+ * Nhánh từ chối của 4 hàm ĐẾM bên dưới (chỉ phục vụ khối "Dữ liệu" chỉ-chủ-shop ở /cai-dat, gọi từ
+ * RSC). Chúng trả số liệu trần (tổng tiền chi phí/đơn/ads) chứ không phải `ActionResult`, nên nhánh
+ * lỗi NÉM thay vì trả một con số giả (0/false sẽ in "Không có dữ liệu để xóa" — sai sự thật). Trang
+ * phải chỉ gọi chúng khi người xem là chủ shop; cổng đã ghi `TU_CHOI_QUYEN` trước khi tới đây.
+ */
+function tuChoiDocChuShop(): never {
+  throw new Error("Chỉ chủ shop xem được số liệu vùng dữ liệu.");
+}
+
+/**
  * Có gì cho nút "Xóa dữ liệu giao dịch" xoá không.
  *
  * Phải đếm ĐÚNG những bảng lượt xoá đụng tới: thiếu bảng nào thì dialog báo "Không có dữ liệu để
@@ -148,7 +163,7 @@ export async function deleteAllData(shopNameConfirm: string): Promise<ActionResu
  * tới chúng nữa.
  */
 export async function coDuLieuGiaoDich(): Promise<boolean> {
-  await requireUser();
+  if (!(await congChuShopAction()).ok) return tuChoiDocChuShop();
 
   const dem = await Promise.all([
     prisma.order.count(),
@@ -206,7 +221,7 @@ export type ChiPhiKhongDungLai = {
  * Đếm động để dialog nói được ĐỘ LỚN của khoản mất, thay vì một câu cảnh báo chung chung.
  */
 export async function demChiPhiKhongDungLai(): Promise<ChiPhiKhongDungLai> {
-  await requireUser();
+  if (!(await congChuShopAction()).ok) return tuChoiDocChuShop();
 
   const [chiPhi, soDinhKy, khoanTienKhac, soKhoanVay, soSoTietKiem, thuNhap] = await Promise.all([
     prisma.expense.aggregate({
@@ -255,7 +270,7 @@ export type DonMoCoi = {
  * mất dữ liệu thật (phí sàn `returnedFee` của chúng vẫn trừ vào lãi ròng), nên giữ trong số đếm.
  */
 export async function demDonMoCoi(): Promise<DonMoCoi> {
-  await requireUser();
+  if (!(await congChuShopAction()).ok) return tuChoiDocChuShop();
 
   const [row] = await prisma.$queryRaw<{ soDon: number; tongTien: bigint }[]>`
     SELECT
@@ -293,7 +308,7 @@ export type AdsMoCoi = {
  * Đổi format `refId` mà quên chỗ này thì con số nhảy vọt — đó là dấu hiệu, không phải nhiễu.
  */
 export async function demAdsMoCoi(): Promise<AdsMoCoi> {
-  await requireUser();
+  if (!(await congChuShopAction()).ok) return tuChoiDocChuShop();
 
   // Khoá đối chiếu gộp `nguồn|externalId` để so bằng MỘT phép bằng — Postgres gom được thành
   // hash anti-join. Tách thành 2 điều kiện NOT EXISTS có kèm `nguon = '...'` thì nó phải dò lại
@@ -364,7 +379,9 @@ const SO_CANH_BAO_HIEN = 3;
  * TAY — đây chính là lượt đó (UI nói rõ điều này); chặn thì khoá luôn đường phục hồi sau khi xoá.
  */
 export async function dungLaiTuKhoTho(): Promise<ActionResult<KetQuaDungLai>> {
-  await requireUser();
+  const cong = await congChuShopAction();
+  if (!cong.ok) return cong;
+  const { nguoiDung } = cong;
 
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
@@ -407,11 +424,21 @@ export async function dungLaiTuKhoTho(): Promise<ActionResult<KetQuaDungLai>> {
       // tầng nên KHÔNG được đẩy thẳng ra client; chi tiết đã nằm sẵn trong `SyncLog.error` của
       // đúng lượt này (bảng ghi TRƯỚC KHI trả response) nên không mất, chỉ cần xem ở nhật ký.
       console.error("Dựng lại từ kho thô thất bại (lỗi nghiệp vụ/hạ tầng):", body.error);
+      await ghiNhatKyLoi({ actor: nguoiDung, hanhDong: HANH_DONG.DU_LIEU_DUNG_LAI_TU_KHO, ghiChu: { lyDo: "that-bai" } });
       return {
         ok: false,
         error: "Dựng lại thất bại — xem chi tiết ở nhật ký đồng bộ (/cai-dat).",
       };
     }
+
+    // Lượt dựng lại chạy qua NHIỀU transaction (không có một transaction chung để ghi kèm) ⇒ ghi
+    // nhật ký ngay sau khi xong. Ghi hỏng thì rơi xuống `catch` (báo lỗi hệ thống): lượt dựng lại
+    // idempotent nên chủ shop bấm lại là an toàn.
+    await ghiNhatKy(prisma, {
+      actor: nguoiDung,
+      hanhDong: HANH_DONG.DU_LIEU_DUNG_LAI_TU_KHO,
+      ghiChu: { soDong: body.stats.ordersUpserted },
+    });
 
     revalidatePath("/", "layout");
     return {
@@ -433,6 +460,7 @@ export async function dungLaiTuKhoTho(): Promise<ActionResult<KetQuaDungLai>> {
     // ném trước khi kịp trả `Response`, hoặc `res.json()` hỏng). Log đủ phía server, trả client
     // câu cố định thay vì `err.message` thô.
     console.error("Dựng lại từ kho thô thất bại:", err);
+    await ghiNhatKyLoi({ actor: nguoiDung, hanhDong: HANH_DONG.DU_LIEU_DUNG_LAI_TU_KHO, ghiChu: { lyDo: "loi-he-thong" } });
     return {
       ok: false,
       error: "Dựng lại thất bại — lỗi hệ thống, kiểm log server để biết chi tiết.",

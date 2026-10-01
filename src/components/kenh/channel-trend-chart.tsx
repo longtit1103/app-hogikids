@@ -9,7 +9,7 @@ import { ChannelInactiveAccordion } from "@/components/kenh/channel-inactive-acc
 import { ChannelTrendTooltip } from "@/components/kenh/channel-trend-tooltip";
 import { formatVnd, formatVndShort } from "@/lib/format";
 import { groupByWeek } from "@/lib/reports/group-by-week";
-import type { ChannelPnl } from "@/lib/reports/pnl";
+import type { ChannelPnlChe } from "@/lib/reports/pnl-che";
 import { cn } from "@/lib/utils";
 
 const WEEK_GROUP_THRESHOLD_DAYS = 90;
@@ -24,7 +24,7 @@ function dayLabel(dateStr: string): string {
 
 function buildPoints(
   dailyRevenue: Array<{ date: string; values: Record<string, number> }>,
-  activeChannels: ChannelPnl[]
+  activeChannels: ChannelPnlChe[]
 ): ChartPoint[] {
   return dailyRevenue.map((d) => {
     const point: ChartPoint = { date: d.date };
@@ -45,7 +45,7 @@ export function ChannelTrendChart({
   channels,
 }: {
   dailyRevenue: Array<{ date: string; values: Record<string, number> }>;
-  channels: ChannelPnl[];
+  channels: ChannelPnlChe[];
 }) {
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
 

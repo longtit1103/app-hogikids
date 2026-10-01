@@ -20,9 +20,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  */
 const epDoTruocBoQua = vi.hoisted(() => ({ bat: false }));
 
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/thung-rac/do-tinh-trang-khoi-phuc", async (importOriginal) => {
   const goc = await importOriginal<typeof import("@/lib/thung-rac/do-tinh-trang-khoi-phuc")>();

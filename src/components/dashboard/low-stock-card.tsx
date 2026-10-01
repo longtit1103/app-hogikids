@@ -1,5 +1,4 @@
-import Link from "next/link";
-
+import { LinkNeuDuocVao } from "@/components/dashboard/link-neu-duoc-vao";
 import { Badge } from "@/components/ui/badge";
 import type { LowStockPreviewRow } from "@/lib/queries/variants";
 
@@ -9,7 +8,16 @@ import type { LowStockPreviewRow } from "@/lib/queries/variants";
  * `getLowStockPreview()` (`src/lib/queries/variants.ts`, tái dùng predicate
  * ngưỡng phase 3 — không viết lại SQL ở đây).
  */
-export function LowStockCard({ rows, total }: { rows: LowStockPreviewRow[]; total: number }) {
+export function LowStockCard({
+  rows,
+  total,
+  hrefDuocPhep = [],
+}: {
+  rows: LowStockPreviewRow[];
+  total: number;
+  /** Trang người xem được vào — `/ton-kho` cần `ton-kho:xem`, thiếu thì dòng là chữ thường. */
+  hrefDuocPhep?: readonly string[];
+}) {
   return (
     <div className="rounded-xl bg-surface-card p-4">
       <div className="flex items-center justify-between gap-2">
@@ -23,10 +31,13 @@ export function LowStockCard({ rows, total }: { rows: LowStockPreviewRow[]; tota
         <>
           <div className="mt-3 flex flex-col gap-1">
             {rows.map((v) => (
-              <Link
+              <LinkNeuDuocVao
                 key={v.variantId}
                 href="/ton-kho?loc=sap_het"
+                hrefDuocPhep={hrefDuocPhep}
+                khoi
                 className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-soft"
+                classNameTinh="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-ink">
@@ -39,12 +50,17 @@ export function LowStockCard({ rows, total }: { rows: LowStockPreviewRow[]; tota
                 ) : (
                   <Badge className="shrink-0 bg-warning/20 text-ink">Còn {v.stock.toLocaleString("vi-VN")}</Badge>
                 )}
-              </Link>
+              </LinkNeuDuocVao>
             ))}
           </div>
-          <Link href="/ton-kho?loc=sap_het" className="mt-3 inline-block text-xs text-primary hover:underline">
-            Xem tất cả ({total})
-          </Link>
+          <LinkNeuDuocVao
+            href="/ton-kho?loc=sap_het"
+            hrefDuocPhep={hrefDuocPhep}
+            className="mt-3 inline-block text-xs text-primary hover:underline"
+            classNameTinh="mt-3 inline-block text-xs text-muted-foreground"
+          >
+            Tổng {total} SKU dưới ngưỡng
+          </LinkNeuDuocVao>
         </>
       )}
     </div>

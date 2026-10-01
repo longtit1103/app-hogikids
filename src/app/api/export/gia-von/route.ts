@@ -1,33 +1,35 @@
 import { format } from "date-fns";
-import * as XLSX from "xlsx";
 
+import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
 import { getVariantsForExport } from "@/lib/queries/variants";
-import { requireUser } from "@/lib/session";
+import { congRoute } from "@/lib/quyen/cong-route";
+import { dungXlsxBuffer, ghiNhatKyXuat, phanHoiTaiFile, tuChoiNeuThieuQuyen } from "@/lib/reports/xuat-xlsx-server";
 
-/** GET /api/export/gia-von — file mẫu import: SKU hiện có + giá vốn/ngưỡng hiện tại. */
+const HEADER = ["SKU", "Tên sản phẩm", "Giá vốn", "Ngưỡng"];
+
+/**
+ * GET /api/export/gia-von — file mẫu import: SKU hiện có + giá vốn/ngưỡng hiện tại.
+ * Quyền (spec phân quyền §4.3): `san-pham:xem` ∧ `gia-von-loi-nhuan:xem` ∧ `xuat-du-lieu` — file này
+ * vô nghĩa khi che giá vốn nên thiếu quyền giá vốn là 403, không phải file thiếu cột.
+ */
 export async function GET(): Promise<Response> {
-  await requireUser();
+  const c = await congRoute("san-pham:xem");
+  if (!c.ok) return c.response;
+  const nd = c.nguoiDung;
+  const tuChoi = await tuChoiNeuThieuQuyen(nd, ["gia-von-loi-nhuan:xem", "xuat-du-lieu"]);
+  if (tuChoi) return tuChoi;
 
-  const variants = await getVariantsForExport({});
-  const rows = variants.map((v) => ({
+  const kq = await getVariantsForExport({}, quyenGiaVonCua(nd));
+  // Đã kiểm quyền giá vốn ngay trên — nhánh che ở đây là bất khả; vẫn narrow thay vì ép kiểu.
+  if (!kq.coQuyenGiaVon) return Response.json({ error: "Thiếu quyền xem giá vốn" }, { status: 403 });
+
+  const rows = kq.rows.map((v) => ({
     SKU: v.sku,
     "Tên sản phẩm": v.productName,
     "Giá vốn": v.costPrice,
     Ngưỡng: v.lowStockThreshold ?? "",
   }));
-
-  const ws = XLSX.utils.json_to_sheet(rows, { header: ["SKU", "Tên sản phẩm", "Giá vốn", "Ngưỡng"] });
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Gia von");
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
-
-  const filename = `gia-von-${format(new Date(), "yyyy-MM-dd")}.xlsx`;
-  return new Response(new Uint8Array(buf), {
-    headers: {
-      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "X-Content-Type-Options": "nosniff", // chặn browser sniff bytes thành type khác
-      "Cache-Control": "no-store", // dữ liệu giá vốn — không để browser/CDN cache
-    },
-  });
+  const buf = dungXlsxBuffer([{ name: "Gia von", rows, header: HEADER }]);
+  await ghiNhatKyXuat(nd, "gia-von", { soDong: rows.length });
+  return phanHoiTaiFile(buf, `gia-von-${format(new Date(), "yyyy-MM-dd")}.xlsx`, "xlsx");
 }

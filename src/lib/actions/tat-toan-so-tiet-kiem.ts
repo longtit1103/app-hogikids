@@ -5,7 +5,7 @@ import { format, startOfDay } from "date-fns";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { LoiHopDong, OPT_TX, soTienKySchema } from "@/lib/actions/khoan-vay-chung";
+import { LoiHopDong, maLoiNhatKy, OPT_TX, soTienKySchema } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
@@ -13,7 +13,8 @@ import { loiSoTietKiem, REF_LAI_PREFIX } from "@/lib/actions/so-tiet-kiem-chung"
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
 import {
   chanSoDuTietKiemAm,
   khoaSoTietKiem,
@@ -85,7 +86,9 @@ const tatToanSchema = z.object({
  * `SAVINGS_IN` + bản ghi `ThuNhap` mà nó vừa ghi ở bước 3-4 biến mất sạch, không để lại rác.
  */
 export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = tatToanSchema.safeParse(input);
@@ -197,6 +200,16 @@ export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ 
           );
         }
 
+        // Nhật ký OK đứng NGAY TRƯỚC câu đóng sổ, KHÔNG sau: `closedAt` phải là câu CUỐI CÙNG của
+        // transaction tất toán (bất biến CLAUDE.md). Nhật ký ném ⇒ gốc, lãi rollback, sổ vẫn mở;
+        // câu đóng thua fencing ⇒ dòng nhật ký rollback theo.
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "TIET_KIEM_TAT_TOAN",
+          doiTuong: { loai: "SoTietKiem", id },
+          ghiChu: { ky: format(ngay, "yyyy-MM-dd") },
+        });
+
         // BƯỚC 6 — ĐÓNG SỔ, BƯỚC CUỐI CÙNG (lý do ở khối chú thích trên hàm). Fencing: điều kiện
         // `closedAt: null` nằm TRONG câu UPDATE.
         const dong = await tx.soTietKiem.updateMany({
@@ -210,6 +223,12 @@ export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ 
     lamMoiTrang();
     return { ok: true, data: { id } };
   } catch (e) {
+    await ghiNhatKyLoi({
+      actor: nguoiDung,
+      hanhDong: "TIET_KIEM_TAT_TOAN",
+      doiTuong: { loai: "SoTietKiem", id },
+      ghiChu: { lyDo: maLoiNhatKy(e) },
+    });
     return { ok: false, ...loiSoTietKiem(e, "Lỗi khi tất toán sổ tiết kiệm") };
   }
 }
@@ -230,7 +249,9 @@ export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ 
  * rollback trọn: không có ca "sổ mở lại rồi mà lãi vẫn nằm trong P&L".
  */
 export async function moLaiSoTietKiem(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = idSchema.safeParse(input);
@@ -269,12 +290,19 @@ export async function moLaiSoTietKiem(input: unknown): Promise<ActionResult<{ id
         // Sau khi gỡ dòng nhận lại, số đang gửi quay về đúng Σ đã gửi — vẫn kiểm cho nhất quán luật
         // "vị từ chạy SAU MỌI lượt ghi" (§8): sổ có dòng ghi tay lệch phải chặn ngay tại đây.
         await chanSoDuTietKiemAm(tx, id);
+        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_MO_LAI", doiTuong: { loai: "SoTietKiem", id } });
       }, OPT_TX)
     );
 
     lamMoiTrang();
     return { ok: true, data: { id } };
   } catch (e) {
+    await ghiNhatKyLoi({
+      actor: nguoiDung,
+      hanhDong: "TIET_KIEM_MO_LAI",
+      doiTuong: { loai: "SoTietKiem", id },
+      ghiChu: { lyDo: maLoiNhatKy(e) },
+    });
     return { ok: false, ...loiSoTietKiem(e, "Lỗi khi mở lại sổ tiết kiệm") };
   }
 }

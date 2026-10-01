@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTrendSheetRows } from "@/components/bao-cao/trend-tab";
+import { buildTrendSheetRows } from "@/lib/reports/bao-cao-sheet-rows";
 import type { MonthlyTrendRow } from "@/lib/reports/monthly-trend";
 
 /**

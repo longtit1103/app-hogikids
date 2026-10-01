@@ -23,7 +23,14 @@ import { seedReference, truncateBusinessTables } from "../helpers/test-db";
  * phiếu đề xuất, Σ 223.099.858đ — cùng con số đo thật trên prod.
  */
 
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user-id") }));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("../helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 const { ghiChiPhiNhapHang } = await import("@/lib/actions/chi-phi-nhap-hang");
@@ -107,10 +114,15 @@ describe("ghiChiPhiNhapHang — lưới tiền trên DB thật", () => {
     const quyTruoc = await quy();
     const pnlTruoc = await calcPnl(KY);
 
+    await prisma.auditLog.deleteMany({ where: { hanhDong: "NHAP_HANG_GHI_CHI_PHI" } });
     const kq = await ghiChiPhiNhapHang(await duyetTatCa());
 
     expect(kq.ok).toBe(true);
     if (kq.ok) expect(kq.data).toEqual({ daGhi: 4, boQua: 0, tongTien: TONG_4_PHIEU });
+    // Một lượt duyệt = MỘT dòng nhật ký, kèm số phiếu đã ghi (không kèm số tiền).
+    expect(await prisma.auditLog.findMany({ where: { hanhDong: "NHAP_HANG_GHI_CHI_PHI" } })).toMatchObject([
+      { ketQua: "OK", actorId: "test-user", ghiChu: { soDong: 4 } },
+    ]);
 
     const dong = await prisma.expense.findMany({ orderBy: { date: "asc" } });
     expect(dong).toHaveLength(4);

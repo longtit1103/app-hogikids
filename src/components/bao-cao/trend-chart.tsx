@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { formatVnd, formatVndShort } from "@/lib/format";
-import type { MonthlyTrendRow } from "@/lib/reports/monthly-trend";
+import type { MonthlyTrendRow, MonthlyTrendRowChe } from "@/lib/reports/monthly-trend";
 import { formatPct1, monthLabel } from "@/lib/reports/trend-format";
 import { cn } from "@/lib/utils";
 
@@ -28,8 +28,10 @@ const SERIES: { key: SeriesKey; label: string; color: string }[] = [
  * (>200 dòng nếu gộp cả bảng — quy ước modularize). Tự quản lý state ẩn/hiện
  * series (không component cha nào khác cần biết trạng thái này).
  */
-export function TrendChart({ rows }: { rows: MonthlyTrendRow[] }) {
+export function TrendChart({ rows, coLai }: { rows: MonthlyTrendRow[] | MonthlyTrendRowChe[]; coLai: boolean }) {
   const [hidden, setHidden] = useState<Set<SeriesKey>>(new Set());
+  // Thiếu quyền giá vốn: dòng là DTO che (không `netProfit`) ⇒ không series LN ròng.
+  const series = coLai ? SERIES : SERIES.filter((s) => s.key !== "netProfit");
 
   function toggleSeries(key: SeriesKey) {
     setHidden((prev) => {
@@ -38,7 +40,7 @@ export function TrendChart({ rows }: { rows: MonthlyTrendRow[] }) {
         next.delete(key);
       } else {
         // Không cho tắt hết — giữ tối thiểu 1 series hiển thị.
-        if (SERIES.every((s) => s.key === key || next.has(s.key))) return prev;
+        if (series.every((s) => s.key === key || next.has(s.key))) return prev;
         next.add(key);
       }
       return next;
@@ -48,7 +50,7 @@ export function TrendChart({ rows }: { rows: MonthlyTrendRow[] }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2 print:hidden">
-        {SERIES.map((s) => (
+        {series.map((s) => (
           <button
             key={s.key}
             type="button"
@@ -99,7 +101,7 @@ export function TrendChart({ rows }: { rows: MonthlyTrendRow[] }) {
             {!hidden.has("revenue") && (
               <Bar yAxisId="left" dataKey="revenue" name="Doanh thu" fill={REVENUE_COLOR} fillOpacity={0.6} radius={[4, 4, 0, 0]} />
             )}
-            {!hidden.has("netProfit") && (
+            {coLai && !hidden.has("netProfit") && (
               <Line yAxisId="left" type="monotone" dataKey="netProfit" name="LN ròng" stroke={PROFIT_COLOR} strokeWidth={2} dot={false} />
             )}
             {!hidden.has("returnBomRatePct") && (

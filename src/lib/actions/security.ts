@@ -10,20 +10,13 @@ import {
   resetAttempts,
 } from "@/lib/login-lockout";
 import { chayNoiTiepTheoEmail, QuaNhieuLuotDangNhap } from "@/lib/login-gate";
-import { hashPassword, MAX_PASSWORD_LENGTH, verifyPassword } from "@/lib/password";
+import { matKhauMoiVaXacNhanSchema } from "@/lib/mat-khau-moi-schema";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
+import { hashPassword, verifyPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
-import { createSession, docGhiNhoCuaPhien, requireUser, thuHoiMoiPhien } from "@/lib/session";
-
-/** Ít nhất 1 chữ cái + 1 chữ số (không ràng buộc ký tự đặc biệt/hoa-thường). */
-const NEW_PASSWORD_COMPLEXITY = /(?=.*[a-zA-Z])(?=.*\d)/;
-
-/**
- * Trần dưới của mật khẩu MỚI khi đổi mật khẩu — nâng 8 → 12 ký tự (chốt 24/09). CHỈ áp cho mật
- * khẩu MỚI ở màn này: đăng nhập bằng mật khẩu CŨ ngắn hơn 12 ký tự (đặt từ trước lượt nâng trần
- * này) vẫn phải vào được — màn đăng nhập (`auth.ts`) không có ràng buộc độ dài dưới, chỉ so khớp
- * hash. Không lùi cùng lúc `MAX_PASSWORD_LENGTH` (trần TRÊN, dùng chung với đăng nhập/seed).
- */
-const MIN_NEW_PASSWORD_LENGTH = 12;
+import { congAction } from "@/lib/quyen/cong-action";
+import { createSession, docGhiNhoCuaPhien, thuHoiPhienCuaNguoi } from "@/lib/session";
 
 /**
  * Bộ đếm khoá của màn Đổi mật khẩu PHẢI tách khỏi bộ đếm màn Đăng nhập — trước đây cả hai cùng
@@ -40,39 +33,44 @@ function khoaDoiMatKhau(email: string): string {
   return `doimatkhau:${email}`;
 }
 
+/**
+ * Mật khẩu hiện tại (chỉ cần có — mật khẩu cũ ngắn hơn luật mới vẫn phải xác thực được) + cặp mật khẩu
+ * mới/nhập lại theo luật CHUNG `matKhauMoiVaXacNhanSchema` (≥12 ký tự, có chữ và số, trần dùng chung với
+ * đăng nhập). Vế trái đứng trước ⇒ ô hiện tại trống báo lỗi trước các ô mật khẩu mới.
+ */
 const changePasswordSchema = z
-  .object({
-    currentPassword: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"),
-    // Trần TRÊN phải dùng chung hằng số với màn đăng nhập (`MAX_PASSWORD_LENGTH`) — đặt được ở đây
-    // mà đăng nhập lại chặn nghĩa là chủ shop tự khoá mình vĩnh viễn, xem ghi chú ở `password.ts`.
-    newPassword: z
-      .string()
-      .min(MIN_NEW_PASSWORD_LENGTH, `Mật khẩu mới phải có ít nhất ${MIN_NEW_PASSWORD_LENGTH} ký tự`)
-      .max(MAX_PASSWORD_LENGTH, `Mật khẩu mới tối đa ${MAX_PASSWORD_LENGTH} ký tự`)
-      .regex(NEW_PASSWORD_COMPLEXITY, "Mật khẩu mới phải có cả chữ và số"),
-    confirmPassword: z.string().min(1, "Vui lòng nhập lại mật khẩu mới"),
-  })
-  .refine((data) => data.confirmPassword === data.newPassword, {
-    message: "Mật khẩu xác nhận không khớp",
-    path: ["confirmPassword"],
-  });
+  .object({ currentPassword: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại") })
+  .and(matKhauMoiVaXacNhanSchema);
 
 /**
- * Đổi mật khẩu đăng nhập (app 1 người dùng). Xác thực mật khẩu hiện tại
+ * Dòng `User` đã đổi trạng thái (bị thu hồi phiên / reset / khoá) kể từ lúc cookie đang gọi được cấp
+ * — phát hiện DƯỚI khoá dòng, trong transaction.
+ */
+class TrangThaiDaDoi extends Error {}
+
+const LOI_TRANG_THAI_DA_DOI = "Trạng thái tài khoản đã đổi, đăng nhập lại";
+
+/**
+ * Đổi mật khẩu của CHÍNH người đang đăng nhập (không cần quyền module). Xác thực mật khẩu hiện tại
  * bằng scrypt (`verifyPassword`) trước khi ghi hash mới.
  *
- * THU HỒI MỌI PHIÊN KHÁC trong CÙNG transaction với lượt ghi hash: cookie iron-session là cookie
- * KÝ, không có bản ghi phía máy chủ, nên nếu không đẩy mốc phiên thì cookie "ghi nhớ đăng nhập" 30
- * ngày trên các thiết bị khác vẫn vào được — vô hiệu hoá chính lý do người ta đổi mật khẩu. Hai
- * lượt ghi phải cùng sống hoặc cùng chết, nếu không lỗi ở lượt thứ hai để lại đúng trạng thái tệ
- * nhất: mật khẩu mới đã có hiệu lực mà cookie cũ vẫn vào được. Thiết bị ĐANG thao tác
- * được cấp lại cookie ngay (đúng loại "ghi nhớ" mà phiên này đang dùng) nên chủ shop không bị đá
- * ra giữa chừng; mọi thiết bị khác phải đăng nhập lại.
+ * THU HỒI MỌI PHIÊN KHÁC CỦA NGƯỜI NÀY trong CÙNG transaction với lượt ghi hash: cookie iron-session
+ * là cookie KÝ, không có bản ghi phía máy chủ, nên nếu không đổi epoch thì cookie "ghi nhớ đăng
+ * nhập" 30 ngày trên các thiết bị khác vẫn vào được — vô hiệu hoá chính lý do người ta đổi mật khẩu.
+ * Hash + epoch + nhật ký cùng sống hoặc cùng chết. Thiết bị ĐANG thao tác được cấp lại cookie từ
+ * epoch transaction TRẢ RA (không đọc lại ngữ cảnh đã cache), đúng loại "ghi nhớ" phiên này dùng.
+ *
+ * Khe đua: transaction `SELECT … FOR UPDATE` dòng user rồi đối chiếu `sessionEpoch` với epoch của
+ * cookie đang gọi. Một lượt đổi mật khẩu/reset/khoá khác đã commit trước ⇒ epoch lệch ⇒
+ * `TRANG_THAI_DA_DOI`, không ghi gì — hai lượt đổi đồng thời chỉ một lượt thắng.
  */
 export async function changePassword(formData: FormData): Promise<ActionResult> {
-  const userId = await requireUser();
-  // Lượt phục hồi lùi CẢ `User.passwordHash` LẪN mốc thu hồi phiên về bản backup. Đổi mật khẩu
-  // trong cửa sổ đó = chủ shop tin mật khẩu mới có hiệu lực, còn mật khẩu CŨ mới là cái vào được.
+  const cong = await congAction();
+  if (!cong.ok) return cong;
+  const nguoiDung = cong.nguoiDung;
+  const actor = { id: nguoiDung.id, email: nguoiDung.email };
+  // Lượt phục hồi lùi CẢ `User.passwordHash` LẪN epoch phiên về bản backup. Đổi mật khẩu trong cửa
+  // sổ đó = người dùng tin mật khẩu mới có hiệu lực, còn mật khẩu CŨ mới là cái vào được.
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = changePasswordSchema.safeParse({
@@ -92,7 +90,7 @@ export async function changePassword(formData: FormData): Promise<ActionResult> 
 
   const { currentPassword, newPassword } = parsed.data;
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const user = await prisma.user.findUnique({ where: { id: nguoiDung.id } });
   if (!user) {
     return { ok: false, error: "Không tìm thấy người dùng" };
   }
@@ -109,7 +107,7 @@ export async function changePassword(formData: FormData): Promise<ActionResult> 
     }
     if (!(await verifyPassword(currentPassword, user.passwordHash))) {
       recordFailedAttempt(khoaBoDem);
-      return { ok: false as const, error: "Mật khẩu hiện tại không đúng" };
+      return { ok: false as const, error: "Mật khẩu hiện tại không đúng", saiMatKhau: true };
     }
     // Xoá bộ đếm NGAY TẠI ĐÂY, trong cổng — giống `login()` xoá ngay sau khi xác thực xong.
     // Để tận cuối hàm (sau khi băm mật khẩu mới hàng trăm ms, ghi DB rồi cấp cookie) là mở một
@@ -126,6 +124,10 @@ export async function changePassword(formData: FormData): Promise<ActionResult> 
   });
 
   if (!kiemMatKhauHienTai.ok) {
+    // Ghi nhật ký lượt sai mật khẩu thật; lượt bị khoá tạm/hàng đợi đầy là chặn tần suất, không ghi.
+    if ("saiMatKhau" in kiemMatKhauHienTai) {
+      await ghiNhatKyLoi({ actor, hanhDong: HANH_DONG.DOI_MAT_KHAU, ghiChu: { lyDo: "sai mật khẩu hiện tại" } });
+    }
     return { ok: false, error: kiemMatKhauHienTai.error, field: "currentPassword" };
   }
 
@@ -137,27 +139,42 @@ export async function changePassword(formData: FormData): Promise<ActionResult> 
     };
   }
 
-  // Đọc lựa chọn "ghi nhớ" TRƯỚC khi đẩy mốc — sau đó cookie cũ hết hiệu lực, không đọc lại được.
+  // Đọc lựa chọn "ghi nhớ" TRƯỚC khi đổi epoch — sau đó cookie cũ hết hiệu lực, không đọc lại được.
   const ghiNho = await docGhiNhoCuaPhien();
 
-  // scrypt tốn hàng trăm ms — tính XONG rồi mới mở transaction, đừng giữ transaction qua nó.
+  // scrypt tốn hàng trăm ms — tính XONG rồi mới mở transaction, đừng giữ transaction (và khoá dòng)
+  // qua nó.
   const hashMoi = await hashPassword(newPassword);
 
-  // Hash mới + mốc thu hồi phiên phải cùng SỐNG hoặc cùng CHẾT. Tách rời thì lỗi ở lệnh thứ hai để
-  // lại đúng trạng thái tệ nhất: mật khẩu mới đã có hiệu lực nhưng cookie 30 ngày trên máy khác vẫn
-  // vào được, mà UI thì báo "thất bại" nên chủ shop nhập lại mật khẩu cũ và tự khoá mình ra ngoài.
+  let mocMoi: string;
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: userId }, data: { passwordHash: hashMoi } });
-      await thuHoiMoiPhien(tx);
+    mocMoi = await prisma.$transaction(async (tx) => {
+      const [dong] = await tx.$queryRaw<{ sessionEpoch: string; mustChangePassword: boolean; isActive: boolean }[]>`
+        SELECT "sessionEpoch", "mustChangePassword", "isActive" FROM "User" WHERE "id" = ${nguoiDung.id} FOR UPDATE`;
+      // Epoch lệch cookie đang gọi (đổi mật khẩu nơi khác / reset / khoá đã commit trước), chủ shop
+      // vừa bật "phải đổi mật khẩu", hoặc tài khoản vừa bị khoá ⇒ không ghi đè lên trạng thái mới hơn.
+      // Soi `isActive` trực tiếp chứ không trông vào việc lượt khoá có đổi epoch hay không.
+      if (!dong || dong.sessionEpoch !== nguoiDung.mocPhien || dong.mustChangePassword || !dong.isActive) {
+        throw new TrangThaiDaDoi();
+      }
+      await tx.user.update({ where: { id: nguoiDung.id }, data: { passwordHash: hashMoi } });
+      const moc = await thuHoiPhienCuaNguoi(tx, nguoiDung.id);
+      await ghiNhatKy(tx, { actor, hanhDong: HANH_DONG.DOI_MAT_KHAU });
+      return moc;
     });
-  } catch {
+  } catch (loi) {
+    if (loi instanceof TrangThaiDaDoi) {
+      await ghiNhatKyLoi({ actor, hanhDong: HANH_DONG.DOI_MAT_KHAU, ghiChu: { lyDo: "TRANG_THAI_DA_DOI" } });
+      return { ok: false, error: LOI_TRANG_THAI_DA_DOI, code: "TRANG_THAI_DA_DOI" };
+    }
+    console.error("[security] Không lưu được mật khẩu mới:", loi);
+    await ghiNhatKyLoi({ actor, hanhDong: HANH_DONG.DOI_MAT_KHAU, ghiChu: { lyDo: "lỗi lưu" } });
     return { ok: false, error: "Không lưu được mật khẩu mới — thử lại" };
   }
 
-  // NGOÀI transaction: ghi cookie (không phải ghi DB), và phải chạy SAU khi mốc mới đã COMMIT —
-  // `createSession` đọc mốc hiện hành từ DB, chạy sớm hơn là cấp một cookie vô hiệu ngay lúc sinh.
-  await createSession(userId, ghiNho); // cấp lại cho ĐÚNG thiết bị đang thao tác
+  // NGOÀI transaction (ghi cookie, không ghi DB) và SAU khi epoch mới đã COMMIT: cookie mang đúng
+  // epoch transaction trả ra — cấp cho ĐÚNG thiết bị đang thao tác.
+  await createSession(nguoiDung.id, ghiNho, mocMoi);
 
   return { ok: true, data: undefined };
 }

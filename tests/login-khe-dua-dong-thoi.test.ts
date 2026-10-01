@@ -12,11 +12,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * lượt đoán mật khẩu mà kẻ tấn công thực sự mua được — thước đo trực tiếp của lỗ hổng.
  */
 vi.mock("@/lib/prisma", () => ({
-  prisma: { user: { findFirst: vi.fn() } },
+  prisma: {
+    user: { findUnique: vi.fn(), update: vi.fn(async () => ({})) },
+    // Ghi `lastLoginAt` + nhật ký sau khi đăng nhập thành công chạy trong một transaction.
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({ user: { update: async () => ({}) } })),
+  },
 }));
 vi.mock("@/lib/session", () => ({
   createSession: vi.fn(async () => {}),
   destroySession: vi.fn(async () => {}),
+}));
+// Nhật ký đăng nhập (DB) không phải thứ bài này đo — prisma giả không có bảng `AuditLog`.
+vi.mock("@/lib/nhat-ky/ghi-nhat-ky", () => ({
+  ghiNhatKy: vi.fn(async () => undefined),
+  ghiNhatKyLoi: vi.fn(async () => undefined),
 }));
 vi.mock("@/lib/password", async (importActual) => {
   const that = await importActual<typeof import("@/lib/password")>();
@@ -54,9 +63,9 @@ describe("login() — khe đua giữa lúc đọc khoá và lúc ghi lượt sai
     vi.mocked(verifyPassword).mockClear().mockImplementation(verifyPasswordThat);
     vi.mocked(createSession).mockClear();
     hashThat ??= await hashPassword(MAT_KHAU_DUNG);
-    vi.mocked(prisma.user.findFirst)
+    vi.mocked(prisma.user.findUnique)
       .mockReset()
-      .mockResolvedValue({ id: "chu-shop", email: EMAIL, passwordHash: hashThat } as never);
+      .mockResolvedValue({ id: "chu-shop", email: EMAIL, passwordHash: hashThat, sessionEpoch: "0", isActive: true } as never);
   });
 
   it("1000 request ĐỒNG THỜI chỉ mua được tối đa 5 lượt đoán mật khẩu", async () => {
@@ -103,7 +112,7 @@ describe("login() — khe đua giữa lúc đọc khoá và lúc ghi lượt sai
     const r = await login(form(MAT_KHAU_DUNG));
 
     expect(r).toEqual({ ok: true, data: undefined });
-    expect(vi.mocked(createSession)).toHaveBeenCalledWith("chu-shop", false);
+    expect(vi.mocked(createSession)).toHaveBeenCalledWith("chu-shop", false, "0");
     expect(getLockoutSecondsRemaining(EMAIL)).toBe(0);
     // Bộ đếm đã xoá thật: 5 lượt sai kế tiếp mới lại đủ khoá, không phải 1.
     for (let i = 0; i < 4; i += 1) {
@@ -113,7 +122,7 @@ describe("login() — khe đua giữa lúc đọc khoá và lúc ghi lượt sai
   });
 
   it("lỗi DB không làm kẹt hàng đợi và KHÔNG bị tính là sai mật khẩu", async () => {
-    vi.mocked(prisma.user.findFirst).mockRejectedValueOnce(new Error("mất kết nối DB"));
+    vi.mocked(prisma.user.findUnique).mockRejectedValueOnce(new Error("mất kết nối DB"));
 
     await expect(login(form(MAT_KHAU_SAI))).rejects.toThrow("mất kết nối DB");
 
@@ -133,7 +142,7 @@ describe("login() — khe đua giữa lúc đọc khoá và lúc ghi lượt sai
   it("email KHÁC nhau không chờ nhau (cổng nối tiếp theo từng email, không phải toàn cục)", async () => {
     // Nối tiếp toàn cục sẽ biến chính chốt bảo vệ thành chỗ nghẽn: một kẻ bơm email giả là chủ
     // shop phải xếp hàng sau nó. Cổng phải tách theo email.
-    vi.mocked(prisma.user.findFirst).mockResolvedValue(null as never);
+    vi.mocked(prisma.user.findUnique).mockResolvedValue(null as never);
 
     const ketQua = await Promise.all(
       Array.from({ length: 20 }, (_, i) => login(form(MAT_KHAU_SAI, `khac-${i}@hogikids.test`)))

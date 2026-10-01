@@ -4,10 +4,29 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatVnd } from "@/lib/format";
-import type { VariantRow } from "@/lib/queries/variants";
+import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
+import type { VariantRow, VariantRowChe } from "@/lib/queries/variants";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
+
+type GiaVonDong = { costPrice: number; stockValue: number } | null;
+
+/** Ghép dòng + phần giá vốn (null ở nhánh che) — narrow union MỘT lần, desktop và mobile dùng chung. */
+function ghepGiaVon(bang: KetQuaChe<{ rows: VariantRow[] }, { rows: VariantRowChe[] }>): { v: VariantRowChe; gv: GiaVonDong }[] {
+  if (bang.coQuyenGiaVon) return bang.rows.map((v) => ({ v, gv: { costPrice: v.costPrice, stockValue: v.stockValue } }));
+  return bang.rows.map((v) => ({ v, gv: null }));
+}
+
+function GiaTriVon({ gv }: { gv: NonNullable<GiaVonDong> }) {
+  return gv.costPrice === 0 ? (
+    <span title="Chưa có giá vốn — cập nhật ở Sản phẩm" className="text-muted-foreground">
+      —
+    </span>
+  ) : (
+    formatVnd(gv.stockValue)
+  );
+}
 
 function hrefWith(sp: Record<string, string | undefined>, overrides: Record<string, string | undefined>): string {
   const params = new URLSearchParams();
@@ -43,15 +62,16 @@ function SortHeader({
   );
 }
 
+/** Thiếu quyền giá vốn: không cột Giá vốn/Giá trị vốn, sort chỉ theo tồn (dữ liệu che từ server). */
 export function InventoryTable({
-  rows,
+  bang,
   total,
   page,
   sort,
   dir,
   sp,
 }: {
-  rows: VariantRow[];
+  bang: KetQuaChe<{ rows: VariantRow[] }, { rows: VariantRowChe[] }>;
   total: number;
   page: number;
   sort: "ton" | "von";
@@ -61,6 +81,8 @@ export function InventoryTable({
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const to = Math.min(page * PAGE_SIZE, total);
+  const coGiaVon = bang.coQuyenGiaVon;
+  const dong = ghepGiaVon(bang);
 
   return (
     <div className="rounded-xl border border-hairline">
@@ -74,15 +96,17 @@ export function InventoryTable({
               <SortHeader label="Tồn" field="ton" sp={sp} sort={sort} dir={dir} />
             </TableHead>
             <TableHead className="text-right">Ngưỡng</TableHead>
-            <TableHead className="text-right">Giá vốn</TableHead>
-            <TableHead className="text-right">
-              <SortHeader label="Giá trị vốn" field="von" sp={sp} sort={sort} dir={dir} />
-            </TableHead>
+            {coGiaVon && <TableHead className="text-right">Giá vốn</TableHead>}
+            {coGiaVon && (
+              <TableHead className="text-right">
+                <SortHeader label="Giá trị vốn" field="von" sp={sp} sort={sort} dir={dir} />
+              </TableHead>
+            )}
             <TableHead>Trạng thái</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((v) => (
+          {dong.map(({ v, gv }) => (
             <TableRow key={v.variantId} className={cn(v.isLow && "bg-warning/5")}>
               <TableCell className="font-mono text-sm">{v.sku}</TableCell>
               <TableCell>
@@ -98,16 +122,12 @@ export function InventoryTable({
                 {v.effectiveThreshold.toLocaleString("vi-VN")}
                 {v.lowStockThreshold === null && "*"}
               </TableCell>
-              <TableCell className="text-right text-sm">{formatVnd(v.costPrice)}</TableCell>
-              <TableCell className="text-right text-sm">
-                {v.costPrice === 0 ? (
-                  <span title="Chưa có giá vốn — cập nhật ở Sản phẩm" className="text-muted-foreground">
-                    —
-                  </span>
-                ) : (
-                  formatVnd(v.stockValue)
-                )}
-              </TableCell>
+              {gv && <TableCell className="text-right text-sm">{formatVnd(gv.costPrice)}</TableCell>}
+              {gv && (
+                <TableCell className="text-right text-sm">
+                  <GiaTriVon gv={gv} />
+                </TableCell>
+              )}
               <TableCell>
                 {v.stock === 0 ? (
                   <Badge className="bg-error text-white">Hết hàng</Badge>
@@ -122,7 +142,7 @@ export function InventoryTable({
 
       {/* Mobile: card dọc */}
       <div className="flex flex-col gap-2 p-3 md:hidden">
-        {rows.map((v) => (
+        {dong.map(({ v, gv }) => (
           <div
             key={v.variantId}
             className={cn("flex flex-col gap-1.5 rounded-lg border border-hairline p-3", v.isLow && "bg-warning/5")}
@@ -151,18 +171,14 @@ export function InventoryTable({
                 {v.lowStockThreshold === null && "*"}
               </span>
             </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Giá vốn: {formatVnd(v.costPrice)}</span>
-              <span className="text-ink">
-                {v.costPrice === 0 ? (
-                  <span title="Chưa có giá vốn — cập nhật ở Sản phẩm" className="text-muted-foreground">
-                    —
-                  </span>
-                ) : (
-                  formatVnd(v.stockValue)
-                )}
-              </span>
-            </div>
+            {gv && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Giá vốn: {formatVnd(gv.costPrice)}</span>
+                <span className="text-ink">
+                  <GiaTriVon gv={gv} />
+                </span>
+              </div>
+            )}
           </div>
         ))}
       </div>

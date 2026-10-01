@@ -192,6 +192,15 @@ test.describe("Tồn kho", () => {
   });
 });
 
+/**
+ * Mốc `inserted_at` dạng Pancake (chuỗi naive = UTC) cách bây giờ `gio` giờ. Đơn fixture phải nằm trong
+ * khoảng mặc định của /don-hang ("tháng này"): mốc cố định "2026-07-01" làm hai bài mở drawer hỏng
+ * ngay khi sang tháng khác — chỉ vì đơn rơi khỏi danh sách, không phải lỗi tính năng.
+ */
+function gioNaiveUtcTruoc(gio: number): string {
+  return new Date(Date.now() - gio * 3_600_000).toISOString().replace("Z", "000");
+}
+
 test.describe("Đơn hàng", () => {
   // Order/SKU riêng (không trùng orders-sample/products-sample) để đảm bảo item resolve
   // được Variant thật — cần cho case "sửa giá vốn → drawer đổi lãi".
@@ -216,7 +225,7 @@ test.describe("Đơn hàng", () => {
         {
           id: "E2E-DRAWER-01",
           status: 3,
-          inserted_at: "2026-07-01T10:00:00.000000",
+          inserted_at: gioNaiveUtcTruoc(2),
           order_sources_name: "Shopee",
           marketplace_id: "-3",
           total_price: 200000,
@@ -236,7 +245,7 @@ test.describe("Đơn hàng", () => {
           id: "260800E2EMASAN1",
           system_id: 998877,
           status: 3,
-          inserted_at: "2026-07-01T11:00:00.000000",
+          inserted_at: gioNaiveUtcTruoc(1),
           order_sources_name: "Shopee",
           marketplace_id: "-3",
           total_price: 50000,
@@ -309,7 +318,9 @@ test.describe("Đơn hàng", () => {
   });
 
   test("click đơn → drawer hiện lãi khớp công thức; sửa giá vốn → lãi đổi", async ({ page }) => {
-    await page.goto("/don-hang");
+    // Tìm theo mã: DB e2e sống qua nhiều lượt và nhiều spec ghi đơn hôm nay, đơn fixture không còn nằm
+    // ở trang đầu của danh sách mặc định.
+    await page.goto("/don-hang?q=E2E-DRAWER-01");
     await page.getByRole("link", { name: "E2E-DRAWER-01" }).click();
 
     // itemsTotal = 200.000 − giảm giá dòng (2×20.000) = 160.000; − fee 15.000 − cogs (2×40.000) = 65.000
@@ -328,7 +339,9 @@ test.describe("Đơn hàng", () => {
     await input.press("Enter");
     await expect(prodRow.getByTestId("gia-von-sp")).toContainText("60.000");
 
-    await page.goto("/don-hang");
+    // Tìm theo mã: DB e2e sống qua nhiều lượt và nhiều spec ghi đơn hôm nay, đơn fixture không còn nằm
+    // ở trang đầu của danh sách mặc định.
+    await page.goto("/don-hang?q=E2E-DRAWER-01");
     await page.getByRole("link", { name: "E2E-DRAWER-01" }).click();
     // cogs mới = 2×60.000=120.000 → lãi = 160.000−0−15.000−120.000 = 25.000
     await expect(page.getByText("25.000 ₫")).toBeVisible();
@@ -346,7 +359,9 @@ test.describe("Đơn hàng", () => {
    * theo TEXT sẽ khớp cả bản ẩn — phải neo vào popup thật `[data-slot="popover-content"]`.
    */
   test('drawer chi tiết đơn — dòng "Lãi đơn", bung/thu gọn nhóm, dấu "?" chỉ mở khi rê chuột', async ({ page }) => {
-    await page.goto("/don-hang");
+    // Tìm theo mã: DB e2e sống qua nhiều lượt và nhiều spec ghi đơn hôm nay, đơn fixture không còn nằm
+    // ở trang đầu của danh sách mặc định.
+    await page.goto("/don-hang?q=E2E-DRAWER-01");
     await page.getByRole("link", { name: "E2E-DRAWER-01" }).click();
 
     await expect(page.getByText("Lãi đơn", { exact: true })).toBeVisible();

@@ -9,14 +9,21 @@ import { tinhSoQuyThang } from "@/lib/so-quy/so-quy-queries";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 /**
- * Integration (`hogikids_test`) cho bản chốt số dư cuối tháng. Mock `requireUser` + `revalidatePath`
+ * Integration (`hogikids_test`) cho bản chốt số dư cuối tháng. Mock `docNguoiDungPhien` + `revalidatePath`
  * như `cash-movements-actions.integration.test.ts`.
  *
  * Fixture: mở sổ D0 = 05/07/2026 (góp vốn 100tr), rút vốn 10tr ngày 10/08/2026
  *   ⇒ sổ quỹ CUỐI KỲ tháng 8/2026 = 90tr (luỹ kế từ D0).
  * Tháng 6/2026 nằm TRƯỚC D0 · tháng sau tháng hiện tại là TƯƠNG LAI.
  */
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user-id") }));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 const T8 = { from: startOfMonth(new Date(2026, 7, 1)), to: endOfMonth(new Date(2026, 7, 1)) };

@@ -7,12 +7,16 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 /**
  * HÀNG RÀO bất biến #1 (`hogikids_test`, DB thật): "Tính lại phí kỳ này" CHỈ
  * đụng đơn kênh không có phí sàn thật (Facebook/Website). Đơn Shopee/TikTok
- * mang phí THẬT `fee_marketplace` PHẢI byte-identical sau recompute. `requireUser`
+ * mang phí THẬT `fee_marketplace` PHẢI byte-identical sau recompute. Ngữ cảnh người dùng
  * + `revalidatePath` mock (không có request scope trong vitest) — xem ads-import.test.ts.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));

@@ -13,9 +13,12 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
  * `runPgDump` bị mock: chạy pg_dump thật ở test là chậm, phụ thuộc binary + mạng Tailscale, và
  * không kiểm thêm điều gì — cái cần chốt là ĐƯỜNG GHI/ĐỌC LOG quanh nó.
  */
-vi.mock("@/lib/session", () => ({
-  getAuthenticatedUserId: vi.fn(async () => "test-user-id"),
-}));
+// Route gác bằng `congChuShopRoute()` — mặc định chủ shop giả; ca "cổng" dưới đổi sang STAFF/không phiên.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (importActual) => {
+  const that = await importActual<typeof import("@/lib/quyen/nguoi-dung-phien")>();
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return { ...that, docNguoiDungPhien: vi.fn(async () => nguoiDungGia()) };
+});
 vi.mock("@/lib/backup/run-pg-dump", () => ({
   runPgDump: vi.fn(async () => Buffer.from("PGDMP giả")),
 }));
@@ -40,6 +43,8 @@ import { dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { giuKhoaViecNang, traKhoaViecNang } from "@/lib/backup/khoa-viec-nang";
 import { runPgDump } from "@/lib/backup/run-pg-dump";
 import { prisma } from "@/lib/prisma";
+import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
+import { nguoiDungGia } from "./helpers/nguoi-dung-gia";
 
 const DUMP = Buffer.from("PGDMP dữ liệu giả cho test");
 
@@ -57,6 +62,7 @@ beforeEach(async () => {
   vi.mocked(runPgDump).mockReset();
   vi.mocked(runPgDump).mockResolvedValue(DUMP);
   vi.mocked(dangPhucHoi).mockReturnValue(false);
+  vi.mocked(docNguoiDungPhien).mockReset().mockResolvedValue(nguoiDungGia());
 });
 
 afterAll(async () => {
@@ -74,6 +80,42 @@ afterAll(async () => {
 function req(): Request {
   return new Request("http://localhost/api/backup", { method: "POST" });
 }
+
+/**
+ * Bản backup chứa TOÀN BỘ DB — kể cả hash mật khẩu chủ shop và kho token — nên chỉ chủ shop được
+ * tải. Tài khoản phụ (STAFF) có quyền gì cũng không qua; người đang phải đổi mật khẩu cũng không.
+ */
+describe("POST /api/backup — cổng chỉ chủ shop", () => {
+  it("STAFF (kể cả có quyền) ⇒ 403, KHÔNG chạy pg_dump, KHÔNG ghi SyncLog", async () => {
+    vi.mocked(docNguoiDungPhien).mockResolvedValue(
+      nguoiDungGia({ id: "test-staff", role: "STAFF", quyen: new Set(["cai-dat:xem"]) }),
+    );
+    const res = await POST(req());
+    expect(res.status).toBe(403);
+    expect(runPgDump).not.toHaveBeenCalled();
+    expect(await docLogBackup()).toHaveLength(0);
+  });
+
+  it("chủ shop đang phải đổi mật khẩu ⇒ 403 PHAI_DOI_MAT_KHAU, KHÔNG chạy pg_dump", async () => {
+    vi.mocked(docNguoiDungPhien).mockResolvedValue(nguoiDungGia({ phaiDoiMatKhau: true }));
+    const res = await POST(req());
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "PHAI_DOI_MAT_KHAU" });
+    expect(runPgDump).not.toHaveBeenCalled();
+  });
+
+  it("không có phiên ⇒ 401", async () => {
+    vi.mocked(docNguoiDungPhien).mockResolvedValue(null);
+    expect((await POST(req())).status).toBe(401);
+    expect(runPgDump).not.toHaveBeenCalled();
+  });
+
+  it("chủ shop ⇒ qua cổng, tải được file", async () => {
+    const res = await POST(req());
+    expect(res.status).toBe(200);
+    expect(runPgDump).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("POST /api/backup — ghi nhật ký sao lưu", () => {
   it("dump OK → 200 kèm file, và sinh ĐÚNG 1 dòng SyncLog BACKUP status OK có sizeBytes", async () => {

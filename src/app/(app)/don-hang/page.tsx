@@ -13,7 +13,8 @@ import {
 } from "@/lib/queries/orders";
 import { slugToStatus } from "@/lib/orders/order-status-meta";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
 import { PageTitle } from "@/components/shell/page-title";
 
 type SearchParams = {
@@ -27,10 +28,11 @@ type SearchParams = {
 };
 
 export default async function DonHangPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  // Canh phiên NGAY TẠI TRANG, không chỉ dựa vào `(app)/layout.tsx`: một request RSC dựng tay có
+  // Cổng NGAY TẠI TRANG, không chỉ dựa vào `(app)/layout.tsx`: một request RSC dựng tay có
   // thể xin riêng segment trang mà không chạy lại layout ⇒ dữ liệu đơn hàng lọt ra ngoài phiên,
   // và mốc thu hồi phiên (đổi mật khẩu) cũng không được soi. 6 trang khác trong nhóm này đã làm vậy.
-  await requireUser("/don-hang");
+  const nd = await yeuCauQuyenTrang("/don-hang", "don-hang:xem");
+  const quyen = quyenGiaVonCua(nd);
 
   const sp = await searchParams;
   const page = docSoTrang(sp.trang);
@@ -48,7 +50,7 @@ export default async function DonHangPage({ searchParams }: { searchParams: Prom
       page,
     }),
     getLastPancakeSyncAt(),
-    sp.don ? getOrderDetail(sp.don) : Promise.resolve(null),
+    sp.don ? getOrderDetail(sp.don, quyen) : Promise.resolve(null),
     prisma.channel.findMany({ orderBy: { sortOrder: "asc" }, select: { id: true, name: true, color: true } }),
   ]);
 

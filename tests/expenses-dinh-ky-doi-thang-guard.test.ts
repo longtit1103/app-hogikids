@@ -16,9 +16,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * cảnh báo nào. UNIQUE `(recurringId, recurringMonth)` dưới DB chỉ đỡ chiều ĐÍCH (tháng đích đã có
  * dòng của chính mẫu); chiều NGUỒN (tháng cũ trống rồi bị sinh bù) vẫn chỉ cổng trong action chặn.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 // revalidatePath cần request scope (không có trong vitest) — no-op cho unit test.
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),

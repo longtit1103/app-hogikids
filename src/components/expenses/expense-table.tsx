@@ -67,9 +67,18 @@ type ExpenseTableProps = {
   totalAmount: number;
   categories: { id: string; name: string }[];
   channels: { id: string; name: string; color: string }[];
+  /** Có `chi-phi:sua` (server tính). Thiếu/false ⇒ không nút Sửa/Xóa trên dòng (action vẫn tự chặn). */
+  choPhepSua?: boolean;
 };
 
-export function ExpenseTable({ rows, count, totalAmount, categories, channels }: ExpenseTableProps) {
+export function ExpenseTable({
+  rows,
+  count,
+  totalAmount,
+  categories,
+  channels,
+  choPhepSua = false,
+}: ExpenseTableProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -172,6 +181,8 @@ export function ExpenseTable({ rows, count, totalAmount, categories, channels }:
         </div>
       );
     }
+    // Dòng ads (trên) chỉ có nút xoá đã khoá sẵn — không phải nút ghi. Dòng thường: Sửa/Xóa theo quyền.
+    if (!choPhepSua) return null;
     return (
       <div className="flex items-center justify-end gap-3">
         <button

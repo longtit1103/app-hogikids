@@ -1,15 +1,17 @@
 import Link from "next/link";
 
-import { ChannelComparisonSection } from "@/components/kenh/channel-comparison-section";
+import { ChannelComparisonSection, type SoSanhKenhDuLieu } from "@/components/kenh/channel-comparison-section";
 import { ChannelNotFoundToast } from "@/components/kenh/channel-not-found-toast";
 import { ChannelTrendChart } from "@/components/kenh/channel-trend-chart";
 import { clampRangeEndToNow, khoangServerThuocTinh, previousComparableRange, resolveRangeFromParams } from "@/lib/date-range";
 import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import { prisma } from "@/lib/prisma";
+import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
 import { computeChannelDailyRevenue } from "@/lib/reports/daily-series";
 import { chuThichBienRongTheoKenh } from "@/lib/reports/chu-thich-thu-nhap-tai-chinh";
 import { computeChannelPnl, sumThuNhapTaiChinh, type ChannelPnl } from "@/lib/reports/pnl";
-import { requireUser } from "@/lib/session";
+import { boChannelPnlTheoQuyen, cheChannelPnl } from "@/lib/reports/pnl-che";
 
 type SearchParams = { tu?: string; den?: string; range?: string; loi?: string };
 
@@ -49,7 +51,10 @@ function zeroChannelPnl(c: ChannelRow): ChannelPnl {
 }
 
 export default async function KenhPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requireUser();
+  const nd = await yeuCauQuyenTrang("/kenh", "kenh:xem");
+  // `computeChannelPnl` tính đủ (ngoại lệ chốt 30/09, spec phân quyền §4.1); thiếu quyền giá vốn thì
+  // chiếu DTO che (`boChannelPnlTheoQuyen`) TRƯỚC khi vào props client bên dưới.
+  const quyen = quyenGiaVonCua(nd);
 
   const sp = await searchParams;
   const now = new Date();
@@ -71,7 +76,8 @@ export default async function KenhPage({ searchParams }: { searchParams: Promise
       orderBy: { sortOrder: "asc" },
       select: { id: true, name: true, color: true, isActive: true, platformFeePct: true, paymentFeePct: true },
     }),
-    sumThuNhapTaiChinh(range),
+    // Chỉ để chú thích biên ròng — người không thấy lãi thì không cần (và không đọc).
+    quyen.coQuyenGiaVon ? sumThuNhapTaiChinh(range) : Promise.resolve(0),
   ]);
 
   const feePctByChannel: Record<string, number> = {};
@@ -85,20 +91,21 @@ export default async function KenhPage({ searchParams }: { searchParams: Promise
   const inactiveWithActivity = pnlChannels.filter((c) => !c.isActive);
   // Lãi tiết kiệm KHÔNG thuộc kênh bán nào (calcPnlCore ép 0 dưới lăng kính kênh) — nói ra để
   // cộng biên ròng các kênh lại không khớp bảng Lãi/Lỗ thì có lời giải thích ngay tại chỗ.
-  const ghiChuKenh = chuThichBienRongTheoKenh(thuNhapTaiChinh);
+  const ghiChuKenh = quyen.coQuyenGiaVon ? chuThichBienRongTheoKenh(thuNhapTaiChinh) : null;
+  const soSanh: SoSanhKenhDuLieu = boChannelPnlTheoQuyen(
+    { channels: activeChannels, prevChannels: prevPnlChannels },
+    quyen,
+  );
 
   return (
     <div className="flex flex-col gap-6" data-khoang-server={khoangServerThuocTinh(range)}>
       <ChannelNotFoundToast />
 
-      <ChannelComparisonSection
-        channels={activeChannels}
-        prevChannels={prevPnlChannels}
-        feePctByChannel={feePctByChannel}
-      />
+      <ChannelComparisonSection du={soSanh} feePctByChannel={feePctByChannel} />
 
       {ghiChuKenh && <p className="-mt-2 text-xs text-muted-foreground">{ghiChuKenh}</p>}
-      <ChannelTrendChart dailyRevenue={dailyRevenue} channels={[...activeChannels, ...inactiveWithActivity]} />
+      {/* Biểu đồ chỉ cần doanh thu/tên/màu — luôn DTO che, kể cả chủ shop (bớt payload client). */}
+      <ChannelTrendChart dailyRevenue={dailyRevenue} channels={cheChannelPnl([...activeChannels, ...inactiveWithActivity])} />
 
       <div className="flex justify-end">
         <Link href="/marketing?tab=quang-cao" className="text-sm text-primary hover:underline">

@@ -1,5 +1,6 @@
 "use server";
 
+import { format } from "date-fns";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
@@ -7,14 +8,16 @@ import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
 import { thangChot } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import { ngayMoSo } from "@/lib/so-quy/so-quy-queries";
 
 /**
  * Hai server action cho bản CHỐT SỐ DƯ THẬT cuối tháng (tab Dòng tiền) — hàng rào bắt sai cộng dồn
  * sổ quỹ. Đây là THƯỚC ĐO, không phải nguồn tiền: không ghi `CashMovement`, không đổi quỹ, không vào
- * Lãi/Lỗ. Vì thế KHÔNG cần transaction / khoá cha / khoá việc nặng — một dòng, không có số dẫn xuất.
+ * Lãi/Lỗ. Vì thế KHÔNG cần khoá cha / khoá việc nặng — một dòng, không có số dẫn xuất. Transaction
+ * ngắn chỉ để dòng nhật ký đi CÙNG câu ghi (nhật ký ném ⇒ bản chốt không lưu).
  *
  * Một tháng một dòng: `luu` là upsert theo `thang`, lưu lại cùng tháng = sửa đè. Xoá là xoá thẳng,
  * CỐ Ý không qua thùng rác — ba con số gõ lại mất 10 giây, dựng cả cơ chế khôi phục là thừa.
@@ -66,7 +69,9 @@ async function loiThangKhongHopLe(thang: Date): Promise<string | null> {
 }
 
 export async function luuSoDuChotThang(input: unknown): Promise<ActionResult<{ thang: Date }>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-dong-tien:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = chotSchema.safeParse(input);
@@ -77,24 +82,46 @@ export async function luuSoDuChotThang(input: unknown): Promise<ActionResult<{ t
   if (loi !== null) return { ok: false, error: loi };
 
   const { soDuBank, tienMat, note } = parsed.data;
-  await prisma.soDuChotThang.upsert({
-    where: { thang },
-    create: { thang, soDuBank, tienMat, note },
-    update: { soDuBank, tienMat, note },
+  await prisma.$transaction(async (tx) => {
+    const row = await tx.soDuChotThang.upsert({
+      where: { thang },
+      create: { thang, soDuBank, tienMat, note },
+      update: { soDuBank, tienMat, note },
+    });
+    await ghiNhatKy(tx, {
+      actor: nguoiDung,
+      hanhDong: "CHOT_SO_DU_LUU",
+      doiTuong: { loai: "SoDuChotThang", id: row.id },
+      ghiChu: { thang: format(thang, "yyyy-MM") },
+    });
   });
   lamMoiTrang();
   return { ok: true, data: { thang } };
 }
 
 export async function xoaSoDuChotThang(input: unknown): Promise<ActionResult<null>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-dong-tien:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = xoaSchema.safeParse(input);
   if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
   const thang = thangChot(parsed.data.thang);
 
-  const { count } = await prisma.soDuChotThang.deleteMany({ where: { thang } });
+  const count = await prisma.$transaction(async (tx) => {
+    const { count: n } = await tx.soDuChotThang.deleteMany({ where: { thang } });
+    // Không có gì để xoá thì cũng không có gì để ghi dấu vết.
+    if (n > 0) {
+      await ghiNhatKy(tx, {
+        actor: nguoiDung,
+        hanhDong: "CHOT_SO_DU_XOA",
+        doiTuong: { loai: "SoDuChotThang" },
+        ghiChu: { thang: format(thang, "yyyy-MM") },
+      });
+    }
+    return n;
+  });
   if (count === 0) return { ok: false, error: "Không tìm thấy bản chốt của tháng này" };
   lamMoiTrang();
   return { ok: true, data: null };

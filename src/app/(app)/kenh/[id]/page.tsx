@@ -5,7 +5,7 @@ import { endOfDay } from "date-fns";
 import { AddChannelAdsButton } from "@/components/kenh/add-channel-ads-button";
 import { ChannelAdsExpensesTab } from "@/components/kenh/channel-ads-expenses-tab";
 import { feeBadgeLabel } from "@/components/kenh/channel-format";
-import { ChannelKpiCards } from "@/components/kenh/channel-kpi-cards";
+import { ChannelKpiCards, type KpiKenhDuLieu } from "@/components/kenh/channel-kpi-cards";
 import { ChannelOrdersTab } from "@/components/kenh/channel-orders-tab";
 import { ChannelRevenueAdsChart } from "@/components/kenh/channel-revenue-ads-chart";
 import { SanPhamBanChayKenh } from "@/components/kenh/san-pham-ban-chay-kenh";
@@ -16,11 +16,14 @@ import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { slugToStatus } from "@/lib/orders/order-status-meta";
 import { docSoTrang } from "@/lib/pagination";
 import { prisma } from "@/lib/prisma";
+import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
 import { getOrderListPage } from "@/lib/queries/orders";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
+import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
 import { computeChannelRevenueAdsSeries } from "@/lib/reports/daily-series";
 import { calcPnl } from "@/lib/reports/pnl";
+import { boPnlTheoQuyen } from "@/lib/reports/pnl-che";
 import { computeProductReport } from "@/lib/reports/product-report";
-import { requireUser } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
 const TOP_SAN_PHAM_LIMIT = 10;
@@ -55,7 +58,10 @@ export default async function KenhChiTietPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<SearchParams>;
 }) {
-  await requireUser();
+  const nd = await yeuCauQuyenTrang("/kenh", "kenh:xem");
+  const quyen = quyenGiaVonCua(nd);
+  // Thêm/sửa/xoá chi phí ads gắn kênh là ghi Sổ chi phí — đòi `chi-phi:sua` (action cũng tự kiểm).
+  const suaChiPhi = coQuyen(nd, "chi-phi:sua");
 
   const { id } = await params;
   const channel = await prisma.channel.findUnique({ where: { id } });
@@ -82,7 +88,7 @@ export default async function KenhChiTietPage({
       calcPnl(range, { channelId: id }),
       calcPnl(previousComparableRange(range, now), { channelId: id }),
       computeChannelRevenueAdsSeries(range, id),
-      computeProductReport(range, { channelId: id }),
+      computeProductReport(range, { channelId: id }, quyen),
       getOrderListPage({
         channels: [id],
         from: range.from,
@@ -122,6 +128,11 @@ export default async function KenhChiTietPage({
   }));
 
   const roas = current.ads > 0 ? current.revenue / current.ads : null;
+  // `calcPnl` tính đủ (ngoại lệ chốt 30/09) — thiếu quyền giá vốn thì chiếu DTO che trước khi vào props.
+  const kpiKenh: KpiKenhDuLieu = boPnlTheoQuyen({ current, previous }, quyen);
+  const topSanPhamCat = topSanPham.coQuyenGiaVon
+    ? { coQuyenGiaVon: true as const, rows: topSanPham.rows.slice(0, TOP_SAN_PHAM_LIMIT) }
+    : { coQuyenGiaVon: false as const, rows: topSanPham.rows.slice(0, TOP_SAN_PHAM_LIMIT) };
 
   // Chuyển tab giữ kỳ (tu/den) + so_sanh, KHÔNG giữ filter riêng tab Đơn hàng
   // (q/trang_thai/trang) — khớp cách /bao-cao đổi tab (chỉ giữ tu/den).
@@ -161,21 +172,23 @@ export default async function KenhChiTietPage({
             Sửa trong Cài đặt
           </Link>
         </div>
-        <AddChannelAdsButton
-          channelId={id}
-          channelName={channel.name}
-          isActive={channel.isActive}
-          categories={categories}
-          channels={activeChannels}
-        />
+        {suaChiPhi && (
+          <AddChannelAdsButton
+            channelId={id}
+            channelName={channel.name}
+            isActive={channel.isActive}
+            categories={categories}
+            channels={activeChannels}
+          />
+        )}
       </div>
 
-      <ChannelKpiCards current={current} previous={previous} />
+      <ChannelKpiCards du={kpiKenh} />
 
       <ChannelRevenueAdsChart points={series} channelColor={channel.color} />
 
       <SanPhamBanChayKenh
-        rows={topSanPham.slice(0, TOP_SAN_PHAM_LIMIT)}
+        bang={topSanPhamCat}
         channelId={id}
         ky={serializeDateRange(range)}
       />
@@ -211,7 +224,13 @@ export default async function KenhChiTietPage({
             channelName={channel.name}
           />
         ) : (
-          <ChannelAdsExpensesTab rows={adsExpenseRows} categories={categories} channels={activeChannels} roas={roas} />
+          <ChannelAdsExpensesTab
+            rows={adsExpenseRows}
+            categories={categories}
+            channels={activeChannels}
+            roas={roas}
+            choPhepSua={suaChiPhi}
+          />
         )}
       </div>
     </div>

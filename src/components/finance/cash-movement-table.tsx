@@ -6,14 +6,16 @@ import { Pencil, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CASH_MOVEMENT_KIND_META, isInflow, signedAmount } from "@/lib/cash-movements/cash-movement-kinds";
-import type { CashMovementRow } from "@/lib/cash-movements/cash-movement-queries";
+import { CASH_MOVEMENT_KIND_META, isInflow, kindGanSoQuy, signedAmount } from "@/lib/cash-movements/cash-movement-kinds";
+import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
 import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 
 import { CashMovementDeleteDialog } from "./cash-movement-delete-dialog";
 import { CashMovementFormModal } from "./cash-movement-form-modal";
+
+type DongBang = CashMovementRow | CashMovementRowCoBan;
 
 /**
  * Bảng "khoản tiền khác" trong tháng đang xem — dòng VÀO badge đặc, dòng RA badge viền; số tiền CÓ DẤU
@@ -25,22 +27,31 @@ export function CashMovementTable({
   loans,
   soTietKiem,
   d0,
+  choPhepSua = false,
+  choPhepSuaDongSoQuy = false,
 }: {
-  rows: CashMovementRow[];
+  /** Bản cơ bản (không tên/id khoản vay, sổ) khi người xem thiếu `tai-chinh-so-quy:xem`. */
+  rows: readonly (CashMovementRow | CashMovementRowCoBan)[];
   loans: KhoanVayRow[];
   /** Sổ tiết kiệm cho ô chọn ở form ghi tay khi loại dòng là `SAVINGS_OUT`/`SAVINGS_IN`. */
   soTietKiem: SoTietKiemRow[];
   /** Ngày mở sổ quỹ — sửa một dòng lùi về trước D0 cũng phải hỏi lại (modal lo). */
   d0: Date | null;
+  /** Có quyền sửa khối này? `false` ⇒ ẩn nút ghi/sửa (server vẫn chặn ở cổng action). */
+  choPhepSua?: boolean;
+  /**
+   * Có `tai-chinh-so-quy:sua`? Dòng gắn khoản vay / sổ tiết kiệm thuộc khối Sổ quỹ — thiếu ⇒ dòng đó
+   * không có nút sửa/xoá (server vẫn chặn ở action).
+   */
+  choPhepSuaDongSoQuy?: boolean;
 }) {
-  const [editingRow, setEditingRow] = useState<CashMovementRow | null>(null);
-  const [deletingRow, setDeletingRow] = useState<CashMovementRow | null>(null);
+  const [editingRow, setEditingRow] = useState<DongBang | null>(null);
+  const [deletingRow, setDeletingRow] = useState<DongBang | null>(null);
 
   if (rows.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        Tháng này chưa ghi khoản tiền nào. Bấm &quot;+ Nhập quỹ&quot; khi có góp vốn, vay vốn, trả nợ gốc
-        hay bán trực tiếp.
+        Tháng này chưa ghi khoản tiền nào. {choPhepSua ? 'Bấm "+ Nhập quỹ" khi có góp vốn, vay vốn, trả nợ gốc hay bán trực tiếp.' : ""}
       </p>
     );
   }
@@ -49,8 +60,8 @@ export function CashMovementTable({
    * Dòng gốc vay / gửi-rút sổ tiết kiệm hiện luôn TÊN khoản dưới badge — một cột "Loại" trần không
    * nói được nợ của ai, tiền nằm ở sổ nào. Hai tên không bao giờ cùng có (CHECK loại trừ ở DB).
    */
-  function kindBadge(row: CashMovementRow) {
-    const tenKhoan = row.loanName ?? row.savingsName;
+  function kindBadge(row: DongBang) {
+    const tenKhoan = "loanName" in row ? (row.loanName ?? row.savingsName) : null;
     return (
       <div className="flex flex-col items-start gap-0.5">
         <Badge variant={isInflow(row.kind) ? "secondary" : "outline"}>{CASH_MOVEMENT_KIND_META[row.kind].label}</Badge>
@@ -59,11 +70,13 @@ export function CashMovementTable({
     );
   }
 
-  function amountText(row: CashMovementRow) {
+  function amountText(row: DongBang) {
     return <span className="tabular-nums text-ink">{formatVnd(signedAmount(row.kind, row.amount))}</span>;
   }
 
-  function rowActions(row: CashMovementRow) {
+  function rowActions(row: DongBang) {
+    if (!choPhepSua) return null;
+    if (kindGanSoQuy(row.kind) && !choPhepSuaDongSoQuy) return null;
     return (
       <div className="flex items-center justify-end gap-3">
         <button type="button" aria-label="Sửa" onClick={() => setEditingRow(row)} className="text-muted-foreground hover:text-ink">
@@ -86,7 +99,7 @@ export function CashMovementTable({
             <TableHead>Loại</TableHead>
             <TableHead>Ghi chú</TableHead>
             <TableHead className="text-right">Số tiền</TableHead>
-            <TableHead className="text-right">Thao tác</TableHead>
+            {choPhepSua && <TableHead className="text-right">Thao tác</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -98,7 +111,7 @@ export function CashMovementTable({
                 {row.description || "—"}
               </TableCell>
               <TableCell className="text-right text-sm">{amountText(row)}</TableCell>
-              <TableCell>{rowActions(row)}</TableCell>
+              {choPhepSua && <TableCell>{rowActions(row)}</TableCell>}
             </TableRow>
           ))}
         </TableBody>
@@ -128,6 +141,7 @@ export function CashMovementTable({
         loans={loans}
         soTietKiem={soTietKiem}
         d0={d0}
+        choPhepLoaiSoQuy={choPhepSuaDongSoQuy}
       />
       <CashMovementDeleteDialog open={Boolean(deletingRow)} onOpenChange={(o) => !o && setDeletingRow(null)} row={deletingRow} />
     </div>

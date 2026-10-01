@@ -6,7 +6,10 @@ import { tinhAnhHuongCogs } from "@/lib/gia-von/anh-huong-cogs";
 import { docDeXuatGiaVon } from "@/lib/gia-von/doc-de-xuat-gia-von";
 import { vanTayDeXuat, type CheDoDoiChieu } from "@/lib/gia-von/doi-chieu-gia-von";
 import { formatVnd } from "@/lib/format";
-import { requireUser } from "@/lib/session";
+import { redirect } from "next/navigation";
+
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
+import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
 
 /**
  * Màn DUYỆT giá vốn theo Pancake — thay cho việc chủ shop phải nhớ mà báo rồi có người chạy CLI.
@@ -24,7 +27,12 @@ export default async function DongBoGiaVonPage({
 }: {
   searchParams: Promise<{ che_do?: string }>;
 }) {
-  await requireUser("/san-pham/dong-bo-gia-von");
+  // Áp giá vốn là SỬA giá vốn: cần sửa sản phẩm VÀ được thấy giá vốn (màn này in giá cũ/mới + ảnh
+  // hưởng COGS). Thiếu quyền giá vốn ⇒ cùng một cổng từ chối, không hiện màn rỗng.
+  const nd = await yeuCauQuyenTrang("/san-pham/dong-bo-gia-von", "san-pham:sua");
+  if (!coQuyen(nd, "gia-von-loi-nhuan:xem")) {
+    redirect(`/khong-co-quyen?tu=${encodeURIComponent("/san-pham/dong-bo-gia-von")}`);
+  }
 
   const sp = await searchParams;
   const cheDo: CheDoDoiChieu = sp.che_do === "chi-thieu" ? "chi-thieu" : "theo-pancake";

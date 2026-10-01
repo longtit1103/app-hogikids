@@ -16,9 +16,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * Nhưng SỐ TIỀN phải mở: đó là đường duy nhất chủ shop tự chữa số lãi khai sai sau khi con dấu đã
  * đóng. Và đường XOÁ CỐ Ý không chặn — xem ca cuối.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 // revalidatePath cần request scope (không có trong vitest) — no-op cho unit test.
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),

@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { normalizeCustomRange, serializeDateRange } from "@/lib/date-range";
 import { formatVnd } from "@/lib/format";
 import { chuThichBienRongCoThuNhap } from "@/lib/reports/chu-thich-thu-nhap-tai-chinh";
-import type { MonthlyTrendRow } from "@/lib/reports/monthly-trend";
+import type { MonthlyTrend, MonthlyTrendRow } from "@/lib/reports/monthly-trend";
 import { formatPct1, monthLabel } from "@/lib/reports/trend-format";
 
 /** Δ LN ròng so dòng tháng trước (theo %) — dòng đầu tiên trong cửa sổ hiện luôn "—". */
@@ -42,17 +42,20 @@ function netProfitDelta(current: MonthlyTrendRow, prev: MonthlyTrendRow | undefi
  * `trend-chart.tsx` — file này chỉ giữ cửa sổ 6/12, bảng, và điều hướng click
  * dòng tháng.
  */
-export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
+export function TrendTab({ trend }: { trend: MonthlyTrend }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const [windowSize, setWindowSize] = useState<6 | 12>(6);
 
-  const displayRows = rows.slice(-windowSize);
+  // Thiếu quyền giá vốn (nhánh che): không cột lãi/biên/Δ, không drill sang Lãi/Lỗ (tab đó đòi giá vốn).
+  const coLai = trend.coQuyenGiaVon;
+  const displayRows = trend.rows.slice(-windowSize);
+  const rowsLai: MonthlyTrendRow[] | null = trend.coQuyenGiaVon ? trend.rows.slice(-windowSize) : null;
   const monthsWithData = displayRows.filter((r) => r.orderCount > 0).length;
   const showTable = monthsWithData >= 2;
   // Có tháng nào gồm lãi tiết kiệm không — quyết định hiện chú thích dưới bảng.
-  const coThuNhapTaiChinh = displayRows.some((r) => r.financialIncome > 0);
+  const coThuNhapTaiChinh = rowsLai?.some((r) => r.financialIncome > 0) ?? false;
 
   function handleRowClick(monthStr: string) {
     const monthDate = parse(monthStr, "yyyy-MM", new Date());
@@ -82,7 +85,7 @@ export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
         </Select>
       </div>
 
-      <TrendChart rows={displayRows} />
+      <TrendChart rows={displayRows} coLai={coLai} />
 
       {showTable ? (
         <>
@@ -93,38 +96,45 @@ export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
                 <TableHead>Tháng</TableHead>
                 <TableHead className="text-right">Doanh thu</TableHead>
                 <TableHead className="text-right">DT thuần</TableHead>
-                <TableHead className="text-right">LN ròng</TableHead>
-                <TableHead className="text-right">Biên ròng %</TableHead>
+                {coLai && <TableHead className="text-right">LN ròng</TableHead>}
+                {coLai && <TableHead className="text-right">Biên ròng %</TableHead>}
                 <TableHead className="text-right">Số đơn</TableHead>
                 <TableHead className="text-right">Hoàn/bom %</TableHead>
-                <TableHead className="text-right">Δ</TableHead>
+                {coLai && <TableHead className="text-right">Δ</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {displayRows.map((r, i) => (
+              {displayRows.map((r, i) => {
+                const lai = rowsLai?.[i] ?? null;
+                return (
                 <TableRow
                   key={r.month}
-                  onClick={() => handleRowClick(r.month)}
-                  className="cursor-pointer"
-                  title={`Xem P&L tháng ${monthLabel(r.month)}`}
+                  onClick={coLai ? () => handleRowClick(r.month) : undefined}
+                  className={coLai ? "cursor-pointer" : undefined}
+                  title={coLai ? `Xem P&L tháng ${monthLabel(r.month)}` : undefined}
                 >
                   <TableCell>{monthLabel(r.month)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatVnd(r.revenue)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatVnd(r.netRevenue)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatVnd(r.netProfit)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {r.marginPct === null ? "—" : formatPct1(r.marginPct)}
-                    {r.financialIncome > 0 && (
-                      <span title={chuThichBienRongCoThuNhap(r.financialIncome) ?? ""}> *</span>
-                    )}
-                  </TableCell>
+                  {lai && <TableCell className="text-right tabular-nums">{formatVnd(lai.netProfit)}</TableCell>}
+                  {lai && (
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {lai.marginPct === null ? "—" : formatPct1(lai.marginPct)}
+                      {lai.financialIncome > 0 && (
+                        <span title={chuThichBienRongCoThuNhap(lai.financialIncome) ?? ""}> *</span>
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell className="text-right tabular-nums">{r.orderCount.toLocaleString("vi-VN")}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {formatPct1(r.returnBomRatePct)}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{netProfitDelta(r, displayRows[i - 1])}</TableCell>
+                  {lai && rowsLai && (
+                    <TableCell className="text-right tabular-nums">{netProfitDelta(lai, rowsLai[i - 1])}</TableCell>
+                  )}
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -140,18 +150,4 @@ export function TrendTab({ rows }: { rows: MonthlyTrendRow[] }) {
       )}
     </div>
   );
-}
-
-/** Sheet Excel — luôn xuất đủ 12 tháng nhận từ page.tsx (nhiều hơn cửa sổ 6 tháng mặc định trên màn, không ít hơn). */
-export function buildTrendSheetRows(rows: MonthlyTrendRow[]) {
-  return rows.map((r) => ({
-    Tháng: monthLabel(r.month),
-    "Doanh thu": r.revenue,
-    "DT thuần": r.netRevenue,
-    "LN ròng": r.netProfit,
-    "Thu nhập tài chính": r.financialIncome,
-    "Biên ròng %": r.marginPct === null ? "" : Math.round(r.marginPct * 10) / 10,
-    "Số đơn": r.orderCount,
-    "Hoàn/bom %": Math.round(r.returnBomRatePct * 10) / 10,
-  }));
 }

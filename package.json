@@ -8,6 +8,7 @@
     "start": "next start",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:prod": "playwright test -c playwright.prod.config.ts",
     "preview": "bash scripts/preview-local.sh",
     "setup": "tsx scripts/setup-clone.ts"
   },

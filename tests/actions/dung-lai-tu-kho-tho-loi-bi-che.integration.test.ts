@@ -9,7 +9,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
  * Mock `dungLaiGiaoDichTuKhoTho` ném lỗi có chuỗi NHẬN DIỆN — không có DB thật nào sinh ra chuỗi
  * này, nên nếu nó lọt ra `ActionResult.error` thì chắc chắn là rò rỉ, không phải trùng hợp.
  */
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "user-test") }));
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("../helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 const LOI_HA_TANG_GIA =
@@ -58,6 +64,15 @@ describe("dungLaiTuKhoTho — lỗi bên trong withSyncLog không lộ chi tiế
       const logRow = await prisma.syncLog.findFirst({ orderBy: { startedAt: "desc" } });
       expect(logRow?.status).toBe("ERROR");
       expect(logRow?.error).toContain(LOI_HA_TANG_GIA);
+
+      // Lượt dựng lại hỏng (có thể đã ghi một phần) để lại dòng nhật ký LOI — chỉ mã lý do, không
+      // mang message thô của hạ tầng.
+      const nhatKy = await prisma.auditLog.findFirst({
+        where: { hanhDong: "DU_LIEU_DUNG_LAI_TU_KHO" },
+        orderBy: { thoiDiem: "desc" },
+      });
+      expect(nhatKy).toMatchObject({ ketQua: "LOI", ghiChu: { lyDo: "that-bai" } });
+      expect(JSON.stringify(nhatKy)).not.toContain("supabase-db");
     } finally {
       log.mockRestore();
     }

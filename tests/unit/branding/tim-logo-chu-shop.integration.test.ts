@@ -4,35 +4,35 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { timLogoPathChuShop } from "@/lib/branding/app-icon";
 import { prisma } from "@/lib/prisma";
 
-// createdAt đặt về 1990 để chắc chắn sớm hơn mọi user seed/test khác trong DB test.
-const EMAIL_SOM = "chu-shop-som@icon.test";
-const EMAIL_MUON = "nguoi-sau@icon.test";
+import { seedShopProfile } from "../../helpers/test-db";
 
-describe("timLogoPathChuShop — lấy logo của User tạo SỚM NHẤT", () => {
+describe("timLogoPathChuShop — logo lấy từ ShopProfile, không phụ thuộc User", () => {
+  const EMAIL = "nguoi-dung-co-logo-cu@icon.test";
+
   beforeAll(async () => {
-    await prisma.user.deleteMany({ where: { email: { in: [EMAIL_SOM, EMAIL_MUON] } } });
+    await prisma.user.deleteMany({ where: { email: EMAIL } });
+    // Cột cũ trên User có logo khác: code mới phải BỎ QUA nó.
     await prisma.user.create({
       data: {
-        email: EMAIL_MUON,
+        email: EMAIL,
         passwordHash: "scrypt$fake$hash",
-        shopLogoPath: "/api/uploads/logo-2.png",
-        createdAt: new Date("1990-06-01T00:00:00+07:00"),
-      },
-    });
-    await prisma.user.create({
-      data: {
-        email: EMAIL_SOM,
-        passwordHash: "scrypt$fake$hash",
-        shopLogoPath: "/api/uploads/logo-1.png",
+        shopLogoPath: "/api/uploads/logo-cu-tren-user.png",
         createdAt: new Date("1990-01-01T00:00:00+07:00"),
       },
     });
   });
   afterAll(async () => {
-    await prisma.user.deleteMany({ where: { email: { in: [EMAIL_SOM, EMAIL_MUON] } } });
+    await prisma.user.deleteMany({ where: { email: EMAIL } });
+    await seedShopProfile();
   });
 
-  it("chọn user tạo sớm nhất, bất kể thứ tự insert", async () => {
-    expect(await timLogoPathChuShop()).toBe("/api/uploads/logo-1.png");
+  it("trả logo của ShopProfile", async () => {
+    await seedShopProfile({ shopLogoPath: "/api/uploads/logo-shop.png" });
+    expect(await timLogoPathChuShop()).toBe("/api/uploads/logo-shop.png");
+  });
+
+  it("ShopProfile chưa có logo ⇒ null dù User còn cột cũ", async () => {
+    await seedShopProfile({ shopLogoPath: null });
+    expect(await timLogoPathChuShop()).toBeNull();
   });
 });

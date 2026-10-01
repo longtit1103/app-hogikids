@@ -62,6 +62,28 @@ export type PhieuNhapDeXuat = {
   lechLuoiKiem: boolean;
 };
 
+/**
+ * Phiếu đề xuất cho người THIẾU `gia-von-loi-nhuan:xem`: bỏ SỐ LƯỢNG. Giá nhập chính là nguồn đề
+ * xuất giá vốn (`doi-chieu-gia-von.ts`), và phiếu một dòng hàng thì tổng ÷ số lượng = đúng giá nhập
+ * đơn vị. Giữ TỔNG phiếu: đó là số tiền chi phí người ghi sổ cần thấy để duyệt.
+ */
+export type PhieuNhapDeXuatChe = Omit<PhieuNhapDeXuat, "soLuong">;
+
+/** Pick theo danh sách trường được phép (không spread rồi xoá) — trường mới mặc định không lọt ra. */
+export function chePhieuNhapDeXuat(rows: readonly PhieuNhapDeXuat[]): PhieuNhapDeXuatChe[] {
+  return rows.map((d) => ({
+    uuid: d.uuid,
+    displayId: d.displayId,
+    ngay: d.ngay,
+    soTien: d.soTien,
+    soDongHang: d.soDongHang,
+    nhaCungCap: d.nhaCungCap,
+    ghiChu: d.ghiChu,
+    refId: d.refId,
+    lechLuoiKiem: d.lechLuoiKiem,
+  }));
+}
+
 export type PhieuNhapDaGhi = {
   uuid: string;
   displayId: number | null;

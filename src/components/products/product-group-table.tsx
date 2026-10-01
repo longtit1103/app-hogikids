@@ -15,7 +15,8 @@ import {
   updateVariantThreshold,
 } from "@/lib/actions/cost-price";
 import { formatVnd } from "@/lib/format";
-import type { ProductRow, ProductVariantRow } from "@/lib/queries/products";
+import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
+import type { ProductRow, ProductRowChe, ProductVariantRowChe } from "@/lib/queries/products";
 import { cn } from "@/lib/utils";
 import { InlineMoneyCell } from "./inline-money-cell";
 import { ProductApplyCell } from "./product-apply-cell";
@@ -40,7 +41,34 @@ function parseThresholdInput(raw: string): number | null | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function priceRangeLabel(p: ProductRow): string {
+/**
+ * Phần giá vốn của một sản phẩm — null ở nhánh che (người thiếu `gia-von-loi-nhuan:xem`: server không
+ * gửi giá vốn nào, bảng không có cột giá vốn). `sua` = được sửa giá vốn (`san-pham:sua` ∧ giá vốn).
+ */
+type GiaVonSp = {
+  uniformCost: number | null;
+  hasMissingCost: boolean;
+  theoBienThe: Record<string, number>;
+  sua: boolean;
+};
+
+type BangSanPham = KetQuaChe<{ products: ProductRow[]; suaGiaVon: boolean }, { products: ProductRowChe[] }>;
+
+/** Narrow union MỘT lần: dòng hiển thị (trường không nhạy cảm) + phần giá vốn tách riêng. */
+function ghepGiaVon(bang: BangSanPham): { product: ProductRowChe; giaVon: GiaVonSp | null }[] {
+  if (!bang.coQuyenGiaVon) return bang.products.map((product) => ({ product, giaVon: null }));
+  return bang.products.map((product) => ({
+    product,
+    giaVon: {
+      uniformCost: product.uniformCost,
+      hasMissingCost: product.hasMissingCost,
+      theoBienThe: Object.fromEntries(product.variants.map((v) => [v.variantId, v.costPrice])),
+      sua: bang.suaGiaVon,
+    },
+  }));
+}
+
+function priceRangeLabel(p: ProductRowChe): string {
   if (p.variantCount === 0) return "—";
   return p.sellPriceMin === p.sellPriceMax
     ? formatVnd(p.sellPriceMin)
@@ -48,17 +76,21 @@ function priceRangeLabel(p: ProductRow): string {
 }
 
 export function ProductGroupTable({
-  products,
+  bang,
+  suaNguong,
   total,
   page,
   defaultThreshold,
 }: {
-  products: ProductRow[];
+  bang: BangSanPham;
+  /** `san-pham:sua` — thiếu thì ô ngưỡng chỉ hiển thị (action cũng tự từ chối). */
+  suaNguong: boolean;
   total: number;
   page: number;
   defaultThreshold: number;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const dong = ghepGiaVon(bang);
 
   function toggle(productId: string) {
     setExpanded((prev) => ({ ...prev, [productId]: !prev[productId] }));
@@ -74,15 +106,21 @@ export function ProductGroupTable({
             <TableHead className="text-center">Số biến thể</TableHead>
             <TableHead className="text-right">Giá bán</TableHead>
             <TableHead className="text-right">Tổng tồn</TableHead>
-            <TableHead className="bg-primary/5 text-right">Giá vốn (áp cho tất cả)</TableHead>
+            {bang.coQuyenGiaVon && (
+              <TableHead className="bg-primary/5 text-right">
+                {bang.suaGiaVon ? "Giá vốn (áp cho tất cả)" : "Giá vốn"}
+              </TableHead>
+            )}
             <TableHead className="text-right">Ngưỡng</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {products.map((p) => (
+          {dong.map(({ product: p, giaVon }) => (
             <ProductRowGroup
               key={p.productId}
               product={p}
+              giaVon={giaVon}
+              suaNguong={suaNguong}
               defaultThreshold={defaultThreshold}
               isExpanded={!!expanded[p.productId]}
               onToggle={() => toggle(p.productId)}
@@ -98,11 +136,15 @@ export function ProductGroupTable({
 
 function ProductRowGroup({
   product,
+  giaVon,
+  suaNguong,
   defaultThreshold,
   isExpanded,
   onToggle,
 }: {
-  product: ProductRow;
+  product: ProductRowChe;
+  giaVon: GiaVonSp | null;
+  suaNguong: boolean;
   defaultThreshold: number;
   isExpanded: boolean;
   onToggle: () => void;
@@ -111,8 +153,8 @@ function ProductRowGroup({
   const { variants } = product;
 
   // Giá vốn cấp SP: 0 coi như trống (hiện placeholder + warn); lệch nhau → "Nhiều mức".
-  const costMixed = product.uniformCost === null && product.variantCount > 1;
-  const costValue = product.uniformCost && product.uniformCost > 0 ? product.uniformCost : null;
+  const costMixed = giaVon !== null && giaVon.uniformCost === null && product.variantCount > 1;
+  const costValue = giaVon?.uniformCost && giaVon.uniformCost > 0 ? giaVon.uniformCost : null;
 
   // Ngưỡng cấp SP: đồng nhất (kể cả cùng null=mặc định) hay lệch nhau.
   const thr0 = variants[0]?.lowStockThreshold ?? null;
@@ -124,7 +166,10 @@ function ProductRowGroup({
   // sửa trực tiếp, không bung confirm.
   function costConfirm(next: number | null): string | null {
     if (variants.length <= 1) return null;
-    const n = variants.filter((v) => v.costPrice > 0 && v.costPrice !== next).length;
+    const n = variants.filter((v) => {
+      const cost = giaVon?.theoBienThe[v.variantId] ?? 0;
+      return cost > 0 && cost !== next;
+    }).length;
     return n > 0 ? `Ghi đè giá vốn của ${n} biến thể đang có giá khác?` : null;
   }
   function thrConfirm(next: number | null): string | null {
@@ -188,45 +233,67 @@ function ProductRowGroup({
           <StockCell isOutOfStock={product.isOutOfStock} isLow={product.isLow} totalStock={product.totalStock} />
         </TableCell>
 
-        <TableCell className="text-right">
-          <ProductApplyCell
-            value={costValue}
-            isMixed={costMixed}
-            placeholder="Nhập giá vốn"
-            mixedLabel="Nhiều mức"
-            formatDisplay={formatVnd}
-            parseInput={parseMoneyInput}
-            getConfirmMessage={costConfirm}
-            onApply={(v) => updateProductCost(product.productId, v ?? 0)}
-            warn={product.hasMissingCost}
-            warnTooltip="Có biến thể chưa có giá vốn — đơn chứa SKU này chưa tính được lãi"
-            testId="gia-von-sp"
-          />
-        </TableCell>
+        {giaVon && (
+          <TableCell className="text-right">
+            {giaVon.sua ? (
+              <ProductApplyCell
+                value={costValue}
+                isMixed={costMixed}
+                placeholder="Nhập giá vốn"
+                mixedLabel="Nhiều mức"
+                formatDisplay={formatVnd}
+                parseInput={parseMoneyInput}
+                getConfirmMessage={costConfirm}
+                onApply={(v) => updateProductCost(product.productId, v ?? 0)}
+                warn={giaVon.hasMissingCost}
+                warnTooltip="Có biến thể chưa có giá vốn — đơn chứa SKU này chưa tính được lãi"
+                testId="gia-von-sp"
+              />
+            ) : (
+              <ChiXem text={costMixed ? "Nhiều mức" : costValue === null ? "—" : formatVnd(costValue)} testId="gia-von-sp" />
+            )}
+          </TableCell>
+        )}
 
         <TableCell className="text-right">
-          <ProductApplyCell
-            value={thrValue}
-            isMixed={thrMixed}
-            placeholder={`${defaultThreshold} (mặc định)`}
-            mixedLabel="Nhiều mức"
-            formatDisplay={(v) => v.toLocaleString("vi-VN")}
-            parseInput={parseThresholdInput}
-            getConfirmMessage={thrConfirm}
-            onApply={(v) => updateProductThreshold(product.productId, v)}
-            testId="nguong-sp"
-          />
+          {suaNguong ? (
+            <ProductApplyCell
+              value={thrValue}
+              isMixed={thrMixed}
+              placeholder={`${defaultThreshold} (mặc định)`}
+              mixedLabel="Nhiều mức"
+              formatDisplay={(v) => v.toLocaleString("vi-VN")}
+              parseInput={parseThresholdInput}
+              getConfirmMessage={thrConfirm}
+              onApply={(v) => updateProductThreshold(product.productId, v)}
+              testId="nguong-sp"
+            />
+          ) : (
+            <ChiXem
+              text={thrMixed ? "Nhiều mức" : thrValue === null ? `${defaultThreshold} (mặc định)` : thrValue.toLocaleString("vi-VN")}
+              testId="nguong-sp"
+            />
+          )}
         </TableCell>
       </TableRow>
 
       {isExpanded && (
         <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={7} className="bg-surface-soft/40 p-0">
-            <VariantSubTable variants={variants} defaultThreshold={defaultThreshold} />
+          <TableCell colSpan={giaVon ? 7 : 6} className="bg-surface-soft/40 p-0">
+            <VariantSubTable variants={variants} giaVon={giaVon} suaNguong={suaNguong} defaultThreshold={defaultThreshold} />
           </TableCell>
         </TableRow>
       )}
     </>
+  );
+}
+
+/** Ô chỉ hiển thị (không có quyền sửa) — cùng `data-testid` với ô sửa để e2e đọc được giá trị. */
+function ChiXem({ text, testId }: { text: string; testId: string }) {
+  return (
+    <span data-testid={testId} className="text-sm text-muted-foreground">
+      {text}
+    </span>
   );
 }
 
@@ -261,9 +328,13 @@ function StockCell({
 /** Sub-bảng biến thể khi mở rộng — sửa giá vốn/ngưỡng RIÊNG từng SKU (ngoại lệ). */
 function VariantSubTable({
   variants,
+  giaVon,
+  suaNguong,
   defaultThreshold,
 }: {
-  variants: ProductVariantRow[];
+  variants: ProductVariantRowChe[];
+  giaVon: GiaVonSp | null;
+  suaNguong: boolean;
   defaultThreshold: number;
 }) {
   return (
@@ -274,12 +345,14 @@ function VariantSubTable({
             <th className="py-1 pr-3 text-left font-medium">SKU</th>
             <th className="py-1 pr-3 text-left font-medium">Biến thể</th>
             <th className="py-1 pr-3 text-right font-medium">Tồn</th>
-            <th className="py-1 pr-3 text-right font-medium">Giá vốn</th>
+            {giaVon && <th className="py-1 pr-3 text-right font-medium">Giá vốn</th>}
             <th className="py-1 text-right font-medium">Ngưỡng</th>
           </tr>
         </thead>
         <tbody>
-          {variants.map((v) => (
+          {variants.map((v) => {
+            const cost = giaVon?.theoBienThe[v.variantId] ?? 0;
+            return (
             <tr key={v.variantId} data-testid="variant-row" className="border-t border-hairline/60">
               <td className="py-1.5 pr-3 font-mono text-xs text-muted-foreground">{v.sku}</td>
               <td className="py-1.5 pr-3">
@@ -292,29 +365,43 @@ function VariantSubTable({
                   {v.stock.toLocaleString("vi-VN")}
                 </span>
               </td>
-              <td className="py-1.5 pr-3 text-right">
-                <InlineMoneyCell
-                  value={v.costPrice}
-                  formatDisplay={formatVnd}
-                  parseInput={parseMoneyInput}
-                  onSave={(val) => updateVariantCost(v.variantId, val ?? 0)}
-                  warn={v.costPrice === 0}
-                  warnTooltip="Chưa có giá vốn — đơn chứa SKU này chưa tính được lãi"
-                  testId="gia-von"
-                />
-              </td>
+              {giaVon && (
+                <td className="py-1.5 pr-3 text-right">
+                  {giaVon.sua ? (
+                    <InlineMoneyCell
+                      value={cost}
+                      formatDisplay={formatVnd}
+                      parseInput={parseMoneyInput}
+                      onSave={(val) => updateVariantCost(v.variantId, val ?? 0)}
+                      warn={cost === 0}
+                      warnTooltip="Chưa có giá vốn — đơn chứa SKU này chưa tính được lãi"
+                      testId="gia-von"
+                    />
+                  ) : (
+                    <ChiXem text={cost === 0 ? "—" : formatVnd(cost)} testId="gia-von" />
+                  )}
+                </td>
+              )}
               <td className="py-1.5 text-right">
-                <InlineMoneyCell
-                  value={v.lowStockThreshold}
-                  placeholder={`${defaultThreshold} (mặc định)`}
-                  formatDisplay={(val) => val.toLocaleString("vi-VN")}
-                  parseInput={parseThresholdInput}
-                  onSave={(val) => updateVariantThreshold(v.variantId, val)}
-                  testId="nguong"
-                />
+                {suaNguong ? (
+                  <InlineMoneyCell
+                    value={v.lowStockThreshold}
+                    placeholder={`${defaultThreshold} (mặc định)`}
+                    formatDisplay={(val) => val.toLocaleString("vi-VN")}
+                    parseInput={parseThresholdInput}
+                    onSave={(val) => updateVariantThreshold(v.variantId, val)}
+                    testId="nguong"
+                  />
+                ) : (
+                  <ChiXem
+                    text={v.lowStockThreshold === null ? `${defaultThreshold} (mặc định)` : v.lowStockThreshold.toLocaleString("vi-VN")}
+                    testId="nguong"
+                  />
+                )}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

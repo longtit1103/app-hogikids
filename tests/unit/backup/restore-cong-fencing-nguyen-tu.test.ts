@@ -46,9 +46,15 @@ vi.mock("@/lib/backup/khoa-bao-tri", async (importOriginal) => {
 });
 
 vi.mock("@/lib/session", () => ({
-  getAuthenticatedUserId: vi.fn(async () => "test-user"),
-  thuHoiMoiPhien: vi.fn(async () => undefined),
+  thuHoiMoiPhienMoiNguoi: vi.fn(async () => undefined),
 }));
+
+// Route gác bằng `congChuShopRoute()` — chủ shop giả, không cần cookie/DB.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (importActual) => {
+  const that = await importActual<typeof import("@/lib/quyen/nguoi-dung-phien")>();
+  const { nguoiDungGia } = await import("../../helpers/nguoi-dung-gia");
+  return { ...that, docNguoiDungPhien: vi.fn(async () => nguoiDungGia()) };
+});
 
 vi.mock("@/lib/backup/thu-hoi-phien-co-han", () => ({
   thuHoiMoiPhienCoHan: vi.fn(async () => undefined),
@@ -80,6 +86,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 // bước nạp giả vẫn chạy — cùng một kiểu mất chốt.
 vi.mock("@/lib/backup/run-restore", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/backup/run-restore")>()),
+  // Cổng M1 sớm của route đọc file thật bằng `pg_restore`; dump giả ở đây không phải dump thật ⇒
+  // cho qua (cổng có suite riêng: `restore-chan-dump-truoc-phan-quyen.integration.test.ts`).
+  kiemDumCoM1: vi.fn(async () => undefined),
   runRestore: vi.fn(async (_buf: Buffer, opts?: { truocKhiPhaHuy?: () => void | Promise<void> }) => {
     await opts?.truocKhiPhaHuy?.();
     gia.daNap = true;

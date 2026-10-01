@@ -9,8 +9,11 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/action-result";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { hasValidMagicBytes, LOGO_FILENAME_RE } from "@/lib/branding/logo-file";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congAction } from "@/lib/quyen/cong-action";
+import { docShopProfileKhongCache, ghiShopProfile } from "@/lib/shop-profile/doc-shop-profile";
 
 // ---- Cài đặt › Thông tin shop (tên, SĐT, logo) ------------------------------
 
@@ -80,7 +83,8 @@ async function saveLogoFile(file: File): Promise<string | null> {
  * ngay không cần F5.
  */
 export async function updateShopInfo(formData: FormData): Promise<ActionResult> {
-  const userId = await requireUser();
+  const cong = await congAction("cai-dat:sua");
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = shopInfoSchema.safeParse({
@@ -109,17 +113,17 @@ export async function updateShopInfo(formData: FormData): Promise<ActionResult> 
   // đơn thuần không đụng file nào). Đọc sau khi file mới đã ghi xong đĩa, để nếu
   // có lỗi ở bước này thì cùng lắm sinh thêm 1 file mồ côi, KHÔNG mất logo cũ.
   const oldShopLogoPath = shopLogoPath
-    ? (await prisma.user.findUnique({ where: { id: userId }, select: { shopLogoPath: true } }))?.shopLogoPath
+    ? (await docShopProfileKhongCache()).shopLogoPath
     : null;
 
   try {
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
+    await prisma.$transaction(async (tx) => {
+      await ghiShopProfile(tx, {
         shopName: parsed.data.shopName,
         shopPhone: parsed.data.shopPhone ?? null,
         ...(shopLogoPath ? { shopLogoPath } : {}),
-      },
+      });
+      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_THONG_TIN_SHOP });
     });
   } catch {
     return { ok: false, error: "Lỗi khi lưu thông tin shop" };

@@ -67,6 +67,9 @@ const FILE_CAM = [
   "src/components/dashboard/kpi-cards.tsx",
   "src/components/dashboard/revenue-profit-chart.tsx",
   "src/lib/reports/voucher-breakdown.ts",
+  // Phân quyền (10/2026): DTO che lãi/COGS chiếu từ `PnlBreakdown` + sheet Excel dựng ở server.
+  "src/lib/reports/pnl-che.ts",
+  "src/lib/reports/bao-cao-sheet-rows.ts",
 ];
 
 /**

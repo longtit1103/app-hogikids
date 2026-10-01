@@ -82,6 +82,25 @@ export const CASH_MOVEMENT_KIND_META: Record<CashMovementKind, CashMovementKindM
   },
 };
 
+/** Bốn loại BẮT BUỘC trỏ về một khoản vay: gốc vay + tiền gửi bắt buộc theo hợp đồng vay. */
+export const KIND_GAN_KHOAN_VAY: readonly CashMovementKind[] = [
+  "LOAN_IN",
+  "LOAN_REPAY",
+  "DEPOSIT_OUT",
+  "DEPOSIT_IN",
+];
+
+/** Hai loại BẮT BUỘC trỏ về một sổ tiết kiệm sinh lãi. */
+export const KIND_GAN_SO_TIET_KIEM: readonly CashMovementKind[] = ["SAVINGS_OUT", "SAVINGS_IN"];
+
+/**
+ * Dòng thuộc khối SỔ QUỸ (khoản vay / sổ tiết kiệm) chứ không chỉ dòng tiền trơn — ghi/sửa/xoá dòng
+ * này làm đổi dư nợ hoặc số đang gửi, nên đòi thêm `tai-chinh-so-quy:sua` ngoài quyền dòng tiền.
+ */
+export function kindGanSoQuy(kind: CashMovementKind): boolean {
+  return KIND_GAN_KHOAN_VAY.includes(kind) || KIND_GAN_SO_TIET_KIEM.includes(kind);
+}
+
 export function isInflow(kind: CashMovementKind): boolean {
   return CASH_MOVEMENT_KIND_META[kind].direction === "IN";
 }

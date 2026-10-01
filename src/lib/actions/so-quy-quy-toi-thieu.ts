@@ -7,7 +7,8 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
 import { TRAN_QUY_TOI_THIEU } from "@/lib/so-quy/du-bao-quy";
 import { KEY_QUY_TOI_THIEU } from "@/lib/so-quy/du-bao-quy-queries";
 
@@ -28,7 +29,9 @@ const schema = z.object({
 });
 
 export async function datQuyToiThieu(input: unknown): Promise<ActionResult> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   // Ô `Setting` nằm trong đúng bảng lượt phục hồi nạp lại — ghi giữa lượt là bị bản backup lùi mất.
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
@@ -37,10 +40,14 @@ export async function datQuyToiThieu(input: unknown): Promise<ActionResult> {
   const value = String(parsed.data.soTien);
 
   try {
-    await prisma.setting.upsert({
-      where: { key: KEY_QUY_TOI_THIEU },
-      create: { key: KEY_QUY_TOI_THIEU, value },
-      update: { value },
+    await prisma.$transaction(async (tx) => {
+      await tx.setting.upsert({
+        where: { key: KEY_QUY_TOI_THIEU },
+        create: { key: KEY_QUY_TOI_THIEU, value },
+        update: { value },
+      });
+      // Không ghi số tiền vào nhật ký (không giá trị trước/sau — spec §5), chỉ "đã đặt".
+      await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "QUY_TOI_THIEU_DAT", doiTuong: { loai: "Setting", id: KEY_QUY_TOI_THIEU } });
     });
   } catch (e) {
     console.error("[so-quy] datQuyToiThieu lỗi ghi Setting", e);

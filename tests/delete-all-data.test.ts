@@ -11,15 +11,19 @@ import {
   type ChiPhiKhongDungLai,
 } from "@/lib/actions/data-admin";
 import { landRaw } from "@/lib/bronze/land-raw";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { prisma } from "@/lib/prisma";
-import { seedReference, seedShopIdSetting } from "./helpers/test-db";
+import { DANH_MUC_QUYEN } from "@/lib/quyen/danh-muc-quyen";
+import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
+import { nguoiDungGia } from "./helpers/nguoi-dung-gia";
+import { seedReference, seedShopIdSetting, seedShopProfile } from "./helpers/test-db";
 
 import { xoaCacheCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 
 /**
  * Integration test hợp đồng "Xóa dữ liệu giao dịch" + đường phục hồi, chạy trên
- * DB thật (`hogikids_test`). Chỉ mock `requireUser` (nó gọi `cookies()` — không
- * có request scope trong vitest) và `revalidatePath` (cần request scope).
+ * DB thật (`hogikids_test`). Chỉ mock ngữ cảnh người dùng (`docNguoiDungPhien` gọi `cookies()` —
+ * không có request scope trong vitest) và `revalidatePath` (cần request scope).
  *
  * Trọng tâm:
  *  - `deleteAllData` xoá ĐÚNG sổ sách giao dịch (gồm 4 bảng "Tiền đã về"), GIỮ
@@ -29,9 +33,20 @@ import { xoaCacheCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
  *  - `dungLaiTuKhoTho` dựng lại đơn nhưng TUYỆT ĐỐI không kéo tồn kho lùi về ảnh
  *    kho thô, và khoá lượt thứ hai khi đang có lượt chạy.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (không cookie): mặc định CHỦ SHOP; từng ca đổi sang STAFF bằng
+// `mockResolvedValueOnce`. Giữ bản thật của các hàm thuần (`coQuyen`, `laChuShop`…).
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia({ id: "test-user-id" })),
+  };
+});
+// `ghiNhatKy` chạy BẢN THẬT; ca "nhật ký hỏng ⇒ không xoá" ép nó ném một lần.
+vi.mock("@/lib/nhat-ky/ghi-nhat-ky", async (goc) => {
+  const that = await goc<typeof import("@/lib/nhat-ky/ghi-nhat-ky")>();
+  return { ...that, ghiNhatKy: vi.fn(that.ghiNhatKy) };
+});
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
@@ -58,9 +73,9 @@ async function seedFullDataset(): Promise<void> {
       id: USER_ID,
       email: "owner@hogikids.test",
       passwordHash: "scrypt$fake$hash",
-      shopName: SHOP_NAME,
     },
   });
+  await seedShopProfile({ shopName: SHOP_NAME });
 
   await prisma.setting.createMany({
     data: [
@@ -301,6 +316,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await clearAll();
+  await seedShopProfile(); // trả tên shop về mặc định cho suite sau
   await prisma.$disconnect();
 });
 
@@ -364,6 +380,8 @@ describe("deleteAllData", () => {
 
     // Cấu hình giữ nguyên.
     expect(await prisma.user.count()).toBe(1);
+    // Thông tin shop (tên dùng làm chuỗi xác nhận) không phải giao dịch — lượt xoá không được chạm.
+    expect(await prisma.shopProfile.findUnique({ where: { id: 1 } })).toMatchObject({ shopName: SHOP_NAME });
     expect(await prisma.channel.count()).toBe(5);
     expect(await prisma.expenseCategory.count()).toBeGreaterThanOrEqual(7);
 
@@ -772,5 +790,88 @@ describe("moTaKhoanMatTrang", () => {
     ).toBe(
       "Đang có 2 khoản chi phí nhập tay (50.000 ₫), 1 chi phí định kỳ, 1 khoản tiền khác ghi tay (7.000.000 ₫) và 1 khoản vay (hồ sơ + dư nợ).",
     );
+  });
+});
+
+/**
+ * Vùng dữ liệu là OWNER-ONLY (spec phân quyền §1.1): tài khoản phụ có ĐỦ mọi quyền cấp được vẫn bị
+ * từ chối — xoá toàn bộ, dựng lại, và cả 4 hàm đếm (trả tổng tiền chi phí/đơn/ads).
+ */
+describe("vùng dữ liệu — chỉ chủ shop + nhật ký", () => {
+  const staffDuQuyen = nguoiDungGia({ id: "staff-du-quyen", role: "STAFF", quyen: new Set(DANH_MUC_QUYEN) });
+  const dongTuChoi = () =>
+    prisma.auditLog.findMany({ where: { hanhDong: "TU_CHOI_QUYEN", actorId: staffDuQuyen.id } });
+
+  beforeEach(async () => {
+    await prisma.auditLog.deleteMany();
+  });
+
+  it("STAFF đủ mọi quyền cấp được: xoá toàn bộ ⇒ KHONG_CO_QUYEN, không xoá gì, có dòng TU_CHOI_QUYEN", async () => {
+    vi.mocked(docNguoiDungPhien).mockResolvedValueOnce(staffDuQuyen);
+
+    const res = await deleteAllData(SHOP_NAME);
+
+    expect(res).toMatchObject({ ok: false, code: "KHONG_CO_QUYEN" });
+    expect(await prisma.order.count()).toBe(1);
+    expect(await prisma.expense.count()).toBe(1);
+    const tuChoi = await dongTuChoi();
+    expect(tuChoi).toHaveLength(1);
+    expect(tuChoi[0]).toMatchObject({ ketQua: "LOI", ghiChu: { quyenThieu: "chu-shop" } });
+  });
+
+  it("STAFF đủ mọi quyền cấp được: dựng lại từ kho thô ⇒ KHONG_CO_QUYEN, không đẻ SyncLog", async () => {
+    const logTruoc = await prisma.syncLog.count();
+    vi.mocked(docNguoiDungPhien).mockResolvedValueOnce(staffDuQuyen);
+
+    const res = await dungLaiTuKhoTho();
+
+    expect(res).toMatchObject({ ok: false, code: "KHONG_CO_QUYEN" });
+    expect(await prisma.syncLog.count()).toBe(logTruoc);
+    expect(await dongTuChoi()).toHaveLength(1);
+  });
+
+  it.each([
+    ["coDuLieuGiaoDich", coDuLieuGiaoDich],
+    ["demChiPhiKhongDungLai", demChiPhiKhongDungLai],
+    ["demDonMoCoi", demDonMoCoi],
+    ["demAdsMoCoi", demAdsMoCoi],
+  ] as const)("STAFF gọi %s ⇒ ném (không trả số giả), có dòng TU_CHOI_QUYEN", async (_ten, dem) => {
+    vi.mocked(docNguoiDungPhien).mockResolvedValueOnce(staffDuQuyen);
+
+    await expect(dem()).rejects.toThrow("Chỉ chủ shop");
+    expect(await dongTuChoi()).toHaveLength(1);
+  });
+
+  it("chủ shop xoá ⇒ dòng DU_LIEU_XOA_TOAN_BO (OK, đúng người) — bảng nhật ký sống qua lượt xoá", async () => {
+    const res = await deleteAllData(SHOP_NAME);
+
+    expect(res.ok).toBe(true);
+    const dong = await prisma.auditLog.findMany({ where: { hanhDong: "DU_LIEU_XOA_TOAN_BO" } });
+    expect(dong).toHaveLength(1);
+    expect(dong[0]).toMatchObject({ ketQua: "OK", actorId: "test-user-id" });
+  });
+
+  it("ghi nhật ký hỏng ⇒ lượt xoá rollback, dữ liệu còn nguyên", async () => {
+    vi.mocked(ghiNhatKy).mockRejectedValueOnce(new Error("nhat-ky-hong"));
+
+    await expect(deleteAllData(SHOP_NAME)).rejects.toThrow("nhat-ky-hong");
+
+    expect(await prisma.order.count()).toBe(1);
+    expect(await prisma.expense.count()).toBe(1);
+    expect(await prisma.cashMovement.count()).toBe(3);
+    expect(await prisma.auditLog.count({ where: { hanhDong: "DU_LIEU_XOA_TOAN_BO" } })).toBe(0);
+  });
+
+  it("chủ shop dựng lại xong ⇒ dòng DU_LIEU_DUNG_LAI_TU_KHO kèm số đơn", async () => {
+    await xoaHetGiaoDich();
+    await prisma.rawPancakeOrder.deleteMany();
+    await landRaw("orders", "1942992175", rawBody(RAW_ORDER));
+
+    const res = await dungLaiTuKhoTho();
+
+    expect(res.ok).toBe(true);
+    const dong = await prisma.auditLog.findMany({ where: { hanhDong: "DU_LIEU_DUNG_LAI_TU_KHO" } });
+    expect(dong).toHaveLength(1);
+    expect(dong[0]).toMatchObject({ ketQua: "OK", actorId: "test-user-id", ghiChu: { soDong: 1 } });
   });
 });

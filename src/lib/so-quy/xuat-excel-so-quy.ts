@@ -4,9 +4,9 @@ import type { SoQuyDongChay } from "@/lib/so-quy/dong-chay-so-quy-types";
 import { NGUON_LABEL } from "@/lib/so-quy/nhan-nguon-dong-quy";
 
 /**
- * Builder THUẦN cho sheet Excel tab "Sổ quỹ" (dòng chạy) — dùng ở nút "Xuất Excel", khuôn
- * `exportTabToExcel` (`@/lib/reports/export-excel.ts`, client). Cột: Ngày · Nguồn · Diễn giải · Thu ·
- * Chi · Số dư — cùng thứ tự bảng trên màn (`so-quy-dong-chay-table.tsx`). Tiền LUÔN là số nguyên
+ * Builder THUẦN cho sheet Excel tab "Sổ quỹ" (dòng chạy) — dùng ở route xuất phía server
+ * `src/app/api/export/so-quy/route.ts` (file sinh trên server, client không dựng sheet). Cột: Ngày ·
+ * Nguồn · Diễn giải · Thu · Chi · Số dư — cùng thứ tự bảng trên màn (`so-quy-dong-chay-table.tsx`). Tiền LUÔN là số nguyên
  * (không format chuỗi qua `formatVnd`) để cộng được ngay trong Excel; ô không áp dụng (vd Thu/Chi của
  * dòng Đầu/Cuối kỳ, Số dư của dòng Tổng) để trống `""` thay vì 0 — 0 dễ hiểu nhầm thành "phát sinh bằng
  * 0". Dòng đầu "Đầu kỳ" neo ĐÚNG `dauKy` của thẻ Quỹ (không tự cộng lại từ các dòng — cùng bất biến với

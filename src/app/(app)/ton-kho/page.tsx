@@ -2,8 +2,10 @@ import { InventoryKpiCards } from "@/components/inventory/inventory-kpi-cards";
 import { InventoryTable } from "@/components/inventory/inventory-table";
 import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
 import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
+import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
 import { getVariantListPage, VARIANT_PAGE_SIZE } from "@/lib/queries/variants";
-import { requireUser } from "@/lib/session";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
+import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
 import { PageTitle } from "@/components/shell/page-title";
 
 export default async function TonKhoPage({
@@ -11,16 +13,19 @@ export default async function TonKhoPage({
 }: {
   searchParams: Promise<{ q?: string; loc?: string; sap_xep?: string; chieu?: string; trang?: string }>;
 }) {
-  // Canh phiên ngay tại trang, không chỉ dựa vào layout — xem ghi chú ở `/don-hang`.
-  await requireUser("/ton-kho");
+  // Cổng ngay tại trang, không chỉ dựa vào layout — xem ghi chú ở `/don-hang`.
+  const nd = await yeuCauQuyenTrang("/ton-kho", "ton-kho:xem");
+  const quyen = quyenGiaVonCua(nd);
 
   const sp = await searchParams;
   const page = docSoTrang(sp.trang);
   const lowOnly = sp.loc === "sap_het";
-  const sort = sp.sap_xep === "ton" ? "ton" : "von";
+  // Thiếu quyền giá vốn: không có cột "Giá trị vốn" để sort ⇒ sort theo tồn (query cũng tự ép vậy).
+  const sort = sp.sap_xep === "ton" || !quyen.coQuyenGiaVon ? "ton" : "von";
   const dir = sp.chieu === "asc" ? "asc" : "desc";
 
-  const { rows, total, kpi } = await getVariantListPage({ q: sp.q, lowOnly, sort, dir, page });
+  const bang = await getVariantListPage({ q: sp.q, lowOnly, sort, dir, page }, quyen);
+  const { total } = bang;
 
   veTrangCuoiNeuVuot({ duongDan: "/ton-kho", sp, trang: page, tong: total, soDongMoiTrang: VARIANT_PAGE_SIZE });
 
@@ -30,11 +35,11 @@ export default async function TonKhoPage({
         <p className="text-sm text-muted-foreground">Tồn realtime từ Pancake — điều chỉnh tồn tại Pancake</p>
       </PageTitle>
 
-      <InventoryKpiCards kpi={kpi} />
-      <InventoryToolbar />
+      <InventoryKpiCards du={bang} />
+      <InventoryToolbar choPhepXuat={coQuyen(nd, "xuat-du-lieu")} />
 
-      {rows.length > 0 ? (
-        <InventoryTable rows={rows} total={total} page={page} sort={sort} dir={dir} sp={sp} />
+      {bang.rows.length > 0 ? (
+        <InventoryTable bang={bang} total={total} page={page} sort={sort} dir={dir} sp={sp} />
       ) : (
         <EmptyState lowOnly={lowOnly} q={sp.q} />
       )}

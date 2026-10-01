@@ -73,7 +73,16 @@ function TrangThai({ loan }: { loan: KhoanVayRow }) {
   );
 }
 
-export function KhoanVayTable({ rows, d0 }: { rows: KhoanVayRow[]; d0: Date | null }) {
+export function KhoanVayTable({
+  rows,
+  d0,
+  choPhepSua = false,
+}: {
+  rows: KhoanVayRow[];
+  d0: Date | null;
+  /** `false` ⇒ ẩn cột thao tác (server vẫn chặn ở cổng action). */
+  choPhepSua?: boolean;
+}) {
   return (
     <div className="rounded-xl border border-hairline">
       {/* Desktop: bảng */}
@@ -88,7 +97,7 @@ export function KhoanVayTable({ rows, d0 }: { rows: KhoanVayRow[]; d0: Date | nu
             <TableHead className="text-right">Dư nợ gốc</TableHead>
             <TableHead>Kỳ tới</TableHead>
             <TableHead>Trạng thái</TableHead>
-            <TableHead className="text-right">Thao tác</TableHead>
+            {choPhepSua && <TableHead className="text-right">Thao tác</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -118,9 +127,11 @@ export function KhoanVayTable({ rows, d0 }: { rows: KhoanVayRow[]; d0: Date | nu
               <TableCell>
                 <TrangThai loan={loan} />
               </TableCell>
-              <TableCell className="text-right">
-                <KhoanVayRowActions loan={loan} d0={d0} />
-              </TableCell>
+              {choPhepSua && (
+                <TableCell className="text-right">
+                  <KhoanVayRowActions loan={loan} d0={d0} />
+                </TableCell>
+              )}
             </TableRow>
           ))}
         </TableBody>
@@ -135,7 +146,7 @@ export function KhoanVayTable({ rows, d0 }: { rows: KhoanVayRow[]; d0: Date | nu
                 <p className="text-sm font-medium text-ink">{loan.name}</p>
                 <p className="text-xs text-muted-foreground">{loan.lender || "—"}</p>
               </div>
-              <KhoanVayRowActions loan={loan} d0={d0} />
+              {choPhepSua && <KhoanVayRowActions loan={loan} d0={d0} />}
             </div>
             <p className="font-serif text-xl text-ink tabular-nums">{formatVnd(loan.duNo)}</p>
             {loan.laiTamTinh !== null && (

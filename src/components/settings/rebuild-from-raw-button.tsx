@@ -57,7 +57,7 @@ export function RebuildFromRawButton() {
 
   const napTrangThai = useCallback(() => {
     void getLatestSync("PANCAKE")
-      .then(setLatest)
+      .then((r) => setLatest(r.ok ? r.data : null))
       .catch(() => {});
   }, []);
 
@@ -94,7 +94,8 @@ export function RebuildFromRawButton() {
 
     pollRef.current = setInterval(() => {
       void getLatestSync("PANCAKE")
-        .then((l) => {
+        .then((r) => {
+          const l = r.ok ? r.data : null;
           if (!l || new Date(l.startedAt).getTime() <= bamLuc || l.status === "RUNNING") return;
           setLatest(l);
           ketLuan(() => {

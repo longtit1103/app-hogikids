@@ -8,6 +8,7 @@ import { formatPct1, formatRoas } from "@/components/kenh/channel-format";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatVnd } from "@/lib/format";
 import type { ChannelPnl } from "@/lib/reports/pnl";
+import { coLaiKenh, type ChannelPnlChe, type ChannelPnlCheTruong } from "@/lib/reports/pnl-che";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,7 +31,9 @@ const COLUMNS: { key: ColumnKey; label: string; align: "left" | "right" }[] = [
   { key: "roas", label: "ROAS", align: "right" },
 ];
 
-function sortValue(c: ChannelPnl, key: ColumnKey): number | string | null {
+type DongKenh = ChannelPnl | ChannelPnlChe;
+
+function sortValue(c: DongKenh, key: ColumnKey): number | string | null {
   switch (key) {
     case "name":
       return c.name;
@@ -47,23 +50,26 @@ function sortValue(c: ChannelPnl, key: ColumnKey): number | string | null {
     case "returnBom":
       return c.returnBomRatePct;
     case "netProfit":
-      return c.netProfit;
+      return coLaiKenh(c) ? c.netProfit : null;
     case "roas":
       return c.roas;
   }
 }
 
-/** Hàng "Tổng": tiền/đếm cộng dồn; tỉ lệ (AOV/Hoàn-Bom/ROAS/margin) TÍNH LẠI từ tổng — không cộng trung bình các % lại. */
-function computeTotalRow(channels: ChannelPnl[]): ChannelPnl {
+/**
+ * Hàng "Tổng": tiền/đếm cộng dồn; tỉ lệ (AOV/Hoàn-Bom/ROAS) TÍNH LẠI từ tổng — không cộng trung bình các
+ * % lại. LN ròng tổng = null khi dòng nào đó là DTO che (thiếu quyền giá vốn).
+ */
+function computeTotalRow(channels: readonly DongKenh[]): { row: ChannelPnlCheTruong; netProfit: number | null } {
   const revenue = channels.reduce((s, c) => s + c.revenue, 0);
   const orderCount = channels.reduce((s, c) => s + c.orderCount, 0);
   const ads = channels.reduce((s, c) => s + c.ads, 0);
   const platformFee = channels.reduce((s, c) => s + c.platformFee, 0);
   const returnBomOrderCount = channels.reduce((s, c) => s + c.returnBomOrderCount, 0);
-  const netProfit = channels.reduce((s, c) => s + c.netProfit, 0);
+  const netProfit = channels.every(coLaiKenh) ? channels.reduce((s, c) => s + c.netProfit, 0) : null;
   const returnDenom = orderCount + returnBomOrderCount;
 
-  return {
+  const row: ChannelPnlCheTruong = {
     channelId: "__total__",
     name: "Tổng",
     color: "transparent",
@@ -75,13 +81,24 @@ function computeTotalRow(channels: ChannelPnl[]): ChannelPnl {
     platformFee,
     returnBomOrderCount,
     returnBomRatePct: returnDenom ? (returnBomOrderCount / returnDenom) * 100 : null,
-    netProfit,
     roas: ads > 0 ? revenue / ads : null,
-    marginPct: revenue ? (netProfit / revenue) * 100 : null,
   };
+  return { row, netProfit };
 }
 
-function DataRow({ c, isTotal, onClick }: { c: ChannelPnl; isTotal?: boolean; onClick?: () => void }) {
+function DataRow({
+  c,
+  netProfit,
+  hienLai,
+  isTotal,
+  onClick,
+}: {
+  c: ChannelPnlCheTruong;
+  netProfit: number | null;
+  hienLai: boolean;
+  isTotal?: boolean;
+  onClick?: () => void;
+}) {
   return (
     <TableRow
       onClick={onClick}
@@ -101,9 +118,11 @@ function DataRow({ c, isTotal, onClick }: { c: ChannelPnl; isTotal?: boolean; on
       <TableCell className="text-right">
         {c.returnBomRatePct === null ? "—" : formatPct1(c.returnBomRatePct)} · {c.returnBomOrderCount.toLocaleString("vi-VN")} đơn
       </TableCell>
-      <TableCell className={cn("bg-surface-soft text-right", c.netProfit < 0 && "text-error")}>
-        {formatVnd(c.netProfit)}
-      </TableCell>
+      {hienLai && (
+        <TableCell className={cn("bg-surface-soft text-right", netProfit !== null && netProfit < 0 && "text-error")}>
+          {netProfit === null ? "—" : formatVnd(netProfit)}
+        </TableCell>
+      )}
       <TableCell className="bg-surface-soft text-right">
         {c.roas === null ? (
           <span title="Chưa có chi phí ads">—</span>
@@ -115,7 +134,15 @@ function DataRow({ c, isTotal, onClick }: { c: ChannelPnl; isTotal?: boolean; on
   );
 }
 
-export function ChannelCompareTable({ channels }: { channels: ChannelPnl[] }) {
+/** Thiếu quyền giá vốn (`coQuyenGiaVon` false, dòng là DTO che): không cột LN ròng. */
+export function ChannelCompareTable({
+  channels,
+  coQuyenGiaVon,
+}: {
+  channels: readonly DongKenh[];
+  coQuyenGiaVon: boolean;
+}) {
+  const cot = coQuyenGiaVon ? COLUMNS : COLUMNS.filter((col) => col.key !== "netProfit");
   const router = useRouter();
   const [sort, setSort] = useState<{ key: ColumnKey; dir: "asc" | "desc" }>({ key: "revenue", dir: "desc" });
 
@@ -133,7 +160,9 @@ export function ChannelCompareTable({ channels }: { channels: ChannelPnl[] }) {
     return sort.dir === "asc" ? cmp : -cmp;
   });
 
-  const totalRow = computeTotalRow(channels);
+  const tong = computeTotalRow(channels);
+  const totalRow = tong.row;
+  const laiCua = (c: DongKenh): number | null => (coLaiKenh(c) ? c.netProfit : null);
 
   return (
     <div className="rounded-xl border border-hairline bg-canvas">
@@ -142,7 +171,7 @@ export function ChannelCompareTable({ channels }: { channels: ChannelPnl[] }) {
         <Table>
           <TableHeader>
             <TableRow>
-              {COLUMNS.map((col) => {
+              {cot.map((col) => {
                 const active = sort.key === col.key;
                 return (
                   <TableHead key={col.key} className={col.align === "right" ? "text-right" : undefined}>
@@ -172,9 +201,15 @@ export function ChannelCompareTable({ channels }: { channels: ChannelPnl[] }) {
           </TableHeader>
           <TableBody>
             {sorted.map((c) => (
-              <DataRow key={c.channelId} c={c} onClick={() => router.push(`/kenh/${c.channelId}`)} />
+              <DataRow
+                key={c.channelId}
+                c={c}
+                netProfit={laiCua(c)}
+                hienLai={coQuyenGiaVon}
+                onClick={() => router.push(`/kenh/${c.channelId}`)}
+              />
             ))}
-            <DataRow c={totalRow} isTotal />
+            <DataRow c={totalRow} netProfit={tong.netProfit} hienLai={coQuyenGiaVon} isTotal />
           </TableBody>
         </Table>
       </div>
@@ -201,10 +236,12 @@ export function ChannelCompareTable({ channels }: { channels: ChannelPnl[] }) {
               </span>
               <span>ROAS {c.roas === null ? "—" : formatRoas(c.roas)}</span>
             </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">LN ròng</span>
-              <span className={cn(c.netProfit < 0 && "text-error")}>{formatVnd(c.netProfit)}</span>
-            </div>
+            {coLaiKenh(c) && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">LN ròng</span>
+                <span className={cn(c.netProfit < 0 && "text-error")}>{formatVnd(c.netProfit)}</span>
+              </div>
+            )}
           </button>
         ))}
         <div className="flex flex-col gap-1.5 rounded-lg border border-hairline bg-surface-soft p-3">
@@ -212,10 +249,12 @@ export function ChannelCompareTable({ channels }: { channels: ChannelPnl[] }) {
             <span className="text-sm font-medium text-ink">Tổng</span>
             <span className="text-sm font-medium text-ink">{formatVnd(totalRow.revenue)}</span>
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">LN ròng</span>
-            <span className={cn(totalRow.netProfit < 0 && "text-error")}>{formatVnd(totalRow.netProfit)}</span>
-          </div>
+          {tong.netProfit !== null && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">LN ròng</span>
+              <span className={cn(tong.netProfit < 0 && "text-error")}>{formatVnd(tong.netProfit)}</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

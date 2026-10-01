@@ -7,7 +7,9 @@ import { LayoutGrid, Table2 } from "lucide-react";
 import { ChannelCardGrid } from "@/components/kenh/channel-card-grid";
 import { ChannelCompareTable } from "@/components/kenh/channel-compare-table";
 import { Switch } from "@/components/ui/switch";
+import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
 import type { ChannelPnl } from "@/lib/reports/pnl";
+import type { ChannelPnlChe } from "@/lib/reports/pnl-che";
 import { cn } from "@/lib/utils";
 import { PageTitle } from "@/components/shell/page-title";
 
@@ -24,15 +26,20 @@ type ViewMode = "card" | "table";
  * kênh 0 hoạt động trong kỳ vẫn phải có thẻ 0 ₫ (không được biến mất như kết
  * quả thô của `computeChannelPnl`).
  */
+/** Kênh kỳ này + kỳ trước — nhánh che (thiếu `gia-von-loi-nhuan:xem`) chỉ mang DTO không lãi/biên. */
+export type SoSanhKenhDuLieu = KetQuaChe<
+  { channels: ChannelPnl[]; prevChannels: ChannelPnl[] },
+  { channels: ChannelPnlChe[]; prevChannels: ChannelPnlChe[] }
+>;
+
 export function ChannelComparisonSection({
-  channels,
-  prevChannels,
+  du,
   feePctByChannel,
 }: {
-  channels: ChannelPnl[];
-  prevChannels: ChannelPnl[];
+  du: SoSanhKenhDuLieu;
   feePctByChannel: Record<string, number>;
 }) {
+  const { channels, prevChannels, coQuyenGiaVon } = du;
   const [compareOn, setCompareOn] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>("card");
 
@@ -101,13 +108,16 @@ export function ChannelComparisonSection({
               prevChannels={prevChannels}
               feePctByChannel={feePctByChannel}
               compareOn={compareOn}
+              coQuyenGiaVon={coQuyenGiaVon}
             />
           ) : (
-            <ChannelCompareTable channels={channels} />
+            <ChannelCompareTable channels={channels} coQuyenGiaVon={coQuyenGiaVon} />
           )}
-          <p className="text-xs text-muted-foreground">
-            LN kênh chỉ trừ chi phí gắn kênh — tổng các kênh ≠ LN ròng toàn shop
-          </p>
+          {coQuyenGiaVon && (
+            <p className="text-xs text-muted-foreground">
+              LN kênh chỉ trừ chi phí gắn kênh — tổng các kênh ≠ LN ròng toàn shop
+            </p>
+          )}
         </>
       )}
     </div>

@@ -5,13 +5,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // `verifyPassword` path (against the module-level dummy hash) and returns
 // normally instead of short-circuiting or throwing, not to exercise Prisma.
 vi.mock("@/lib/prisma", () => ({
-  prisma: { user: { findFirst: vi.fn() } },
+  prisma: {
+    user: { findUnique: vi.fn(), update: vi.fn(async () => ({})) },
+    // Ghi `lastLoginAt` + nhật ký sau khi đăng nhập thành công chạy trong một transaction.
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({ user: { update: async () => ({}) } })),
+  },
 }));
 // `createSession` ghi cookie (cần request scope, không có trong vitest) — mock để nhánh đăng nhập
 // THÀNH CÔNG chạy được, và để soi đúng xem phiên có bị cấp oan hay không.
 vi.mock("@/lib/session", () => ({
   createSession: vi.fn(async () => {}),
   destroySession: vi.fn(async () => {}),
+}));
+// Nhật ký đăng nhập (DB) không phải thứ bài này đo — prisma giả không có bảng `AuditLog`.
+vi.mock("@/lib/nhat-ky/ghi-nhat-ky", () => ({
+  ghiNhatKy: vi.fn(async () => undefined),
+  ghiNhatKyLoi: vi.fn(async () => undefined),
 }));
 
 import { prisma } from "@/lib/prisma";
@@ -33,7 +42,7 @@ function buildLoginFormData(email: string, password: string): FormData {
 describe("login() — timing side-channel fix", () => {
   beforeEach(() => {
     resetAttempts(NON_EXISTENT_EMAIL);
-    vi.mocked(prisma.user.findFirst).mockReset().mockResolvedValue(null);
+    vi.mocked(prisma.user.findUnique).mockReset().mockResolvedValue(null);
     vi.mocked(createSession).mockClear();
   });
 
@@ -57,14 +66,14 @@ describe("login() — timing side-channel fix", () => {
 
   // Chặn nhồi chuỗi khổng lồ vào scrypt (verifyPassword)/DB: email > 254 ký
   // tự (trần RFC 5321) hoặc mật khẩu > 200 ký tự phải rớt ngay ở bước
-  // safeParse, KHÔNG chạm tới prisma.findFirst/verifyPassword — và vẫn trả
+  // safeParse, KHÔNG chạm tới prisma.findUnique/verifyPassword — và vẫn trả
   // đúng thông báo lỗi CHUNG (không lộ ra là do "quá dài").
   it("từ chối email vượt quá 254 ký tự ngay ở bước parse, không đụng DB", async () => {
     const oversizedEmail = `${"a".repeat(250)}@hogikids.test`; // > 254 ký tự
     const result = await login(buildLoginFormData(oversizedEmail, "bat-ky-mat-khau-nao"));
 
     expect(result).toEqual({ ok: false, error: GENERIC_ERROR });
-    expect(prisma.user.findFirst).not.toHaveBeenCalled();
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
   it("từ chối mật khẩu vượt quá 200 ký tự ngay ở bước parse, không đụng DB", async () => {
@@ -72,7 +81,7 @@ describe("login() — timing side-channel fix", () => {
     const result = await login(buildLoginFormData(NON_EXISTENT_EMAIL, oversizedPassword));
 
     expect(result).toEqual({ ok: false, error: GENERIC_ERROR });
-    expect(prisma.user.findFirst).not.toHaveBeenCalled();
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
   it("vẫn chấp nhận email/mật khẩu dài NHƯNG trong hạn (254/200 ký tự)", async () => {
@@ -86,7 +95,7 @@ describe("login() — timing side-channel fix", () => {
     const result = await login(buildLoginFormData(boundaryEmail, boundaryPassword));
 
     expect(result).toEqual({ ok: false, error: GENERIC_ERROR });
-    expect(prisma.user.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
   });
 
   // Hai ca dưới PHẢI dùng mật khẩu ĐÚNG mới phân biệt được: nếu đưa mật khẩu sai thì cả bản có
@@ -94,38 +103,35 @@ describe("login() — timing side-channel fix", () => {
   // kiểm bằng cách gỡ bản vá: bản test dùng mật khẩu sai vẫn xanh 7/7).
   const MAT_KHAU_DUNG = "matkhau-dung-1";
 
-  it("email khớp nhờ KÝ TỰ ĐẠI DIỆN của ILIKE bị TỪ CHỐI, dù mật khẩu ĐÚNG", async () => {
-    // `mode: "insensitive"` dịch ra ILIKE nên `_` khớp 1 ký tự bất kỳ — đo thật trên DB:
-    // "_____@hogikids.test" trả về đúng tài khoản "admin@hogikids.test". Nhận kết quả đó thì:
-    // (a) đăng nhập được bằng email KHÔNG có thật, và (b) nặng hơn — khoá lockout ghi theo CHUỖI
-    // NGƯỜI DÙNG GÕ nên mỗi biến thể `_` là một bộ đếm riêng (local part n ký tự ⇒ 2^n bộ đếm,
-    // mỗi cái 5 lượt sai) ⇒ chốt chống dò mật khẩu vô nghĩa.
-    vi.mocked(prisma.user.findFirst).mockResolvedValue({
-      id: "user-that",
-      email: "admin@hogikids.test",
-      passwordHash: await hashPassword(MAT_KHAU_DUNG),
-    } as never);
-
+  it("tra email CHÍNH XÁC (không `mode: insensitive`/ILIKE) — `_` không là ký tự đại diện", async () => {
+    // ILIKE coi `_` là ký tự đại diện: `kho_1@…` khớp cả `khoa1@…`, `findFirst` trả nhầm dòng ⇒ chủ
+    // nhân thật bị báo sai rồi tự bị khoá tạm; mỗi biến thể `_` lại là một bộ đếm lockout riêng.
+    // Chốt HÌNH DẠNG truy vấn: đúng một phép bằng trên email đã chuẩn hoá. Hành vi trên DB thật:
+    // `tests/auth-login-tai-khoan-khoa.integration.test.ts`.
     const result = await login(buildLoginFormData("_____@hogikids.test", MAT_KHAU_DUNG));
 
     expect(result).toEqual({ ok: false, error: GENERIC_ERROR });
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: "_____@hogikids.test" } });
     expect(createSession).not.toHaveBeenCalled();
     resetAttempts("_____@hogikids.test");
   });
 
   it("email chỉ khác HOA/THƯỜNG vẫn đăng nhập được (không vá quá tay)", async () => {
-    // Đây mới là mục đích thật của `mode: "insensitive"` — vá lỗ ILIKE mà chặn luôn ca này thì
-    // chủ shop gõ email viết hoa sẽ không vào được app.
-    vi.mocked(prisma.user.findFirst).mockResolvedValue({
+    // Email lưu dạng chuẩn hoá; email GÕ được chuẩn hoá trước khi tra — chủ shop gõ viết hoa vẫn vào.
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
       id: "user-that",
-      email: "Admin@Hogikids.test",
+      email: "admin@hogikids.test",
       passwordHash: await hashPassword(MAT_KHAU_DUNG),
+      sessionEpoch: "e".repeat(32),
+      isActive: true,
     } as never);
 
     const result = await login(buildLoginFormData("ADMIN@hogikids.test", MAT_KHAU_DUNG));
 
     expect(result).toEqual({ ok: true, data: undefined });
-    expect(createSession).toHaveBeenCalledWith("user-that", false);
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: "admin@hogikids.test" } });
+    // Cookie mang epoch của ĐÚNG dòng vừa so hash — không đọc lại DB.
+    expect(createSession).toHaveBeenCalledWith("user-that", false, "e".repeat(32));
     resetAttempts("admin@hogikids.test");
   });
 });

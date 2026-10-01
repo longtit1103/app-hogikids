@@ -70,12 +70,18 @@ export function SoQuyDongChayTab({
   /** Số khoản vay còn hiệu lực đang có kỳ trả nợ chờ duyệt — page tính từ `listKhoanVay()` qua
    * `demKhoanVayCoKyCho()`, cùng phép đếm với thẻ Quỹ ở tab Dòng tiền. */
   soKhoanVayCoKyCho,
+  /** Người xem có `xuat-du-lieu` — thiếu thì không nút Xuất Excel (route vẫn tự chặn). */
+  choPhepXuat,
+  /** Người xem có `tai-chinh-so-quy:sua` — thiếu thì ô Quỹ tối thiểu chỉ đọc (action vẫn tự chặn). */
+  choPhepSua,
 }: {
   dongChay: SoQuyDongChay;
   duBaoQuy: DuBaoQuy | null;
   hrefDongTien: string;
   isCurrentMonth: boolean;
   soKhoanVayCoKyCho: number;
+  choPhepXuat: boolean;
+  choPhepSua: boolean;
 }) {
   // Khối MỚI ở đầu tab: biểu đồ 90+30 ngày + cảnh báo sắp cạn + ô ngưỡng. Đặt TRƯỚC nhánh trạng thái
   // của `dongChay` vì hai hợp đồng độc lập — có thể đang xem một tháng TRUOC_MO_SO trong khi sổ đã mở
@@ -89,7 +95,7 @@ export function SoQuyDongChayTab({
       <div className="flex flex-col gap-4 rounded-xl border border-hairline p-4" data-testid="so-quy-du-bao">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="font-serif text-lg text-ink">Dự báo quỹ 30 ngày</h3>
-          <SoQuyQuyToiThieuForm nguong={duBaoQuy.nguong} nguongDaDat={duBaoQuy.nguongDaDat} />
+          <SoQuyQuyToiThieuForm nguong={duBaoQuy.nguong} nguongDaDat={duBaoQuy.nguongDaDat} choPhepSua={choPhepSua} />
         </div>
         <SoQuyDuBaoCanhBao
           homNay={duBaoQuy.homNay}
@@ -170,11 +176,7 @@ export function SoQuyDongChayTab({
 
       {/* Xuất đúng bảng đang xem (tháng này, dòng chạy + Đầu/Cuối kỳ). Khoá kỳ lấy ở SERVER (giờ VN). */}
       <div className="flex justify-end">
-        <SoQuyXuatExcelButton
-          dongChay={dongChay}
-          ky={format(dongChay.den, "yyyy-MM")}
-          laThangHienTai={isCurrentMonth}
-        />
+        <SoQuyXuatExcelButton ky={format(dongChay.den, "yyyy-MM")} choPhepXuat={choPhepXuat} />
       </div>
 
       <div className={cn("grid grid-cols-2 gap-3", cuoiKyDuKien ? "sm:grid-cols-5" : "sm:grid-cols-4")}>

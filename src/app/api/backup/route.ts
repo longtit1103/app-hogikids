@@ -4,8 +4,10 @@ import { chanRouteKhiDangPhucHoi, dangPhucHoi } from "@/lib/backup/khoa-bao-tri"
 import { giuKhoaViecNang, traKhoaViecNang } from "@/lib/backup/khoa-viec-nang";
 import { runPgDump } from "@/lib/backup/run-pg-dump";
 import { chanRequestKhacOrigin } from "@/lib/chan-request-khac-origin";
+import { ghiNhatKy, ghiNhatKyLoi, type ActorNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { getAuthenticatedUserId } from "@/lib/session";
+import { congChuShopRoute } from "@/lib/quyen/cong-route";
 
 /** Tên việc nặng của nút "Sao lưu ngay" — hiện trong câu 409 khi một việc nặng khác đang chạy. */
 const VIEC_SAO_LUU = "sao lưu dữ liệu (tải bản backup)";
@@ -17,8 +19,9 @@ const VIEC_SAO_LUU = "sao lưu dữ liệu (tải bản backup)";
  * ghi SyncLog kind BACKUP); GET còn kích được cross-site qua thẻ <a>/<img>
  * (cookie sameSite=lax vẫn gửi cho GET top-level, POST thì không).
  *
- * Guard bằng `getAuthenticatedUserId()` (KHÔNG `requireUser()`: nó `redirect()` — sai cho
- * route API; ở đây không có phiên → trả 401 JSON). Thành công → ghi 1 dòng SyncLog
+ * CHỈ CHỦ SHOP (`congChuShopRoute`): bản dump chứa TOÀN BỘ DB — hash mật khẩu mọi tài khoản, kho
+ * token — nên tài khoản phụ (STAFF) quyền gì cũng không tải được; chưa đăng nhập 401 JSON, STAFF
+ * hoặc đang phải đổi mật khẩu 403 JSON (cổng route không `redirect()`). Thành công → ghi 1 dòng SyncLog
  * kind BACKUP status OK (CÙNG nguồn với cron đêm `api/ingest/backup-log`, xem
  * `lib/backup/trang-thai-sao-luu.ts` — màn Cài đặt chỉ đọc SyncLog, không còn đọc
  * `Setting.lastBackupAt`) rồi trả Buffer dump kèm `Content-Disposition` attachment
@@ -28,10 +31,9 @@ const VIEC_SAO_LUU = "sao lưu dữ liệu (tải bản backup)";
  * KHÔNG được để lượt lỗi này biến mất khỏi nguồn trạng thái duy nhất.
  */
 export async function POST(request: Request): Promise<Response> {
-  const userId = await getAuthenticatedUserId();
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const cong = await congChuShopRoute();
+  if (!cong.ok) return cong.response;
+  const actor: ActorNhatKy = { id: cong.nguoiDung.id, email: cong.nguoiDung.email };
 
   // Lớp thứ hai sau cookie `sameSite=lax`: cửa sổ "Lax-allowing-unsafe" 2 phút của Chrome vẫn gửi
   // cookie kèm POST top-level cross-site ⇒ trang lạ ép được máy chủ chạy pg_dump. Xem lý do đầy
@@ -90,6 +92,10 @@ export async function POST(request: Request): Promise<Response> {
     const finishedAt = new Date();
     const filename = `hogikids-${format(finishedAt, "yyyyMMdd-HHmm")}.dump`;
 
+    // Nhật ký TRƯỚC khi trả file và TRƯỚC dòng SyncLog OK: ghi hỏng ⇒ nhảy xuống catch (SyncLog ERROR +
+    // 500), không bao giờ có "SyncLog OK rồi lại ERROR" cho cùng một lượt.
+    await ghiNhatKySaoLuuOk(actor, filename);
+
     // Nguồn trạng thái DUY NHẤT cho `lib/backup/trang-thai-sao-luu.ts` (màn Cài đặt) — CÙNG kind
     // BACKUP với cron đêm `api/ingest/backup-log`, không tạo nguồn thứ hai để rồi trôi nhau như
     // `Setting.lastBackupAt` cũ (đã bỏ). Không có `drivePath` — bản tay không đẩy Google Drive.
@@ -112,6 +118,11 @@ export async function POST(request: Request): Promise<Response> {
     // Ghi cả lượt LỖI: bấm nút mà dump hỏng vẫn phải hiện "loi" ở màn Cài đặt, không được lặng
     // thinh coi như chưa có gì xảy ra (đúng thứ cảnh báo giả mà nguồn SyncLog này sinh ra để sửa).
     await ghiLogSaoLuu({ status: "ERROR", finishedAt: new Date(), error: message });
+    await ghiNhatKyLoi({
+      hanhDong: HANH_DONG.SAO_LUU_TAI,
+      actor,
+      ghiChu: { lyDo: err instanceof LoiNhatKySaoLuu ? "Không ghi được nhật ký" : "Sao lưu thất bại" },
+    });
     return Response.json({ error: message }, { status: 500 });
   } finally {
     // Best-effort, giống `/api/restore`: dump hỏng giữa lượt phục hồi có thể đã đổi/xoá dòng khoá —
@@ -122,6 +133,34 @@ export async function POST(request: Request): Promise<Response> {
     } catch (err) {
       console.error("Không trả được khoá việc nặng sau lượt sao lưu — tự hết hạn tối đa 5 phút.", err);
     }
+  }
+}
+
+/** Ghi dòng nhật ký OK hỏng — câu cố định cho response, không lộ lỗi Prisma thô. */
+class LoiNhatKySaoLuu extends Error {
+  constructor() {
+    super("Không ghi được nhật ký thao tác — KHÔNG trả bản sao lưu (tải toàn bộ dữ liệu phải để lại dấu vết).");
+    this.name = "LoiNhatKySaoLuu";
+  }
+}
+
+/**
+ * Nhật ký `SAO_LUU_TAI` OK — FAIL-CLOSED: bản dump chứa TOÀN BỘ DB (hash mật khẩu, kho token), nên
+ * lượt tải không để lại dấu vết thì không trả file. Ngoại lệ duy nhất: đang có lượt phục hồi giữ khoá
+ * (cùng luật `ghiLogSaoLuu` bên dưới) — ghi lúc này là INSERT vào schema sắp bị thay; bỏ dòng, file vẫn
+ * trả như trước khi có nhật ký.
+ */
+async function ghiNhatKySaoLuuOk(actor: ActorNhatKy, filename: string): Promise<void> {
+  if (dangPhucHoi()) return;
+  try {
+    await ghiNhatKy(prisma, {
+      hanhDong: HANH_DONG.SAO_LUU_TAI,
+      actor,
+      doiTuong: { loai: "BanSaoLuu", moTa: filename },
+    });
+  } catch (err) {
+    console.error("[nhat-ky] Không ghi được dòng SAO_LUU_TAI OK:", err);
+    throw new LoiNhatKySaoLuu();
   }
 }
 

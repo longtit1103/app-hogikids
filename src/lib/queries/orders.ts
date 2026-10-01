@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { tachChiTietPhiTuRaw, type PlatformFeeComponent } from "@/lib/reports/platform-fee-breakdown";
 import { layQuyetToanDon, type QuyetToanDon } from "@/lib/reports/tiktok-quyet-toan-don";
 
+import type { KetQuaChe, QuyenGiaVon } from "./che-gia-von-types";
+
 export type OrderListParams = {
   q?: string;
   channels?: string[];
@@ -52,7 +54,22 @@ export type OrderListTotals = {
   discount: number;
 };
 
-export type OrderDetail = {
+/** Dòng hàng KHÔNG nhạy cảm — danh sách được phép (pick); nhánh che chỉ có ngần này. */
+export type OrderDetailItemChe = {
+  sku: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  lineDiscount: number;
+};
+
+export type OrderDetailItem = OrderDetailItemChe & {
+  /** Giá vốn HIỆN HÀNH của biến thể; null = dòng không khớp biến thể nào. */
+  costPrice: number | null;
+};
+
+/** Chi tiết đơn không mang giá vốn (người thiếu `gia-von-loi-nhuan:xem`). */
+export type OrderDetailChe = {
   id: string;
   pancakeId: string;
   /** Mã đơn hàng BÊN SÀN để đối chiếu — null khi đơn không có mã sàn thật (xem `maDonBenSan`). */
@@ -71,14 +88,7 @@ export type OrderDetail = {
   returnedFee: number;
   shipFeeCustomer: number;
   syncedAt: Date;
-  items: {
-    sku: string;
-    productName: string;
-    quantity: number;
-    unitPrice: number;
-    lineDiscount: number;
-    costPrice: number | null;
-  }[];
+  items: OrderDetailItemChe[];
   /** Chi tiết phí sàn của đơn này (tách từ `raw`) — dòng con "Phí sàn" ở drawer. Rỗng → dòng không bung. */
   feeComponents: PlatformFeeComponent[];
   /** Voucher SÀN tài trợ đã kẹp — hiện dạng dòng ghi chú, KHÔNG trừ vào doanh thu (bất biến #1). */
@@ -86,6 +96,12 @@ export type OrderDetail = {
   /** Số SÀN quyết toán cho đơn này (đối chiếu, đọc Bronze TikTok) — null = chưa quyết toán/không phải TikTok. */
   quyetToan: QuyetToanDon | null;
 };
+
+/** Chi tiết đơn đầy đủ — dòng hàng kèm giá vốn hiện hành. */
+export type OrderDetail = Omit<OrderDetailChe, "items"> & { items: OrderDetailItem[] };
+
+/** Kết quả `getOrderDetail` theo quyền — drawer narrow bằng `order.coQuyenGiaVon`. */
+export type OrderDetailTheoQuyen = KetQuaChe<OrderDetail, OrderDetailChe>;
 
 const PAGE_SIZE = 20;
 
@@ -229,8 +245,11 @@ function suyVoucherSanDaApDung(raw: unknown, items: { quantity: number; lineDisc
  *
  * `raw` được SELECT để chắt ra `feeComponents`/`marketplaceFunded` nhưng KHÔNG bao giờ trả
  * nguyên cục ra client — payload nặng và có dữ liệu khách hàng (bất biến #1, #8 ranh giới dữ liệu).
+ *
+ * Thiếu `gia-von-loi-nhuan:xem`: KHÔNG đọc giá vốn — câu chính không join `Variant.costPrice`, chỉ
+ * nhánh đủ quyền mới chạy thêm một câu lấy giá vốn theo `variantId`.
  */
-export async function getOrderDetail(id: string): Promise<OrderDetail | null> {
+export async function getOrderDetail(id: string, quyen: QuyenGiaVon): Promise<OrderDetailTheoQuyen | null> {
   const order = await prisma.order.findUnique({
     where: { id },
     select: {
@@ -257,20 +276,19 @@ export async function getOrderDetail(id: string): Promise<OrderDetail | null> {
           quantity: true,
           unitPrice: true,
           lineDiscount: true,
-          variant: { select: { costPrice: true } },
+          variantId: true,
         },
       },
     },
   });
   if (!order) return null;
 
-  const items = order.items.map((it) => ({
+  const items: OrderDetailItemChe[] = order.items.map((it) => ({
     sku: it.sku,
     productName: it.productName,
     quantity: it.quantity,
     unitPrice: it.unitPrice,
     lineDiscount: it.lineDiscount,
-    costPrice: it.variant?.costPrice ?? null,
   }));
 
   const marketplaceFunded = suyVoucherSanDaApDung(order.raw, items);
@@ -280,7 +298,7 @@ export async function getOrderDetail(id: string): Promise<OrderDetail | null> {
   // dòng và phình dần), vừa có thể NHẬN NHẦM khối "Sàn quyết toán" nếu mã đơn hai sàn trùng nhau.
   const quyetToan = order.channel.id === "tiktok" ? await layQuyetToanDon(order.pancakeId) : null;
 
-  return {
+  const chung: Omit<OrderDetailChe, "items"> = {
     id: order.id,
     pancakeId: order.pancakeId,
     maSan: maDonBenSan({
@@ -302,10 +320,25 @@ export async function getOrderDetail(id: string): Promise<OrderDetail | null> {
     returnedFee: order.returnedFee,
     shipFeeCustomer: order.shipFeeCustomer,
     syncedAt: order.syncedAt,
-    items,
     feeComponents: tachChiTietPhiTuRaw(order.raw),
     marketplaceFunded,
     quyetToan,
+  };
+
+  if (!quyen.coQuyenGiaVon) return { coQuyenGiaVon: false, ...chung, items };
+
+  const variantIds = [...new Set(order.items.flatMap((it) => (it.variantId ? [it.variantId] : [])))];
+  const giaVon = variantIds.length
+    ? await prisma.variant.findMany({ where: { id: { in: variantIds } }, select: { id: true, costPrice: true } })
+    : [];
+  const giaVonTheoId = new Map(giaVon.map((v) => [v.id, v.costPrice]));
+  return {
+    coQuyenGiaVon: true,
+    ...chung,
+    items: order.items.map((it, i) => ({
+      ...items[i],
+      costPrice: it.variantId ? (giaVonTheoId.get(it.variantId) ?? null) : null,
+    })),
   };
 }
 

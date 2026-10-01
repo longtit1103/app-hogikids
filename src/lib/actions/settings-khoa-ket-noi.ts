@@ -13,8 +13,10 @@ import { kiemTraPancake } from "@/lib/ket-noi/kiem-tra-pancake";
 import { kiemTraTiktokBusiness } from "@/lib/ket-noi/kiem-tra-tiktok-business";
 import { kiemTraTiktokShop } from "@/lib/ket-noi/kiem-tra-tiktok-shop";
 import type { KetQuaKiemTra } from "@/lib/ket-noi/kiem-tra-types";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congChuShopAction } from "@/lib/quyen/cong-action";
 import { luuTokenMetaVaoKho } from "@/lib/tokens/luu-token-meta";
 import { doiTokenMetaDaiHan } from "@/lib/tokens/meta-doi-token-dai-han";
 
@@ -34,7 +36,9 @@ export async function luuKhoaKetNoi(
   nguonId: NguonKetNoiId,
   values: Record<string, string>
 ): Promise<ActionResult<{ daLuu: number }>> {
-  await requireUser();
+  // Khoá kết nối là owner-only (spec phân quyền §1.1) — không phải quyền cấp được cho tài khoản phụ.
+  const cong = await congChuShopAction();
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const nguon = timNguonKetNoi(nguonId);
@@ -64,11 +68,18 @@ export async function luuKhoaKetNoi(
   if (loiShopId) return { ok: false, error: loiShopId };
 
   try {
-    await prisma.$transaction(
-      canGhi.map(([key, value]) =>
-        prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } })
-      )
-    );
+    await prisma.$transaction(async (tx) => {
+      for (const [key, value] of canGhi) {
+        await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+      }
+      // Chỉ ghi NGUỒN + SỐ Ô đã lưu — tuyệt đối không tên/giá trị khoá (bất biến của file).
+      await ghiNhatKy(tx, {
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.KHOA_KET_NOI_LUU,
+        doiTuong: { loai: "NguonKetNoi", id: nguon.id },
+        ghiChu: { soDong: canGhi.length },
+      });
+    });
   } catch {
     // KHÔNG đưa err.message vào body: lỗi Prisma có thể chứa giá trị khóa.
     return { ok: false, error: "Lỗi khi lưu khóa vào kho" };
@@ -94,7 +105,8 @@ const BO_KIEM_TRA = new Map<NguonKetNoiId, () => Promise<KetQuaKiemTra>>([
 
 /** Chỉ ĐỌC kho + gọi thử nguồn ngoài — không ghi gì nên không chặn lúc phục hồi. */
 export async function kiemTraKetNoiNguon(nguonId: NguonKetNoiId): Promise<ActionResult<KetQuaKiemTra>> {
-  await requireUser();
+  const cong = await congChuShopAction();
+  if (!cong.ok) return cong;
   const kiemTra = BO_KIEM_TRA.get(nguonId);
   if (!kiemTra) return { ok: false, error: "Nguồn không hợp lệ" };
   try {
@@ -120,7 +132,8 @@ export type KetQuaDoiTokenMetaUi = {
  * `scripts/meta-ads-lay-token.ts` trên máy dev.
  */
 export async function doiVaLuuTokenMeta(tokenTuoi: string): Promise<ActionResult<KetQuaDoiTokenMetaUi>> {
-  await requireUser();
+  const cong = await congChuShopAction();
+  if (!cong.ok) return cong;
   // Cùng lý do route POST chặn: nhận 200 rồi bị lượt phục hồi lùi bảng Setting = người dùng tin
   // token mới đã nằm trong kho trong khi kho quay về token cũ — hỏng lặng, phát hiện vài tuần sau.
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
@@ -156,6 +169,11 @@ export async function doiVaLuuTokenMeta(tokenTuoi: string): Promise<ActionResult
   } catch {
     return { ok: false, error: "Đổi token thành công nhưng LƯU thất bại — thử lại" };
   }
+  // `luuTokenMetaVaoKho` tự mở transaction của nó (dùng chung với route ingest, hàm duy nhất ghi 4 key
+  // token) và không nhận `tx` ⇒ nhật ký OK ghi ngay sau khi lưu xong, NGOÀI transaction đó. Nhật ký ném ⇒
+  // action ném (không báo thành công giả) dù token đã nằm trong kho: chấp nhận vì đưa vào trong tx cần
+  // sửa `src/lib/tokens/luu-token-meta.ts` (ngoài phạm vi đợt vá này). Không mang token/hạn vào nhật ký.
+  await ghiNhatKy(prisma, { actor: cong.nguoiDung, hanhDong: HANH_DONG.KHOA_KET_NOI_THAY_META });
 
   revalidatePath("/cai-dat");
   return {

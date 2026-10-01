@@ -18,7 +18,13 @@ vi.mock("@/lib/bronze/transform-from-raw", async (importOriginal) => {
   return { ...actual, transformFromRaw };
 });
 
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user-id") }));
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("../helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { POST as ingestRaw } from "@/app/api/ingest/raw/route";
@@ -27,7 +33,7 @@ import { QUA_HAN_PHUT } from "@/lib/bronze/doi-soat-don-con-do";
 import { SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
-import { seedReference, truncateBusinessTables } from "../helpers/test-db";
+import { seedReference, seedShopProfile, truncateBusinessTables } from "../helpers/test-db";
 
 /**
  * Lượt đối soát đêm — lưới an toàn thứ hai. Dấu kết cục chỉ giúp lượt GỬI LẠI tự chữa, mà đơn đã
@@ -139,20 +145,20 @@ describe("lượt đối soát đơn còn dở", () => {
     await goiDon("ORD-DS-XOA");
     expect(await prisma.order.count()).toBe(1);
 
-    // `deleteAllData` đòi đúng tên shop của user đang đăng nhập làm xác nhận.
-    const user = await prisma.user.upsert({
+    // `deleteAllData` đòi đúng tên shop (ShopProfile) làm xác nhận.
+    await prisma.user.upsert({
       where: { id: "test-user-id" },
-      update: { shopName: "HogiKids Test" },
+      update: {},
       create: {
         id: "test-user-id",
         email: "doi-soat@hogikids.test",
         passwordHash: `${"0".repeat(32)}:${"0".repeat(128)}`,
-        shopName: "HogiKids Test",
       },
     });
+    await seedShopProfile(); // tên shop mặc định "HogiKids" = chuỗi xác nhận
 
     const { deleteAllData } = await import("@/lib/actions/data-admin");
-    const kq = await deleteAllData(user.shopName);
+    const kq = await deleteAllData("HogiKids");
     expect(kq.ok).toBe(true);
 
     expect(await prisma.order.count()).toBe(0);
@@ -300,18 +306,18 @@ describe("lượt đối soát đơn còn dở", () => {
     await goiDon("ORD-DS-DISCARD"); // land xong, chết dở ⇒ dòng ở "chưa xong"
     expect((await prisma.rawPancakeOrder.findFirstOrThrow()).silverOutcome).toBeNull();
 
-    const user = await prisma.user.upsert({
+    await prisma.user.upsert({
       where: { id: "test-user-id" },
-      update: { shopName: "HogiKids Test" },
+      update: {},
       create: {
         id: "test-user-id",
         email: "discard@hogikids.test",
         passwordHash: `${"0".repeat(32)}:${"0".repeat(128)}`,
-        shopName: "HogiKids Test",
       },
     });
+    await seedShopProfile(); // tên shop mặc định "HogiKids" = chuỗi xác nhận
     const { deleteAllData } = await import("@/lib/actions/data-admin");
-    expect((await deleteAllData(user.shopName)).ok).toBe(true);
+    expect((await deleteAllData("HogiKids")).ok).toBe(true);
 
     expect((await prisma.rawPancakeOrder.findFirstOrThrow()).silverOutcome).toBe("DISCARDED");
 

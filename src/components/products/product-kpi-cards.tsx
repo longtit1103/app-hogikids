@@ -1,7 +1,8 @@
 import Link from "next/link";
 
 import { formatVnd } from "@/lib/format";
-import type { ProductKpi } from "@/lib/queries/products";
+import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
+import type { ProductKpi, ProductKpiChe } from "@/lib/queries/products";
 import { cn } from "@/lib/utils";
 
 function KpiCard({
@@ -42,9 +43,11 @@ function KpiCard({
   );
 }
 
-export function ProductKpiCards({ kpi }: { kpi: ProductKpi }) {
+/** Thiếu quyền giá vốn: không thẻ "Thiếu giá vốn"/"Giá trị tồn theo vốn" — server đã không tính hai số đó. */
+export function ProductKpiCards({ du }: { du: KetQuaChe<{ kpi: ProductKpi }, { kpi: ProductKpiChe }> }) {
+  const { kpi } = du;
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", du.coQuyenGiaVon && "lg:grid-cols-4")}>
       {/* Số SKU vốn nằm ở dòng mô tả tiêu đề trang — tiêu đề ẩn dưới md (PageTitle) nên giữ lại
           ở đây, CHỈ mobile (máy tính đã có ở tiêu đề; `md:hidden` trên chính <p> để khỏi dư khoảng).
           `print:hidden`: bản in dùng PageTitle (`print:flex`) đã có "x sản phẩm · y SKU" — thiếu dấu
@@ -55,30 +58,34 @@ export function ProductKpiCards({ kpi }: { kpi: ProductKpi }) {
         caption={`${kpi.totalVariants.toLocaleString("vi-VN")} SKU`}
         captionClassName="md:hidden print:hidden"
       />
-      <KpiCard
-        label="Thiếu giá vốn"
-        value={kpi.missingCostProducts.toLocaleString("vi-VN")}
-        valueClassName="text-warning"
-        href="?loc=thieu_gia_von"
-      />
+      {du.coQuyenGiaVon && (
+        <KpiCard
+          label="Thiếu giá vốn"
+          value={du.kpi.missingCostProducts.toLocaleString("vi-VN")}
+          valueClassName="text-warning"
+          href="?loc=thieu_gia_von"
+        />
+      )}
       <KpiCard
         label="Sắp hết hàng"
         value={kpi.lowStockProducts.toLocaleString("vi-VN")}
         valueClassName="text-warning"
         href="?loc=sap_het"
       />
-      <KpiCard
-        label="Giá trị tồn theo vốn"
-        value={formatVnd(kpi.stockValue)}
-        dark
-        caption={
-          kpi.productsWithoutCostInValue > 0 ? (
-            <Link href="?loc=thieu_gia_von" className="text-warning hover:underline">
-              * {kpi.productsWithoutCostInValue} sản phẩm chưa có giá vốn
-            </Link>
-          ) : undefined
-        }
-      />
+      {du.coQuyenGiaVon && (
+        <KpiCard
+          label="Giá trị tồn theo vốn"
+          value={formatVnd(du.kpi.stockValue)}
+          dark
+          caption={
+            du.kpi.productsWithoutCostInValue > 0 ? (
+              <Link href="?loc=thieu_gia_von" className="text-warning hover:underline">
+                * {du.kpi.productsWithoutCostInValue} sản phẩm chưa có giá vốn
+              </Link>
+            ) : undefined
+          }
+        />
+      )}
     </div>
   );
 }

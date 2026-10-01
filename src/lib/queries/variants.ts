@@ -2,7 +2,10 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
-export type VariantRow = {
+import type { KetQuaChe, QuyenGiaVon } from "./che-gia-von-types";
+
+/** Trường KHÔNG nhạy cảm của một dòng biến thể — danh sách được phép (pick); nhánh che chỉ có ngần này. */
+export type VariantRowChe = {
   variantId: string;
   sku: string;
   productName: string;
@@ -10,10 +13,14 @@ export type VariantRow = {
   imageUrl: string | null;
   sellPrice: number;
   stock: number;
-  costPrice: number;
   lowStockThreshold: number | null;
   effectiveThreshold: number;
   isLow: boolean;
+};
+
+/** Dòng đầy đủ — chỉ người có `gia-von-loi-nhuan:xem`. */
+export type VariantRow = VariantRowChe & {
+  costPrice: number;
   stockValue: number;
 };
 
@@ -28,14 +35,25 @@ export type VariantListParams = {
   page: number;
 };
 
-export type VariantKpi = {
+/** KPI không nhạy cảm (đếm SKU/tồn) — nhánh che chỉ có ngần này. */
+export type VariantKpiChe = {
   totalSku: number;
-  missingCost: number;
   totalStock: number;
   lowCount: number;
+};
+
+export type VariantKpi = VariantKpiChe & {
+  missingCost: number;
   stockValue: number;
   skusWithoutCostInValue: number;
 };
+
+export type VariantListPage = KetQuaChe<
+  { rows: VariantRow[]; total: number; kpi: VariantKpi },
+  { rows: VariantRowChe[]; total: number; kpi: VariantKpiChe }
+>;
+
+export type VariantExport = KetQuaChe<{ rows: VariantRow[] }, { rows: VariantRowChe[] }>;
 
 const PAGE_SIZE = 20;
 
@@ -46,17 +64,26 @@ export async function getDefaultThreshold(): Promise<number> {
   return Number.isFinite(n) && n >= 0 ? n : 5;
 }
 
-/** WHERE lọc dùng chung (list + export). Ngưỡng so 2 cột nên PHẢI raw: `stock <= COALESCE(lowStockThreshold, d)`. */
-function buildWhere(d: number, p: Pick<VariantListParams, "q" | "missingCost" | "soldMissingCost" | "lowOnly">): Prisma.Sql {
+/**
+ * WHERE lọc dùng chung (list + export). Ngưỡng so 2 cột nên PHẢI raw: `stock <= COALESCE(lowStockThreshold, d)`.
+ *
+ * Người gọi thiếu quyền giá vốn: hai bộ lọc theo `costPrice` bị BỎ (không lọc) — lọc "thiếu giá vốn"
+ * trả về đúng tập SKU giá vốn 0, tức lộ giá vốn qua kết quả lọc dù không cột nào được select.
+ */
+function buildWhere(
+  d: number,
+  p: Pick<VariantListParams, "q" | "missingCost" | "soldMissingCost" | "lowOnly">,
+  quyen: QuyenGiaVon,
+): Prisma.Sql {
   const conds: Prisma.Sql[] = [];
   if (p.q && p.q.trim()) {
     const like = `%${p.q.trim()}%`;
     conds.push(Prisma.sql`(v.sku ILIKE ${like} OR p.name ILIKE ${like} OR v.label ILIKE ${like})`);
   }
-  if (p.missingCost) conds.push(Prisma.sql`v."costPrice" = 0`);
+  if (quyen.coQuyenGiaVon && p.missingCost) conds.push(Prisma.sql`v."costPrice" = 0`);
   // Hẹp hơn `missingCost` — xem chú thích ở `ProductListParams.soldMissingCost` (products.ts):
   // chỉ biến thể ĐÃ BÁN trong đơn HỢP LỆ, tức tập nhập giá vốn vào là đổi số P&L thật.
-  if (p.soldMissingCost) {
+  if (quyen.coQuyenGiaVon && p.soldMissingCost) {
     conds.push(Prisma.sql`v."costPrice" = 0 AND EXISTS(
       SELECT 1 FROM "OrderItem" oi
       JOIN "Order" o ON o.id = oi."orderId"
@@ -67,31 +94,25 @@ function buildWhere(d: number, p: Pick<VariantListParams, "q" | "missingCost" | 
   return conds.length ? Prisma.sql`WHERE ${Prisma.join(conds, " AND ")}` : Prisma.empty;
 }
 
-type RawVariant = {
-  variantId: string;
-  sku: string;
-  productName: string;
-  label: string;
-  imageUrl: string | null;
-  sellPrice: number;
-  stock: number;
-  costPrice: number;
-  lowStockThreshold: number | null;
-  effectiveThreshold: number;
-  isLow: boolean;
-  stockValue: bigint;
-};
+type RawVariantChe = VariantRowChe;
+type RawVariant = RawVariantChe & { costPrice: number; stockValue: bigint };
 
-function selectExpr(d: number): Prisma.Sql {
+/** Cột KHÔNG nhạy cảm — nhánh che select đúng ngần này (không `costPrice`, không tích tồn × vốn). */
+function selectExprChe(d: number): Prisma.Sql {
   return Prisma.sql`
     v.id AS "variantId", v.sku, p.name AS "productName", v.label, p."imageUrl",
-    v."sellPrice", v.stock, v."costPrice", v."lowStockThreshold",
+    v."sellPrice", v.stock, v."lowStockThreshold",
     COALESCE(v."lowStockThreshold", ${d})::int AS "effectiveThreshold",
-    (v.stock <= COALESCE(v."lowStockThreshold", ${d})) AS "isLow",
-    (v.stock::bigint * v."costPrice") AS "stockValue"`;
+    (v.stock <= COALESCE(v."lowStockThreshold", ${d})) AS "isLow"`;
 }
 
-function toRow(r: RawVariant): VariantRow {
+function selectExpr(d: number): Prisma.Sql {
+  return Prisma.sql`${selectExprChe(d)},
+    v."costPrice", (v.stock::bigint * v."costPrice") AS "stockValue"`;
+}
+
+/** Pick tường minh — cột thừa trong kết quả raw (nếu có) không bao giờ lọt ra ngoài. */
+function toRowChe(r: RawVariantChe): VariantRowChe {
   return {
     variantId: r.variantId,
     sku: r.sku,
@@ -100,30 +121,28 @@ function toRow(r: RawVariant): VariantRow {
     imageUrl: r.imageUrl,
     sellPrice: r.sellPrice,
     stock: r.stock,
-    costPrice: r.costPrice,
     lowStockThreshold: r.lowStockThreshold,
     effectiveThreshold: r.effectiveThreshold,
     isLow: r.isLow,
-    stockValue: Number(r.stockValue),
   };
 }
 
-/** Trang danh sách variant + KPI toàn cục (KPI KHÔNG theo filter — số tổng để card hiển thị ổn định). */
-export async function getVariantListPage(
-  p: VariantListParams,
-): Promise<{ rows: VariantRow[]; total: number; kpi: VariantKpi }> {
+function toRow(r: RawVariant): VariantRow {
+  return { ...toRowChe(r), costPrice: r.costPrice, stockValue: Number(r.stockValue) };
+}
+
+/**
+ * Trang danh sách variant + KPI toàn cục (KPI KHÔNG theo filter — số tổng để card hiển thị ổn định).
+ * Thiếu quyền giá vốn: không select `costPrice`/giá trị tồn, sort "Giá trị vốn" rơi về sort theo tồn
+ * (thứ tự theo giá vốn cũng là lộ giá vốn), KPI chỉ còn số đếm.
+ */
+export async function getVariantListPage(p: VariantListParams, quyen: QuyenGiaVon): Promise<VariantListPage> {
   const d = await getDefaultThreshold();
-  const where = buildWhere(d, p);
-  const sortCol = p.sort === "ton" ? Prisma.sql`v.stock` : Prisma.sql`v."costPrice"`;
+  const where = buildWhere(d, p, quyen);
+  const sortTheoVon = quyen.coQuyenGiaVon && p.sort !== "ton";
+  const sortCol = sortTheoVon ? Prisma.sql`v."costPrice"` : Prisma.sql`v.stock`;
   const dir = p.dir === "asc" ? Prisma.sql`ASC` : Prisma.sql`DESC`;
   const offset = Math.max(0, (p.page - 1) * PAGE_SIZE);
-
-  const rows = await prisma.$queryRaw<RawVariant[]>`
-    SELECT ${selectExpr(d)}
-    FROM "Variant" v JOIN "Product" p ON p.id = v."productId"
-    ${where}
-    ORDER BY ${sortCol} ${dir}, v.id ASC
-    LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
 
   // total từ COUNT ĐỘC LẬP (không dùng COUNT(*) OVER() — trang vượt trả 0 rows sẽ làm total sập về 0
   // dù còn dữ liệu ở trang 1, lệch với KPI).
@@ -132,6 +151,34 @@ export async function getVariantListPage(
     FROM "Variant" v JOIN "Product" p ON p.id = v."productId"
     ${where}`;
   const total = totalRows[0] ? Number(totalRows[0].total) : 0;
+
+  if (!quyen.coQuyenGiaVon) {
+    const rows = await prisma.$queryRaw<RawVariantChe[]>`
+      SELECT ${selectExprChe(d)}
+      FROM "Variant" v JOIN "Product" p ON p.id = v."productId"
+      ${where}
+      ORDER BY ${sortCol} ${dir}, v.id ASC
+      LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
+    const kpiRows = await prisma.$queryRaw<{ totalSku: number; totalStock: bigint; lowCount: number }[]>`
+      SELECT COUNT(*)::int AS "totalSku",
+             COALESCE(SUM(v.stock), 0)::bigint AS "totalStock",
+             COUNT(*) FILTER (WHERE v.stock <= COALESCE(v."lowStockThreshold", ${d}))::int AS "lowCount"
+      FROM "Variant" v JOIN "Product" p ON p.id = v."productId"`;
+    const k = kpiRows[0];
+    return {
+      coQuyenGiaVon: false,
+      rows: rows.map(toRowChe),
+      total,
+      kpi: { totalSku: k?.totalSku ?? 0, totalStock: k ? Number(k.totalStock) : 0, lowCount: k?.lowCount ?? 0 },
+    };
+  }
+
+  const rows = await prisma.$queryRaw<RawVariant[]>`
+    SELECT ${selectExpr(d)}
+    FROM "Variant" v JOIN "Product" p ON p.id = v."productId"
+    ${where}
+    ORDER BY ${sortCol} ${dir}, v.id ASC
+    LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
 
   const kpiRows = await prisma.$queryRaw<
     { totalSku: number; missingCost: number; totalStock: bigint; lowCount: number; stockValue: bigint; skusWithoutCostInValue: number }[]
@@ -146,6 +193,7 @@ export async function getVariantListPage(
 
   const k = kpiRows[0];
   return {
+    coQuyenGiaVon: true,
     rows: rows.map(toRow),
     total,
     kpi: {
@@ -159,21 +207,33 @@ export async function getVariantListPage(
   };
 }
 
-/** Xuất (không phân trang) — dùng cho CSV/xlsx. */
+/**
+ * Xuất (không phân trang) — dùng cho CSV/xlsx. Thiếu quyền giá vốn: không select giá vốn, sắp theo SKU
+ * (thứ tự theo giá vốn cũng là lộ giá vốn).
+ */
 export async function getVariantsForExport(
   p: Pick<VariantListParams, "q" | "lowOnly" | "missingCost" | "soldMissingCost">,
-): Promise<VariantRow[]> {
+  quyen: QuyenGiaVon,
+): Promise<VariantExport> {
   const d = await getDefaultThreshold();
-  const where = buildWhere(d, p);
+  const where = buildWhere(d, p, quyen);
+  if (!quyen.coQuyenGiaVon) {
+    const rows = await prisma.$queryRaw<RawVariantChe[]>`
+      SELECT ${selectExprChe(d)}
+      FROM "Variant" v JOIN "Product" p ON p.id = v."productId"
+      ${where}
+      ORDER BY v.sku ASC, v.id ASC`;
+    return { coQuyenGiaVon: false, rows: rows.map(toRowChe) };
+  }
   const rows = await prisma.$queryRaw<RawVariant[]>`
     SELECT ${selectExpr(d)}
     FROM "Variant" v JOIN "Product" p ON p.id = v."productId"
     ${where}
     ORDER BY v."costPrice" DESC, v.id ASC`;
-  return rows.map(toRow);
+  return { coQuyenGiaVon: true, rows: rows.map(toRow) };
 }
 
-/** Số SKU thiếu giá vốn (costPrice = 0) — badge sidebar + KPI. */
+/** Số SKU thiếu giá vốn (costPrice = 0) — badge sidebar + KPI. Người gọi tự kiểm quyền giá vốn (layout). */
 export async function countMissingCostVariants(): Promise<number> {
   return prisma.variant.count({ where: { costPrice: 0 } });
 }
@@ -187,15 +247,15 @@ export type LowStockPreviewRow = {
 };
 
 /**
- * 5 biến thể tồn thấp nhất + tổng số đang cảnh báo — dùng cho Dashboard
- * `low-stock-card`. Dùng LẠI `buildWhere`/`selectExpr`/`toRow` (không viết lại
- * predicate ngưỡng SQL lần 2).
+ * 5 biến thể tồn thấp nhất + tổng số đang cảnh báo — dùng cho Dashboard `low-stock-card`. Dùng LẠI
+ * `buildWhere`/`selectExprChe` (không viết lại predicate ngưỡng SQL lần 2). Trả đúng 5 trường của
+ * `LowStockPreviewRow` (pick) — thẻ tồn thấp không cần giá vốn nên luôn đi nhánh che.
  */
 export async function getLowStockPreview(limit = 5): Promise<{ rows: LowStockPreviewRow[]; total: number }> {
   const d = await getDefaultThreshold();
-  const where = buildWhere(d, { lowOnly: true });
-  const rows = await prisma.$queryRaw<RawVariant[]>`
-    SELECT ${selectExpr(d)}
+  const where = buildWhere(d, { lowOnly: true }, { coQuyenGiaVon: false });
+  const rows = await prisma.$queryRaw<RawVariantChe[]>`
+    SELECT ${selectExprChe(d)}
     FROM "Variant" v JOIN "Product" p ON p.id = v."productId"
     ${where}
     ORDER BY v.stock ASC, v.id ASC
@@ -205,7 +265,13 @@ export async function getLowStockPreview(limit = 5): Promise<{ rows: LowStockPre
     FROM "Variant" v JOIN "Product" p ON p.id = v."productId"
     ${where}`;
   return {
-    rows: rows.map(toRow),
+    rows: rows.map((r) => ({
+      variantId: r.variantId,
+      sku: r.sku,
+      productName: r.productName,
+      label: r.label,
+      stock: r.stock,
+    })),
     total: totalRows[0] ? Number(totalRows[0].total) : 0,
   };
 }

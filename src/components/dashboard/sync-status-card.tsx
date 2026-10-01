@@ -1,8 +1,9 @@
-import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { vi } from "date-fns/locale";
 
+import { LinkNeuDuocVao } from "@/components/dashboard/link-neu-duoc-vao";
 import { Badge } from "@/components/ui/badge";
+import { coTheVaoHref } from "@/components/shell/nav-config";
 import { SyncNowButton } from "@/components/shell/sync-now-button";
 
 import type { SyncKind, SyncStatus } from "@prisma/client";
@@ -45,7 +46,17 @@ function StatusBadge({ log }: { log: SyncStatusRow["log"] }) {
  * lớp P&L quan tâm "dữ liệu đã đồng bộ chưa" hơn là vận hành đơn (Pancake POS
  * giữ toàn bộ vận hành). Mỗi kind lấy SyncLog gần nhất (`page.tsx` fetch sẵn).
  */
-export function SyncStatusCard({ rows }: { rows: SyncStatusRow[] }) {
+export function SyncStatusCard({
+  rows,
+  choPhepDongBo = false,
+  hrefDuocPhep = [],
+}: {
+  rows: SyncStatusRow[];
+  /** `cai-dat:sua` (server tính) — thiếu thì không nút "Đồng bộ ngay". */
+  choPhepDongBo?: boolean;
+  /** Trang người xem được vào — `/cai-dat` cần `cai-dat:xem`; thiếu thì không hiện link "Cài đặt kết nối". */
+  hrefDuocPhep?: readonly string[];
+}) {
   return (
     <div className="rounded-xl bg-surface-card p-4">
       <h3 className="font-serif text-lg text-ink">Tình trạng đồng bộ</h3>
@@ -68,10 +79,12 @@ export function SyncStatusCard({ rows }: { rows: SyncStatusRow[] }) {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3">
-        <SyncNowButton />
-        <Link href="/cai-dat" className="text-xs text-primary hover:underline">
-          Cài đặt kết nối
-        </Link>
+        <SyncNowButton choPhepDongBo={choPhepDongBo} />
+        {coTheVaoHref(hrefDuocPhep, "/cai-dat") && (
+          <LinkNeuDuocVao href="/cai-dat" hrefDuocPhep={hrefDuocPhep} className="text-xs text-primary hover:underline">
+            Cài đặt kết nối
+          </LinkNeuDuocVao>
+        )}
       </div>
     </div>
   );

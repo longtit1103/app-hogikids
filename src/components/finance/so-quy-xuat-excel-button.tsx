@@ -1,38 +1,27 @@
-"use client";
-
 import { FileDown } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { exportTabToExcel } from "@/lib/reports/export-excel";
-import type { SoQuyDongChay } from "@/lib/so-quy/dong-chay-so-quy-types";
-import { buildSoQuySheetRows } from "@/lib/so-quy/xuat-excel-so-quy";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /**
- * Nút "Xuất Excel" tab Sổ quỹ (dòng chạy) — chỉ render khi có số để xuất (nhánh `CO_SO` của
- * `SoQuyDongChay`); controller (`so-quy-dong-chay-tab.tsx`) tự quyết ẩn/không gắn nút này ở hai nhánh
- * còn lại (`CHUA_MO_SO`/`TRUOC_MO_SO`). `ky` = khoá kỳ đang xem (`yyyy-MM`), dùng cho TÊN FILE, cùng
- * khuôn `exportTabToExcel` (toast thành công/thất bại đã nằm trong đó, không lặp ở đây).
+ * Nút "Xuất Excel" tab Sổ quỹ (dòng chạy) — LINK tới route server `/api/export/so-quy?ky=yyyy-MM`
+ * (spec phân quyền §4.3: file dựng ở server, qua cổng `tai-chinh-so-quy:xem` ∧ `xuat-du-lieu`). Chỉ render
+ * khi có số để xuất (nhánh `CO_SO` của `SoQuyDongChay`); controller (`so-quy-dong-chay-tab.tsx`) tự quyết
+ * ẩn/không gắn nút này ở hai nhánh còn lại. `ky` = khoá kỳ đang xem (`yyyy-MM`).
+ *
+ * `choPhepXuat` false (thiếu `xuat-du-lieu`) ⇒ không render — route vẫn tự trả 403 nếu thiếu quyền.
+ * Server component (không `"use client"`): chỉ là một link, không dữ liệu sổ quỹ nào đi xuống trình duyệt.
  */
-export function SoQuyXuatExcelButton({
-  dongChay,
-  ky,
-  laThangHienTai,
-}: {
-  dongChay: Extract<SoQuyDongChay, { trangThai: "CO_SO" }>;
-  ky: string;
-  /** Kỳ đang xem có phải tháng hiện tại — tab tính sẵn (`isCurrentMonth`), truyền xuống cho nhãn "Cuối
-   * kỳ" của sheet KHỚP đúng nhãn màn hình (`nhanCuoiKySoQuy`). */
-  laThangHienTai: boolean;
-}) {
-  async function handleExcel() {
-    const rows = buildSoQuySheetRows(dongChay, laThangHienTai);
-    await exportTabToExcel("so-quy", [{ name: "Sổ quỹ", rows }], ky);
-  }
-
+export function SoQuyXuatExcelButton({ ky, choPhepXuat }: { ky: string; choPhepXuat: boolean }) {
+  if (!choPhepXuat) return null;
   return (
-    <Button type="button" variant="outline" size="sm" onClick={handleExcel} className="print:hidden">
+    <a
+      href={`/api/export/so-quy?${new URLSearchParams({ ky }).toString()}`}
+      download
+      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "print:hidden")}
+    >
       <FileDown className="size-4" />
       Xuất Excel
-    </Button>
+    </a>
   );
 }

@@ -1,9 +1,10 @@
 import Image from "next/image";
-import Link from "next/link";
 import { Shirt } from "lucide-react";
 
+import { LinkNeuDuocVao } from "@/components/dashboard/link-neu-duoc-vao";
+import { coTheVaoHref } from "@/components/shell/nav-config";
 import { formatVnd } from "@/lib/format";
-import type { ProductReportRow } from "@/lib/reports/product-report";
+import type { ProductReportRowChe } from "@/lib/reports/product-report";
 
 /**
  * Top 5 sản phẩm bán chạy (theo doanh thu) trong range toàn cục. Server
@@ -11,7 +12,14 @@ import type { ProductReportRow } from "@/lib/reports/product-report";
  * bởi `computeProductReport`. Click dòng → tab Sản phẩm ở `/bao-cao` lọc đúng
  * 1 SP (route `/san-pham/{id}` KHÔNG tồn tại — không dùng).
  */
-export function TopProductsCard({ products }: { products: ProductReportRow[] }) {
+export function TopProductsCard({
+  products,
+  hrefDuocPhep = [],
+}: {
+  products: ProductReportRowChe[];
+  /** Trang người xem được vào — `/bao-cao` cần `bao-cao:xem`, thiếu thì dòng là chữ thường. */
+  hrefDuocPhep?: readonly string[];
+}) {
   return (
     <div className="rounded-xl bg-surface-card p-4">
       <h3 className="font-serif text-lg text-ink">Top 5 sản phẩm bán chạy</h3>
@@ -21,10 +29,13 @@ export function TopProductsCard({ products }: { products: ProductReportRow[] }) 
       ) : (
         <div className="mt-3 flex flex-col gap-1">
           {products.map((p) => (
-            <Link
+            <LinkNeuDuocVao
               key={p.productId}
               href={`/bao-cao?tab=san-pham&sp=${p.productId}`}
+              hrefDuocPhep={hrefDuocPhep}
+              khoi
               className="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-soft"
+              classNameTinh="flex items-center gap-3 rounded-lg px-2 py-1.5"
             >
               {p.imageUrl ? (
                 <Image
@@ -43,18 +54,19 @@ export function TopProductsCard({ products }: { products: ProductReportRow[] }) 
               <span className="min-w-0 flex-1 truncate text-sm text-ink">{p.name}</span>
               <span className="shrink-0 text-xs text-muted-foreground">{p.soldQty.toLocaleString("vi-VN")}</span>
               <span className="shrink-0 text-sm text-ink">{formatVnd(p.revenue)}</span>
-            </Link>
+            </LinkNeuDuocVao>
           ))}
         </div>
       )}
 
-      {products.length > 0 && (
-        <Link
+      {products.length > 0 && coTheVaoHref(hrefDuocPhep, "/bao-cao") && (
+        <LinkNeuDuocVao
           href="/bao-cao?tab=san-pham"
+          hrefDuocPhep={hrefDuocPhep}
           className="mt-3 inline-block text-xs text-primary hover:underline"
         >
           Xem báo cáo sản phẩm
-        </Link>
+        </LinkNeuDuocVao>
       )}
     </div>
   );

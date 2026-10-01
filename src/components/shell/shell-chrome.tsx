@@ -8,9 +8,23 @@ import type { TrangThaiLechGiaVon } from "@/lib/gia-von/trang-thai-lech-gia-von"
 import { cauNhacPhieuNhap, type TrangThaiPhieuNhap } from "@/lib/nhap-hang/trang-thai-phieu-nhap";
 import type { CanhBaoSapCan } from "@/lib/so-quy/du-bao-quy-types";
 
+import { BannerLuiBan } from "./banner-lui-ban";
 import { BottomTabBar } from "./bottom-tab-bar";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
+
+const LOP_BANNER_GIA_VON =
+  "flex flex-col gap-0.5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-ink shadow-sm";
+
+/** Banner lệch giá vốn: link sang trang duyệt khi người xem vào được, khối tĩnh khi không. */
+function BannerGiaVon({ coLink, children }: { coLink: boolean; children: React.ReactNode }) {
+  if (!coLink) return <div className={LOP_BANNER_GIA_VON}>{children}</div>;
+  return (
+    <Link href="/san-pham/dong-bo-gia-von" className={`${LOP_BANNER_GIA_VON} transition hover:bg-warning/15`}>
+      {children}
+    </Link>
+  );
+}
 
 /**
  * Giữ state mở/đóng ngăn kéo điều hướng mobile để tab "Thêm" (trong `BottomTabBar`) và nội dung
@@ -28,6 +42,11 @@ export function ShellChrome({
   soKhoanVayCoKyCho,
   phieuNhapChuaGhi,
   canhBaoSapCanQuy,
+  hrefDuocPhep,
+  nguoiDung,
+  choPhepDongBo = false,
+  choPhepDuyetGiaVon = false,
+  dangLuiBanTu = null,
   children,
 }: {
   shopName: string;
@@ -52,6 +71,22 @@ export function ShellChrome({
   phieuNhapChuaGhi: TrangThaiPhieuNhap;
   /** Dự báo quỹ 30 ngày chạm ngưỡng tối thiểu — null = không chạm hoặc chưa mở sổ (`docCanhBaoSapCan`). */
   canhBaoSapCanQuy: CanhBaoSapCan;
+  /** Tập href menu được hiện — server tính từ quyền (`hrefDuocPhep`); CHỈ chuỗi để qua ranh giới RSC. */
+  hrefDuocPhep: string[];
+  /** Khối tài khoản ở đáy sidebar — chỉ chuỗi. */
+  nguoiDung: { email: string; tenHienThi: string };
+  /** Người xem có `cai-dat:sua` — hiện nút "Đồng bộ ngay" ở Topbar. Boolean (không truyền hàm qua RSC). */
+  choPhepDongBo?: boolean;
+  /**
+   * Người xem vào được `/san-pham/dong-bo-gia-von` (`san-pham:sua` ∧ giá vốn — server tính). Thiếu ⇒
+   * banner lệch giá vốn vẫn báo số nhưng là khối tĩnh, không mời bấm sang trang sẽ từ chối.
+   */
+  choPhepDuyetGiaVon?: boolean;
+  /**
+   * Mốc lùi bản phân quyền (chuỗi đã định dạng) khi DB còn dấu `phanQuyenDangLui` — null = không lùi.
+   * Server chỉ đọc cho chủ shop (`docDauLuiBan`). Chuỗi, không hàm — qua ranh giới RSC.
+   */
+  dangLuiBanTu?: string | null;
   children: React.ReactNode;
 }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -62,11 +97,13 @@ export function ShellChrome({
         shopName={shopName}
         missingCostCount={missingCostCount}
         lowStockWarning={lowStockWarning}
+        hrefDuocPhep={hrefDuocPhep}
+        nguoiDung={nguoiDung}
         mobileOpen={mobileNavOpen}
         onMobileOpenChange={setMobileNavOpen}
       />
       <div className="flex min-h-man-hinh min-w-0 flex-col">
-        <Topbar />
+        <Topbar choPhepDongBo={choPhepDongBo} />
         {/* `pb-16` dưới md: chừa đáy ≥ chiều cao thanh tab (~3.5rem) để dòng cuối không bị che. KHÔNG
             cộng `env(safe-area-inset-bottom)` lần nữa — `body` đã đệm inset đáy (globals.css). */}
         <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 pt-6 pb-16 md:px-6 md:pb-6">
@@ -106,6 +143,8 @@ export function ShellChrome({
             tín hiệu thấp hơn chặn đường, ngay trên cơ chế dựng ra để chống hỏng lặng.
           */}
           <div className="sticky top-2 z-20 flex flex-col gap-2 empty:hidden [&:not(:empty)]:mb-4">
+          {/* Đứng ĐẦU: trạng thái sau lùi bản là lỗi vận hành trên máy chủ, không tự hết. */}
+          {dangLuiBanTu && <BannerLuiBan tu={dangLuiBanTu} />}
           {(syncHasBacklog || dataSyncHasError || saoLuuCoVanDe) && (
             <Link
               href="/cai-dat"
@@ -144,10 +183,7 @@ export function ShellChrome({
             lệch" bằng số của ba hôm trước làm chủ shop tin là mình đang nhìn hiện tại.
           */}
           {lechGiaVon.muc !== "khop" && (
-            <Link
-              href="/san-pham/dong-bo-gia-von"
-              className="flex flex-col gap-0.5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-ink shadow-sm transition hover:bg-warning/15"
-            >
+            <BannerGiaVon coLink={choPhepDuyetGiaVon}>
               {lechGiaVon.muc === "co-lech" ? (
                 <span className="font-semibold">
                   {lechGiaVon.soLech} mã có giá vốn lệch với Pancake — lãi đang tính theo giá cũ.
@@ -168,8 +204,10 @@ export function ShellChrome({
                   Chưa đối chiếu giá vốn với Pancake lần nào — kiểm lượt đồng bộ đêm ở Cài đặt.
                 </span>
               )}
-              <span className="text-muted-foreground">Nhấn để xem danh sách và duyệt →</span>
-            </Link>
+              {choPhepDuyetGiaVon && (
+                <span className="text-muted-foreground">Nhấn để xem danh sách và duyệt →</span>
+              )}
+            </BannerGiaVon>
           )}
           {/*
             NHẮC VIỆC khoản vay — cùng hạng với banner giá vốn (vàng, "có việc chờ bạn duyệt"), KHÔNG
@@ -252,6 +290,7 @@ export function ShellChrome({
       </div>
       <BottomTabBar
         lowStockWarning={lowStockWarning}
+        hrefDuocPhep={hrefDuocPhep}
         moreOpen={mobileNavOpen}
         onOpenMore={() => setMobileNavOpen(true)}
       />

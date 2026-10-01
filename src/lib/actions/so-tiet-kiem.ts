@@ -5,13 +5,14 @@ import { startOfDay } from "date-fns";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { LoiHopDong, OPT_TX } from "@/lib/actions/khoan-vay-chung";
+import { LoiHopDong, maLoiNhatKy, OPT_TX } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { loiSoTietKiem, soTietKiemSchema } from "@/lib/actions/so-tiet-kiem-chung";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
 import { lyDoKhongXoaSoTietKiem } from "@/lib/tiet-kiem/ly-do-khong-xoa-so-tiet-kiem";
 import { chupVaoThungRac } from "@/lib/thung-rac/ghi-thung-rac";
 import { chanSoDuTietKiemAm, khoaSoTietKiem } from "@/lib/tiet-kiem/vi-tu-so-tiet-kiem";
@@ -72,7 +73,9 @@ const idSchema = z.object({ id: z.string().min(1, "Chọn sổ tiết kiệm") }
  * transaction nên không có gì để khoá, và `create` tự giữ khoá dòng nó vừa sinh tới lúc commit.
  */
 export async function taoSoTietKiem(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = soTietKiemSchema.safeParse(input);
@@ -106,6 +109,7 @@ export async function taoSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
             description: `Gửi tiết kiệm ${d.name}`,
           },
         });
+        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_TAO", doiTuong: { loai: "SoTietKiem", id: so.id } });
         return so.id;
       }, OPT_TX)
     );
@@ -129,7 +133,9 @@ export async function taoSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
  * Chỉ chạm dòng tiền khi THẬT SỰ đổi: ghi đè `date` bằng giá trị "cùng ngày khác giờ" sẽ lệch ngầm.
  */
 export async function suaSoTietKiem(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   // Hai lượt parse riêng: `soTietKiemSchema` kết thúc bằng `.transform` (ZodEffects) nên không
@@ -205,6 +211,8 @@ export async function suaSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
         }
 
         await chanSoDuTietKiemAm(tx, id);
+        // Câu CUỐI, cùng transaction giữ khoá dòng `SoTietKiem`: nhật ký ném ⇒ bản sửa rollback.
+        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_SUA", doiTuong: { loai: "SoTietKiem", id } });
       }, OPT_TX)
     );
 
@@ -228,7 +236,9 @@ export async function suaSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
  * còn, và `deleteMany` bên dưới xoá luôn chúng ⇒ quỹ nhảy lên im lặng.
  */
 export async function xoaSoTietKiem(input: unknown): Promise<ActionResult<null>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = idSchema.safeParse(input);
@@ -271,12 +281,19 @@ export async function xoaSoTietKiem(input: unknown): Promise<ActionResult<null>>
         // FK `onDelete: Restrict` là hàng rào cuối: dọn dòng gửi TRƯỚC rồi mới xoá hồ sơ.
         await tx.cashMovement.deleteMany({ where: { savingsId: id } });
         await tx.soTietKiem.delete({ where: { id } });
+        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_XOA", doiTuong: { loai: "SoTietKiem", id } });
       }, OPT_TX)
     );
 
     lamMoiTrang();
     return { ok: true, data: null };
   } catch (e) {
+    await ghiNhatKyLoi({
+      actor: nguoiDung,
+      hanhDong: "TIET_KIEM_XOA",
+      doiTuong: { loai: "SoTietKiem", id },
+      ghiChu: { lyDo: maLoiNhatKy(e) },
+    });
     return { ok: false, ...loiSoTietKiem(e, "Lỗi khi xoá sổ tiết kiệm") };
   }
 }

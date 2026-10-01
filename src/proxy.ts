@@ -5,7 +5,7 @@ import { taoContentSecurityPolicy, taoNonce } from "@/lib/content-security-polic
 /**
  * Proxy (Next 16 đổi tên `middleware` → `proxy`) — CHỈ làm một việc: gắn Content-Security-Policy
  * có nonce MỚI cho mỗi request trang HTML. KHÔNG xác thực ở đây: cổng phiên vẫn là
- * `requireUser()` trong layout `(app)` — dời auth vào proxy là đổi mô hình bảo vệ, việc khác.
+ * cổng trang `yeuCauQuyenTrang` trong layout/page `(app)` — dời auth vào proxy là đổi mô hình bảo vệ, việc khác.
  *
  * Nonce phải đi HAI chiều:
  *  - header CSP của REQUEST ⇒ Next đọc nonce từ đây lúc render và gắn vào mọi `<script>` nó sinh;

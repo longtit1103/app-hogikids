@@ -4,8 +4,10 @@ import Link from "next/link";
 import { DuyetChiPhiNhapHang } from "@/components/nhap-hang/duyet-chi-phi-nhap-hang";
 import { formatVnd } from "@/lib/format";
 import { docDeXuatPhieuNhap } from "@/lib/nhap-hang/doc-phieu-nhap-bronze";
-import { vanTayDeXuatPhieuNhap } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
-import { requireUser } from "@/lib/session";
+import { chePhieuNhapDeXuat, vanTayDeXuatPhieuNhap } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
+import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
+import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
 import { tinhQuyTuTong } from "@/lib/so-quy/cong-thuc-so-quy";
 import { docTongNguon } from "@/lib/so-quy/so-quy-queries";
 
@@ -21,13 +23,17 @@ import { docTongNguon } from "@/lib/so-quy/so-quy-queries";
  * shop hiểu nhầm rằng đổi kỳ sẽ đổi danh sách. Khuôn bày theo `/san-pham/dong-bo-gia-von`.
  */
 export default async function ChiPhiNhapHangPage() {
-  await requireUser("/tai-chinh/chi-phi-nhap-hang");
+  const nd = await yeuCauQuyenTrang("/tai-chinh/chi-phi-nhap-hang", "chi-phi:xem");
 
   const { deXuat, daGhi, boQuaTruocD0, canhBao, d0, soPhieuNhapThat } = await docDeXuatPhieuNhap();
 
   // Quỹ tới HÔM NAY — số để nói "ghi xong quỹ còn bao nhiêu". Đọc đúng đường `docTongNguon` mà thẻ
   // Quỹ còn lại dùng (tiền THẬT, không đụng số dự kiến), nên hai màn không bao giờ lệch nhau.
-  const quyHomNay = d0 === null ? null : tinhQuyTuTong(await docTongNguon(d0, new Date()));
+  // Số quỹ thuộc quyền Sổ quỹ — thiếu thì KHÔNG đọc (null = màn tự bỏ câu "quỹ còn lại").
+  const quyHomNay =
+    d0 === null || !coQuyen(nd, "tai-chinh-so-quy:xem")
+      ? null
+      : tinhQuyTuTong(await docTongNguon(d0, new Date()));
 
   return (
     <div className="flex flex-col gap-6">
@@ -67,10 +73,12 @@ export default async function ChiPhiNhapHangPage() {
         </div>
       ) : (
         <DuyetChiPhiNhapHang
-          deXuat={deXuat}
+          // Thiếu quyền giá vốn ⇒ bỏ số lượng (tổng ÷ số lượng = giá nhập ≈ giá vốn), giữ tổng phiếu.
+          deXuat={quyenGiaVonCua(nd).coQuyenGiaVon ? deXuat : chePhieuNhapDeXuat(deXuat)}
           // Vân tay của ĐÚNG danh sách đang hiện trên màn — lượt ghi từ chối nếu nó đã đổi.
           vanTay={vanTayDeXuatPhieuNhap(deXuat)}
           quyHomNay={quyHomNay}
+          choPhepSua={coQuyen(nd, "chi-phi:sua")}
         />
       )}
 

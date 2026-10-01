@@ -17,7 +17,7 @@ import {
   PROVISIONAL_FEE_TITLE,
   returnedOrderFeeDisplay,
 } from "@/lib/orders/provisional-fee";
-import type { OrderDetail } from "@/lib/queries/orders";
+import type { OrderDetailTheoQuyen } from "@/lib/queries/orders";
 import { OrderProfitTree } from "./order-profit-tree";
 import { OrderReturnedPanel } from "./order-returned-panel";
 import { OrderStatusBadge } from "./order-status-badge";
@@ -31,8 +31,17 @@ import { OrderStatusBadge } from "./order-status-badge";
  *  2. "Sàn quyết toán" (`buildSettlementLines`) — số SÀN thật trả về, CHỈ hiện khi có
  *     (`order.quyetToan !== null`, hiện tại chỉ TikTok đã quyết toán). Đặt CẠNH khối (1)
  *     để đối chiếu, TUYỆT ĐỐI không trộn vào phép tính của (1) — bất biến #7.
+ *
+ * Người thiếu `gia-von-loi-nhuan:xem` nhận `order.coQuyenGiaVon === false` (server không gửi giá vốn):
+ * không cột giá vốn/lãi dòng, cây (1) dừng ở "Thực nhận từ sàn" — bỏ nhánh Giá vốn và dòng Lãi đơn.
  */
-export function OrderDetailDrawer({ order }: { order: OrderDetail | null }) {
+
+/** Dòng cây chỉ có nghĩa khi biết giá vốn — cắt khỏi cây ở nhánh che. */
+function laDongGiaVon(id: string): boolean {
+  return id === "cogs" || id.startsWith("cogs:") || id === "profit";
+}
+
+export function OrderDetailDrawer({ order }: { order: OrderDetailTheoQuyen | null }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -45,7 +54,11 @@ export function OrderDetailDrawer({ order }: { order: OrderDetail | null }) {
 
   if (!order) return null;
 
-  const { cogs, missingCostCount } = calcOrderCogs(order.items);
+  const coGiaVon = order.coQuyenGiaVon;
+  // Nhánh che: không có giá vốn ⇒ đưa `costPrice: null`/`cogs: 0` cho hàm dựng cây rồi CẮT các dòng
+  // phụ thuộc giá vốn — số trên các dòng còn lại (doanh thu, phí sàn, thực nhận) không dùng tới chúng.
+  const itemsTinh = order.coQuyenGiaVon ? order.items : order.items.map((it) => ({ ...it, costPrice: null }));
+  const { cogs, missingCostCount } = order.coQuyenGiaVon ? calcOrderCogs(order.items) : { cogs: 0, missingCostCount: 0 };
   const excludedFromPnl = order.status === "RETURNED" || order.status === "CANCELLED";
   // Shopee/TikTok = phí sàn THẬT từ Pancake (`fee_marketplace`); kênh khác = ước tính % (Cài đặt).
   const realFee = usesRealPlatformFee(order.channelId);
@@ -55,15 +68,16 @@ export function OrderDetailDrawer({ order }: { order: OrderDetail | null }) {
   // Cây "Lãi đơn" tính LUÔN cho mọi đơn (thuần, rẻ) — kể cả đơn hoàn/hủy: khối
   // settlement bên dưới cần "Thực nhận từ sàn" của app để tính dòng chênh lệch,
   // dù đơn hoàn/hủy không hiện cây này (đã có khối riêng, giữ nguyên như cũ).
-  const profitLines = buildOrderProfitLines({
+  const tatCaDong = buildOrderProfitLines({
     itemsTotal: order.itemsTotal,
     discount: order.discount,
     platformFeeEst: order.platformFeeEst,
     cogs,
-    items: order.items,
+    items: itemsTinh,
     feeComponents: order.feeComponents,
     marketplaceFunded: order.marketplaceFunded,
   });
+  const profitLines = coGiaVon ? tatCaDong : tatCaDong.filter((l) => !laDongGiaVon(l.id));
   // Đơn hoàn/hủy KHÔNG có "thực nhận" (app cố tình loại khỏi P&L) nên không có gì
   // để so — truyền `null` để bỏ dòng chênh, thay vì đem trừ một số không tồn tại
   // rồi đỏ rực bằng đúng giá trị đơn ngay dưới dòng "đơn không tính vào P&L".
@@ -117,12 +131,12 @@ export function OrderDetailDrawer({ order }: { order: OrderDetail | null }) {
                 <TableHead>Tên</TableHead>
                 <TableHead className="text-right">SL</TableHead>
                 <TableHead className="text-right">Đơn giá</TableHead>
-                <TableHead className="text-right">Giá vốn hiện hành</TableHead>
-                <TableHead className="text-right">Lãi gộp dòng</TableHead>
+                {coGiaVon && <TableHead className="text-right">Giá vốn hiện hành</TableHead>}
+                {coGiaVon && <TableHead className="text-right">Lãi gộp dòng</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {order.items.map((it, i) => {
+              {itemsTinh.map((it, i) => {
                 // Lãi dòng RÒNG (cùng cơ sở itemsTotal): doanh thu dòng sau giảm giá − giá vốn dòng.
                 const lineProfit = it.unitPrice * it.quantity - it.lineDiscount - (it.costPrice ?? 0) * it.quantity;
                 return (
@@ -131,6 +145,7 @@ export function OrderDetailDrawer({ order }: { order: OrderDetail | null }) {
                     <TableCell className="text-sm">{it.productName}</TableCell>
                     <TableCell className="text-right text-sm">{it.quantity}</TableCell>
                     <TableCell className="text-right text-sm">{formatVnd(it.unitPrice)}</TableCell>
+                    {coGiaVon && (
                     <TableCell className="text-right text-sm">
                       {it.costPrice === 0 && it.sku ? (
                         <Link
@@ -156,9 +171,12 @@ export function OrderDetailDrawer({ order }: { order: OrderDetail | null }) {
                         formatVnd(it.costPrice)
                       )}
                     </TableCell>
-                    <TableCell data-testid="line-profit" className="text-right text-sm">
-                      {formatVnd(lineProfit)}
-                    </TableCell>
+                    )}
+                    {coGiaVon && (
+                      <TableCell data-testid="line-profit" className="text-right text-sm">
+                        {formatVnd(lineProfit)}
+                      </TableCell>
+                    )}
                   </TableRow>
                 );
               })}
@@ -176,7 +194,7 @@ export function OrderDetailDrawer({ order }: { order: OrderDetail | null }) {
                   : "Phí sàn ước tính theo % kênh (Cài đặt)."}
                 {provisionalFee &&
                   " Sàn chưa đối soát xong — phí thật thường cao hơn (~27-36%), nên LÃI THẬT sẽ thấp hơn số đang hiện; tự cập nhật khi đơn được đồng bộ lại."}
-                {" Chưa gồm chi phí chung (ads, vận chuyển, đóng gói…)."}
+                {coGiaVon && " Chưa gồm chi phí chung (ads, vận chuyển, đóng gói…)."}
                 {missingCostCount > 0 && ` ⚠ ${missingCostCount} dòng chưa có giá vốn — lãi đang tính thiếu.`}
               </p>
             </div>

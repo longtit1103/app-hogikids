@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { format } from "date-fns";
 
-import { ingestPancake, resetRawPancake } from "./ingest-raw";
+import { ingestPancake, resetRawPancake, testPrisma } from "./ingest-raw";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 /**
@@ -16,7 +16,25 @@ import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 const TODAY = format(new Date(), "yyyy-MM-dd");
 
+/**
+ * Id fixture mang dấu thời gian nên mỗi lượt chạy sinh một sản phẩm/đơn MỚI; không dọn thì DB e2e
+ * (sống qua nhiều lượt) phình dần và đẩy sản phẩm của spec khác (views.spec mở "/san-pham" trang đầu,
+ * sắp theo tên) sang trang 2. Dọn cả trước (sót từ lượt bị ngắt) lẫn sau.
+ */
+async function donDuLieuKenh(): Promise<void> {
+  const prisma = testPrisma();
+  try {
+    await prisma.order.deleteMany({ where: { pancakeId: { startsWith: "E2E-KENH-ORDER-" } } });
+    await prisma.product.deleteMany({ where: { pancakeId: { startsWith: "E2E-KENH-P-" } } });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+test.afterAll(donDuLieuKenh);
+
 test.beforeAll(async () => {
+  await donDuLieuKenh();
   const stamp = Date.now();
   const sku = `E2E-KENH-SKU-${stamp}`;
 

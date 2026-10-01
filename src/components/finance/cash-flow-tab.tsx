@@ -1,4 +1,4 @@
-import type { CashMovementRow } from "@/lib/cash-movements/cash-movement-queries";
+import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
 import { formatVnd } from "@/lib/format";
 import type { CashFlow, ShopeeCashIn, TiktokCashIn } from "@/lib/reports/cash-flow";
 import type { DoiSoatTienVe } from "@/lib/reports/doi-soat-tien-ve";
@@ -87,41 +87,129 @@ export function hasPurchaseSpend(outBreakdown: CashFlow["outBreakdown"]): boolea
   return outBreakdown.some((b) => b.categoryId === PURCHASE_CATEGORY_ID);
 }
 
-export function CashFlowTab({
-  flow,
-  isCurrentMonth,
-  doiSoat,
-  doiSoatShopee,
-  movements,
-  soQuy,
-  doiChieu,
-  loans,
-  tietKiem,
-  soTietKiem,
-  laiTietKiemTrongKy,
-  viTiktok,
-}: {
+/** Nhóm khối thuộc quyền `tai-chinh-dong-tien:xem` (spec §1.4). */
+export type NhomDongTien = {
   flow: CashFlow;
-  isCurrentMonth: boolean;
   /** Đối soát tiền về cấp đơn (TikTok). Vắng → khối đối soát không hiện. */
   doiSoat?: DoiSoatTienVe;
   doiSoatShopee?: DoiSoatShopee;
-  /** Khoản tiền khác ghi tay trong tháng (bảng ở khối riêng). */
-  movements: CashMovementRow[];
+  /** Khoản tiền khác ghi tay trong tháng (bảng ở khối riêng). Bản cơ bản khi thiếu quyền Sổ quỹ. */
+  movements: CashMovementRow[] | CashMovementRowCoBan[];
+  /** Ô "Còn ở ví TikTok" (thông tin, ngoài số quỹ) — chỉ truyền tiếp cho thẻ Quỹ. */
+  viTiktok: ViTiktokConLaiHienThi | null;
+  /** Có `tai-chinh-dong-tien:sua`? `false` ⇒ ẩn nút ghi tay / nhập file ví (server vẫn chặn). */
+  choPhepSua: boolean;
+  /** Có `tai-chinh-so-quy:sua`? `false` ⇒ dòng gắn khoản vay / sổ tiết kiệm không có nút sửa/xoá. */
+  choPhepSuaDongSoQuy: boolean;
+  /**
+   * Có `tai-chinh-so-quy:xem`? Lãi tiết kiệm thuộc khối Sổ quỹ — `false` ⇒ page đã bỏ lãi khỏi `flow`
+   * (`dongTienKhongLaiTietKiem`), ở đây bỏ luôn vế "lãi tiết kiệm" trong câu công thức.
+   */
+  hienLaiTietKiem: boolean;
+};
+
+/** Nhóm khối thuộc quyền `tai-chinh-so-quy:xem` (spec §1.4). */
+export type NhomQuy = {
   /** 4 số sổ quỹ + quỹ tới hôm nay + cảnh báo dữ liệu (`tinhSoQuyThang`). */
   soQuy: SoQuyThangDayDu;
-  /** Bản chốt số dư THẬT tháng đang xem đối chiếu với cuối kỳ sổ — hàng rào bắt sai cộng dồn. */
-  doiChieu: DoiChieuSoDuChot;
+  /** Bản chốt số dư THẬT đối chiếu với cuối kỳ sổ; null khi người xem không có đủ cả hai quyền
+   *  (phép đối chiếu cần cả bản chốt lẫn sổ quỹ). */
+  doiChieu: DoiChieuSoDuChot | null;
   loans: KhoanVayRow[];
   /** Tiền đang gửi ở sổ tiết kiệm sinh lãi — chỉ truyền tiếp cho thẻ Quỹ. */
   tietKiem: TietKiemQuy | null;
-  /** Toàn bộ sổ tiết kiệm (đang gửi + đã tất toán) — bảng và thẻ đến hạn của khối Sổ tiết kiệm. */
+  /** Toàn bộ sổ tiết kiệm (đang gửi + đã tất toán). */
   soTietKiem: SoTietKiemRow[];
   /** Σ lãi tiết kiệm ĐÃ NHẬN trong KỲ ĐANG XEM — dòng tổng của bảng, không phải cả lịch sử. */
   laiTietKiemTrongKy: number;
-  /** Ô "Còn ở ví TikTok" (thông tin, ngoài số quỹ) — chỉ truyền tiếp cho thẻ Quỹ. */
-  viTiktok: ViTiktokConLaiHienThi | null;
+  /** Có `tai-chinh-so-quy:sua`? `false` ⇒ ẩn nút thêm/sửa khoản vay, sổ tiết kiệm. */
+  choPhepSua: boolean;
+  /**
+   * Có `tai-chinh-dong-tien:sua`? Nút ghi trong khối Quỹ mà action đòi quyền DÒNG TIỀN: "+ Nhập quỹ"
+   * (tạo `CashMovement`, kèm `choPhepSua`) và Chốt số dư cuối tháng. `false` ⇒ ẩn (server vẫn chặn).
+   */
+  choPhepGhiDongTien: boolean;
+};
+
+/**
+ * Mỗi nhóm là `null` khi người xem thiếu quyền — khi đó nhóm KHÔNG được query ở page và KHÔNG render
+ * ở đây (không phải "tải hết rồi ẩn"). Ít nhất một nhóm khác `null` (cổng trang đảm bảo).
+ */
+export function CashFlowTab({
+  dongTien,
+  quy,
+  isCurrentMonth,
+}: {
+  dongTien: NhomDongTien | null;
+  quy: NhomQuy | null;
+  isCurrentMonth: boolean;
 }) {
+  return (
+    <div className="flex flex-col gap-4">
+      {quy && <KhoiQuy quy={quy} isCurrentMonth={isCurrentMonth} viTiktok={dongTien?.viTiktok ?? null} />}
+      {dongTien && (
+        <KhoiDongTien
+          dongTien={dongTien}
+          isCurrentMonth={isCurrentMonth}
+          loans={quy?.loans ?? []}
+          soTietKiem={quy?.soTietKiem ?? []}
+          d0={quy?.soQuy.d0 ?? null}
+        />
+      )}
+    </div>
+  );
+}
+
+function KhoiQuy({ quy, isCurrentMonth, viTiktok }: { quy: NhomQuy; isCurrentMonth: boolean; viTiktok: ViTiktokConLaiHienThi | null }) {
+  const { soQuy, doiChieu, loans, tietKiem, soTietKiem, laiTietKiemTrongKy, choPhepSua, choPhepGhiDongTien } =
+    quy;
+  // Số KHOẢN VAY có kỳ tới hạn chưa ghi (mỗi khoản tối đa 1 kỳ chờ) — thẻ Quỹ nhắc một dòng, khối
+  // Khoản vay mới là chỗ duyệt. Cùng phép đếm với banner shell (`demKhoanVayCoKyChoDuyet`).
+  const soKhoanVayCoKyCho = demKhoanVayCoKyCho(loans);
+  return (
+    <>
+      <SoQuyCard
+        soQuy={soQuy}
+        isCurrentMonth={isCurrentMonth}
+        soKhoanVayCoKyCho={soKhoanVayCoKyCho}
+        loans={loans}
+        tietKiem={tietKiem}
+        viTiktok={viTiktok}
+        choPhepNhapQuy={choPhepSua && choPhepGhiDongTien}
+      />
+
+      {doiChieu && (
+        <SoDuChotThangCard doiChieu={doiChieu} isCurrentMonth={isCurrentMonth} choPhepSua={choPhepGhiDongTien} />
+      )}
+
+      <KhoanVaySection loans={loans} d0={soQuy.d0} choPhepSua={choPhepSua} />
+
+      <SoTietKiemSection
+        sos={soTietKiem}
+        loans={loans}
+        laiNhanTrongKy={laiTietKiemTrongKy}
+        d0={soQuy.d0}
+        choPhepSua={choPhepSua}
+      />
+    </>
+  );
+}
+
+function KhoiDongTien({
+  dongTien,
+  isCurrentMonth,
+  loans,
+  soTietKiem,
+  d0,
+}: {
+  dongTien: NhomDongTien;
+  isCurrentMonth: boolean;
+  /** Rỗng/null khi người xem không có quyền Sổ quỹ — modal ghi tay chỉ thiếu ô chọn khoản vay/sổ. */
+  loans: KhoanVayRow[];
+  soTietKiem: SoTietKiemRow[];
+  d0: Date | null;
+}) {
+  const { flow, doiSoat, doiSoatShopee, movements, choPhepSua, choPhepSuaDongSoQuy, hienLaiTietKiem } = dongTien;
   const balanceNegative = flow.balance < 0;
   const { tiktok, shopee } = flow.actualIn;
   const hasActual = tiktok !== null || shopee !== null;
@@ -138,27 +226,8 @@ export function CashFlowTab({
     .filter(Boolean)
     .join(" · ");
 
-  // Số KHOẢN VAY có kỳ tới hạn chưa ghi (mỗi khoản tối đa 1 kỳ chờ) — thẻ Quỹ nhắc một dòng, khối
-  // Khoản vay mới là chỗ duyệt. Cùng phép đếm với banner shell (`demKhoanVayCoKyChoDuyet`).
-  const soKhoanVayCoKyCho = demKhoanVayCoKyCho(loans);
-
   return (
-    <div className="flex flex-col gap-4">
-      <SoQuyCard
-        soQuy={soQuy}
-        isCurrentMonth={isCurrentMonth}
-        soKhoanVayCoKyCho={soKhoanVayCoKyCho}
-        loans={loans}
-        tietKiem={tietKiem}
-        viTiktok={viTiktok}
-      />
-
-      <SoDuChotThangCard doiChieu={doiChieu} isCurrentMonth={isCurrentMonth} />
-
-      <KhoanVaySection loans={loans} d0={soQuy.d0} />
-
-      <SoTietKiemSection sos={soTietKiem} loans={loans} laiNhanTrongKy={laiTietKiemTrongKy} d0={soQuy.d0} />
-
+    <>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-xl bg-surface-card p-4">
           <p className="text-sm text-muted-foreground">Dự kiến thu — đơn đã giao</p>
@@ -181,8 +250,8 @@ export function CashFlowTab({
               giao, tức đúng lúc con số dễ bị đọc nhầm thành "tiền trong tài khoản" nhất thì lời giải
               thích lại biến mất. */}
           <p className="mt-1 text-xs text-muted-foreground">
-            = thu dự kiến + vào khác + lãi tiết kiệm − chi thật − ra khác · theo đơn đã giao, chưa
-            chắc đã về
+            = thu dự kiến + vào khác{hienLaiTietKiem ? " + lãi tiết kiệm" : ""} − chi thật − ra khác · theo
+            đơn đã giao, chưa chắc đã về
           </p>
           {isCurrentMonth && flow.pendingCount > 0 && (
             <p className="mt-1 text-xs text-muted-foreground">
@@ -213,7 +282,9 @@ export function CashFlowTab({
         rows={movements}
         loans={loans}
         soTietKiem={soTietKiem}
-        d0={soQuy.d0}
+        d0={d0}
+        choPhepSua={choPhepSua}
+        choPhepSuaDongSoQuy={choPhepSuaDongSoQuy}
       />
 
       {/* Tiền đã về (thật) — ĐA KÊNH. Nút import ví Shopee ở đây (file nuôi cash-IN,
@@ -221,7 +292,7 @@ export function CashFlowTab({
       <div className="rounded-xl border border-hairline p-4">
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">Tiền đã về (thật)</p>
-          <ShopeeImportButton />
+          {choPhepSua && <ShopeeImportButton />}
         </div>
 
         {hasActual ? (
@@ -267,6 +338,6 @@ export function CashFlowTab({
         <p>Nhập hàng tính vào tiền ra (khác P&amp;L — P&amp;L trừ COGS hàng đã bán, không trừ tiền nhập kho).</p>
         <p>Khoản ghi tay (vay, góp/rút vốn, trả nợ gốc, bán trực tiếp) chỉ vào quỹ — không vào Lãi/Lỗ.</p>
       </div>
-    </div>
+    </>
   );
 }

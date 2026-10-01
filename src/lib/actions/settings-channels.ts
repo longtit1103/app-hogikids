@@ -8,8 +8,10 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { REAL_FEE_CHANNELS } from "@/lib/channels/real-fee-channels";
 import type { DateRange } from "@/lib/date-range";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congAction } from "@/lib/quyen/cong-action";
 
 // ---- Cài đặt › Kênh bán (bật/tắt, phí %, màu) + "Tính lại phí kỳ này" -------
 // ⚠️ CHẠM BẤT BIẾN #1: `recomputeFeesInRange` ghi `platformFeeEst`. Hàng rào
@@ -38,7 +40,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * (chỉ FB/Website) phải bấm "Tính lại phí kỳ này" (recomputeFeesInRange).
  */
 export async function updateChannels(input: unknown): Promise<ActionResult> {
-  await requireUser();
+  const cong = await congAction("cai-dat:sua");
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = channelConfigSchema.safeParse(input);
@@ -47,9 +50,9 @@ export async function updateChannels(input: unknown): Promise<ActionResult> {
   }
 
   try {
-    await prisma.$transaction(
-      parsed.data.map((c) =>
-        prisma.channel.update({
+    await prisma.$transaction(async (tx) => {
+      for (const c of parsed.data) {
+        await tx.channel.update({
           where: { id: c.id },
           data: {
             isActive: c.isActive,
@@ -57,9 +60,10 @@ export async function updateChannels(input: unknown): Promise<ActionResult> {
             paymentFeePct: round2(c.paymentFeePct),
             color: c.color,
           },
-        }),
-      ),
-    );
+        });
+      }
+      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_KENH });
+    });
   } catch {
     return { ok: false, error: "Lỗi khi lưu cấu hình kênh" };
   }
@@ -77,7 +81,8 @@ export async function updateChannels(input: unknown): Promise<ActionResult> {
 export async function countRecomputableOrders(
   range: DateRange,
 ): Promise<ActionResult<{ count: number }>> {
-  await requireUser();
+  const cong = await congAction("cai-dat:xem");
+  if (!cong.ok) return cong;
 
   const count = await prisma.order.count({
     where: {
@@ -106,7 +111,8 @@ export async function countRecomputableOrders(
 export async function recomputeFeesInRange(
   range: DateRange,
 ): Promise<ActionResult<{ updated: number }>> {
-  await requireUser();
+  const cong = await congAction("cai-dat:sua");
+  if (!cong.ok) return cong;
   // Lượt này UPDATE `platformFeeEst` của cả kỳ trong MỘT transaction tới 60s. Chạy giữa lượt phục
   // hồi thì hoặc chết giữa chừng vì bảng bị drop, hoặc commit xong rồi bị bản backup lùi lại —
   // cả hai đều để lại phí sàn không khớp gì cả.
@@ -133,6 +139,7 @@ export async function recomputeFeesInRange(
           n++;
         }
       }
+      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_TINH_LAI_PHI, ghiChu: { soDong: n } });
       return n;
     },
     { maxWait: 10_000, timeout: 60_000 },

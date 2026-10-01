@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPnlSheetRows } from "@/components/bao-cao/report-export-buttons";
+import { buildPnlSheetRows } from "@/lib/reports/bao-cao-sheet-rows";
 import type { PnlBreakdown } from "@/lib/reports/pnl";
 
 /**

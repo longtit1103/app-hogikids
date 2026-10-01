@@ -1,9 +1,10 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { endOfMonth, format, startOfMonth, subMonths } from "date-fns";
 
 import { PnlTab } from "@/components/bao-cao/pnl-tab";
-import { ReportExportButtons } from "@/components/bao-cao/report-export-buttons";
-import { CashFlowTab } from "@/components/finance/cash-flow-tab";
+import { hrefXuatPnl, ReportExportButtons } from "@/components/bao-cao/report-export-buttons";
+import { CashFlowTab, type NhomDongTien, type NhomQuy } from "@/components/finance/cash-flow-tab";
 import { ExpenseLedgerTab } from "@/components/finance/expense-ledger-tab";
 import { listCashMovements } from "@/lib/cash-movements/cash-movement-queries";
 import { khoangServerThuocTinh, resolveRangeFromParams } from "@/lib/date-range";
@@ -14,9 +15,12 @@ import { calcPnl } from "@/lib/reports/pnl";
 import { computeBackfilledPlatformFee, computePlatformFeeComponents } from "@/lib/reports/platform-fee-breakdown";
 import { computeVoucherBreakdown } from "@/lib/reports/voucher-breakdown";
 import { computeCashFlow, sumGmv } from "@/lib/reports/cash-flow";
+import { dongTienKhongLaiTietKiem } from "@/lib/reports/cash-flow-theo-quyen";
 import { doiSoatTienVe } from "@/lib/reports/doi-soat-tien-ve";
 import { doiSoatTienVeShopee } from "@/lib/reports/doi-soat-tien-ve-shopee";
-import { requireUser } from "@/lib/session";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
+import type { Quyen } from "@/lib/quyen/danh-muc-quyen";
+import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
 import { listKhoanVay } from "@/lib/so-quy/khoan-vay-queries";
 import { docSoDuChot, ghepDoiChieuSoDuChot, tinhKhoanCauTruc } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import { docDuBaoQuy } from "@/lib/so-quy/du-bao-quy-queries";
@@ -41,6 +45,15 @@ const TAB_ITEMS: { key: FinanceTab; label: string }[] = [
   { key: "so-quy", label: "Sổ quỹ" },
   { key: "so-chi-phi", label: "Sổ chi phí" },
 ];
+
+/** Quyền xem của từng tab — mỗi tab một quyền (spec §1.1); tab Dòng tiền còn mở cho người chỉ có Sổ quỹ (§1.4). */
+const QUYEN_TAB: Record<FinanceTab, Quyen> = {
+  "loi-lo": "tai-chinh-loi-lo:xem",
+  "dong-tien": "tai-chinh-dong-tien:xem",
+  "so-quy": "tai-chinh-so-quy:xem",
+  "so-chi-phi": "chi-phi:xem",
+};
+const MOI_QUYEN_TAB: readonly Quyen[] = Object.values(QUYEN_TAB);
 
 function isFinanceTab(value: string | undefined): value is FinanceTab {
   return value === "loi-lo" || value === "dong-tien" || value === "so-quy" || value === "so-chi-phi";
@@ -76,17 +89,37 @@ function laThangHienTai(monthStart: Date): boolean {
 }
 
 export default async function TaiChinhPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requireUser();
+  const nd = await yeuCauQuyenTrang("/tai-chinh", MOI_QUYEN_TAB);
 
   const sp = await searchParams;
-  const tab: FinanceTab = isFinanceTab(sp.tab) ? sp.tab : "loi-lo";
+  const coDongTien = coQuyen(nd, "tai-chinh-dong-tien:xem");
+  const coQuy = coQuyen(nd, "tai-chinh-so-quy:xem");
+  // Tab mặc định = tab đầu tiên người xem có quyền RIÊNG (không cứng Lãi/Lỗ).
+  const tabMacDinh: FinanceTab = TAB_ITEMS.find((t) => coQuyen(nd, QUYEN_TAB[t.key]))?.key ?? "dong-tien";
+  // Thanh tab: "Dòng tiền" hiện khi có MỘT trong hai quyền dòng tiền/sổ quỹ — khối Khoản vay, Tiết
+  // kiệm chỉ nằm ở tab đó, người chỉ có Sổ quỹ không có đường vào nếu tab bị ẩn (nội dung vẫn cổng
+  // theo từng khối bên dưới). Khớp đúng cổng `?tab=dong-tien` ngay dưới.
+  const tabHienThi = TAB_ITEMS.filter((t) =>
+    t.key === "dong-tien" ? coDongTien || coQuy : coQuyen(nd, QUYEN_TAB[t.key]),
+  );
+  let tab: FinanceTab = tabMacDinh;
+  if (isFinanceTab(sp.tab)) {
+    // Tab được CHỈ ĐỊNH mà không có quyền ⇒ từ chối, KHÔNG rơi về tab mặc định (sẽ render nhầm khối
+    // người này không được xem). Dòng tiền mở cho người có MỘT trong hai quyền dòng tiền/sổ quỹ.
+    const duQuyen =
+      sp.tab === "dong-tien" ? coDongTien || coQuy : coQuyen(nd, QUYEN_TAB[sp.tab]);
+    if (!duQuyen) {
+      redirect(`/khong-co-quyen?tu=${encodeURIComponent(`/tai-chinh?tab=${sp.tab}`)}`);
+    }
+    tab = sp.tab;
+  }
   // Range chung: ?tu=&den= (Tùy chọn) → ?range=<preset> → this_month.
   const range = resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, new Date(), await docLuaChonDaLuu());
 
   // Chuyển tab giữ range đang xem (tu/den HOẶC preset), bỏ filter riêng của sổ.
   function tabHref(target: FinanceTab): string {
     const params = new URLSearchParams();
-    if (target !== "loi-lo") params.set("tab", target);
+    if (target !== tabMacDinh) params.set("tab", target);
     if (sp.tu && sp.den) {
       params.set("tu", sp.tu);
       params.set("den", sp.den);
@@ -146,19 +179,8 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
         </div>
         <div className="flex justify-end print:hidden">
           <ReportExportButtons
-            ky={format(monthRange.from, "yyyy-MM")}
             hasData={hasData}
-            data={{
-              tab: "pnl",
-              monthPnl,
-              prevMonthPnl,
-              feeComponents,
-              prevFeeComponents,
-              voucher,
-              prevVoucher,
-              backfilledFee,
-              prevBackfilledFee,
-            }}
+            href={coQuyen(nd, "xuat-du-lieu") ? hrefXuatPnl(format(monthRange.from, "yyyy-MM")) : null}
           />
         </div>
         <PnlTab
@@ -172,11 +194,12 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
           prevVoucher={prevVoucher}
           backfilledFee={backfilledFee}
           prevBackfilledFee={prevBackfilledFee}
+          choPhepDongBo={coQuyen(nd, "cai-dat:sua")}
         />
       </div>
     );
   } else if (tab === "so-chi-phi") {
-    content = <ExpenseLedgerTab sp={sp} range={range} />;
+    content = <ExpenseLedgerTab sp={sp} range={range} choPhepSua={coQuyen(nd, "chi-phi:sua")} />;
   } else if (tab === "so-quy") {
     // Sổ quỹ theo THÁNG — CÙNG kỳ + CÙNG thứ tự ensureRecurring→đọc với tab Dòng tiền, không thì
     // "Cuối kỳ" của hai tab lệch nhau.
@@ -202,6 +225,8 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
         hrefDongTien={tabHref("dong-tien")}
         isCurrentMonth={laThangHienTai(monthRange.from)}
         soKhoanVayCoKyCho={demKhoanVayCoKyCho(loans)}
+        choPhepXuat={coQuyen(nd, "xuat-du-lieu")}
+        choPhepSua={coQuyen(nd, "tai-chinh-so-quy:sua")}
       />
     );
   } else {
@@ -209,77 +234,91 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
     // (getExpenseSummary trong computeCashFlow không tự backfill chi phí định kỳ).
     const monthRange = { from: startOfMonth(range.to), to: endOfMonth(range.to) };
     await ensureRecurringExpensesForMonths([monthRange.from]);
-    const [
-      flow,
-      doiSoat,
-      doiSoatShopee,
-      movements,
-      soQuy,
-      loans,
-      tietKiemTong,
-      soTietKiem,
-      laiTietKiemTrongKy,
-      banChot,
-      banChotThangTruoc,
-      viTiktok,
-    ] = await Promise.all([
-      computeCashFlow(monthRange),
-      doiSoatTienVe(monthRange),
-      doiSoatTienVeShopee(monthRange),
-      listCashMovements(monthRange),
-      // Quỹ luỹ kế từ ngày mở sổ; KHÔNG ensure chi phí định kỳ toàn lịch sử (spec §5.6 — mỗi tháng
-      // là một transaction và luật Path A còn sinh lùi, tức đổi P&L quá khứ âm thầm).
-      tinhSoQuyThang(monthRange),
-      listKhoanVay(),
-      // 5 số cho footnote thẻ Quỹ, LUỸ KẾ tới hôm nay chứ không theo `monthRange`: câu chú thích nói
-      // "đang gửi bao nhiêu, đáo hạn ngày nào" — đó là trạng thái HIỆN TẠI, không phải số của tháng
-      // đang xem. Bốn số sau đều nói về CHÍNH sổ đáo hạn sớm nhất nên không tự ghép từ hai nguồn.
-      tongDangGui(),
-      // Danh sách sổ cho bảng + thẻ đến hạn, và Σ lãi đã nhận TRONG KỲ cho dòng tổng. Cùng một
-      // lượt `Promise.all` với các nguồn khác — không mở thêm vòng đọc DB nào.
-      listSoTietKiem(),
-      tongLaiDaNhanTrongKy(monthRange),
-      // Bản chốt số dư THẬT của tháng đang xem + tháng liền trước (để nhắc "tháng trước chưa chốt") —
-      // đọc ở đây, ghép với `soQuy` bằng hàm thuần bên dưới (hàm ghép cần `soQuy` nên không thể tự
-      // nằm trong cùng lượt này).
-      docSoDuChot(monthRange.from),
-      docSoDuChot(subMonths(monthRange.from, 1)),
-      // Ô thông tin "Còn ở ví TikTok" — ĐỘC LẬP `monthRange` (luôn là trạng thái hiện tại) và KHÔNG
-      // bao giờ vào số quỹ. Lỗi đọc chỉ ẩn ô, không được kéo sập cả tab Dòng tiền.
-      docViTiktokConLaiToiThieu().catch((e: unknown) => {
-        console.error("[tai-chinh] docViTiktokConLaiToiThieu lỗi — ẩn ô Còn ở ví TikTok", e);
-        return null;
-      }),
+    // HAI nhóm khối, mỗi nhóm một cổng riêng (spec §1.4): thiếu quyền ⇒ KHÔNG query, không chỉ ẩn.
+    // `Promise.all` chung để không mở thêm round-trip DB tuần tự.
+    const [nhomDongTien, nhomQuy, banChotCap] = await Promise.all([
+      coDongTien
+        ? Promise.all([
+            computeCashFlow(monthRange),
+            doiSoatTienVe(monthRange),
+            doiSoatTienVeShopee(monthRange),
+            listCashMovements(monthRange, { coQuyenSoQuy: coQuy }),
+            // Ô thông tin "Còn ở ví TikTok" — ĐỘC LẬP `monthRange` (luôn là trạng thái hiện tại) và KHÔNG
+            // bao giờ vào số quỹ. Lỗi đọc chỉ ẩn ô, không được kéo sập cả tab Dòng tiền.
+            docViTiktokConLaiToiThieu().catch((e: unknown) => {
+              console.error("[tai-chinh] docViTiktokConLaiToiThieu lỗi — ẩn ô Còn ở ví TikTok", e);
+              return null;
+            }),
+          ])
+        : null,
+      coQuy
+        ? Promise.all([
+            // Quỹ luỹ kế từ ngày mở sổ; KHÔNG ensure chi phí định kỳ toàn lịch sử (spec §5.6 — mỗi
+            // tháng là một transaction và luật Path A còn sinh lùi, tức đổi P&L quá khứ âm thầm).
+            tinhSoQuyThang(monthRange),
+            listKhoanVay(),
+            // 5 số cho footnote thẻ Quỹ, LUỸ KẾ tới hôm nay chứ không theo `monthRange`: câu chú thích
+            // nói "đang gửi bao nhiêu, đáo hạn ngày nào" — đó là trạng thái HIỆN TẠI. Bốn số sau đều
+            // nói về CHÍNH sổ đáo hạn sớm nhất nên không tự ghép từ hai nguồn.
+            tongDangGui(),
+            // Danh sách sổ cho bảng + thẻ đến hạn, và Σ lãi đã nhận TRONG KỲ cho dòng tổng.
+            listSoTietKiem(),
+            tongLaiDaNhanTrongKy(monthRange),
+          ])
+        : null,
+      // Bản chốt số dư THẬT của tháng đang xem + tháng liền trước. Chỉ dùng để ghép với `soQuy` nên
+      // chỉ đọc khi người xem có CẢ hai quyền (không có sổ quỹ thì không có gì để đối chiếu).
+      coDongTien && coQuy
+        ? Promise.all([docSoDuChot(monthRange.from), docSoDuChot(subMonths(monthRange.from, 1))])
+        : null,
     ]);
-    // Thấu chi + tiền đang gửi: hai khoản làm tiền thật lệch sổ mà KHÔNG phải sai sổ — cùng phép
-    // lọc với footnote thẻ Quỹ, nhưng thẻ chốt cần chúng dưới dạng SỐ để tự cộng/loại trừ.
-    const doiChieu = ghepDoiChieuSoDuChot(
-      monthRange,
-      soQuy,
-      { thangNay: banChot, thangTruoc: banChotThangTruoc },
-      tinhKhoanCauTruc(loans, tietKiemTong.tong)
-    );
-    const isCurrentMonth = laThangHienTai(monthRange.from);
-    content = (
-      <CashFlowTab
-        flow={flow}
-        isCurrentMonth={isCurrentMonth}
-        doiSoat={doiSoat}
-        doiSoatShopee={doiSoatShopee}
-        movements={movements}
-        soQuy={soQuy}
-        doiChieu={doiChieu}
-        loans={loans}
-        tietKiem={{
+
+    let khoiQuy: NhomQuy | null = null;
+    if (nhomQuy) {
+      const [soQuy, loans, tietKiemTong, soTietKiem, laiTietKiemTrongKy] = nhomQuy;
+      // Thấu chi + tiền đang gửi: hai khoản làm tiền thật lệch sổ mà KHÔNG phải sai sổ — cùng phép
+      // lọc với footnote thẻ Quỹ, nhưng thẻ chốt cần chúng dưới dạng SỐ để tự cộng/loại trừ.
+      const doiChieu = banChotCap
+        ? ghepDoiChieuSoDuChot(
+            monthRange,
+            soQuy,
+            { thangNay: banChotCap[0], thangTruoc: banChotCap[1] },
+            tinhKhoanCauTruc(loans, tietKiemTong.tong),
+          )
+        : null;
+      khoiQuy = {
+        soQuy,
+        doiChieu,
+        loans,
+        tietKiem: {
           tong: tietKiemTong.tong,
           daoHanGanNhat: tietKiemTong.daoHanGanNhat,
           gocDaoHan: tietKiemTong.gocDaoHanGanNhat,
           laiDuKienDaoHan: tietKiemTong.laiDaoHanGanNhat,
-        }}
-        soTietKiem={soTietKiem}
-        laiTietKiemTrongKy={laiTietKiemTrongKy}
-        viTiktok={viTiktok}
-      />
+        },
+        soTietKiem,
+        laiTietKiemTrongKy,
+        choPhepSua: coQuyen(nd, "tai-chinh-so-quy:sua"),
+        choPhepGhiDongTien: coQuyen(nd, "tai-chinh-dong-tien:sua"),
+      };
+    }
+    let khoiDongTien: NhomDongTien | null = null;
+    if (nhomDongTien) {
+      const [flow, doiSoat, doiSoatShopee, movements, viTiktok] = nhomDongTien;
+      khoiDongTien = {
+        // Lãi tiết kiệm thuộc Sổ quỹ — thiếu quyền thì bỏ khỏi cả dòng tách lẫn số chênh lệch.
+        flow: coQuy ? flow : dongTienKhongLaiTietKiem(flow),
+        doiSoat,
+        doiSoatShopee,
+        movements,
+        viTiktok,
+        choPhepSua: coQuyen(nd, "tai-chinh-dong-tien:sua"),
+        choPhepSuaDongSoQuy: coQuyen(nd, "tai-chinh-so-quy:sua"),
+        hienLaiTietKiem: coQuy,
+      };
+    }
+    content = (
+      <CashFlowTab dongTien={khoiDongTien} quy={khoiQuy} isCurrentMonth={laThangHienTai(monthRange.from)} />
     );
   }
 
@@ -293,7 +332,7 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
       </PageTitle>
 
       <nav className="flex gap-1 rounded-lg bg-surface-soft p-1 print:hidden" aria-label="Lăng kính tài chính">
-        {TAB_ITEMS.map((t) => (
+        {tabHienThi.map((t) => (
           <Link
             key={t.key}
             href={tabHref(t.key)}

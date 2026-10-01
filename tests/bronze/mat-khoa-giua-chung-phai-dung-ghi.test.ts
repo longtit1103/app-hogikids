@@ -1,8 +1,12 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("../helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // Bọc SPY quanh bản THẬT (không thay bằng hàm giả): cần khẳng định hàng rào được LẮP vào đường
 // xoá, chứ không chỉ tồn tại trong thư viện — lỗi đã gặp là viết hàng rào rồi quên gọi nó.
@@ -25,7 +29,7 @@ import { rebuildFromRaw } from "@/lib/bronze/rebuild";
 import { SHOP_KHO, SHOP_SHOPEE } from "../helpers/shop-ids-fixture";
 import { prisma } from "@/lib/prisma";
 
-import { seedReference, truncateBusinessTables } from "../helpers/test-db";
+import { seedReference, seedShopProfile, truncateBusinessTables } from "../helpers/test-db";
 
 /**
  * HÀNG RÀO PHẢI NẰM Ở CALLER THẬT, không chỉ trong primitive.
@@ -391,19 +395,19 @@ describe("mất khoá giữa chừng ⇒ caller THẬT phải dừng ghi", () =>
       await import("@/lib/backup/khoa-viec-nang");
     vi.mocked(kiemGiuKhoaTrongTransaction).mockClear();
 
-    const user = await prisma.user.upsert({
+    await prisma.user.upsert({
       where: { id: "test-user-id" },
-      update: { shopName: "HogiKids Test" },
+      update: {},
       create: {
         id: "test-user-id",
         email: "mat-khoa@hogikids.test",
         passwordHash: `${"0".repeat(32)}:${"0".repeat(128)}`,
-        shopName: "HogiKids Test",
       },
     });
+    await seedShopProfile(); // tên shop mặc định "HogiKids" = chuỗi xác nhận
 
     const { deleteAllData } = await import("@/lib/actions/data-admin");
-    expect((await deleteAllData(user.shopName)).ok).toBe(true);
+    expect((await deleteAllData("HogiKids")).ok).toBe(true);
 
     expect(vi.mocked(kiemGiuKhoaTrongTransaction)).toHaveBeenCalledTimes(1);
   });

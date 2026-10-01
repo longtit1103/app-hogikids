@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { calcPnl } from "@/lib/reports/pnl";
 import { computeProductReport } from "@/lib/reports/product-report";
 
+import { CHE, DAY } from "./helpers/nhanh-quyen-gia-von";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 /**
@@ -100,13 +101,16 @@ describe("Doanh thu tab Sản phẩm khớp P&L", () => {
     await rebuildFromRaw();
 
     const pnl = await calcPnl(RANGE);
-    const productRows = await computeProductReport(RANGE);
+    const productRows = (await computeProductReport(RANGE, undefined, DAY)).rows;
     const productRevenue = productRows.reduce((s, r) => s + r.revenue, 0);
 
     // Tính tay: ORDER_A 215.000 + ORDER_B 150.000 + ORDER_C 165.000 = 530.000 (đơn hoàn bị loại).
     expect(pnl.revenue).toBe(530_000);
     expect(productRevenue).toBe(530_000);
     expect(productRevenue).toBe(pnl.revenue);
+    // Nhánh che (không giá vốn) dùng CÙNG phép cộng doanh thu — che không được làm lệch số.
+    const cheRows = (await computeProductReport(RANGE, undefined, CHE)).rows;
+    expect(cheRows.reduce((s, r) => s + r.revenue, 0)).toBe(pnl.revenue);
 
     // Nhóm "SKU không khớp" thật sự có mặt và mang đúng doanh thu dòng (3 × 50.000).
     const unmatched = productRows.find((r) => r.productId === "sku-khong-khop");
@@ -115,7 +119,7 @@ describe("Doanh thu tab Sản phẩm khớp P&L", () => {
 
   it("kỳ không có đơn → cả 2 phía cùng bằng 0 (parity giữ ở biên rỗng)", async () => {
     const pnl = await calcPnl(RANGE);
-    const productRows = await computeProductReport(RANGE);
+    const productRows = (await computeProductReport(RANGE, undefined, DAY)).rows;
     expect(pnl.revenue).toBe(0);
     expect(productRows.reduce((s, r) => s + r.revenue, 0)).toBe(0);
   });

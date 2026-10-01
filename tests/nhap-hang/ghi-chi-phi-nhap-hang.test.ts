@@ -13,19 +13,31 @@ import {
  * chục triệu vào sổ mà không ai chủ ý.
  */
 
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user-id") }));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("../helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 const findMany = vi.fn(async () => [] as { refId: string | null }[]);
 const createMany = vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length }));
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+const auditLogCreate = vi.fn(async () => ({}));
+vi.mock("@/lib/prisma", () => {
+  const prisma = {
     expense: {
       findMany: (...a: unknown[]) => findMany(...(a as [])),
       createMany: (...a: unknown[]) => createMany(...(a as [{ data: unknown[] }])),
     },
-  },
-}));
+    // Dòng nhật ký đi cùng transaction ghi — client giả dùng chính nó làm `tx`.
+    auditLog: { create: () => auditLogCreate() },
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
+  };
+  return { prisma };
+});
 
 const docDeXuatPhieuNhap = vi.fn();
 vi.mock("@/lib/nhap-hang/doc-phieu-nhap-bronze", () => ({
@@ -60,6 +72,7 @@ const DE_XUAT = [phieu("uuid-a", 28_999_920, 181), phieu("uuid-b", 59_559_808, 1
 beforeEach(() => {
   findMany.mockClear();
   createMany.mockClear();
+  auditLogCreate.mockClear();
   docDeXuatPhieuNhap.mockReset();
   docDeXuatPhieuNhap.mockResolvedValue({ deXuat: DE_XUAT });
 });
@@ -152,6 +165,7 @@ describe("ghiChiPhiNhapHang — cổng từ chối", () => {
     expect(kq.ok).toBe(true);
     if (kq.ok) expect(kq.data).toEqual({ daGhi: 1, boQua: 0, tongTien: 20_000_000 });
     expect(createMany).toHaveBeenCalledTimes(1);
+    expect(auditLogCreate).toHaveBeenCalledTimes(1); // nhật ký cùng transaction ghi
     expect(createMany.mock.calls[0][0]).toMatchObject({
       skipDuplicates: true,
       data: [

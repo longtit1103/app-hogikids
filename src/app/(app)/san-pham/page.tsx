@@ -5,9 +5,11 @@ import { ProductGroupTable } from "@/components/products/product-group-table";
 import { ProductKpiCards } from "@/components/products/product-kpi-cards";
 import { ProductToolbar } from "@/components/products/product-toolbar";
 import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
+import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
 import { getProductListPage, PRODUCT_PAGE_SIZE } from "@/lib/queries/products";
 import { getDefaultThreshold } from "@/lib/queries/variants";
-import { requireUser } from "@/lib/session";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
+import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
 import { PageTitle } from "@/components/shell/page-title";
 
 export default async function SanPhamPage({
@@ -15,20 +17,29 @@ export default async function SanPhamPage({
 }: {
   searchParams: Promise<{ q?: string; loc?: string; trang?: string }>;
 }) {
-  // Canh phiên ngay tại trang, không chỉ dựa vào layout — xem ghi chú ở `/don-hang`.
-  await requireUser("/san-pham");
+  // Cổng ngay tại trang, không chỉ dựa vào layout — xem ghi chú ở `/don-hang`.
+  const nd = await yeuCauQuyenTrang("/san-pham", "san-pham:xem");
+  const quyen = quyenGiaVonCua(nd);
+  const suaNguong = coQuyen(nd, "san-pham:sua");
+  // Sửa/nhập/đồng bộ giá vốn cần CẢ quyền sửa module lẫn quyền thấy giá vốn (spec phân quyền §1.1).
+  const suaGiaVon = suaNguong && quyen.coQuyenGiaVon;
 
   const sp = await searchParams;
   const page = docSoTrang(sp.trang);
-  const missingCost = sp.loc === "thieu_gia_von";
+  // Hai bộ lọc theo giá vốn vô nghĩa với người không thấy giá vốn (query cũng tự bỏ qua).
+  const missingCost = quyen.coQuyenGiaVon && sp.loc === "thieu_gia_von";
   // Tập HÀNH ĐỘNG ĐƯỢC (đã bán mà giá vốn còn 0) — xem `ProductListParams.soldMissingCost`.
-  const soldMissingCost = sp.loc === "da_ban_thieu_gia_von";
+  const soldMissingCost = quyen.coQuyenGiaVon && sp.loc === "da_ban_thieu_gia_von";
   const lowOnly = sp.loc === "sap_het";
 
-  const [{ products, total, kpi }, defaultThreshold] = await Promise.all([
-    getProductListPage({ q: sp.q, missingCost, soldMissingCost, lowOnly, page }),
+  const [du, defaultThreshold] = await Promise.all([
+    getProductListPage({ q: sp.q, missingCost, soldMissingCost, lowOnly, page }, quyen),
     getDefaultThreshold(),
   ]);
+  const { total, kpi } = du;
+  const bang = du.coQuyenGiaVon
+    ? { coQuyenGiaVon: true as const, products: du.products, suaGiaVon }
+    : { coQuyenGiaVon: false as const, products: du.products };
 
   veTrangCuoiNeuVuot({ duongDan: "/san-pham", sp, trang: page, tong: total, soDongMoiTrang: PRODUCT_PAGE_SIZE });
 
@@ -40,6 +51,7 @@ export default async function SanPhamPage({
             {kpi.totalProducts.toLocaleString("vi-VN")} sản phẩm · {kpi.totalVariants.toLocaleString("vi-VN")} SKU
           </p>
         </PageTitle>
+        {suaGiaVon && (
         <div className="flex flex-wrap items-center gap-2">
           {/*
             Đường vào CỐ ĐỊNH cho màn đồng bộ giá vốn. Không dựa vào dải cảnh báo: dải đó im khi
@@ -52,20 +64,22 @@ export default async function SanPhamPage({
           >
             Đồng bộ giá vốn từ Pancake
           </Link>
-          <CostImportModal />
+          <CostImportModal choPhepTaiMau={coQuyen(nd, "xuat-du-lieu")} />
         </div>
+        )}
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Dữ liệu sản phẩm/giá bán/tồn đồng bộ từ Pancake — chỉnh sửa tại Pancake. App chỉ quản lý giá vốn và ngưỡng
-        cảnh báo. Nhập giá vốn ở cấp sản phẩm để áp cho tất cả biến thể, hoặc mở rộng để sửa riêng từng biến thể.
+        Dữ liệu sản phẩm/giá bán/tồn đồng bộ từ Pancake — chỉnh sửa tại Pancake.
+        {suaGiaVon &&
+          " App chỉ quản lý giá vốn và ngưỡng cảnh báo. Nhập giá vốn ở cấp sản phẩm để áp cho tất cả biến thể, hoặc mở rộng để sửa riêng từng biến thể."}
       </p>
 
-      <ProductKpiCards kpi={kpi} />
-      <ProductToolbar />
+      <ProductKpiCards du={du} />
+      <ProductToolbar coQuyenGiaVon={quyen.coQuyenGiaVon} />
 
-      {products.length > 0 ? (
-        <ProductGroupTable products={products} total={total} page={page} defaultThreshold={defaultThreshold} />
+      {bang.products.length > 0 ? (
+        <ProductGroupTable bang={bang} suaNguong={suaNguong} total={total} page={page} defaultThreshold={defaultThreshold} />
       ) : (
         <EmptyState missingCost={missingCost} soldMissingCost={soldMissingCost} lowOnly={lowOnly} q={sp.q} />
       )}

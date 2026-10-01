@@ -1,7 +1,9 @@
 import type { Prisma } from "@prisma/client";
 
 import { laLoiTrungDongDinhKyThang } from "@/lib/expenses/khoa-thang-dinh-ky";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { prisma } from "@/lib/prisma";
+import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
 import {
   chanDuNoAm,
   chanTienGuiAm,
@@ -26,6 +28,7 @@ import {
   CAU_THANG_DA_CO_DINH_KY,
   lyDoKhongKhoiPhuc,
 } from "@/lib/thung-rac/ly-do-khong-khoi-phuc";
+import { kiemQuyenBang } from "@/lib/thung-rac/quyen-thung-rac";
 
 /**
  * Khôi phục một mục trong thùng rác: dựng lại bản ghi (và cả CỤM con của nó) với ĐÚNG id cũ.
@@ -45,6 +48,11 @@ import {
  *
  * THỨ TỰ GHI: CHA trước, CON sau — `CashMovement.loanId`/`savingsId` và `ThuNhap.savingsId` đều là
  * FK `Restrict`, ghi con trước là Postgres từ chối cả transaction.
+ *
+ * QUYỀN + NHẬT KÝ nằm TRONG CÙNG transaction này (spec phân quyền §1.4, §5): quyền kiểm theo `bang`
+ * đọc từ DB (không tin client) TRƯỚC con dấu CAS; dòng nhật ký là câu CUỐI — nhật ký ném ⇒ cụm dựng
+ * lại + con dấu rollback trọn. Người gọi KHÔNG được bọc thêm transaction ngoài: transaction trong sẽ
+ * chờ khoá dòng mà transaction ngoài đang giữ ⇒ treo tới timeout.
  */
 
 export type KetQuaKhoiPhuc =
@@ -124,11 +132,18 @@ async function noiLaiSoTietKiem(
 /** Nới hạn transaction: cụm khoản vay có thể vài chục câu, và DB test/dev đi qua Tailscale. */
 const OPT_TX = { timeout: 10_000, maxWait: 5_000 } as const;
 
-export async function khoiPhucBanGhiDaXoa(id: string): Promise<KetQuaKhoiPhuc> {
+/**
+ * Thiếu quyền của loại bản ghi ⇒ NÉM `LoiThieuQuyenThungRac` ra ngoài (không dịch thành `lyDo`):
+ * tầng action cần phân biệt để ghi nhật ký `TU_CHOI_QUYEN` + trả `code: "KHONG_CO_QUYEN"`.
+ */
+export async function khoiPhucBanGhiDaXoa(id: string, actor: NguoiDung): Promise<KetQuaKhoiPhuc> {
   try {
     const canhBao = await prisma.$transaction(async (tx) => {
       const dong = await tx.banGhiDaXoa.findUnique({ where: { id } });
       if (!dong) throw new LoiKhongKhoiPhuc("Không tìm thấy mục trong thùng rác");
+
+      // Quyền theo LOẠI bản ghi vừa đọc — TRƯỚC con dấu CAS và mọi câu ghi.
+      kiemQuyenBang(actor, dong.bang, dong.anh);
 
       // CON DẤU "đã khôi phục", đóng NGAY và bằng CHÍNH câu UPDATE có điều kiện (`khoiPhucLuc:
       // null`) rồi xét `count` — không đọc trước rồi mới ghi. Check-then-act không đóng được race;
@@ -173,6 +188,14 @@ export async function khoiPhucBanGhiDaXoa(id: string): Promise<KetQuaKhoiPhuc> {
         await chanTienGuiAm(tx, loanId);
       }
       for (const savingsId of savingsIds) await chanSoDuTietKiemAm(tx, savingsId);
+
+      // Câu CUỐI của transaction: mọi cổng đã qua ⇒ chỉ lượt khôi phục thật có dấu vết.
+      await ghiNhatKy(tx, {
+        actor,
+        hanhDong: "THUNG_RAC_KHOI_PHUC",
+        doiTuong: { loai: dong.bang, id: dong.banGhiId },
+        ghiChu: { loaiBanGhi: dong.bang },
+      });
 
       return canhBao;
     }, OPT_TX);

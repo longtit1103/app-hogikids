@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { getOrderDetail } from "@/lib/queries/orders";
 import { prisma } from "@/lib/prisma";
+import { DAY } from "../helpers/nhanh-quyen-gia-von";
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
 
 /**
@@ -83,7 +84,7 @@ describe("getOrderDetail — voucher sàn tài trợ", () => {
       lineDiscountShopChiu: 5_000, // 40.000 − 35.000
     });
 
-    const d = await getOrderDetail(id);
+    const d = await getOrderDetail(id, DAY);
     expect(d?.marketplaceFunded).toBe(35_000);
   });
 
@@ -96,7 +97,7 @@ describe("getOrderDetail — voucher sàn tài trợ", () => {
       lineDiscountShopChiu: 40_000, // shop chịu trọn
     });
 
-    expect((await getOrderDetail(id))?.marketplaceFunded).toBe(0);
+    expect((await getOrderDetail(id, DAY))?.marketplaceFunded).toBe(0);
   });
 
   it("sàn gánh TRỌN phần giảm giá dòng → hiện đúng toàn bộ", async () => {
@@ -108,7 +109,7 @@ describe("getOrderDetail — voucher sàn tài trợ", () => {
       lineDiscountShopChiu: 0,
     });
 
-    expect((await getOrderDetail(id))?.marketplaceFunded).toBe(30_000);
+    expect((await getOrderDetail(id, DAY))?.marketplaceFunded).toBe(30_000);
   });
 
   /**
@@ -126,7 +127,7 @@ describe("getOrderDetail — voucher sàn tài trợ", () => {
       lineDiscountShopChiu: 12_000, // ingest suy ra sàn gánh 28.000
     });
 
-    expect((await getOrderDetail(id))?.marketplaceFunded).toBe(28_000);
+    expect((await getOrderDetail(id, DAY))?.marketplaceFunded).toBe(28_000);
   });
 
   it("đơn Shopee KHÔNG tra quyết toán TikTok — kể cả khi Bronze có giao dịch trùng mã", async () => {
@@ -157,7 +158,7 @@ describe("getOrderDetail — voucher sàn tài trợ", () => {
       },
     });
 
-    expect((await getOrderDetail(order.id))?.quyetToan).toBeNull();
+    expect((await getOrderDetail(order.id, DAY))?.quyetToan).toBeNull();
   });
 
   it("đơn TikTok vẫn tra được quyết toán (guard không giết đường thật)", async () => {
@@ -185,7 +186,7 @@ describe("getOrderDetail — voucher sàn tài trợ", () => {
       },
     });
 
-    expect((await getOrderDetail(order.id))?.quyetToan?.settlement).toBe(123_456);
+    expect((await getOrderDetail(order.id, DAY))?.quyetToan?.settlement).toBe(123_456);
   });
 
   it("payload không có mảng items (dữ liệu lạ) → 0, không văng lỗi", async () => {
@@ -204,6 +205,6 @@ describe("getOrderDetail — voucher sàn tài trợ", () => {
       },
     });
 
-    expect((await getOrderDetail(order.id))?.marketplaceFunded).toBe(0);
+    expect((await getOrderDetail(order.id, DAY))?.marketplaceFunded).toBe(0);
   });
 });

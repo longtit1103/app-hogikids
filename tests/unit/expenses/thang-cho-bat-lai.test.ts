@@ -12,9 +12,6 @@ import { thangChoBatLai } from "@/lib/expenses/thang-cho-bat-lai";
  * "tháng sau" mà ghi mốc tháng này — sinh lại đúng khoản vừa xoá — hoặc nút hỏng hẳn; `tsc` không bắt.
  * Giờ VN: `tests/setup.ts` ép `TZ=Asia/Ho_Chi_Minh`.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
@@ -71,11 +68,15 @@ describe("KhoanChiDinhKySection — truyền đúng cặp tháng xuống nút B�
       activeFrom: null,
     };
 
-    const cay = KhoanChiDinhKySection({ items: [mauDaDung] });
+    const cay = KhoanChiDinhKySection({ items: [mauDaDung], choPhepSua: true });
     const nut = timPhanTu<NutBatLaiKhoanChiDinhKyProps>(cay, NutBatLaiKhoanChiDinhKy);
 
     expect(nut).toHaveLength(1);
     expect(nut[0].props.thang.nay).toMatchObject({ nhan: "12/2026", khoa: "2026-12" });
     expect(nut[0].props.thang.sau).toMatchObject({ nhan: "01/2027", khoa: "2027-01" });
+
+    // Thiếu `chi-phi:sua` (hoặc không truyền cờ) ⇒ không nút Bật lại — mặc định đóng.
+    expect(timPhanTu(KhoanChiDinhKySection({ items: [mauDaDung], choPhepSua: false }), NutBatLaiKhoanChiDinhKy)).toHaveLength(0);
+    expect(timPhanTu(KhoanChiDinhKySection({ items: [mauDaDung] }), NutBatLaiKhoanChiDinhKy)).toHaveLength(0);
   });
 });

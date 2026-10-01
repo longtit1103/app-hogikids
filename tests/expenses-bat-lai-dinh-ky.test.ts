@@ -1,5 +1,5 @@
 import { addMonths, format, startOfMonth, subMonths } from "date-fns";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { batLaiDinhKy, createExpense, deleteExpense, stopRecurring, updateExpense } from "@/lib/actions/expenses";
 import { ensureRecurringExpenses, ensureRecurringExpensesForMonths } from "@/lib/expenses/ensure-recurring-expenses";
@@ -15,9 +15,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * còn `active`. Không có cận dưới thì bật lại mẫu đã dừng là ghi LÙI chi phí vào đúng các tháng đã
  * dừng (Lãi/Lỗ tháng cũ tụt mà không ai hay). Suite chốt bằng số dòng/tiền THẬT sau khi chạy bộ sinh.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 // revalidatePath cần request scope (không có trong vitest) — no-op cho unit test.
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
@@ -171,13 +176,35 @@ describe("createExpense lặp hàng tháng — mẫu mới mang mốc", () => {
   it("ngày ở tháng CŨ (ghi lùi khoản đã bắt đầu từ trước) ⇒ mốc = tháng của dòng đầu tiên", async () => {
     // Mốc theo tháng của chính dòng đầu mẫu vừa ghi: tháng trước đó không sinh lùi, còn các tháng từ đó
     // tới nay là khoản chi THẬT chủ shop khai "lặp hàng tháng" — vẫn được sinh như thường.
-    const res = await createExpense(input(`${format(bonThang[1], "yyyy-MM")}-10`));
+    // Ngày đến hạn = 01 để tháng hiện tại LUÔN đã tới hạn, không phụ thuộc hôm nay là ngày mấy.
+    const res = await createExpense(input(`${format(bonThang[1], "yyyy-MM")}-01`));
     expect(res.ok).toBe(true);
 
     const mau = await prisma.recurringExpense.findFirstOrThrow();
     expect(mau.activeFrom?.getTime()).toBe(bonThang[1].getTime());
     expect(await ensureRecurringExpensesForMonths(bonThang)).toBe(2); // T-1 và tháng hiện tại
     expect(await thangCuaDong(mau.id)).toEqual(bonThang.slice(1).map((m) => format(m, "yyyy-MM")));
+  });
+
+  // Mẫu đến hạn ngày 10: tháng hiện tại CHỈ được sinh từ ngày 10 trở đi (trước đó chưa tới hạn).
+  // Đồng hồ giả chỉ cho `Date` — timer/Promise của Prisma + pool vẫn chạy thật.
+  describe.each([1, 9, 10, 28])("mẫu đến hạn ngày 10, hôm nay là ngày %i của tháng", (homNay) => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it(homNay >= 10 ? "tháng hiện tại đã tới hạn ⇒ sinh" : "tháng hiện tại CHƯA tới hạn ⇒ chưa sinh", async () => {
+      const res = await createExpense(input(`${format(bonThang[1], "yyyy-MM")}-10`));
+      expect(res.ok).toBe(true);
+      const mau = await prisma.recurringExpense.findFirstOrThrow();
+
+      vi.useFakeTimers({ toFake: ["Date"], now: new Date(thangNay.getFullYear(), thangNay.getMonth(), homNay, 12, 0) });
+
+      const daTaoHienTai = homNay >= 10;
+      expect(await ensureRecurringExpensesForMonths(bonThang)).toBe(daTaoHienTai ? 2 : 1);
+      const thangDuKien = daTaoHienTai ? bonThang.slice(1) : bonThang.slice(1, 3);
+      expect(await thangCuaDong(mau.id)).toEqual(thangDuKien.map((m) => format(m, "yyyy-MM")));
+    });
   });
 });
 

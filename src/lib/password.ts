@@ -3,30 +3,21 @@ import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCallback);
 
-/**
- * Trần độ dài mật khẩu, dùng CHUNG cho cả màn đăng nhập lẫn màn đổi mật khẩu.
- *
- * PHẢI là một hằng số duy nhất, không được để mỗi nơi tự khai một số: nếu màn đổi mật khẩu cho
- * đặt chuỗi dài hơn trần của màn đăng nhập thì chủ shop đặt xong sẽ TỰ KHOÁ MÌNH VĨNH VIỄN —
- * hash mới lưu thành công, mọi phiên bị thu hồi theo thiết kế, rồi lượt đăng nhập kế tiếp bị
- * chặn ngay ở bước kiểm dữ liệu và chỉ nhận đúng thông báo chung "Email hoặc mật khẩu không
- * đúng" (thông báo cố ý không nói lý do để chống dò tài khoản), nên không có cách nào đoán ra.
- * Đường thoát duy nhất khi đó là vào tận DB sửa tay.
- *
- * 200 dư sức cho cả passphrase dài lẫn chuỗi do trình quản lý mật khẩu sinh, mà vẫn chặn được
- * payload cỡ MB nhồi vào scrypt.
- */
-export const MAX_PASSWORD_LENGTH = 200;
+// Hằng số sống ở `do-dai-mat-khau.ts` (không kéo `node:crypto`) để form phía client dùng được; re-export
+// giữ nguyên đường import cũ của phía server. Import TƯƠNG ĐỐI: file này còn được runner Playwright
+// nạp trực tiếp (seed tài khoản), nơi không giải được alias `@/`.
+export { MAX_PASSWORD_LENGTH } from "./do-dai-mat-khau";
 
 /**
- * MUST stay in sync with `prisma/seed.ts`'s `hashPassword` — same key length
- * and, critically, the same salt encoding: the salt is the raw hex STRING
- * itself passed straight into `scrypt` (never `Buffer.from(salt, "hex")`).
- * If either side changes independently, every seeded login silently fails.
+ * Key length + salt encoding are part of the STORED hash format: the salt is
+ * the raw hex STRING itself passed straight into `scrypt` (never
+ * `Buffer.from(salt, "hex")`). Changing either invalidates every existing
+ * hash in the DB. The seed (`prisma/seed-lib.ts`) and test helpers call this
+ * module's `hashPassword` directly — do not re-implement hashing elsewhere.
  */
 const SCRYPT_KEY_LENGTH = 64;
 
-/** Hashes a plaintext password into the `"<saltHex>:<derivedKeyHex>"` format used by prisma/seed.ts. */
+/** Hashes a plaintext password into the stored `"<saltHex>:<derivedKeyHex>"` format. */
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
   const derivedKey = (await scrypt(password, salt, SCRYPT_KEY_LENGTH)) as Buffer;
@@ -35,7 +26,7 @@ export async function hashPassword(password: string): Promise<string> {
 
 /**
  * Verifies a plaintext password against a stored `"<saltHex>:<derivedKeyHex>"`
- * hash (as produced by `hashPassword` / `prisma/seed.ts`). Uses
+ * hash (as produced by `hashPassword`). Uses
  * `timingSafeEqual` to avoid leaking timing information, and never throws on
  * malformed input — a corrupt/foreign hash format just fails verification.
  */
@@ -49,7 +40,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const storedKeyHex = stored.slice(separatorIndex + 1);
   const storedKey = Buffer.from(storedKeyHex, "hex");
 
-  // Salt is passed to scrypt as the raw hex STRING (matching seed.ts) — do
+  // Salt is passed to scrypt as the raw hex STRING (matching `hashPassword`) — do
   // NOT hex-decode it into a Buffer here.
   const derivedKey = (await scrypt(password, salt, SCRYPT_KEY_LENGTH)) as Buffer;
 

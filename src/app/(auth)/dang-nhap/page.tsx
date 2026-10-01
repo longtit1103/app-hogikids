@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { redirect } from "next/navigation";
 
-import { getAuthenticatedUserId } from "@/lib/session";
+import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { isSafeRedirectPath } from "@/lib/safe-redirect-path";
 import { LoginForm } from "./login-form";
 
@@ -10,11 +10,14 @@ type LoginPageProps = {
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  // PHẢI dùng cùng phép kiểm với `requireUser`: nếu ở đây chỉ nhìn cookie có `userId` mà không
-  // soi mốc phiên, thì một cookie ĐÃ BỊ THU HỒI sẽ khiến trang này đẩy sang "/", còn "/" đẩy
-  // ngược về đây — vòng lặp chuyển hướng, không đăng nhập lại được.
-  if (await getAuthenticatedUserId()) {
-    redirect("/");
+  // PHẢI dùng cùng phép kiểm với cổng trang (`docNguoiDungPhien`): nếu ở đây chỉ nhìn cookie có
+  // `userId` mà không soi epoch/`isActive`, thì một cookie ĐÃ BỊ THU HỒI (hoặc tài khoản đã khoá)
+  // sẽ khiến trang này đẩy sang "/", còn "/" đẩy ngược về đây — vòng lặp chuyển hướng, không đăng
+  // nhập lại được. Người phải đổi mật khẩu lần đầu thì đi thẳng tới màn đó (cổng "/" cũng sẽ đẩy
+  // về đấy — đi thẳng đỡ một vòng).
+  const nguoiDung = await docNguoiDungPhien();
+  if (nguoiDung) {
+    redirect(nguoiDung.phaiDoiMatKhau ? "/doi-mat-khau-lan-dau" : "/");
   }
 
   // Only allow same-origin relative paths — never forward an absolute URL,

@@ -11,7 +11,8 @@ import { thongDiepGaySoDu, timGaySoDuVi } from "@/lib/import/shopee-wallet-lien-
 import { parseShopeeWalletFile, type WalletSummary } from "@/lib/import/shopee-wallet-xlsx";
 import { LoiFileQuaNhieuDong } from "@/lib/import/xlsx-shared";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
 
 /**
  * Server actions cho luồng Import file ví Shopee ("Tiền đã về" đa kênh, tab Dòng
@@ -118,7 +119,8 @@ function invalidRowMessage(errors: { line: number; reason: string }[]): string {
  * và trùng khoá cũng coi là CHẶN (checksum "khớp" nhưng file mất dòng / Silver gộp thiếu).
  */
 export async function previewShopeeWalletImport(formData: FormData): Promise<ActionResult<WalletPreview>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-dong-tien:xem");
+  if (!c.ok) return c;
 
   const form = await readWalletFile(formData);
   if (!form.ok) return form;
@@ -193,7 +195,9 @@ async function locKhoaChuaCoSilver(externalIds: string[]): Promise<string[]> {
  * báo thành công giả (số "Tiền đã về" sẽ thiếu ngầm).
  */
 export async function importShopeeWallet(formData: FormData): Promise<ActionResult<WalletImportResult>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-dong-tien:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const form = await readWalletFile(formData);
@@ -293,6 +297,16 @@ export async function importShopeeWallet(formData: FormData): Promise<ActionResu
         code: "PARTIAL_PERSIST",
       };
     }
+
+    // Nhật ký SAU khi đủ-dòng — KHÔNG cùng transaction với land/transform: hai bước đó commit riêng
+    // theo thiết kế (Bronze trước, Silver sau, lượt nhập lại tự chữa dòng kẹt). Nhật ký hỏng ở đây
+    // ⇒ báo lỗi (không toast xanh), dữ liệu đã vào vẫn đúng và nhập lại chính file là idempotent.
+    await ghiNhatKy(prisma, {
+      actor: nguoiDung,
+      hanhDong: "VI_SHOPEE_IMPORT",
+      doiTuong: { loai: "ShopeeSettlement" },
+      ghiChu: { soDong: rows.length },
+    });
 
     return {
       ok: true,

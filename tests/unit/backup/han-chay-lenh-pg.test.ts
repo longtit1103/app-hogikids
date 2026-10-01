@@ -13,6 +13,7 @@ import {
   HAN_NAP_PHUC_HOI_MS,
   HAN_PG_DUMP_MS,
   laLoiQuaHan,
+  NGAN_SACH_LENH_NHANH,
   pgOptionsPhanh,
   TONG_HAN_LENH_TOI_DA_MS,
   TTL_KHOA_PHUC_HOI_MS,
@@ -56,9 +57,10 @@ describe("thứ tự ba lớp phanh", () => {
     }
   });
 
-  it("tổng hạn tính theo nhánh DÀI NHẤT (plain-gzip): dump + nạp + 3 câu ngắn", () => {
+  it("tổng hạn = dump + nạp + ngân sách lệnh nhanh (3 đo được + biên 2 — số đếm thật ở suite đếm lệnh)", () => {
+    expect(NGAN_SACH_LENH_NHANH).toBeGreaterThanOrEqual(5);
     expect(TONG_HAN_LENH_TOI_DA_MS).toBe(
-      HAN_PG_DUMP_MS + HAN_NAP_PHUC_HOI_MS + 3 * HAN_LENH_NHANH_MS,
+      HAN_PG_DUMP_MS + HAN_NAP_PHUC_HOI_MS + NGAN_SACH_LENH_NHANH * HAN_LENH_NHANH_MS,
     );
   });
 

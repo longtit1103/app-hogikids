@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 
 import { formatVnd } from "@/lib/format";
-import type { ChannelPnl } from "@/lib/reports/pnl";
+import type { ChannelPnlChe } from "@/lib/reports/pnl-che";
 
 /**
  * Accordion "Kênh đã tắt (N)" cuối `channel-trend-chart.tsx` — chỉ render khi
@@ -12,7 +12,7 @@ import type { ChannelPnl } from "@/lib/reports/pnl";
  * kết quả thô của `computeChannelPnl` vốn chỉ trả kênh có hoạt động). State
  * mở/đóng tự chứa trong component này — không ảnh hưởng phần chart/legend.
  */
-export function ChannelInactiveAccordion({ channels }: { channels: ChannelPnl[] }) {
+export function ChannelInactiveAccordion({ channels }: { channels: ChannelPnlChe[] }) {
   const [open, setOpen] = useState(false);
 
   if (channels.length === 0) {

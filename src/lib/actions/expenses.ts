@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
+import { maLoiNhatKy } from "@/lib/actions/khoan-vay-chung";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
@@ -14,7 +15,8 @@ import { khoaThangDinhKy, laLoiTrungDongDinhKyThang } from "@/lib/expenses/khoa-
 import { thangChoBatLai } from "@/lib/expenses/thang-cho-bat-lai";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
 import { chupVaoThungRac } from "@/lib/thung-rac/ghi-thung-rac";
 
 /**
@@ -123,7 +125,9 @@ async function validateChannel(channelId: string | null): Promise<string | null>
  * TRƯỚC dòng đầu thì không bao giờ sinh lùi nữa.
  */
 export async function createExpense(input: unknown): Promise<ActionResult> {
-  await requireUser();
+  const c = await congAction("chi-phi:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = createExpenseSchema.safeParse(input);
@@ -151,7 +155,7 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
             activeFrom: startOfMonth(data.date),
           },
         });
-        await tx.expense.create({
+        const row = await tx.expense.create({
           data: {
             date: data.date,
             categoryId: data.categoryId,
@@ -164,18 +168,33 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
             recurringMonth: khoaThangDinhKy(data.date),
           },
         });
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "CHI_PHI_TAO",
+          doiTuong: { loai: "Expense", id: row.id },
+          ghiChu: { thang: format(data.date, "yyyy-MM") },
+        });
       });
     } else {
-      await prisma.expense.create({
-        data: {
-          date: data.date,
-          categoryId: data.categoryId,
-          adsSource: data.adsSource,
-          description: data.description,
-          channelId: data.channelId,
-          amount: data.amount,
-          source: "MANUAL",
-        },
+      // Bọc transaction chỉ để dòng nhật ký đi CÙNG câu ghi: nhật ký ném ⇒ khoản chi không lưu.
+      await prisma.$transaction(async (tx) => {
+        const row = await tx.expense.create({
+          data: {
+            date: data.date,
+            categoryId: data.categoryId,
+            adsSource: data.adsSource,
+            description: data.description,
+            channelId: data.channelId,
+            amount: data.amount,
+            source: "MANUAL",
+          },
+        });
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "CHI_PHI_TAO",
+          doiTuong: { loai: "Expense", id: row.id },
+          ghiChu: { thang: format(data.date, "yyyy-MM") },
+        });
       });
     }
   } catch {
@@ -192,7 +211,9 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
  * `source==="ADS_API"` (ghi tự động từ ingest, không cho sửa tay).
  */
 export async function updateExpense(id: string, input: unknown): Promise<ActionResult> {
-  await requireUser();
+  const c = await congAction("chi-phi:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const existing = await prisma.expense.findUnique({ where: { id } });
@@ -271,6 +292,12 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
           // trên cho qua vẫn phải chiếm đúng ô "1 dòng/mẫu/tháng" của tháng mới.
           ...(existing.recurringId !== null ? { recurringMonth: khoaThangDinhKy(data.date) } : {}),
         },
+      });
+      await ghiNhatKy(tx, {
+        actor: nguoiDung,
+        hanhDong: "CHI_PHI_SUA",
+        doiTuong: { loai: "Expense", id },
+        ghiChu: { thang: format(data.date, "yyyy-MM") },
       });
       return null;
     });
@@ -377,7 +404,9 @@ export async function deleteExpense(
   id: string,
   mode: "only" | "stop_recurring"
 ): Promise<ActionResult> {
-  await requireUser();
+  const c = await congAction("chi-phi:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   // `include: { category: true }` chỉ để lấy TÊN danh mục cho nhãn thùng rác — nhãn phải đọc được
@@ -422,8 +451,20 @@ export async function deleteExpense(
       if (tatDinhKy !== null) {
         await tx.recurringExpense.update({ where: { id: tatDinhKy }, data: { active: false } });
       }
+      await ghiNhatKy(tx, {
+        actor: nguoiDung,
+        hanhDong: "CHI_PHI_XOA",
+        doiTuong: { loai: "Expense", id },
+        ghiChu: { thang: format(banGhi.date, "yyyy-MM") },
+      });
     });
-  } catch {
+  } catch (e) {
+    await ghiNhatKyLoi({
+      actor: nguoiDung,
+      hanhDong: "CHI_PHI_XOA",
+      doiTuong: { loai: "Expense", id },
+      ghiChu: { lyDo: maLoiNhatKy(e) },
+    });
     return { ok: false, error: "Lỗi khi xoá khoản chi" };
   }
 
@@ -485,7 +526,9 @@ export async function batLaiDinhKy(
   recurringId: string,
   tuyChon: { thangBatDau: string; xacNhanTrung?: boolean }
 ): Promise<ActionResult<{ tuThang: string }>> {
-  await requireUser();
+  const c = await congAction("chi-phi:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = batLaiSchema.safeParse({ id: recurringId, tuyChon });
@@ -529,7 +572,14 @@ export async function batLaiDinhKy(
         where: { id, active: false },
         data: { active: true, activeFrom: chon.dauThang },
       });
-      return doi.count === 1 ? { loai: "DA_BAT", tuThang: chon.nhan } : { loai: "DINH_KY_DANG_CHAY" };
+      if (doi.count !== 1) return { loai: "DINH_KY_DANG_CHAY" };
+      await ghiNhatKy(tx, {
+        actor: nguoiDung,
+        hanhDong: "CHI_PHI_BAT_DINH_KY",
+        doiTuong: { loai: "RecurringExpense", id },
+        ghiChu: { thang: chon.khoa },
+      });
+      return { loai: "DA_BAT", tuThang: chon.nhan };
     });
   } catch {
     return { ok: false, error: "Lỗi khi bật lại khoản định kỳ" };
@@ -576,13 +626,24 @@ async function khoaNhomMauDinhKy(
 
 /** Tắt một khoản định kỳ — các Expense đã sinh trước đó không đổi. */
 export async function stopRecurring(recurringId: string): Promise<ActionResult> {
-  await requireUser();
+  const c = await congAction("chi-phi:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   try {
-    await prisma.recurringExpense.update({ where: { id: recurringId }, data: { active: false } });
-  } catch {
-    return { ok: false, error: "Không tìm thấy khoản định kỳ" };
+    await prisma.$transaction(async (tx) => {
+      await tx.recurringExpense.update({ where: { id: recurringId }, data: { active: false } });
+      await ghiNhatKy(tx, {
+        actor: nguoiDung,
+        hanhDong: "CHI_PHI_DUNG_DINH_KY",
+        doiTuong: { loai: "RecurringExpense", id: recurringId },
+      });
+    });
+  } catch (e) {
+    // Chỉ P2025 mới là "không tìm thấy" — lỗi khác (kể cả nhật ký hỏng) không được đội lốt nó.
+    const code = (e as { code?: string })?.code;
+    return { ok: false, error: code === "P2025" ? "Không tìm thấy khoản định kỳ" : "Lỗi khi dừng khoản định kỳ" };
   }
 
   revalidatePath("/tai-chinh");

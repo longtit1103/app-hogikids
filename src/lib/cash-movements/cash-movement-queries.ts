@@ -73,12 +73,20 @@ export async function getCashMovementSummary(range: DateRange): Promise<CashMove
   return { inTotal: tong("IN"), outTotal: tong("OUT"), byKind };
 }
 
-export type CashMovementRow = {
+/**
+ * Dòng ghi tay KHÔNG mang liên kết khoản vay / sổ tiết kiệm — bản trả cho người thiếu
+ * `tai-chinh-so-quy:xem` (khoản vay, sổ tiết kiệm thuộc khối Sổ quỹ). Loại dòng (`kind`) vẫn có: bảng
+ * dòng tiền phải cộng được vào/ra, và "Trả nợ gốc" tự nó không nói nợ của ai, còn bao nhiêu.
+ */
+export type CashMovementRowCoBan = {
   id: string;
   date: Date;
   kind: CashMovementKind;
   amount: number;
   description: string;
+};
+
+export type CashMovementRow = CashMovementRowCoBan & {
   /** Khoản vay dòng này thuộc về (chỉ `LOAN_IN`/`LOAN_REPAY`/`DEPOSIT_*` mới có). */
   loanId: string | null;
   /** Tên khoản vay để bảng hiện thẳng, khỏi bắt người đọc tra id. */
@@ -96,17 +104,32 @@ export type CashMovementRow = {
 /**
  * Dòng trong kỳ, mới nhất trước. KHÔNG phân trang (một tháng vài dòng — spec §4.3); vượt ~200 dòng/tháng
  * thì phân trang theo mẫu `getExpensesPage`.
+ *
+ * `coQuyenSoQuy = false` ⇒ KHÔNG select `loanId`/`savingsId` lẫn tên khoản vay/sổ (pick theo quyền,
+ * không phải tải rồi ẩn): id khoản vay trong payload là chìa để gọi thẳng action ghi gốc vay.
  */
-export async function listCashMovements(range: DateRange): Promise<CashMovementRow[]> {
+export async function listCashMovements(
+  range: DateRange,
+  quyen: { coQuyenSoQuy: true }
+): Promise<CashMovementRow[]>;
+export async function listCashMovements(
+  range: DateRange,
+  quyen: { coQuyenSoQuy: boolean }
+): Promise<CashMovementRow[] | CashMovementRowCoBan[]>;
+export async function listCashMovements(
+  range: DateRange,
+  quyen: { coQuyenSoQuy: boolean }
+): Promise<CashMovementRow[] | CashMovementRowCoBan[]> {
+  const coBan = { id: true, date: true, kind: true, amount: true, description: true } as const;
+  const orderBy = [{ date: "desc" as const }, { createdAt: "desc" as const }];
+  if (!quyen.coQuyenSoQuy) {
+    return prisma.cashMovement.findMany({ where: trongKy(range), orderBy, select: coBan });
+  }
   const rows = await prisma.cashMovement.findMany({
     where: trongKy(range),
-    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    orderBy,
     select: {
-      id: true,
-      date: true,
-      kind: true,
-      amount: true,
-      description: true,
+      ...coBan,
       loanId: true,
       loan: { select: { name: true } },
       savingsId: true,

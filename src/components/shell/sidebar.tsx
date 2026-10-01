@@ -12,12 +12,23 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { logout } from "@/lib/actions/auth";
 import { cn } from "@/lib/utils";
-import { NAV_ITEMS, SETTINGS_NAV_ITEM, TAB_CHINH_HREFS, isNavItemActive } from "./nav-config";
+import {
+  NAV_ITEMS,
+  QUAN_TRI_NAV_ITEM,
+  SETTINGS_NAV_ITEM,
+  TAB_CHINH_HREFS,
+  isNavItemActive,
+  locNavTheoHref,
+} from "./nav-config";
 
 type SidebarProps = {
   shopName: string;
   missingCostCount: number;
   lowStockWarning: boolean;
+  /** Tập href được vào (serializable) — server tính, client lọc `NAV_ITEMS` theo đó. */
+  hrefDuocPhep: readonly string[];
+  /** Chỉ chuỗi (không icon/hàm) để qua ranh giới RSC. */
+  nguoiDung: { email: string; tenHienThi: string };
   mobileOpen: boolean;
   onMobileOpenChange: (open: boolean) => void;
 };
@@ -28,11 +39,25 @@ type SidebarProps = {
  * Ngăn kéo mobile do tab "Thêm" của `BottomTabBar` mở (từ 26/09), nên CHỈ liệt kê mục KHÔNG có
  * tab riêng (`chiMucPhu`) + Cài đặt + tài khoản; sidebar máy tính vẫn đủ mọi mục.
  */
-export function Sidebar({ shopName, missingCostCount, lowStockWarning, mobileOpen, onMobileOpenChange }: SidebarProps) {
+export function Sidebar({
+  shopName,
+  missingCostCount,
+  lowStockWarning,
+  hrefDuocPhep,
+  nguoiDung,
+  mobileOpen,
+  onMobileOpenChange,
+}: SidebarProps) {
   return (
     <>
       <aside className="hidden border-r border-hairline bg-canvas md:sticky md:top-0 md:flex md:h-screen md:flex-col">
-        <SidebarNavContent shopName={shopName} missingCostCount={missingCostCount} lowStockWarning={lowStockWarning} />
+        <SidebarNavContent
+          shopName={shopName}
+          missingCostCount={missingCostCount}
+          lowStockWarning={lowStockWarning}
+          hrefDuocPhep={hrefDuocPhep}
+          nguoiDung={nguoiDung}
+        />
       </aside>
 
       <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
@@ -43,6 +68,8 @@ export function Sidebar({ shopName, missingCostCount, lowStockWarning, mobileOpe
             shopName={shopName}
             missingCostCount={missingCostCount}
             lowStockWarning={lowStockWarning}
+            hrefDuocPhep={hrefDuocPhep}
+            nguoiDung={nguoiDung}
             onNavigate={() => onMobileOpenChange(false)}
             chiMucPhu
           />
@@ -56,12 +83,16 @@ function SidebarNavContent({
   shopName,
   missingCostCount,
   lowStockWarning,
+  hrefDuocPhep,
+  nguoiDung,
   onNavigate,
   chiMucPhu = false,
 }: {
   shopName: string;
   missingCostCount: number;
   lowStockWarning: boolean;
+  hrefDuocPhep: readonly string[];
+  nguoiDung: { email: string; tenHienThi: string };
   onNavigate?: () => void;
   /** Chỉ liệt kê mục KHÔNG nằm trong 4 tab chính (ngăn kéo mở từ tab "Thêm"). */
   chiMucPhu?: boolean;
@@ -69,7 +100,11 @@ function SidebarNavContent({
   const pathname = usePathname();
   const router = useRouter();
   const avatarLetter = shopName.trim().charAt(0).toUpperCase() || "H";
-  const navItems = chiMucPhu ? NAV_ITEMS.filter((i) => !TAB_CHINH_HREFS.includes(i.href)) : NAV_ITEMS;
+  const duocPhep = locNavTheoHref(NAV_ITEMS, hrefDuocPhep);
+  const navItems = chiMucPhu ? duocPhep.filter((i) => !TAB_CHINH_HREFS.includes(i.href)) : duocPhep;
+  const coCaiDat = hrefDuocPhep.includes(SETTINGS_NAV_ITEM.href);
+  const coQuanTri = hrefDuocPhep.includes(QUAN_TRI_NAV_ITEM.href);
+  const tenNguoiDung = nguoiDung.tenHienThi.trim() || nguoiDung.email;
 
   async function handleLogout() {
     await logout();
@@ -98,19 +133,25 @@ function SidebarNavContent({
       </nav>
 
       <div className="flex flex-col gap-1 border-t border-hairline pt-3">
-        <SidebarNavLink item={SETTINGS_NAV_ITEM} pathname={pathname} onNavigate={onNavigate} />
+        {coQuanTri && <SidebarNavLink item={QUAN_TRI_NAV_ITEM} pathname={pathname} onNavigate={onNavigate} />}
+        {coCaiDat && <SidebarNavLink item={SETTINGS_NAV_ITEM} pathname={pathname} onNavigate={onNavigate} />}
 
         <DropdownMenu>
           <DropdownMenuTrigger className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium text-ink transition-colors hover:bg-surface-soft">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-card font-serif text-ink">
               {avatarLetter}
             </span>
-            <span className="truncate">{shopName}</span>
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate">{shopName}</span>
+              <span className="truncate text-xs font-normal text-muted-foreground">{tenNguoiDung}</span>
+            </span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top">
-            <DropdownMenuItem render={<Link href="/cai-dat" onClick={onNavigate} />}>
-              Cài đặt
-            </DropdownMenuItem>
+            {coCaiDat && (
+              <DropdownMenuItem render={<Link href="/cai-dat" onClick={onNavigate} />}>
+                Cài đặt
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={handleLogout}>Đăng xuất</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

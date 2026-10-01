@@ -5,7 +5,7 @@ import { format, parse } from "date-fns";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { formatVnd, formatVndShort } from "@/lib/format";
-import type { DailyPoint } from "@/lib/reports/daily-series";
+import type { DailySeriesTheoQuyen } from "@/lib/reports/pnl-che";
 import { cn } from "@/lib/utils";
 
 /**
@@ -62,7 +62,11 @@ function LegendToggle({
   );
 }
 
-export function RevenueProfitChart({ points }: { points: DailyPoint[] }) {
+/** Thiếu quyền giá vốn: `series.points` chỉ có doanh thu (DTO che từ server) ⇒ không có đường LN ròng. */
+export function RevenueProfitChart({ series }: { series: DailySeriesTheoQuyen }) {
+  // Kiểu CHUNG của hai nhánh cho recharts (nó suy generic từ union rồi đòi nhãn che ở nhánh đầy đủ).
+  const points: readonly { date: string; revenue: number }[] = series.points;
+  const coLai = series.coQuyenGiaVon;
   const [hidden, setHidden] = useState<Set<SeriesKey>>(new Set());
   // Kỳ 1 ngày → không đủ 2 điểm để vẽ đường có ý nghĩa, hiển thị LN ròng cũng
   // dạng cột (thay vì Line) — khớp design spec "chart chỉ có 1 điểm → cột".
@@ -81,13 +85,14 @@ export function RevenueProfitChart({ points }: { points: DailyPoint[] }) {
     });
   }
 
-  const showRevenue = !hidden.has("revenue");
-  const showProfit = !hidden.has("netProfit");
+  const showRevenue = !coLai || !hidden.has("revenue");
+  const showProfit = coLai && !hidden.has("netProfit");
 
   return (
     <div className="rounded-xl border border-hairline bg-canvas p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-serif text-lg text-ink">Doanh thu &amp; lợi nhuận theo ngày</h3>
+        <h3 className="font-serif text-lg text-ink">{coLai ? "Doanh thu & lợi nhuận theo ngày" : "Doanh thu theo ngày"}</h3>
+        {coLai && (
         <div className="flex gap-2">
           <LegendToggle
             label="Doanh thu"
@@ -104,6 +109,7 @@ export function RevenueProfitChart({ points }: { points: DailyPoint[] }) {
             onClick={() => toggleSeries("netProfit")}
           />
         </div>
+        )}
       </div>
 
       <div className="mt-4 h-72 w-full">

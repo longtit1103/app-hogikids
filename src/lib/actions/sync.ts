@@ -8,25 +8,35 @@ import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { giaiUrlSyncNow } from "@/lib/n8n/giai-url-sync-now";
 import { laChuyenHuong } from "@/lib/n8n/kiem-dich-den-n8n";
 import { SYNC_NOW_AUTH_HEADER } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congAction } from "@/lib/quyen/cong-action";
 
-/** SyncLog kind gần nhất (cho badge "Đồng bộ lúc …" + poll sau khi bấm). */
-export async function getLatestSync(kind: SyncKind): Promise<LatestSync> {
-  await requireUser();
+/**
+ * SyncLog kind gần nhất (cho badge "Đồng bộ lúc …" + poll sau khi bấm). Trả kèm `error` thô của
+ * lượt đồng bộ (lỗi hệ thống) ⇒ cần `cai-dat:xem`; nơi gọi coi nhánh từ chối như "chưa có lượt nào".
+ */
+export async function getLatestSync(kind: SyncKind): Promise<ActionResult<LatestSync>> {
+  const cong = await congAction("cai-dat:xem");
+  if (!cong.ok) return cong;
   const log = await prisma.syncLog.findFirst({ where: { kind }, orderBy: { startedAt: "desc" } });
-  if (!log) return null;
+  if (!log) return { ok: true, data: null };
   return {
-    status: log.status,
-    startedAt: log.startedAt.toISOString(),
-    finishedAt: log.finishedAt?.toISOString() ?? null,
-    error: log.error,
+    ok: true,
+    data: {
+      status: log.status,
+      startedAt: log.startedAt.toISOString(),
+      finishedAt: log.finishedAt?.toISOString() ?? null,
+      error: log.error,
+    },
   };
 }
 
 /** Bấm "Đồng bộ ngay" → kích webhook n8n (POST kèm header auth). Không tiết lộ URL xuống client. */
 export async function triggerSyncNow(): Promise<ActionResult> {
-  await requireUser();
+  const cong = await congAction("cai-dat:sua");
+  if (!cong.ok) return cong;
   // Không ghi DB, nhưng vẫn phải chặn: mọi trang n8n đẩy về sẽ bị 503 ở `/api/ingest/raw` TRƯỚC
   // `withSyncLog` ⇒ không có dòng nhật ký nào, badge "Đồng bộ lúc…" giữ mốc cũ, mà action này lại
   // trả ok ⇒ toast xanh nhưng không có gì xảy ra.
@@ -61,8 +71,11 @@ export async function triggerSyncNow(): Promise<ActionResult> {
     if (!res.ok) {
       return { ok: false, error: "Không gọi được n8n — kiểm tra Cài đặt kết nối" };
     }
-    return { ok: true, data: undefined };
   } catch {
     return { ok: false, error: "Không gọi được n8n — kiểm tra Cài đặt kết nối" };
   }
+  // Không có DB write nào để ghi kèm (lượt đồng bộ tự ghi SyncLog phía ingest) ⇒ nhật ký ghi sau khi
+  // n8n nhận lệnh, NGOÀI `try`: nhật ký hỏng là lỗi hệ thống, không được báo nhầm "không gọi được n8n".
+  await ghiNhatKy(prisma, { actor: cong.nguoiDung, hanhDong: HANH_DONG.DONG_BO_KICH_HOAT });
+  return { ok: true, data: undefined };
 }

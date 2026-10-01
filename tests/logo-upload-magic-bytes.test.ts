@@ -9,13 +9,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * không đụng `public/uploads`. Nhánh CHẤP NHẬN cố ý không test ở đây vì nó ghi file thật; đường đó
  * đã có e2e (`tests/e2e/settings.spec.ts`).
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    user: { findUnique: vi.fn(async () => null), update: vi.fn(async () => ({})) },
+    shopProfile: { findUnique: vi.fn(async () => null), upsert: vi.fn(async () => ({})) },
   },
 }));
 
@@ -52,7 +56,7 @@ describe("updateShopInfo — logo phải khớp magic bytes, không chỉ MIME",
     if (r.ok) return;
     expect(r.field).toBe("logo");
     // Không được lưu gì: tên shop cũng không, vì cả thao tác phải hỏng cùng nhau.
-    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.shopProfile.upsert).not.toHaveBeenCalled();
   });
 
   it("MIME khai image/jpeg nhưng ruột là PNG → từ chối (không suy ra định dạng từ nhãn)", async () => {
@@ -61,7 +65,7 @@ describe("updateShopInfo — logo phải khớp magic bytes, không chỉ MIME",
     const r = await updateShopInfo(form(lechDinhDang));
 
     expect(r.ok).toBe(false);
-    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.shopProfile.upsert).not.toHaveBeenCalled();
   });
 
   it("MIME ngoài allowlist (SVG) → từ chối ngay ở lớp đầu", async () => {
@@ -74,6 +78,6 @@ describe("updateShopInfo — logo phải khớp magic bytes, không chỉ MIME",
     const r = await updateShopInfo(form(svg));
 
     expect(r.ok).toBe(false);
-    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.shopProfile.upsert).not.toHaveBeenCalled();
   });
 });

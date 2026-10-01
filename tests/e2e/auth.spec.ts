@@ -29,7 +29,7 @@ test.describe("Đăng nhập", () => {
     expect(cookies.some((cookie) => cookie.name === "hogikids_session")).toBe(true);
 
     // App shell (sidebar nav) is rendered post-login — confirms the (app)
-    // route group's requireUser() guard let the authenticated session through.
+    // route group's page gate (`yeuCauQuyenTrang`) let the authenticated session through.
     await expect(page.getByRole("link", { name: "Đơn hàng" }).first()).toBeVisible();
   });
 });

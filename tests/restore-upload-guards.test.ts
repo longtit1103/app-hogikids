@@ -2,16 +2,21 @@ import { gzipSync } from "node:zlib";
 
 import { describe, expect, it, vi } from "vitest";
 
-// Route gọi getSession() đầu tiên — mock phiên hợp lệ để test đi tới các guard
+// Route gác phiên đầu tiên — mock chủ shop (khối `nguoi-dung-phien` dưới) để test đi tới các guard
 // file. Unit THUẦN, KHÔNG Postgres: mọi case dưới đều return TRƯỚC bước
 // pre-restore backup (pg_dump) nên không exec lệnh pg nào.
 vi.mock("@/lib/session", () => ({
   getSession: async () => ({ userId: "test-user" }),
-  // Route dùng phép kiểm CÓ soi mốc phiên (thu hồi khi đổi mật khẩu) — mock phải khớp.
-  getAuthenticatedUserId: async () => "test-user",
   // Route đẩy mốc phiên sau khi nạp xong — các case dưới đều return trước đó, chỉ cần export tồn tại.
-  thuHoiMoiPhien: vi.fn(async () => undefined),
+  thuHoiMoiPhienMoiNguoi: vi.fn(async () => undefined),
 }));
+
+// Route gác bằng `congChuShopRoute()` — chủ shop giả, không cần cookie/DB.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (importActual) => {
+  const that = await importActual<typeof import("@/lib/quyen/nguoi-dung-phien")>();
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return { ...that, docNguoiDungPhien: vi.fn(async () => nguoiDungGia()) };
+});
 
 import { POST } from "@/app/api/restore/route";
 

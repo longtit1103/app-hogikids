@@ -2,6 +2,7 @@ import { endOfDay } from "date-fns";
 
 import { type DateRange } from "@/lib/date-range";
 import { prisma } from "@/lib/prisma";
+import type { KetQuaChe, QuyenGiaVon } from "@/lib/queries/che-gia-von-types";
 
 /**
  * Báo cáo theo SẢN PHẨM/SKU trong kỳ (bảng /bao-cao "Top sản phẩm", cột "Chậm
@@ -20,28 +21,36 @@ import { prisma } from "@/lib/prisma";
 const UNMATCHED_PRODUCT_ID = "sku-khong-khop";
 const UNMATCHED_PRODUCT_NAME = "SKU không khớp";
 
-export interface ProductReportRow {
+/** Dòng SKU không giá vốn/lãi — danh sách trường được phép (pick). */
+export type ProductReportSkuChe = {
+  variantId: string | null;
+  sku: string;
+  label: string;
+  soldQty: number;
+  revenue: number;
+  currentStock: number;
+};
+
+/** Dòng sản phẩm không COGS/lãi gộp/biên — người thiếu `gia-von-loi-nhuan:xem` chỉ nhận ngần này. */
+export type ProductReportRowChe = {
   productId: string;
   name: string;
   imageUrl: string | null;
   soldQty: number;
   revenue: number;
+  currentStock: number;
+  orderCount: number;
+  skus: ProductReportSkuChe[];
+};
+
+export type ProductReportRow = Omit<ProductReportRowChe, "skus"> & {
   cogs: number;
   grossProfit: number;
   marginPct: number | null;
-  currentStock: number;
-  orderCount: number;
-  skus: Array<{
-    variantId: string | null;
-    sku: string;
-    label: string;
-    soldQty: number;
-    revenue: number;
-    cogs: number;
-    grossProfit: number;
-    currentStock: number;
-  }>;
-}
+  skus: Array<ProductReportSkuChe & { cogs: number; grossProfit: number }>;
+};
+
+export type ProductReport = KetQuaChe<{ rows: ProductReportRow[] }, { rows: ProductReportRowChe[] }>;
 
 type SkuAgg = {
   variantId: string | null;
@@ -61,10 +70,15 @@ type ProductAgg = {
   skus: Map<string, SkuAgg>; // key = variantId (khớp) | productName (không khớp)
 };
 
+/**
+ * Thiếu `gia-von-loi-nhuan:xem` (spec phân quyền §4.1 — hàm query TRỰC TIẾP): KHÔNG select
+ * `Variant.costPrice`, không tính COGS/lãi gộp/biên; doanh thu, số lượng, tồn giữ nguyên.
+ */
 export async function computeProductReport(
   range: DateRange,
-  opts?: { channelId?: string; productId?: string }
-): Promise<ProductReportRow[]> {
+  opts: { channelId?: string; productId?: string } | undefined,
+  quyen: QuyenGiaVon
+): Promise<ProductReport> {
   const to = endOfDay(range.to);
   const orders = await prisma.order.findMany({
     where: {
@@ -86,7 +100,8 @@ export async function computeProductReport(
               id: true,
               sku: true,
               label: true,
-              costPrice: true,
+              // Nhánh thiếu quyền: `false` ⇒ Prisma KHÔNG đưa cột vào câu SELECT.
+              costPrice: quyen.coQuyenGiaVon,
               stock: true,
               product: { select: { id: true, name: true, imageUrl: true } },
             },
@@ -112,7 +127,8 @@ export async function computeProductReport(
             variantId: it.variant.id as string | null,
             sku: it.variant.sku,
             label: it.variant.label,
-            lineCogs: it.quantity * it.variant.costPrice,
+            // Nhánh che không select giá vốn ⇒ không tính COGS (cộng 0, và dòng ra cũng không mang nó).
+            lineCogs: quyen.coQuyenGiaVon ? it.quantity * it.variant.costPrice : 0,
             stock: it.variant.stock,
           }
         : {
@@ -176,6 +192,31 @@ export async function computeProductReport(
     : [];
   const stockByProduct = new Map(stockSums.map((s) => [s.productId, s._sum.stock ?? 0]));
 
+  if (!quyen.coQuyenGiaVon) {
+    // Pick tường minh — không mang `cogs` (luôn 0 ở nhánh này) hay bất cứ trường lãi nào ra ngoài.
+    const rowsChe: ProductReportRowChe[] = [...products.values()].map((p) => {
+      const skus = [...p.skus.values()].sort((a, b) => b.revenue - a.revenue);
+      return {
+        productId: p.productId,
+        name: p.name,
+        imageUrl: p.imageUrl,
+        soldQty: skus.reduce((s, x) => s + x.soldQty, 0),
+        revenue: skus.reduce((s, x) => s + x.revenue, 0),
+        currentStock: stockByProduct.get(p.productId) ?? 0,
+        orderCount: p.orderIds.size,
+        skus: skus.map((s) => ({
+          variantId: s.variantId,
+          sku: s.sku,
+          label: s.label,
+          soldQty: s.soldQty,
+          revenue: s.revenue,
+          currentStock: s.currentStock,
+        })),
+      };
+    });
+    return { coQuyenGiaVon: false, rows: rowsChe.sort((a, b) => b.revenue - a.revenue) };
+  }
+
   const rows: ProductReportRow[] = [...products.values()].map((p) => {
     const skus = [...p.skus.values()].sort((a, b) => b.revenue - a.revenue);
     const soldQty = skus.reduce((s, x) => s + x.soldQty, 0);
@@ -207,5 +248,5 @@ export async function computeProductReport(
     };
   });
 
-  return rows.sort((a, b) => b.revenue - a.revenue);
+  return { coQuyenGiaVon: true, rows: rows.sort((a, b) => b.revenue - a.revenue) };
 }

@@ -8,7 +8,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 // ở đâu trong file cũng được (import ESM được nâng lên trên, gán lúc-nạp sẽ không kịp).
 // Trên prod biến này vắng và action dùng `/backups` — chỗ DUY NHẤT container mount.
 
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn().mockResolvedValue("user-test") }));
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("../helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { apGiaVonTheoPancake } from "@/lib/actions/dong-bo-gia-von-pancake";
@@ -21,7 +27,9 @@ import {
   KEY_SO_LECH_GIA_VON,
 } from "@/lib/gia-von/trang-thai-lech-gia-von";
 import { prisma } from "@/lib/prisma";
+import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 
+import { nguoiDungGia } from "../helpers/nguoi-dung-gia";
 import { SHOP_KHO } from "../helpers/shop-ids-fixture";
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
 
@@ -335,5 +343,39 @@ describe("apGiaVonTheoPancake", () => {
     }
 
     expect(await giaVon(id)).toBe(120_000); // không dòng nào lọt qua
+  });
+});
+
+describe("apGiaVonTheoPancake — quyền sửa sản phẩm ∧ xem giá vốn + nhật ký", () => {
+  beforeEach(async () => {
+    await prisma.auditLog.deleteMany();
+  });
+
+  it("san-pham:sua mà KHÔNG xem giá vốn ⇒ KHONG_CO_QUYEN, giá không đổi, dòng TU_CHOI_QUYEN", async () => {
+    const id = await taoBienThe(120_000);
+    await landBronze(90_000);
+    vi.mocked(docNguoiDungPhien).mockResolvedValueOnce(
+      nguoiDungGia({ id: "staff-sp", role: "STAFF", quyen: new Set(["san-pham:xem", "san-pham:sua"]) }),
+    );
+
+    const r = await bamAp("theo-pancake");
+
+    expect(r).toMatchObject({ ok: false, code: "KHONG_CO_QUYEN" });
+    expect(await giaVon(id)).toBe(120_000);
+    expect(await prisma.auditLog.findMany({ where: { hanhDong: "TU_CHOI_QUYEN" } })).toEqual([
+      expect.objectContaining({ actorId: "staff-sp", ghiChu: { quyenThieu: "gia-von-loi-nhuan:xem" } }),
+    ]);
+  });
+
+  it("áp xong ⇒ dòng GIA_VON_AP_THEO_PANCAKE kèm số dòng đã ghi; không có gì để áp ⇒ không ghi dòng nào", async () => {
+    await taoBienThe(120_000);
+    await landBronze(90_000);
+
+    expect((await bamAp("theo-pancake")).ok).toBe(true);
+    expect((await bamAp("theo-pancake")).ok).toBe(true); // lượt 2: danh sách rỗng
+
+    expect(await prisma.auditLog.findMany({ where: { hanhDong: "GIA_VON_AP_THEO_PANCAKE" } })).toEqual([
+      expect.objectContaining({ ketQua: "OK", ghiChu: { soDong: 1 } }),
+    ]);
   });
 });

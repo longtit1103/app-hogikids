@@ -17,12 +17,15 @@ export function CashMovementAddButton({
   loans,
   soTietKiem,
   d0,
+  choPhepLoaiSoQuy,
 }: {
   loans: KhoanVayRow[];
   /** Sổ tiết kiệm cho ô chọn ở form ghi tay khi loại dòng là `SAVINGS_OUT`/`SAVINGS_IN`. */
   soTietKiem: SoTietKiemRow[];
   /** Ngày mở sổ quỹ; null = chưa mở sổ (modal nói "đây là khoản đầu tiên"). */
   d0: Date | null;
+  /** Có `tai-chinh-so-quy:sua`? `false` ⇒ form không liệt kê loại gắn khoản vay / sổ tiết kiệm. */
+  choPhepLoaiSoQuy: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -37,6 +40,7 @@ export function CashMovementAddButton({
         loans={loans}
         soTietKiem={soTietKiem}
         d0={d0}
+        choPhepLoaiSoQuy={choPhepLoaiSoQuy}
       />
     </>
   );

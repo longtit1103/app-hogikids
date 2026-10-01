@@ -9,8 +9,10 @@ import type { KetQuaKiemTra } from "@/lib/ket-noi/kiem-tra-types";
 import { lyDoTuChoiDichN8n } from "@/lib/n8n/kiem-dich-den-n8n";
 import { kiemTraN8n } from "@/lib/n8n/provision/kiem-tra-va-trang-thai-n8n";
 import { CanXacNhanDoiHaTang, provisionN8n, type KetQuaProvision } from "@/lib/n8n/provision/provision-n8n";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congChuShopAction } from "@/lib/quyen/cong-action";
 
 // ---- Cài đặt › Kết nối & Đồng bộ › Kết nối n8n -------------------------------
 //
@@ -42,7 +44,9 @@ export async function luuKetNoiN8n(values: {
   n8nWebhookPublicBase?: string;
   n8nApiKey?: string;
 }): Promise<ActionResult<{ daLuu: number }>> {
-  await requireUser();
+  // Kết nối n8n thuộc "khoá kết nối" — owner-only (spec phân quyền §1.1).
+  const cong = await congChuShopAction();
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const canGhi: Array<[string, string]> = [];
@@ -64,11 +68,13 @@ export async function luuKetNoiN8n(values: {
   if (canGhi.length === 0) return { ok: false, error: "Chưa nhập giá trị nào để lưu" };
 
   try {
-    await prisma.$transaction(
-      canGhi.map(([key, value]) =>
-        prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } })
-      )
-    );
+    await prisma.$transaction(async (tx) => {
+      for (const [key, value] of canGhi) {
+        await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+      }
+      // Chỉ SỐ ô đã lưu — không tên khoá, không giá trị.
+      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.N8N_LUU_KET_NOI, ghiChu: { soDong: canGhi.length } });
+    });
   } catch {
     return { ok: false, error: "Lỗi khi lưu vào kho" };
   }
@@ -79,7 +85,8 @@ export async function luuKetNoiN8n(values: {
 
 /** Chỉ ĐỌC kho + GET danh sách workflow — không ghi gì nên không chặn lúc phục hồi. */
 export async function kiemTraKetNoiN8n(): Promise<ActionResult<KetQuaKiemTra>> {
-  await requireUser();
+  const cong = await congChuShopAction();
+  if (!cong.ok) return cong;
   try {
     return { ok: true, data: await kiemTraN8n() };
   } catch {
@@ -97,18 +104,27 @@ export type KetQuaCaiWorkflows =
  * trả `can-xac-nhan` để UI hỏi lại thay vì đè âm thầm.
  */
 export async function caiWorkflowsN8n(opts?: { xacNhanDoiHaTang?: boolean }): Promise<ActionResult<KetQuaCaiWorkflows>> {
-  await requireUser();
+  const cong = await congChuShopAction();
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
+  let ketQua: KetQuaProvision;
   try {
-    const ketQua = await provisionN8n({ xacNhanDoiHaTang: opts?.xacNhanDoiHaTang });
-    revalidatePath("/cai-dat");
-    return { ok: true, data: { loai: "xong", ketQua } };
+    ketQua = await provisionN8n({ xacNhanDoiHaTang: opts?.xacNhanDoiHaTang });
   } catch (e) {
+    // Chưa ghi gì — chỉ hỏi lại người dùng ⇒ không có gì để ghi nhật ký.
     if (e instanceof CanXacNhanDoiHaTang) {
       return { ok: true, data: { loai: "can-xac-nhan", chiTiet: e.chiTiet } };
     }
+    // Provision ghi nhiều bước (Setting, n8n) không chung một transaction ⇒ hỏng giữa chừng vẫn có
+    // thể đã đổi một phần — để lại dấu vết LOI.
+    await ghiNhatKyLoi({ actor: cong.nguoiDung, hanhDong: HANH_DONG.N8N_CAI_WORKFLOWS, ghiChu: { lyDo: "that-bai" } });
     // Message của tầng provision/client cam kết không chứa secret — hiện nguyên văn để lần được lỗi.
     return { ok: false, error: e instanceof Error ? e.message : "Cài workflows thất bại" };
   }
+  // Provision tự quản các lượt ghi của nó (nhiều transaction + gọi n8n) ⇒ nhật ký ghi ngay sau khi
+  // xong, NGOÀI `try` ở trên: nhật ký hỏng là lỗi hệ thống, không được báo nhầm thành "Cài thất bại".
+  await ghiNhatKy(prisma, { actor: cong.nguoiDung, hanhDong: HANH_DONG.N8N_CAI_WORKFLOWS });
+  revalidatePath("/cai-dat");
+  return { ok: true, data: { loai: "xong", ketQua } };
 }

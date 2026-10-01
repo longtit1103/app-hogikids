@@ -30,14 +30,28 @@ vi.mock("next/headers", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    setting: {
-      // Mốc phiên mặc định "0" — không đụng DB thật, chỉ cần ổn định giữa lượt tạo và lượt đọc.
-      findUnique: vi.fn(async () => null),
+    user: {
+      // Mọi userId đều là một tài khoản đang hoạt động với epoch "0" — không đụng DB thật, chỉ cần
+      // ổn định giữa lượt tạo phiên và lượt đọc lại.
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => ({
+        id: where.id,
+        email: `${where.id}@hogikids.test`,
+        tenHienThi: "",
+        role: "OWNER",
+        quyen: [],
+        isActive: true,
+        mustChangePassword: false,
+        sessionEpoch: "0",
+      })),
     },
   },
 }));
 
-import { createSession, getAuthenticatedUserId } from "@/lib/session";
+import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
+import { createSession } from "@/lib/session";
+
+/** `id` người dùng của phiên đang hiệu lực (qua đúng đường đọc của ba cổng), hoặc null. */
+const idPhien = async (): Promise<string | null> => (await docNguoiDungPhien())?.id ?? null;
 
 describe("createSession(remember=false) — cookie phiên thật + hết hạn phía server sau 24h", () => {
   beforeEach(() => {
@@ -52,7 +66,7 @@ describe("createSession(remember=false) — cookie phiên thật + hết hạn p
   });
 
   it("Set-Cookie KHÔNG mang Max-Age/Expires (cookie phiên trình duyệt thật)", async () => {
-    await createSession("chu-shop", false);
+    await createSession("chu-shop", false, "0");
 
     expect(khoCookie.size).toBe(1);
     const [, muc] = [...khoCookie.entries()][0];
@@ -62,23 +76,23 @@ describe("createSession(remember=false) — cookie phiên thật + hết hạn p
   });
 
   it("còn trong 24h → vẫn đăng nhập được", async () => {
-    await createSession("chu-shop", false);
+    await createSession("chu-shop", false, "0");
 
     vi.setSystemTime(new Date("2026-09-24T23:59:00+07:00")); // +23h59
-    expect(await getAuthenticatedUserId()).toBe("chu-shop");
+    expect(await idPhien()).toBe("chu-shop");
   });
 
   it("quá 24h → seal bị server TỪ CHỐI dù cookie không có Max-Age để tự xoá", async () => {
-    await createSession("chu-shop", false);
+    await createSession("chu-shop", false, "0");
 
     // `iron-webcrypto` cho phép lệch đồng hồ (`timestampSkewSec`, mặc định 60s) — vượt QUÁ mốc đó
     // mới chắc chắn bị coi là hết hạn, xem `node_modules/iron-webcrypto/dist/index.js` (`unseal`).
     vi.setSystemTime(new Date("2026-09-25T00:02:00+07:00")); // +24h2p, vượt hẳn dung sai 60s
-    expect(await getAuthenticatedUserId()).toBeNull();
+    expect(await idPhien()).toBeNull();
   });
 
   it("remember=true (đối chứng): vẫn còn Max-Age (cookie 30 ngày) như trước", async () => {
-    await createSession("chu-shop", true);
+    await createSession("chu-shop", true, "0");
 
     const [, muc] = [...khoCookie.entries()][0];
     expect(muc.options).toHaveProperty("maxAge");

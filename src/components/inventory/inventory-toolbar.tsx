@@ -7,8 +7,11 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-/** Search debounce 300ms + toggle "Chỉ hiện sắp hết" + nút Xuất CSV (giữ filter hiện tại qua query). */
-export function InventoryToolbar() {
+/**
+ * Search debounce 300ms + toggle "Chỉ hiện sắp hết" + nút Xuất CSV (giữ filter hiện tại qua query).
+ * Nút xuất chỉ hiện khi có quyền `xuat-du-lieu` — route `/api/export/ton-kho` vẫn tự kiểm (403).
+ */
+export function InventoryToolbar({ choPhepXuat }: { choPhepXuat: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -62,11 +65,13 @@ export function InventoryToolbar() {
       <Button type="button" variant={lowOnly ? "default" : "outline"} size="sm" onClick={toggleLowOnly}>
         ⚠ Chỉ hiện sắp hết
       </Button>
-      <a href={exportHref}>
-        <Button type="button" variant="secondary" size="sm">
-          Xuất CSV
-        </Button>
-      </a>
+      {choPhepXuat && (
+        <a href={exportHref}>
+          <Button type="button" variant="secondary" size="sm">
+            Xuất CSV
+          </Button>
+        </a>
+      )}
     </div>
   );
 }

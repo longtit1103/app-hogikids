@@ -4,9 +4,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 const SECRET = "test-ingest-secret";
 process.env.INGEST_SECRET = SECRET;
 
-// `importAdsExpenses` chạy như server action: `requireUser` gọi `cookies()` và `revalidatePath` cần
+// `importAdsExpenses` chạy như server action: cổng đọc phiên từ `cookies()` và `revalidatePath` cần
 // request scope — không có trong vitest. Phần auth thật đã phủ ở e2e.
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user-id") }));
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("../helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { POST as adsPost } from "@/app/api/ingest/ads/route";

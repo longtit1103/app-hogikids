@@ -1,13 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/session", () => ({ requireUser: vi.fn(async () => "test-user") }));
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
+// `$transaction(fn)` chạy callback với chính client giả (upsert + nhật ký cùng "transaction").
+vi.mock("@/lib/prisma", () => {
+  const client = {
     setting: { upsert: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
-    $transaction: vi.fn(async (arr: unknown[]) => Promise.all(arr)),
-  },
-}));
+    auditLog: { create: vi.fn(async () => ({})) },
+    $transaction: vi.fn(),
+  };
+  client.$transaction.mockImplementation(async (fn: (tx: typeof client) => unknown) => fn(client));
+  return { prisma: client };
+});
 
 import { revalidatePath } from "next/cache";
 

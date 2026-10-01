@@ -21,7 +21,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 const gia = vi.hoisted(() => {
   const nhatKy: string[] = [];
-  return { nhatKy };
+  /**
+   * Khối COPY `_prisma_migrations` có migration phân quyền HOÀN TẤT — thứ `pg_restore -a … -f -` bung
+   * ra từ một dump đời mới. Thiếu nó thì cổng "dump đời trước phân quyền" chặn trước mọi bước dưới.
+   */
+  const copyM1 =
+    "COPY app._prisma_migrations (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count) FROM stdin;\n" +
+    "m1\tc\t2026-09-30 17:00:00+00\t20260930170000_tai_khoan_phu_phan_quyen\t\\N\t\\N\t2026-09-30 17:00:00+00\t1\n" +
+    "\\.\n";
+  const state = { copyMigration: copyM1 };
+  return { nhatKy, copyM1, state };
 });
 
 vi.mock("node:child_process", () => ({
@@ -33,6 +42,11 @@ vi.mock("node:child_process", () => ({
   ) => {
     const sql = args.includes("-c") ? (args[args.indexOf("-c") + 1] ?? "") : "";
     if (args[0] === "-l") gia.nhatKy.push("pg_restore doc-muc-luc");
+    else if (args[0] === "-a") {
+      gia.nhatKy.push("pg_restore doc-migration");
+      cb(null, { stdout: gia.state.copyMigration, stderr: "" });
+      return;
+    }
     else if (/DROP\s+SCHEMA/i.test(sql)) gia.nhatKy.push("DROP SCHEMA");
     else if (/GRANT/i.test(sql)) gia.nhatKy.push("GRANT n8n");
     else if (/has_database_privilege/i.test(sql)) gia.nhatKy.push("hoi quyen tao schema");
@@ -57,13 +71,17 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
+import { LoiBackupTruocPhanQuyen } from "@/lib/backup/kiem-migration-trong-dump";
 import { runRestore } from "@/lib/backup/run-restore";
 
 /** File `.dump` hợp lệ ở mức magic — đủ để `runRestore` đi vào nhánh custom. */
 const DUMP = Buffer.from("PGDMP\x01noi-dung-gia");
 
 /** `.sql.gz` hợp lệ: chỉ đụng schema đích, không chạm schema hệ thống Supabase. */
-const SQL_GZ = gzipSync(Buffer.from('CREATE TABLE "app"."Thu" (id integer);\n'));
+const SQL_GZ = gzipSync(Buffer.from(`CREATE TABLE "app"."Thu" (id integer);\n${gia.copyM1}`));
+
+/** Như `SQL_GZ` nhưng chụp trước migration phân quyền (không có khối `_prisma_migrations`). */
+const SQL_GZ_TRUOC_PHAN_QUYEN = gzipSync(Buffer.from('CREATE TABLE "app"."Thu" (id integer);\n'));
 
 /** Lệnh nào trong nhật ký là PHÁ HUỶ dữ liệu — thứ tuyệt đối không được chạy sau khi mất khoá. */
 function coLenhPhaHuy(): boolean {
@@ -72,6 +90,7 @@ function coLenhPhaHuy(): boolean {
 
 beforeEach(() => {
   gia.nhatKy.length = 0;
+  gia.state.copyMigration = gia.copyM1;
   vi.stubEnv("DATABASE_URL", "postgresql://u:p@db-gia:5432/postgres?schema=app");
 });
 
@@ -87,6 +106,28 @@ describe("runRestore — chốt `truocKhiPhaHuy` chặn trước lệnh phá hu�
     expect(gia.nhatKy).toContain("pg_restore doc-muc-luc"); // bước chuẩn bị, chỉ đọc file
     expect(coLenhPhaHuy()).toBe(false);
     expect(gia.nhatKy).not.toContain("GRANT n8n"); // lỗi lan ra, không chạy nốt phần sau
+  });
+
+  it("custom: dump đời trước phân quyền → LoiBackupTruocPhanQuyen TRƯỚC chốt, KHÔNG nạp", async () => {
+    gia.state.copyMigration = ""; // dump không có dòng migration phân quyền
+    const chot = vi.fn();
+
+    await expect(runRestore(DUMP, { truocKhiPhaHuy: chot })).rejects.toBeInstanceOf(LoiBackupTruocPhanQuyen);
+
+    expect(gia.nhatKy).toContain("pg_restore doc-migration");
+    expect(chot).not.toHaveBeenCalled();
+    expect(coLenhPhaHuy()).toBe(false);
+  });
+
+  it("plain: dump đời trước phân quyền → LoiBackupTruocPhanQuyen TRƯỚC chốt, KHÔNG ghi file tạm, KHÔNG drop", async () => {
+    const chot = vi.fn();
+
+    await expect(runRestore(SQL_GZ_TRUOC_PHAN_QUYEN, { truocKhiPhaHuy: chot })).rejects.toBeInstanceOf(
+      LoiBackupTruocPhanQuyen,
+    );
+
+    expect(chot).not.toHaveBeenCalled();
+    expect(gia.nhatKy).toEqual([]); // chưa cả ghi file tạm, chưa hỏi quyền
   });
 
   it("plain: callback ném → KHÔNG drop, KHÔNG nạp", async () => {
@@ -120,6 +161,7 @@ describe("runRestore — chốt `truocKhiPhaHuy` chặn trước lệnh phá hu�
     expect(gia.nhatKy).toEqual([
       "ghi file tam dump",
       "pg_restore doc-muc-luc",
+      "pg_restore doc-migration",
       "nap pg_restore",
       "GRANT n8n",
       "don file tam",

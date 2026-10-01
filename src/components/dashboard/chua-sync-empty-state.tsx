@@ -1,5 +1,5 @@
-import Link from "next/link";
-
+import { LinkNeuDuocVao } from "@/components/dashboard/link-neu-duoc-vao";
+import { coTheVaoHref } from "@/components/shell/nav-config";
 import { SyncNowButton } from "@/components/shell/sync-now-button";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -12,9 +12,13 @@ const STEPS = [
 
 /**
  * Trạng thái lần đầu mở app: chưa có SyncLog PANCAKE nào VÀ chưa có Order nào
- * (`page.tsx` guard). Thay toàn bộ nội dung Dashboard bằng onboarding 3 bước.
+ * (`page.tsx` guard). Thay toàn bộ nội dung Dashboard bằng onboarding 3 bước. `choPhepDongBo` =
+ * `cai-dat:sua` (server tính) — thiếu thì không nút đồng bộ.
  */
-export function ChuaSyncEmptyState() {
+export function ChuaSyncEmptyState({
+  choPhepDongBo = false,
+  hrefDuocPhep = [],
+}: { choPhepDongBo?: boolean; hrefDuocPhep?: readonly string[] } = {}) {
   return (
     <div className="flex flex-col items-center gap-6 rounded-xl border border-hairline bg-canvas px-6 py-16 text-center">
       <h1 className="font-serif text-2xl text-ink">Chưa có dữ liệu từ Pancake</h1>
@@ -34,10 +38,13 @@ export function ChuaSyncEmptyState() {
       </ol>
 
       <div className="flex items-center gap-4">
-        <Link href="/cai-dat" className={cn(buttonVariants({ size: "lg" }))}>
-          Cấu hình kết nối n8n
-        </Link>
-        <SyncNowButton />
+        {/* Nút chỉ dựng khi vào được /cai-dat — người không có quyền thấy 3 bước hướng dẫn, không thấy link gãy. */}
+        {coTheVaoHref(hrefDuocPhep, "/cai-dat") && (
+          <LinkNeuDuocVao href="/cai-dat" hrefDuocPhep={hrefDuocPhep} className={cn(buttonVariants({ size: "lg" }))}>
+            Cấu hình kết nối n8n
+          </LinkNeuDuocVao>
+        )}
+        <SyncNowButton choPhepDongBo={choPhepDongBo} />
       </div>
     </div>
   );

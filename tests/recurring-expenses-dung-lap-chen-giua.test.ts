@@ -15,9 +15,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * Tất định, không ngủ cố định: điểm chen là spy trên đúng câu đọc/câu chèn của bộ sinh; lượt chờ khoá
  * được xác nhận qua `pg_stat_activity` (`wait_event_type = 'Lock'`).
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));

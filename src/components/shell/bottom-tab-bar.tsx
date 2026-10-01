@@ -7,7 +7,7 @@ import { MoreHorizontal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-import { TAB_CHINH_ITEMS, isNavItemActive, laTrangTabChinh } from "./nav-config";
+import { isNavItemActive, laTrangTabChinh, tabChinhTheoHref } from "./nav-config";
 
 const O_TAB =
   "flex min-h-11 min-w-11 flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] font-medium";
@@ -18,10 +18,13 @@ const O_TAB =
  */
 export function BottomTabBar({
   lowStockWarning,
+  hrefDuocPhep,
   moreOpen,
   onOpenMore,
 }: {
   lowStockWarning: boolean;
+  /** Tập href được vào (serializable) — tab lọc theo đó, không cứng Dashboard. */
+  hrefDuocPhep: readonly string[];
   moreOpen: boolean;
   onOpenMore: () => void;
 }) {
@@ -52,7 +55,7 @@ export function BottomTabBar({
         />
       )}
       <ul className="flex">
-        {TAB_CHINH_ITEMS.map((item) => {
+        {tabChinhTheoHref(hrefDuocPhep).map((item) => {
           const thatSu = isNavItemActive(pathname, item.href);
           // Màu theo tab vừa chạm; `aria-current` theo trang THẬT (VoiceOver không báo trước).
           const active = hrefDangToi === null ? thatSu : hrefDangToi === item.href;

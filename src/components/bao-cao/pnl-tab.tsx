@@ -102,6 +102,7 @@ export function PnlTab({
   prevVoucher,
   backfilledFee = 0,
   prevBackfilledFee = 0,
+  choPhepDongBo = false,
 }: {
   monthPnl: PnlBreakdown;
   prevMonthPnl: PnlBreakdown;
@@ -118,6 +119,8 @@ export function PnlTab({
   /** Σ phí ước tính của đơn được bù — tách khỏi phần "Pancake chưa trả chi tiết". */
   backfilledFee?: number;
   prevBackfilledFee?: number;
+  /** `cai-dat:sua` (server tính) — thiếu thì tháng trống không hiện nút "Đồng bộ ngay". */
+  choPhepDongBo?: boolean;
 }) {
   // Quy ước href drill-down nằm ở `pnl-drill-href.ts` — tóm tắt: đích nào đọc
   // range toàn cục (/tai-chinh, /bao-cao) thì được neo ĐÚNG tháng đang hiển thị
@@ -168,7 +171,7 @@ export function PnlTab({
           <p className="text-sm text-muted-foreground">
             Chưa có dữ liệu tháng {month.getMonth() + 1}/{month.getFullYear()}
           </p>
-          <SyncNowButton />
+          <SyncNowButton choPhepDongBo={choPhepDongBo} />
         </div>
       </div>
     );

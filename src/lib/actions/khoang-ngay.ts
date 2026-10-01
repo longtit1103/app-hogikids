@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import { docLuaChonTuCookie, giaTriCookieLuaChon, TEN_COOKIE_KHOANG_NGAY } from "@/lib/date-range-cookie";
-import { requireUser } from "@/lib/session";
+import { congAction } from "@/lib/quyen/cong-action";
 
 const MOT_NAM_GIAY = 365 * 24 * 60 * 60;
 
@@ -20,9 +20,13 @@ const MOT_NAM_GIAY = 365 * 24 * 60 * 60;
  * Giá trị đi qua CHÍNH luật kiểm của URL (`docLuaChonTuCookie`) trước khi ghi: client gửi gì sai
  * hình cũng không vào được cookie. KHÔNG ghi DB ⇒ nằm nhóm CHI_DOC của lưới khoá bảo trì.
  * URL/drill KHÔNG BAO GIỜ gọi action này — chỉ `selectPreset`/`applyCustomRange` của bộ chọn.
+ *
+ * Cổng chỉ đòi ĐĂNG NHẬP (không quyền module): cookie là tuỳ chọn hiển thị của chính trình duyệt, không
+ * mở thêm dữ liệu nào — mỗi trang tự qua cổng quyền của nó khi đọc khoảng ngày này.
  */
 export async function luuLuaChonKhoangNgay(giaTri: string): Promise<ActionResult<null>> {
-  await requireUser();
+  const c = await congAction();
+  if (!c.ok) return c;
   // Server Action nhận payload từ mạng: kiểu khai báo không bảo đảm gì lúc chạy.
   if (typeof giaTri !== "string") return { ok: false, error: "Khoảng ngày không hợp lệ — chọn lại." };
   const luaChon = docLuaChonTuCookie(giaTri);

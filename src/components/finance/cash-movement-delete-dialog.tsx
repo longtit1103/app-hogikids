@@ -9,13 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { deleteCashMovement } from "@/lib/actions/cash-movements";
 import { CASH_MOVEMENT_KIND_META } from "@/lib/cash-movements/cash-movement-kinds";
-import type { CashMovementRow } from "@/lib/cash-movements/cash-movement-queries";
+import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
 import { formatVnd } from "@/lib/format";
 
 export type CashMovementDeleteDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  row: CashMovementRow | null;
+  row: CashMovementRow | CashMovementRowCoBan | null;
 };
 
 /** Xoá 1 khoản tiền khác — xoá cứng, không có nhánh định kỳ (mẫu `expense-delete-dialog.tsx` rút gọn). */
@@ -27,7 +27,7 @@ export function CashMovementDeleteDialog({ open, onOpenChange, row }: CashMoveme
   const label = CASH_MOVEMENT_KIND_META[row.kind].label;
   // Dòng do duyệt kỳ sinh ra: con dấu `lastDueHandled` KHÔNG lùi khi xoá dòng, nên phải nói thẳng
   // — nếu không chủ shop xoá rồi ngồi đợi kỳ hiện lại.
-  const doDuyetKySinh = row.loanId !== null && row.description.startsWith("Trả gốc ");
+  const doDuyetKySinh = "loanId" in row && row.loanId !== null && row.description.startsWith("Trả gốc ");
 
   async function handleDelete() {
     if (!row) return;

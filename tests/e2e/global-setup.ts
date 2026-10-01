@@ -43,6 +43,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
     await seedTestUser();
     await seedShopIds();
+    await seedDoGiaVonVaoDbE2e();
   } catch (e) {
     await khoa.nha(); // hỏng lúc dựng DB thì phải trả khoá ngay, đừng giam tới hết tiến trình
     throw e;
@@ -56,10 +57,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 }
 
 /**
- * Resets the User table to a single, known test account. Imported lazily
- * (relative path, not the "@/" alias — Playwright's own TS transform, unlike
- * vitest's configured alias, isn't guaranteed to resolve it) after
- * DATABASE_URL has been forced to the test DB and the schema exists.
+ * Resets the User table to a single, known test account — the shop OWNER — plus the singleton
+ * ShopProfile. Nhật ký thao tác cũng xoá sạch để mỗi lượt e2e bắt đầu từ bảng trống (spec e2e
+ * soi dòng AuditLog của chính nó). Tài khoản STAFF do từng spec tự tạo qua
+ * `tests/e2e/tao-tai-khoan-staff.ts`.
+ *
+ * Imported lazily (relative path, not the "@/" alias — Playwright's own TS transform, unlike
+ * vitest's configured alias, isn't guaranteed to resolve it) after DATABASE_URL has been forced
+ * to the test DB and the schema exists.
  */
 async function seedTestUser(): Promise<void> {
   const { PrismaClient } = await import("@prisma/client");
@@ -67,10 +72,14 @@ async function seedTestUser(): Promise<void> {
 
   const prisma = new PrismaClient();
   try {
-    await prisma.user.deleteMany({});
     const passwordHash = await hashPassword(TEST_USER_PASSWORD);
-    await prisma.user.create({
-      data: { email: TEST_USER_EMAIL, passwordHash },
+    await prisma.$transaction(async (tx) => {
+      await tx.auditLog.deleteMany({});
+      await tx.user.deleteMany({});
+      await tx.user.create({
+        data: { email: TEST_USER_EMAIL.trim().toLowerCase(), passwordHash, role: "OWNER" },
+      });
+      await tx.shopProfile.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
     });
   } finally {
     await prisma.$disconnect();
@@ -93,6 +102,28 @@ async function seedShopIds(): Promise<void> {
       VALUES ${Prisma.join(SEED_SHOP_ID.map(([k, v]) => Prisma.sql`(${k}, ${v})`))}
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
     `;
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+/**
+ * Seed 1 sản phẩm + đơn mang giá vốn "dò" (`7331117`) cho các spec kiểm che giá vốn ở payload — xem
+ * `fixture-gia-von-do.ts`. Kênh `shopee` là dữ liệu tham chiếu nên upsert kèm để chạy được trên DB
+ * e2e mới tinh.
+ */
+async function seedDoGiaVonVaoDbE2e(): Promise<void> {
+  const { PrismaClient } = await import("@prisma/client");
+  const { seedDoGiaVon } = await import("./fixture-gia-von-do");
+
+  const prisma = new PrismaClient();
+  try {
+    await prisma.channel.upsert({
+      where: { id: "shopee" },
+      create: { id: "shopee", name: "Shopee", color: "#cc785c", platformFeePct: 10, paymentFeePct: 2.5, sortOrder: 1 },
+      update: {},
+    });
+    await seedDoGiaVon(prisma);
   } finally {
     await prisma.$disconnect();
   }

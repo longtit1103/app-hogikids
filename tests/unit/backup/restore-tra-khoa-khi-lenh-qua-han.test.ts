@@ -9,11 +9,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * Không chạy pg thật: cái cần kiểm là dây nối khoá ↔ `finally`, không phải hành vi của pg_restore.
  */
 vi.mock("@/lib/session", () => ({
-  getAuthenticatedUserId: vi.fn(async () => "test-user"),
-  thuHoiMoiPhien: vi.fn(async () => undefined),
+  thuHoiMoiPhienMoiNguoi: vi.fn(async () => undefined),
 }));
 
-// Bước đẩy mốc phiên sau khi nạp — route gọi hàm này chứ không gọi thẳng `thuHoiMoiPhien`. Thiếu
+// Route gác bằng `congChuShopRoute()` — chủ shop giả, không cần cookie/DB.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (importActual) => {
+  const that = await importActual<typeof import("@/lib/quyen/nguoi-dung-phien")>();
+  const { nguoiDungGia } = await import("../../helpers/nguoi-dung-gia");
+  return { ...that, docNguoiDungPhien: vi.fn(async () => nguoiDungGia()) };
+});
+
+// Bước đẩy mốc phiên sau khi nạp — route gọi hàm này chứ không gọi thẳng `thuHoiMoiPhienMoiNguoi`. Thiếu
 // mock ở đây là ca "nạp thành công" mở `prisma.$transaction` THẬT lên DB test (đo được: suite từ
 // 142ms lên 8s khi DB không tới được), trong khi suite này tuyên bố không chạm pg thật.
 vi.mock("@/lib/backup/thu-hoi-phien-co-han", () => ({
@@ -49,6 +55,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 // route gọi chúng TRƯỚC khi giành khoá.
 vi.mock("@/lib/backup/run-restore", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/backup/run-restore")>()),
+  // Cổng M1 sớm của route đọc file thật bằng `pg_restore`; dump giả ở đây không phải dump thật ⇒
+  // cho qua (cổng có suite riêng: `restore-chan-dump-truoc-phan-quyen.integration.test.ts`).
+  kiemDumCoM1: vi.fn(async () => undefined),
   runRestore: vi.fn(),
 }));
 

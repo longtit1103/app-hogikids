@@ -16,7 +16,7 @@ import { lyDoKhongXoaSoTietKiem } from "@/lib/tiet-kiem/ly-do-khong-xoa-so-tiet-
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 /**
- * Integration test (`hogikids_test`) cho 5 server action sổ tiết kiệm. Mock `requireUser` (gọi
+ * Integration test (`hogikids_test`) cho 5 server action sổ tiết kiệm. Mock `docNguoiDungPhien` (đọc
  * `cookies()` — không có request scope trong vitest) + `revalidatePath` (cùng lý do), giống
  * `khoan-vay-actions.integration.test.ts`.
  *
@@ -28,9 +28,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  *
  * `vi.useFakeTimers({ toFake: ["Date"] })` — CHỈ Date: fake luôn timer thì Prisma/pool treo.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));

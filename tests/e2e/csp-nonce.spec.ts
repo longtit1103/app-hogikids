@@ -196,10 +196,10 @@ test.describe("Content-Security-Policy có nonce", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toBeHidden();
 
-    // Xuất Excel (nạp thư viện xlsx động + tải file qua blob) — nút chỉ bật khi kỳ có dữ liệu;
+    // Xuất Excel (link tới route server /api/export/bao-cao) — link chỉ có khi kỳ có dữ liệu;
     // DB e2e tích luỹ từ spec khác nên có thể trống ⇒ chỉ kiểm khi bấm được.
     await page.goto("/tai-chinh");
-    const nutExcel = page.getByRole("button", { name: "Xuất Excel" });
+    const nutExcel = page.getByRole("link", { name: "Xuất Excel" });
     if ((await nutExcel.count()) > 0 && (await nutExcel.first().isEnabled())) {
       const taiVe = page.waitForEvent("download");
       await nutExcel.first().click();

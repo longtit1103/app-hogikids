@@ -3,20 +3,43 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Finding M7: changePassword (lockout + chặn trùng mật khẩu cũ + regex phức tạp) trước
 // đây 0 test. Mock prisma/session/password/lockout để test THUẦN logic action, KHÔNG DB.
 vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user"),
-  // Đổi mật khẩu THU HỒI mọi phiên cũ rồi cấp lại cookie cho đúng thiết bị đang thao tác.
+  // Đổi mật khẩu THU HỒI mọi phiên cũ của người này rồi cấp lại cookie cho đúng thiết bị đang thao tác.
   docGhiNhoCuaPhien: vi.fn(async () => true),
-  thuHoiMoiPhien: vi.fn(async () => undefined),
+  thuHoiPhienCuaNguoi: vi.fn(async () => "moc-moi"),
   createSession: vi.fn(async () => undefined),
 }));
+/** Người đang gọi (qua cổng action) — cookie mang epoch "moc-cu". */
+const NGUOI_DUNG = {
+  id: "test-user",
+  email: "owner@hogikids.test",
+  tenHienThi: "",
+  role: "OWNER" as const,
+  quyen: new Set<never>(),
+  phaiDoiMatKhau: false,
+  mocPhien: "moc-cu",
+};
+vi.mock("@/lib/quyen/cong-action", () => ({
+  congAction: vi.fn(async () => ({ ok: true, nguoiDung: NGUOI_DUNG })),
+}));
+vi.mock("@/lib/nhat-ky/ghi-nhat-ky", () => ({
+  ghiNhatKy: vi.fn(async () => undefined),
+  ghiNhatKyLoi: vi.fn(async () => undefined),
+}));
+/**
+ * Client TRONG transaction — object KHÁC `prisma` (dùng chung các hàm giả để assertion `prisma.user.update`
+ * vẫn soi được lượt ghi). Khác danh tính là điều kiện để assertion "gọi bằng tx" có nghĩa: mock
+ * `$transaction` bằng `fn(prisma)` thì lệnh ghi bằng client gốc SAU commit cũng khớp.
+ */
+const TX = vi.hoisted(() => ({}) as Record<string, unknown>);
 vi.mock("@/lib/prisma", () => {
   const prisma = {
     user: { findUnique: vi.fn(), update: vi.fn() },
+    // Dòng user đọc DƯỚI khoá `FOR UPDATE` trong transaction.
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(),
   };
-  // Action ghi hash + đẩy mốc phiên trong CÙNG transaction ⇒ mock chạy callback với chính client
-  // này, nhờ vậy các assertion `prisma.user.update` bên dưới vẫn soi được lượt ghi.
-  prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
+  Object.assign(TX, { user: { update: prisma.user.update }, $queryRaw: prisma.$queryRaw });
+  prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(TX));
   return { prisma };
 });
 // Chỉ mock 2 HÀM băm; `MAX_PASSWORD_LENGTH` giữ giá trị THẬT (schema đọc hằng số này lúc dựng —
@@ -34,6 +57,8 @@ vi.mock("@/lib/login-lockout", () => ({
 }));
 
 import { changePassword } from "@/lib/actions/security";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
 import {
   getLockoutSecondsRemaining,
   recordFailedAttempt,
@@ -41,7 +66,7 @@ import {
 } from "@/lib/login-lockout";
 import { hashPassword, MAX_PASSWORD_LENGTH, verifyPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
-import { createSession, thuHoiMoiPhien } from "@/lib/session";
+import { createSession, thuHoiPhienCuaNguoi } from "@/lib/session";
 
 const USER = { id: "test-user", email: "owner@hogikids.test", passwordHash: "hash-current" };
 /** Khớp `khoaDoiMatKhau()` ở `@/lib/actions/security` — tách namespace khỏi bộ đếm màn đăng nhập. */
@@ -67,10 +92,28 @@ describe("changePassword", () => {
     vi.mocked(resetAttempts).mockReset();
     // Bộ đếm `$transaction` phải về 0 giữa các case — case "thành công" phía dưới cũng gọi nó.
     // `mockClear` chứ KHÔNG `mockReset`: ở đây chỉ cần xoá bộ đếm, còn implementation
-    // `async (fn) => fn(prisma)` khai trong factory là điều kiện sống của MỌI case chạm DB.
+    // `async (fn) => fn(TX)` khai trong factory là điều kiện sống của MỌI case chạm DB.
     vi.mocked(prisma.$transaction).mockClear();
-    vi.mocked(thuHoiMoiPhien).mockReset().mockResolvedValue(undefined);
+    vi.mocked(thuHoiPhienCuaNguoi).mockReset().mockResolvedValue("moc-moi");
     vi.mocked(createSession).mockReset().mockResolvedValue(undefined);
+    vi.mocked(prisma.$queryRaw)
+      .mockReset()
+      .mockResolvedValue([{ sessionEpoch: "moc-cu", mustChangePassword: false, isActive: true }] as never);
+    vi.mocked(congAction).mockClear();
+    vi.mocked(ghiNhatKy).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ghiNhatKyLoi).mockReset().mockResolvedValue(undefined);
+  });
+
+  it("cổng action từ chối ⇒ trả nguyên kết quả cổng, KHÔNG đụng DB", async () => {
+    vi.mocked(congAction).mockResolvedValueOnce({
+      ok: false,
+      error: "Phiên đăng nhập đã hết hạn — đăng nhập lại",
+      code: "CHUA_DANG_NHAP",
+    });
+    const r = await changePassword(form("cur1234a", "new123456789"));
+    expect(r).toMatchObject({ ok: false, code: "CHUA_DANG_NHAP" });
+    expect(congAction).toHaveBeenCalledWith(); // không đòi quyền module
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
   it("đang bị khoá (lockout) → chặn TRƯỚC verify, KHÔNG ghi DB", async () => {
@@ -91,6 +134,9 @@ describe("changePassword", () => {
     expect(recordFailedAttempt).toHaveBeenCalledWith(KHOA_LOCKOUT_USER);
     expect(recordFailedAttempt).not.toHaveBeenCalledWith(USER.email);
     expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(ghiNhatKyLoi).toHaveBeenCalledWith(
+      expect.objectContaining({ hanhDong: "DOI_MAT_KHAU", actor: { id: "test-user", email: USER.email } }),
+    );
   });
 
   it("mật khẩu mới TRÙNG mật khẩu hiện tại → từ chối, KHÔNG update", async () => {
@@ -119,6 +165,35 @@ describe("changePassword", () => {
     const r = await changePassword(form("cur1234a", "new123456789", "khac123456789"));
     expect(r).toMatchObject({ ok: false, field: "confirmPassword" });
     expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it("luật mật khẩu mới + thứ tự lỗi giữ nguyên: hiện tại trống báo trước; câu lỗi đúng từng chữ", async () => {
+    expect(await changePassword(form("", "short1a"))).toEqual({
+      ok: false,
+      error: "Vui lòng nhập mật khẩu hiện tại",
+      field: "currentPassword",
+    });
+    expect(await changePassword(form("cur1234a", "short1a"))).toEqual({
+      ok: false,
+      error: "Mật khẩu mới phải có ít nhất 12 ký tự",
+      field: "newPassword",
+    });
+    expect(await changePassword(form("cur1234a", "onlylettersnodigit"))).toEqual({
+      ok: false,
+      error: "Mật khẩu mới phải có cả chữ và số",
+      field: "newPassword",
+    });
+    expect(await changePassword(form("cur1234a", "new123456789", ""))).toEqual({
+      ok: false,
+      error: "Vui lòng nhập lại mật khẩu mới",
+      field: "confirmPassword",
+    });
+    expect(await changePassword(form("cur1234a", "new123456789", "khac123456789"))).toEqual({
+      ok: false,
+      error: "Mật khẩu xác nhận không khớp",
+      field: "confirmPassword",
+    });
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
   it("không tìm thấy user → trả lỗi, KHÔNG verify/update", async () => {
@@ -152,16 +227,56 @@ describe("changePassword", () => {
     expect(thuTuXoa).toBeLessThan(vi.mocked(createSession).mock.invocationCallOrder[0]);
   });
 
-  it("đẩy mốc phiên đi CÙNG transaction với lượt ghi hash", async () => {
+  it("đổi epoch + nhật ký đi CÙNG transaction với lượt ghi hash; cookie cấp từ epoch transaction trả ra", async () => {
     await changePassword(form("cur1234a", "brandnew1234"));
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    // Cùng một client ⇒ hai lệnh cùng sống hoặc cùng chết.
-    expect(vi.mocked(thuHoiMoiPhien)).toHaveBeenCalledWith(prisma);
+    // Cùng client TRANSACTION (không phải client gốc) ⇒ các lệnh cùng sống hoặc cùng chết.
+    expect(vi.mocked(thuHoiPhienCuaNguoi)).toHaveBeenCalledWith(TX, "test-user");
+    expect(ghiNhatKy).toHaveBeenCalledWith(TX, {
+      actor: { id: "test-user", email: "owner@hogikids.test" },
+      hanhDong: "DOI_MAT_KHAU",
+    });
+    expect(ghiNhatKy).not.toHaveBeenCalledWith(prisma, expect.anything());
+    expect(createSession).toHaveBeenCalledWith("test-user", true, "moc-moi");
+  });
+
+  it("epoch dưới khoá dòng LỆCH cookie đang gọi ⇒ TRANG_THAI_DA_DOI, không ghi hash, không cấp cookie", async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ sessionEpoch: "moc-da-doi", mustChangePassword: false, isActive: true }] as never);
+
+    const r = await changePassword(form("cur1234a", "brandnew1234"));
+
+    expect(r).toEqual({ ok: false, code: "TRANG_THAI_DA_DOI", error: "Trạng thái tài khoản đã đổi, đăng nhập lại" });
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(thuHoiPhienCuaNguoi).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+    expect(ghiNhatKyLoi).toHaveBeenCalledWith(
+      expect.objectContaining({ hanhDong: "DOI_MAT_KHAU", ghiChu: { lyDo: "TRANG_THAI_DA_DOI" } }),
+    );
+  });
+
+  it("chủ shop vừa bật 'phải đổi mật khẩu' (cờ dưới khoá dòng) ⇒ TRANG_THAI_DA_DOI", async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ sessionEpoch: "moc-cu", mustChangePassword: true, isActive: true }] as never);
+    const r = await changePassword(form("cur1234a", "brandnew1234"));
+    expect(r).toMatchObject({ ok: false, code: "TRANG_THAI_DA_DOI" });
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it("tài khoản đã bị khoá (isActive=false dưới khoá dòng) ⇒ TRANG_THAI_DA_DOI, không ghi hash", async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ sessionEpoch: "moc-cu", mustChangePassword: false, isActive: false }] as never);
+    const r = await changePassword(form("cur1234a", "brandnew1234"));
+    expect(r).toMatchObject({ ok: false, code: "TRANG_THAI_DA_DOI" });
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it("dòng user biến mất dưới khoá ⇒ TRANG_THAI_DA_DOI", async () => {
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([] as never);
+    const r = await changePassword(form("cur1234a", "brandnew1234"));
+    expect(r).toMatchObject({ ok: false, code: "TRANG_THAI_DA_DOI" });
   });
 
   it("đẩy mốc phiên LỖI → KHÔNG trả ok và KHÔNG cấp cookie mới", async () => {
-    vi.mocked(thuHoiMoiPhien).mockRejectedValueOnce(new Error("mất kết nối DB"));
+    vi.mocked(thuHoiPhienCuaNguoi).mockRejectedValueOnce(new Error("mất kết nối DB"));
 
     const r = await changePassword(form("cur1234a", "brandnew1234"));
 

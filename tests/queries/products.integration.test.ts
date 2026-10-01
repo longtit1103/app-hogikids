@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getProductListPage } from "@/lib/queries/products";
 import { prisma } from "@/lib/prisma";
 
+import { CHE, DAY, nhanhChe, nhanhDay } from "../helpers/nhanh-quyen-gia-von";
+
 /**
  * Integration test query GOM THEO PRODUCT (redesign /san-pham 2026-07-17) trên DB test.
  * Seed 3 sản phẩm (tên ASCII để ORDER BY name không phụ thuộc collation):
@@ -84,7 +86,7 @@ afterAll(async () => {
 
 describe("getProductListPage — KPI cấp sản phẩm", () => {
   it("đếm theo sản phẩm + giá trị tồn theo vốn", async () => {
-    const { kpi } = await getProductListPage({ page: 1 });
+    const { kpi } = nhanhDay(await getProductListPage({ page: 1 }, DAY));
     expect(kpi.totalProducts).toBe(3);
     expect(kpi.totalVariants).toBe(5);
     expect(kpi.missingCostProducts).toBe(2); // Pa (Va2=0), Pc (Vc1=0)
@@ -96,7 +98,7 @@ describe("getProductListPage — KPI cấp sản phẩm", () => {
 
 describe("getProductListPage — gom biến thể + aggregate", () => {
   it("mỗi sản phẩm 1 dòng, đúng thứ tự tên + aggregate", async () => {
-    const { products, total } = await getProductListPage({ page: 1 });
+    const { products, total } = nhanhDay(await getProductListPage({ page: 1 }, DAY));
     expect(total).toBe(3);
     expect(products.map((p) => p.name)).toEqual(["A San pham", "B San pham", "C San pham"]);
 
@@ -127,13 +129,13 @@ describe("getProductListPage — gom biến thể + aggregate", () => {
 
 describe("getProductListPage — filter + search", () => {
   it("lọc thiếu giá vốn (theo sản phẩm)", async () => {
-    const { products, total } = await getProductListPage({ page: 1, missingCost: true });
+    const { products, total } = nhanhDay(await getProductListPage({ page: 1, missingCost: true }, DAY));
     expect(total).toBe(2);
     expect(products.map((p) => p.name)).toEqual(["A San pham", "C San pham"]);
   });
 
   it("lọc sắp hết (theo sản phẩm)", async () => {
-    const { total } = await getProductListPage({ page: 1, lowOnly: true });
+    const { total } = nhanhDay(await getProductListPage({ page: 1, lowOnly: true }, DAY));
     expect(total).toBe(3);
   });
 
@@ -141,18 +143,37 @@ describe("getProductListPage — filter + search", () => {
     // Đây là tập HÀNH ĐỘNG ĐƯỢC: nhập giá vốn cho nó thì số P&L đổi ngay, khác với biến thể chưa
     // bán ngày nào (nhập cũng không đổi con số nào). Pa bán trong đơn COMPLETED ⇒ vào; Pc chỉ bán
     // trong đơn RETURNED ⇒ RA (đúng định nghĩa đơn hợp lệ của pnl.ts: ∉ {RETURNED, CANCELLED}).
-    const { products, total } = await getProductListPage({ page: 1, soldMissingCost: true });
+    const { products, total } = nhanhDay(await getProductListPage({ page: 1, soldMissingCost: true }, DAY));
     expect(total).toBe(1);
     expect(products.map((p) => p.name)).toEqual(["A San pham"]);
   });
 
   it("search theo tên sản phẩm", async () => {
-    const { products } = await getProductListPage({ page: 1, q: "b san" });
+    const { products } = nhanhDay(await getProductListPage({ page: 1, q: "b san" }, DAY));
     expect(products.map((p) => p.name)).toEqual(["B San pham"]);
   });
 
   it("search theo SKU biến thể vẫn hiện sản phẩm cha", async () => {
-    const { products } = await getProductListPage({ page: 1, q: "gp-b-2" });
+    const { products } = nhanhDay(await getProductListPage({ page: 1, q: "gp-b-2" }, DAY));
     expect(products.map((p) => p.name)).toEqual(["B San pham"]);
+  });
+});
+
+describe("getProductListPage — thiếu quyền giá vốn", () => {
+  it("không giá vốn/cờ thiếu giá vốn/giá trị tồn; aggregate tồn giữ nguyên", async () => {
+    const { products, total, kpi } = nhanhChe(await getProductListPage({ page: 1 }, CHE));
+    expect(total).toBe(3);
+    expect(kpi).toEqual({ totalProducts: 3, totalVariants: 5, lowStockProducts: 3 });
+    expect(products[0].totalStock).toBe(53);
+    for (const p of products) {
+      expect(p).not.toHaveProperty("uniformCost");
+      expect(p).not.toHaveProperty("hasMissingCost");
+      for (const v of p.variants) expect(v).not.toHaveProperty("costPrice");
+    }
+  });
+
+  it("bộ lọc theo giá vốn bị bỏ qua", async () => {
+    expect(nhanhChe(await getProductListPage({ page: 1, missingCost: true }, CHE)).total).toBe(3);
+    expect(nhanhChe(await getProductListPage({ page: 1, soldMissingCost: true }, CHE)).total).toBe(3);
   });
 });

@@ -75,7 +75,7 @@ test.describe("Sổ quỹ — nút Xuất Excel", () => {
 
     // ③ Bấm Xuất Excel ⇒ bắt sự kiện tải file.
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Xuất Excel" }).click();
+    await page.getByRole("link", { name: "Xuất Excel" }).click();
     const download = await downloadPromise;
 
     // ④ Tên file đúng khuôn `hogikids-so-quy-<yyyy-MM>.xlsx`.

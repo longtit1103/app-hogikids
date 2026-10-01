@@ -12,17 +12,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * Suite này tái hiện đúng kịch bản đó và chốt: A KHÔNG chạy thêm một lệnh pg client nào, và A trả
  * 409 với câu nói rõ nguyên nhân.
  *
- * `runPgDump` + `runRestore` là HAI CỬA DUY NHẤT ra pg client của route (`route.ts` không import gì
- * khác chạy `execFile`; các lời gọi còn lại là Prisma và đều đã bị mock ở đây), nên đếm 2 mock này
- * = 0 chính là "không có lệnh PostgreSQL nào chạy".
+ * `runPgDump` + `runRestore` là HAI CỬA DUY NHẤT ra pg client NỐI DB của route (`route.ts` không
+ * import gì khác chạy `execFile` vào DB; `kiemDumCoM1` chỉ đọc FILE bằng `pg_restore -f -`, chạy
+ * TRƯỚC khi giành khoá và bị mock no-op ở đây; các lời gọi còn lại là Prisma và đều đã bị mock), nên
+ * đếm 2 mock này = 0 chính là "không có lệnh PostgreSQL nào chạy vào DB".
  *
  * Đồng hồ giả bằng cách chặn `performance.now()` — cờ đo tuổi bằng đồng hồ ĐƠN ĐIỆU nên
  * `vi.setSystemTime` vô tác dụng.
  */
 vi.mock("@/lib/session", () => ({
-  getAuthenticatedUserId: vi.fn(async () => "test-user"),
-  thuHoiMoiPhien: vi.fn(async () => undefined),
+  thuHoiMoiPhienMoiNguoi: vi.fn(async () => undefined),
 }));
+
+// Route gác bằng `congChuShopRoute()` — chủ shop giả, không cần cookie/DB.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (importActual) => {
+  const that = await importActual<typeof import("@/lib/quyen/nguoi-dung-phien")>();
+  const { nguoiDungGia } = await import("../../helpers/nguoi-dung-gia");
+  return { ...that, docNguoiDungPhien: vi.fn(async () => nguoiDungGia()) };
+});
 
 // Bước đẩy mốc phiên sau khi nạp — mock để không đụng DB, và để mô phỏng ca nó chạy lâu rồi mới về.
 vi.mock("@/lib/backup/thu-hoi-phien-co-han", () => ({
@@ -57,6 +64,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 // gọi chúng TRƯỚC khi giành khoá.
 vi.mock("@/lib/backup/run-restore", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/backup/run-restore")>()),
+  // Cổng M1 sớm của route đọc file thật bằng `pg_restore`; dump giả ở đây không phải dump thật ⇒
+  // cho qua (cổng có suite riêng: `restore-chan-dump-truoc-phan-quyen.integration.test.ts`).
+  kiemDumCoM1: vi.fn(async () => undefined),
   runRestore: vi.fn(async () => ({ format: "custom" as const })),
 }));
 
@@ -67,7 +77,8 @@ import { runPgDump } from "@/lib/backup/run-pg-dump";
 import { runRestore } from "@/lib/backup/run-restore";
 import { thuHoiMoiPhienCoHan } from "@/lib/backup/thu-hoi-phien-co-han";
 import { coLuotDangChay } from "@/lib/ingest/sync-log";
-import { getAuthenticatedUserId } from "@/lib/session";
+import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
+import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { donKhoaPhucHoi } from "../../helpers/khoa-bao-tri-reset";
 
 /** Request multipart mang một file `.dump` hợp lệ ở mức magic (`PGDMP`). */
@@ -98,7 +109,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   // Dựng lại hành vi mặc định cho MỌI mock ở đầu mỗi ca — không dựa vào việc `restoreAllMocks()`
   // có đụng tới `vi.fn()` hay không (hành vi này đã đổi giữa các đời vitest).
-  vi.mocked(getAuthenticatedUserId).mockReset().mockResolvedValue("test-user");
+  vi.mocked(docNguoiDungPhien).mockReset().mockResolvedValue(nguoiDungGia());
   vi.mocked(thuHoiMoiPhienCoHan).mockReset().mockResolvedValue(undefined);
   vi.mocked(coLuotDangChay).mockReset().mockResolvedValue(false);
   vi.mocked(runPgDump).mockReset().mockResolvedValue(Buffer.from("PGDMP-ban-lui-gia"));

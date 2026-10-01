@@ -76,6 +76,7 @@ export function SoQuyCard({
   loans,
   tietKiem,
   viTiktok = null,
+  choPhepNhapQuy = false,
 }: {
   soQuy: SoQuyThangDayDu;
   isCurrentMonth: boolean;
@@ -86,21 +87,34 @@ export function SoQuyCard({
   tietKiem: TietKiemQuy | null;
   /** Ô thông tin "Còn ở ví TikTok" — KHÔNG thuộc số quỹ; `null` ⇒ ẩn ô. */
   viTiktok?: ViTiktokConLaiHienThi | null;
+  /**
+   * Hiện nút "+ Nhập quỹ" lúc chưa mở sổ (server tính: `tai-chinh-so-quy:sua` ∧ `tai-chinh-dong-tien:sua`
+   * — nút ghi một `CashMovement`, action đòi quyền dòng tiền). Thiếu/false ⇒ chỉ câu thông báo.
+   */
+  choPhepNhapQuy?: boolean;
 }) {
   if (soQuy.d0 === null) {
     return (
       <div className="rounded-xl border border-hairline p-4">
         <p className="text-sm text-muted-foreground">Quỹ còn lại</p>
-        <p className="mt-2 text-sm text-ink">
-          Chưa mở sổ quỹ. Bấm &quot;+ Nhập quỹ&quot; để ghi số tiền đang có (góp vốn) hoặc khoản vay
-          — quỹ sẽ tính từ ngày đó.
-        </p>
-        <div className="mt-3">
-          {/* `d0 === null` = chưa có dòng `CashMovement` nào trong sổ. Mà tạo sổ tiết kiệm LUÔN
-              sinh một dòng gửi, nên ở nhánh này chắc chắn chưa có sổ nào — mảng rỗng là sự thật,
-              không phải chỗ trống điền cho qua. */}
-          <CashMovementAddButton loans={loans} soTietKiem={[]} d0={null} />
-        </div>
+        {choPhepNhapQuy ? (
+          <p className="mt-2 text-sm text-ink">
+            Chưa mở sổ quỹ. Bấm &quot;+ Nhập quỹ&quot; để ghi số tiền đang có (góp vốn) hoặc khoản vay
+            — quỹ sẽ tính từ ngày đó.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-ink">Chưa mở sổ quỹ.</p>
+        )}
+        {choPhepNhapQuy && (
+          <div className="mt-3">
+            {/* `d0 === null` = chưa có dòng `CashMovement` nào trong sổ. Mà tạo sổ tiết kiệm LUÔN
+                sinh một dòng gửi, nên ở nhánh này chắc chắn chưa có sổ nào — mảng rỗng là sự thật,
+                không phải chỗ trống điền cho qua. */}
+            {/* `choPhepNhapQuy` đã gồm `tai-chinh-so-quy:sua` (khối Quỹ ghép cùng quyền Dòng tiền) ⇒
+                form được liệt kê cả loại gắn khoản vay. */}
+            <CashMovementAddButton loans={loans} soTietKiem={[]} d0={null} choPhepLoaiSoQuy={choPhepNhapQuy} />
+          </div>
+        )}
       </div>
     );
   }

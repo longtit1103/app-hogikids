@@ -7,7 +7,8 @@ import { DateRangePicker } from "./date-range-picker";
 import { getPageTitle } from "./nav-config";
 import { SyncNowButton } from "./sync-now-button";
 
-export function Topbar() {
+/** `choPhepDongBo` = `cai-dat:sua` (layout tính ở server, truyền boolean qua `ShellChrome`). */
+export function Topbar({ choPhepDongBo = false }: { choPhepDongBo?: boolean }) {
   const pathname = usePathname();
   const title = getPageTitle(pathname);
 
@@ -30,7 +31,7 @@ export function Topbar() {
         <OrdersTopbarDateFilter />
       </div>
 
-      <SyncNowButton trongTopbar />
+      <SyncNowButton trongTopbar choPhepDongBo={choPhepDongBo} />
     </header>
   );
 }

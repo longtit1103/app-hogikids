@@ -1,13 +1,17 @@
+import { randomBytes } from "node:crypto";
+
 import { cookies } from "next/headers";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { getIronSession, sealData, type SessionOptions } from "iron-session";
-import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
 
 export type SessionData = {
   userId?: string;
-  /** Mốc phiên lúc đăng nhập — lệch mốc hiện hành ⇒ cookie đã bị thu hồi (xem `docMocPhien`). */
+  /**
+   * Epoch phiên của lượt xác thực đã cấp cookie — lệch `User.sessionEpoch` HIỆN TẠI của đúng người đó
+   * ⇒ cookie đã bị thu hồi (xem `kiemPhien` ở `@/lib/quyen/nguoi-dung-phien`).
+   */
   mocPhien?: string;
   /** Người dùng có tick "Ghi nhớ đăng nhập" không — để cấp lại cookie đúng loại sau khi đổi mật khẩu. */
   ghiNho?: boolean;
@@ -18,43 +22,49 @@ const REMEMBER_ME_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 ngày
 /** TTL phía server cho phiên "không ghi nhớ" — xem ghi chú dài ở nhánh `remember === false` của `createSession`. */
 const NOT_REMEMBERED_TTL_SECONDS = 60 * 60 * 24; // 24 giờ
 
-/** Khoá `Setting` giữ mốc phiên. "0" = chưa từng thu hồi phiên nào. */
-const KHOA_MOC_PHIEN = "sessionEpoch";
-const MOC_PHIEN_MAC_DINH = "0";
-
-/**
- * Mốc phiên hiện hành. Cookie mang mốc KHÁC mốc này bị coi như chưa đăng nhập.
- *
- * Vì sao cần: iron-session là cookie KÝ, không có bản ghi phiên phía máy chủ — đổi mật khẩu xong
- * thì cookie "ghi nhớ đăng nhập" 30 ngày trên MỌI thiết bị khác VẪN vào được, đúng lúc chủ shop
- * đổi mật khẩu vì nghi bị lộ. Một dòng `Setting` là đủ làm điểm thu hồi mà KHÔNG phải đổi schema
- * Prisma (hợp đồng) — lượt xoá dữ liệu giao dịch cũng cố ý giữ nguyên bảng `Setting`.
- *
- * Thiếu dòng ⇒ mốc "0", mà cookie đời cũ (chưa có trường `mocPhien`) cũng quy về "0" ⇒ nâng cấp
- * bản này KHÔNG đá ai ra khỏi phiên đang dùng; thu hồi chỉ bắt đầu từ lần đổi mật khẩu đầu tiên.
- */
-export async function docMocPhien(): Promise<string> {
-  const row = await prisma.setting.findUnique({ where: { key: KHOA_MOC_PHIEN } });
-  return row?.value ?? MOC_PHIEN_MAC_DINH;
-}
-
-/** Client Prisma thường HOẶC client trong `$transaction` — đổi mật khẩu đẩy mốc phiên cùng lượt ghi hash. */
+/** Client Prisma thường HOẶC client trong `$transaction` — thu hồi phiên đi cùng lượt ghi của người gọi. */
 export type ClientPhien = PrismaClient | Prisma.TransactionClient;
 
 /**
- * Đẩy mốc phiên sang giá trị mới ⇒ mọi cookie đã cấp trước đó hết hiệu lực.
- *
- * Nhận `db` để người gọi ghép được vào transaction của mình. Đổi mật khẩu PHẢI làm vậy: hash mới
- * đã COMMIT mà mốc phiên chưa đẩy thì cookie "ghi nhớ 30 ngày" trên máy khác vẫn vào được — đúng
- * cánh cửa hàm này sinh ra để khoá.
+ * CHỈ client bên trong `$transaction`. `PrismaClient` gốc gán được sang `Prisma.TransactionClient` (thừa
+ * thuộc tính vẫn khớp kiểu cấu trúc), nên phải chặn thêm `$transaction`: client gốc có, client tx không.
  */
-export async function thuHoiMoiPhien(db: ClientPhien = prisma): Promise<void> {
-  const moc = Date.now().toString();
-  await db.setting.upsert({
-    where: { key: KHOA_MOC_PHIEN },
-    create: { key: KHOA_MOC_PHIEN, value: moc },
-    update: { value: moc },
-  });
+export type ClientTrongTransaction = Prisma.TransactionClient & { $transaction?: never };
+
+/**
+ * Epoch phiên mới: 16 byte ngẫu nhiên MẬT MÃ, 32 hex. KHÔNG dùng mốc thời gian — epoch đoán được thì
+ * ai có cookie cũ ký bằng secret thật (vd lấy từ bản backup) chỉ cần đoán đúng mốc là hồi sinh phiên.
+ */
+export function sinhMocPhien(): string {
+  return randomBytes(16).toString("hex");
+}
+
+/**
+ * Thu hồi mọi phiên của MỘT người (đổi mật khẩu, khoá, đặt lại mật khẩu): ghi epoch mới vào đúng dòng
+ * `User` đó, trả epoch ra để người gọi cấp lại cookie cho thiết bị đang thao tác.
+ *
+ * CHỈ nhận client TRANSACTION (kiểu chặn client gốc lúc biên dịch): đổi epoch phải cùng transaction
+ * với lượt ghi hash/khoá của người gọi. Tách ra hai lượt commit là mở khe: hash mới đã COMMIT mà
+ * epoch chưa đổi thì cookie "ghi nhớ 30 ngày" trên máy khác vẫn vào được; epoch đổi TRƯỚC mà hash
+ * đổi SAU thì một lượt `login` chen giữa đọc được "epoch mới + hash cũ" ⇒ cookie hợp lệ bằng mật
+ * khẩu CŨ. Người khác KHÔNG bị ảnh hưởng (không còn epoch toàn cục).
+ */
+export async function thuHoiPhienCuaNguoi(db: ClientTrongTransaction, userId: string): Promise<string> {
+  const moc = sinhMocPhien();
+  await db.user.update({ where: { id: userId }, data: { sessionEpoch: moc } });
+  return moc;
+}
+
+/**
+ * Thu hồi phiên của MỌI người — dùng sau phục hồi DB (bản backup mang epoch cũ, cookie cũ có thể khớp
+ * lại). Mỗi dòng một epoch ngẫu nhiên riêng, sinh TRONG SQL: `gen_random_uuid()` là hàm LÕI Postgres
+ * ≥ 13 (nguồn `pg_strong_random`, 122 bit) — cố ý KHÔNG dùng `gen_random_bytes()` (thuộc extension
+ * `pgcrypto`, role app không tạo được extension và `search_path` không có schema `extensions`). Bỏ dấu
+ * `-` còn đúng 32 hex, cùng dạng với `sinhMocPhien()`. Không có đường dự phòng: thiếu hàm là lỗi hạ
+ * tầng phải thấy ngay (test preflight `tests/phien/sinh-moc-phien.test.ts`), không lặng lẽ hạ cấp.
+ */
+export async function thuHoiMoiPhienMoiNguoi(db: ClientPhien = prisma): Promise<void> {
+  await db.$executeRaw`UPDATE "User" SET "sessionEpoch" = replace(gen_random_uuid()::text, '-', '')`;
 }
 
 /**
@@ -129,14 +139,17 @@ export async function getSession() {
 }
 
 /**
- * Creates a logged-in session for `userId`. MUST be called from a Server
- * Action or Route Handler (it writes a Set-Cookie). `remember` controls
- * lifetime: `true` persists the cookie for 30 days; `false` produces a real
- * browser session cookie (no Max-Age attribute) that clears when the browser
- * closes — matching the "Ghi nhớ đăng nhập" checkbox semantics.
+ * Cấp cookie phiên cho `userId` với epoch CỦA LƯỢT XÁC THỰC (`mocPhien`) — KHÔNG đọc DB. Epoch phải
+ * đến từ đúng lượt đọc đã so hash (đăng nhập) hoặc từ transaction vừa thu hồi (đổi mật khẩu): một
+ * lượt reset/khoá chen vào giữa lúc xác thực và lúc cấp cookie thì cookie mang epoch cũ ⇒ request kế
+ * tiếp bị từ chối. Đọc lại epoch ở đây sẽ "rửa" cookie thành hợp lệ — đúng khe đua cần đóng.
+ *
+ * MUST be called from a Server Action or Route Handler (it writes a Set-Cookie). `remember` controls
+ * lifetime: `true` persists the cookie for 30 days; `false` produces a real browser session cookie
+ * (no Max-Age attribute) that clears when the browser closes — matching the "Ghi nhớ đăng nhập"
+ * checkbox semantics.
  */
-export async function createSession(userId: string, remember: boolean): Promise<void> {
-  const mocPhien = await docMocPhien();
+export async function createSession(userId: string, remember: boolean, mocPhien: string): Promise<void> {
   const cookieStore = await cookies();
   const data: SessionData = { userId, mocPhien, ghiNho: remember };
 
@@ -190,35 +203,8 @@ export async function destroySession(): Promise<void> {
   session.destroy();
 }
 
-/**
- * `userId` của phiên ĐANG CÒN HIỆU LỰC, hoặc `null`.
- *
- * Khác `getSession()` (chỉ mở cookie): hàm này còn đối chiếu mốc phiên trong cookie với mốc hiện
- * hành, nên cookie cấp trước lần đổi mật khẩu gần nhất sẽ bị từ chối. MỌI chỗ quyết định "đã đăng
- * nhập chưa" phải đi qua đây — bỏ sót một chỗ là mở lại đúng cánh cửa vừa khoá.
- */
-export async function getAuthenticatedUserId(): Promise<string | null> {
-  const session = await getSession();
-  if (!session.userId) return null;
-  const mocHienHanh = await docMocPhien();
-  if ((session.mocPhien ?? MOC_PHIEN_MAC_DINH) !== mocHienHanh) return null;
-  return session.userId;
-}
-
 /** Lựa chọn "Ghi nhớ đăng nhập" của phiên hiện tại (để cấp lại cookie đúng loại sau khi đổi mật khẩu). */
 export async function docGhiNhoCuaPhien(): Promise<boolean> {
   const session = await getSession();
   return session.ghiNho === true;
-}
-
-/**
- * Guards a page: redirects to `/dang-nhap?redirect=<currentPath>` when there
- * is no authenticated user. Returns the authenticated `userId` otherwise.
- */
-export async function requireUser(currentPath = "/"): Promise<string> {
-  const userId = await getAuthenticatedUserId();
-  if (!userId) {
-    redirect(`/dang-nhap?redirect=${encodeURIComponent(currentPath)}`);
-  }
-  return userId;
 }

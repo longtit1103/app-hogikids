@@ -52,7 +52,16 @@ function NhacThangTruoc({ thang }: { thang: Date | null }) {
   );
 }
 
-export function SoDuChotThangCard({ doiChieu, isCurrentMonth }: { doiChieu: DoiChieuSoDuChot; isCurrentMonth: boolean }) {
+export function SoDuChotThangCard({
+  doiChieu,
+  isCurrentMonth,
+  choPhepSua = false,
+}: {
+  doiChieu: DoiChieuSoDuChot;
+  isCurrentMonth: boolean;
+  /** Có `tai-chinh-dong-tien:sua` (server tính) — thiếu/false ⇒ không nút Chốt/Sửa/Xoá (action vẫn tự chặn). */
+  choPhepSua?: boolean;
+}) {
   const thangNhan = format(doiChieu.thang, "MM/yyyy");
   const { cauTruc } = doiChieu;
 
@@ -93,7 +102,9 @@ export function SoDuChotThangCard({ doiChieu, isCurrentMonth }: { doiChieu: DoiC
               với sổ — cách duy nhất bắt được khoản ghi thiếu/ghi thừa.
             </p>
           </div>
-          <SoDuChotThangButton thangIso={thangIso} thangNhan={thangNhan} chot={null} cauTruc={cauTruc} />
+          {choPhepSua && (
+            <SoDuChotThangButton thangIso={thangIso} thangNhan={thangNhan} chot={null} cauTruc={cauTruc} />
+          )}
         </div>
         <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
           {isCurrentMonth && <p>Tháng này chưa hết — chốt vào ngày cuối tháng mới so đúng.</p>}
@@ -120,7 +131,9 @@ export function SoDuChotThangCard({ doiChieu, isCurrentMonth }: { doiChieu: DoiC
             {cau.giaiThich}
           </p>
         </div>
-        <SoDuChotThangButton thangIso={thangIso} thangNhan={thangNhan} chot={chot} cauTruc={cauTruc} />
+        {choPhepSua && (
+          <SoDuChotThangButton thangIso={thangIso} thangNhan={thangNhan} chot={chot} cauTruc={cauTruc} />
+        )}
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">

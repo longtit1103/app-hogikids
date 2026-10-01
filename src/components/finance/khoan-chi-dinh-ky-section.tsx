@@ -16,7 +16,14 @@ import { thangChoBatLai } from "@/lib/expenses/thang-cho-bat-lai";
  * Server component: tháng bật lại và nhãn mốc được format Ở ĐÂY (container giờ VN), không ở client.
  * Mặc định GẤP (`<details>` không `open`) — tra cứu phụ, không phải luồng chính của sổ chi phí.
  */
-export function KhoanChiDinhKySection({ items }: { items: RecurringExpenseRow[] }) {
+export function KhoanChiDinhKySection({
+  items,
+  choPhepSua = false,
+}: {
+  items: RecurringExpenseRow[];
+  /** Có `chi-phi:sua` (server tính). Thiếu/false ⇒ không nút "Bật lại" (action vẫn tự chặn). */
+  choPhepSua?: boolean;
+}) {
   if (items.length === 0) return null;
 
   const soDangChay = items.filter((i) => i.active).length;
@@ -63,7 +70,7 @@ export function KhoanChiDinhKySection({ items }: { items: RecurringExpenseRow[] 
                   </Badge>
                 </td>
                 <td className="py-1.5 text-right">
-                  {!item.active && (
+                  {choPhepSua && !item.active && (
                     <NutBatLaiKhoanChiDinhKy
                       recurringId={item.id}
                       description={item.description}

@@ -4,64 +4,47 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 
-import { ProductReportRow } from "@/components/bao-cao/product-report-row";
+import { ProductReportRow, type GiaVonDongSanPham } from "@/components/bao-cao/product-report-row";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { ProductReportRow as ProductReportRowData } from "@/lib/reports/product-report";
+import type { ProductReport, ProductReportRowChe } from "@/lib/reports/product-report";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
 const ALL_CHANNELS = "__all__";
 
 type SubTab = "ban_chay" | "cham_ban" | "lai_gop";
-const SUB_TABS: { key: SubTab; label: string }[] = [
+const SUB_TABS: { key: SubTab; label: string; canGiaVon?: true }[] = [
   { key: "ban_chay", label: "Bán chạy" },
   { key: "cham_ban", label: "Chậm bán" },
-  { key: "lai_gop", label: "Lãi gộp theo SP" },
+  { key: "lai_gop", label: "Lãi gộp theo SP", canGiaVon: true },
 ];
 
-/**
- * Sheet Excel dùng CHUNG shape với bảng trên màn (2 sheet: "Sản phẩm" mức SP,
- * "SKU" mức biến thể) — luôn xuất TOÀN BỘ `rows` theo range toàn cục hiện tại
- * (không theo sub-tab/tìm kiếm đang lọc trên màn — khớp "Xuất Excel theo TAB
- * đang mở", không phải theo bộ lọc con nhất thời).
- */
-export function buildProductSheetRows(rows: ProductReportRowData[]) {
-  const productRows = rows.map((r) => ({
-    "Sản phẩm": r.name,
-    "SL bán": r.soldQty,
-    "Doanh thu": r.revenue,
-    COGS: r.cogs,
-    "LN gộp": r.grossProfit,
-    "Biên %": r.marginPct === null ? "" : Math.round(r.marginPct * 10) / 10,
-    Tồn: r.currentStock,
+type Dong = { row: ProductReportRowChe; giaVon: GiaVonDongSanPham | null };
+
+/** Narrow union MỘT lần — nhánh che không có COGS/lãi nào để tách. */
+function ghepGiaVon(bang: ProductReport): Dong[] {
+  if (!bang.coQuyenGiaVon) return bang.rows.map((row) => ({ row, giaVon: null }));
+  return bang.rows.map((row) => ({
+    row,
+    giaVon: {
+      cogs: row.cogs,
+      grossProfit: row.grossProfit,
+      marginPct: row.marginPct,
+      skus: row.skus.map((s) => ({ cogs: s.cogs, grossProfit: s.grossProfit })),
+    },
   }));
-  const skuRows = rows.flatMap((r) =>
-    r.skus.map((s) => ({
-      "Sản phẩm": r.name,
-      SKU: s.sku,
-      "Biến thể": s.label,
-      "SL bán": s.soldQty,
-      "Doanh thu": s.revenue,
-      COGS: s.cogs,
-      "LN gộp": s.grossProfit,
-      Tồn: s.currentStock,
-    }))
-  );
-  return [
-    { name: "Sản phẩm", rows: productRows },
-    { name: "SKU", rows: skuRows },
-  ];
 }
 
+/** Thiếu quyền giá vốn: không cột COGS/LN gộp/Biên, không sub-tab "Lãi gộp theo SP" (dữ liệu che từ server). */
 export function ProductReportTab({
-  rows,
+  bang,
   channels,
   slowSellerMaxOrders,
 }: {
-  rows: ProductReportRowData[];
+  bang: ProductReport;
   channels: { id: string; name: string; color: string }[];
   slowSellerMaxOrders: number;
 }) {
@@ -75,6 +58,9 @@ export function ProductReportTab({
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  const coGiaVon = bang.coQuyenGiaVon;
+  const dong = useMemo(() => ghepGiaVon(bang), [bang]);
+  const subTabs = SUB_TABS.filter((t) => coGiaVon || !t.canGiaVon);
   const filterProductId = searchParams.get("sp") ?? undefined;
   const selectedChannel = searchParams.get("kenh") ?? undefined;
 
@@ -87,7 +73,7 @@ export function ProductReportTab({
 
   useEffect(() => {
     setPage(1);
-  }, [subTab, q, filterProductId, rows]);
+  }, [subTab, q, filterProductId, dong]);
 
   function setUrlParam(key: string, value: string | undefined) {
     const params = new URLSearchParams(searchParams);
@@ -105,27 +91,33 @@ export function ProductReportTab({
     });
   }
 
-  const filteredProductName = filterProductId ? rows.find((r) => r.productId === filterProductId)?.name : undefined;
+  const filteredProductName = filterProductId
+    ? dong.find((d) => d.row.productId === filterProductId)?.row.name
+    : undefined;
 
   const baseRows = useMemo(() => {
-    let list = rows;
-    if (filterProductId) list = list.filter((r) => r.productId === filterProductId);
+    let list = dong;
+    if (filterProductId) list = list.filter((d) => d.row.productId === filterProductId);
     if (q) {
       list = list.filter(
-        (r) => r.name.toLowerCase().includes(q) || r.skus.some((s) => s.sku.toLowerCase().includes(q))
+        (d) => d.row.name.toLowerCase().includes(q) || d.row.skus.some((s) => s.sku.toLowerCase().includes(q))
       );
     }
     return list;
-  }, [rows, filterProductId, q]);
+  }, [dong, filterProductId, q]);
 
   const sortedRows = useMemo(() => {
     const list = [...baseRows];
-    if (subTab === "ban_chay") return list.sort((a, b) => b.revenue - a.revenue);
     if (subTab === "cham_ban") {
-      return list.filter((r) => r.orderCount <= slowSellerMaxOrders).sort((a, b) => b.currentStock - a.currentStock);
+      return list
+        .filter((d) => d.row.orderCount <= slowSellerMaxOrders)
+        .sort((a, b) => b.row.currentStock - a.row.currentStock);
     }
-    return list.sort((a, b) => b.grossProfit - a.grossProfit);
-  }, [baseRows, subTab, slowSellerMaxOrders]);
+    if (subTab === "lai_gop" && coGiaVon) {
+      return list.sort((a, b) => (b.giaVon?.grossProfit ?? 0) - (a.giaVon?.grossProfit ?? 0));
+    }
+    return list.sort((a, b) => b.row.revenue - a.row.revenue);
+  }, [baseRows, subTab, slowSellerMaxOrders, coGiaVon]);
 
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
   const pageRows = sortedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -133,7 +125,7 @@ export function ProductReportTab({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2 print:hidden">
-        {SUB_TABS.map((t) => (
+        {subTabs.map((t) => (
           <button
             key={t.key}
             type="button"
@@ -193,17 +185,18 @@ export function ProductReportTab({
                 <TableHead>Sản phẩm</TableHead>
                 <TableHead className="text-right">SL bán</TableHead>
                 <TableHead className="text-right">Doanh thu</TableHead>
-                <TableHead className="text-right">COGS</TableHead>
-                <TableHead className="text-right">LN gộp</TableHead>
-                <TableHead className="text-right">Biên %</TableHead>
+                {coGiaVon && <TableHead className="text-right">COGS</TableHead>}
+                {coGiaVon && <TableHead className="text-right">LN gộp</TableHead>}
+                {coGiaVon && <TableHead className="text-right">Biên %</TableHead>}
                 <TableHead className="text-right">Tồn</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pageRows.map((r) => (
+              {pageRows.map(({ row: r, giaVon }) => (
                 <ProductReportRow
                   key={r.productId}
                   row={r}
+                  giaVon={giaVon}
                   expanded={expanded.has(r.productId)}
                   onToggle={() => toggleExpanded(r.productId)}
                 />

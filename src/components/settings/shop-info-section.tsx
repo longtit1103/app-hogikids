@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { updateShopInfo } from "@/lib/actions/settings-shop-info";
+import type { ShopProfileDto } from "@/lib/shop-profile/doc-shop-profile";
 import { useUnsavedGuard } from "./use-unsaved-guard";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024; // 2MB — client-check nhanh; server (settings-shop-info.ts) validate lại, không tin cái này
@@ -37,11 +38,7 @@ export function ShopInfoSection({
   shopName: initialShopName,
   shopPhone: initialShopPhone,
   shopLogoPath,
-}: {
-  shopName: string;
-  shopPhone: string | null;
-  shopLogoPath: string | null;
-}) {
+}: ShopProfileDto) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 

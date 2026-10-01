@@ -4,10 +4,13 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
+import { kiemQuyenXemGiaVon } from "@/lib/actions/cong-gia-von";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import type { CostImportRow } from "@/lib/import/cost-excel";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { congAction } from "@/lib/quyen/cong-action";
 
 const money = z.coerce.number().int().min(0).max(1_000_000_000);
 const thresholdValue = z.coerce.number().int().min(0).max(1_000_000);
@@ -36,12 +39,22 @@ function revalidateViews(): void {
 }
 
 export async function updateVariantCost(variantId: string, costPrice: number): Promise<ActionResult> {
-  await requireUser();
+  const cong = await congAction("san-pham:sua");
+  if (!cong.ok) return cong;
+  const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
+  if (!giaVon.ok) return giaVon;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
   const parsed = money.safeParse(costPrice);
   if (!parsed.success) return { ok: false, error: "Giá vốn không hợp lệ", field: "costPrice" };
   try {
-    await prisma.variant.update({ where: { id: variantId }, data: { costPrice: parsed.data } });
+    await prisma.$transaction(async (tx) => {
+      await tx.variant.update({ where: { id: variantId }, data: { costPrice: parsed.data } });
+      await ghiNhatKy(tx, {
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.GIA_VON_SUA,
+        doiTuong: { loai: "Variant", id: variantId },
+      });
+    });
     revalidateViews();
     return { ok: true, data: undefined };
   } catch {
@@ -51,12 +64,21 @@ export async function updateVariantCost(variantId: string, costPrice: number): P
 
 /** threshold = null → dùng ngưỡng mặc định (Setting). */
 export async function updateVariantThreshold(variantId: string, threshold: number | null): Promise<ActionResult> {
-  await requireUser();
+  // Ngưỡng tồn không phải dữ liệu giá vốn ⇒ chỉ cần `san-pham:sua` (không kèm quyền xem giá vốn).
+  const cong = await congAction("san-pham:sua");
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
   const parsed = thresholdValue.nullable().safeParse(threshold);
   if (!parsed.success) return { ok: false, error: "Ngưỡng không hợp lệ", field: "threshold" };
   try {
-    await prisma.variant.update({ where: { id: variantId }, data: { lowStockThreshold: parsed.data } });
+    await prisma.$transaction(async (tx) => {
+      await tx.variant.update({ where: { id: variantId }, data: { lowStockThreshold: parsed.data } });
+      await ghiNhatKy(tx, {
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.NGUONG_TON_SUA,
+        doiTuong: { loai: "Variant", id: variantId },
+      });
+    });
     revalidateViews();
     return { ok: true, data: undefined };
   } catch {
@@ -73,12 +95,27 @@ export async function updateProductCost(
   productId: string,
   costPrice: number,
 ): Promise<ActionResult<{ updated: number }>> {
-  await requireUser();
+  const cong = await congAction("san-pham:sua");
+  if (!cong.ok) return cong;
+  const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
+  if (!giaVon.ok) return giaVon;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
   const parsed = money.safeParse(costPrice);
   if (!parsed.success) return { ok: false, error: "Giá vốn không hợp lệ", field: "costPrice" };
   try {
-    const { count } = await prisma.variant.updateMany({ where: { productId }, data: { costPrice: parsed.data } });
+    const count = await prisma.$transaction(async (tx) => {
+      const { count: n } = await tx.variant.updateMany({ where: { productId }, data: { costPrice: parsed.data } });
+      // Không dòng nào đổi ⇒ không có thao tác nào để ghi nhật ký.
+      if (n > 0) {
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.GIA_VON_SUA,
+          doiTuong: { loai: "Product", id: productId },
+          ghiChu: { soDong: n },
+        });
+      }
+      return n;
+    });
     // count=0 = sản phẩm không có biến thể nào (vd đã bị gỡ khi đồng bộ) → báo lỗi, tránh "thành công ảo".
     if (count === 0) return { ok: false, error: "Không tìm thấy biến thể để áp giá vốn" };
     revalidateViews();
@@ -94,14 +131,27 @@ export async function updateProductThreshold(
   productId: string,
   threshold: number | null,
 ): Promise<ActionResult<{ updated: number }>> {
-  await requireUser();
+  // Ngưỡng tồn không phải dữ liệu giá vốn ⇒ chỉ cần `san-pham:sua` (không kèm quyền xem giá vốn).
+  const cong = await congAction("san-pham:sua");
+  if (!cong.ok) return cong;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
   const parsed = thresholdValue.nullable().safeParse(threshold);
   if (!parsed.success) return { ok: false, error: "Ngưỡng không hợp lệ", field: "threshold" };
   try {
-    const { count } = await prisma.variant.updateMany({
-      where: { productId },
-      data: { lowStockThreshold: parsed.data },
+    const count = await prisma.$transaction(async (tx) => {
+      const { count: n } = await tx.variant.updateMany({
+        where: { productId },
+        data: { lowStockThreshold: parsed.data },
+      });
+      if (n > 0) {
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.NGUONG_TON_SUA,
+          doiTuong: { loai: "Product", id: productId },
+          ghiChu: { soDong: n },
+        });
+      }
+      return n;
     });
     if (count === 0) return { ok: false, error: "Không tìm thấy biến thể để áp ngưỡng" };
     revalidateViews();
@@ -114,7 +164,11 @@ export async function updateProductThreshold(
 
 /** Preview đọc-only: nhóm variant theo sku → OK/MULTI (>1)/NOT_FOUND (0). */
 export async function previewCostImport(rows: CostImportRow[]): Promise<ActionResult<{ diffs: CostDiff[] }>> {
-  await requireUser();
+  // Bảng so sánh trả giá vốn ĐANG CÓ ⇒ cùng cổng với lượt ghi (sửa + xem giá vốn).
+  const cong = await congAction("san-pham:sua");
+  if (!cong.ok) return cong;
+  const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
+  if (!giaVon.ok) return giaVon;
   const parsed = z.array(importRowSchema).safeParse(rows);
   if (!parsed.success) return { ok: false, error: "Dữ liệu import không hợp lệ" };
   const clean = parsed.data;
@@ -153,7 +207,10 @@ export async function previewCostImport(rows: CostImportRow[]): Promise<ActionRe
 export async function importCostPrices(
   rows: CostImportRow[],
 ): Promise<ActionResult<{ updatedVariants: number; multiSkus: string[]; notFound: string[] }>> {
-  await requireUser();
+  const cong = await congAction("san-pham:sua");
+  if (!cong.ok) return cong;
+  const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
+  if (!giaVon.ok) return giaVon;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
   const parsed = z.array(importRowSchema).safeParse(rows);
   if (!parsed.success) return { ok: false, error: "Dữ liệu import không hợp lệ" };
@@ -174,6 +231,11 @@ export async function importCostPrices(
           if (count > 1) multiSkus.push(r.sku);
         }
       }
+      await ghiNhatKy(tx, {
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.GIA_VON_IMPORT,
+        ghiChu: { soDong: updatedVariants },
+      });
       return { updatedVariants, multiSkus, notFound };
     });
     revalidateViews();

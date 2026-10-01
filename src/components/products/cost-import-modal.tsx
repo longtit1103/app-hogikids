@@ -30,7 +30,8 @@ const NONE = "__none__"; // sentinel: Select không nhận value=""
 
 type Step = 1 | 2 | 3;
 
-export function CostImportModal() {
+/** `choPhepTaiMau` = có `xuat-du-lieu` — link file mẫu trỏ route `/api/export/gia-von` (route tự kiểm lại). */
+export function CostImportModal({ choPhepTaiMau }: { choPhepTaiMau: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -165,9 +166,11 @@ export function CostImportModal() {
               />
             </label>
             {fileError && <p className="text-sm text-error">{fileError}</p>}
-            <a href="/api/export/gia-von" className="text-sm text-primary hover:underline">
-              Tải file mẫu (kèm SKU hiện có)
-            </a>
+            {choPhepTaiMau && (
+              <a href="/api/export/gia-von" className="text-sm text-primary hover:underline">
+                Tải file mẫu (kèm SKU hiện có)
+              </a>
+            )}
           </div>
         )}
 

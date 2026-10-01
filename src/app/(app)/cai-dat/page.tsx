@@ -22,7 +22,8 @@ import { docTrangThaiSaoLuu } from "@/lib/backup/doc-trang-thai-sao-luu";
 import { docQuyenDocN8n } from "@/lib/n8n/quyen-doc-kho-khoa";
 import { KET_CUC_CAN_XEM } from "@/lib/ingest/webhook-processor";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
+import { coQuyen, laChuShop } from "@/lib/quyen/nguoi-dung-phien";
 import {
   KEY_MOC_KIEM_GIA_VON,
   KEY_SO_LECH_GIA_VON,
@@ -36,6 +37,7 @@ import { doiChieuDonKhoVsSan } from "@/lib/reports/doi-chieu-don-kho";
 import { demCanXem, demTonDong, dsDonCanXem } from "@/lib/bronze/ket-cuc-silver";
 import { QUA_HAN_PHUT } from "@/lib/bronze/doi-soat-don-con-do";
 import { PageTitle } from "@/components/shell/page-title";
+import { docShopProfile } from "@/lib/shop-profile/doc-shop-profile";
 
 /**
  * Anchor id CHỐT theo thứ tự — `#ket-noi` phải khớp NGUYÊN VĂN href
@@ -52,6 +54,25 @@ const SETTINGS_TABS: AnchorTab[] = [
   { id: "du-lieu", label: "Dữ liệu" },
   { id: "bao-mat", label: "Bảo mật" },
 ];
+
+/** Mục neo chỉ chủ shop thấy (khoá kết nối/n8n, sao lưu/phục hồi/xoá dữ liệu). */
+const MUC_CHI_CHU_SHOP: readonly string[] = ["du-lieu"];
+
+/**
+ * Bọc khối SỬA (kênh, danh mục, ngưỡng, thông tin shop): người chỉ có `cai-dat:xem` vẫn thấy cấu hình
+ * nhưng mọi ô nhập/nút trong khối bị khoá — `<fieldset disabled>` khoá cả `input`/`button`/`select`
+ * bên trong mà không phải sửa từng section. Bảo vệ thật nằm ở cổng action (có nhật ký); đây chỉ là
+ * trải nghiệm, để người xem không gõ rồi mới bị từ chối.
+ */
+function KhoiSua({ choPhepSua, children }: { choPhepSua: boolean; children: ReactNode }) {
+  if (choPhepSua) return <>{children}</>;
+  return (
+    <fieldset disabled aria-label="Chỉ xem" className="contents">
+      <p className="pb-3 text-xs text-muted-foreground">Bạn chỉ có quyền xem mục này.</p>
+      {children}
+    </fieldset>
+  );
+}
 
 /** 1 card `id`-anchor dùng chung cho cả 7 section — Task sau chỉ thay `children`. */
 function SettingsSectionCard({
@@ -77,7 +98,14 @@ function SettingsSectionCard({
 }
 
 export default async function CaiDatPage() {
-  const userId = await requireUser("/cai-dat");
+  const nd = await yeuCauQuyenTrang("/cai-dat", "cai-dat:xem");
+  const laChu = laChuShop(nd);
+  const choPhepSua = coQuyen(nd, "cai-dat:sua");
+  // Số mã lệch giá vốn thuộc vùng giá vốn (cùng luật banner layout) — thiếu quyền ⇒ không đọc, không in.
+  const coGiaVon = coQuyen(nd, "gia-von-loi-nhuan:xem");
+  // Khối chỉ chủ shop: thiếu quyền ⇒ KHÔNG query (không phải "tải hết rồi ẩn") — gồm trạng thái khoá
+  // kết nối/n8n, sao lưu và các phép đếm của khối xoá dữ liệu.
+  const chiChu = <T,>(tai: () => Promise<T>): Promise<T | null> => (laChu ? tai() : Promise.resolve(null));
 
   // Map shop id → tên hiển thị cho các khối webhook/đơn-kẹt. Chưa cấu hình shop ID thì để rỗng
   // (các khối hiện id thô) — trang Cài đặt là NƠI người dùng điền cấu hình, không được chết vì
@@ -91,8 +119,29 @@ export default async function CaiDatPage() {
   // "chưa xử lý" sẽ báo động giả. KHÔNG kéo cột payload (TEXT to) về server component.
   const tuNgay = new Date(Date.now() - 7 * 86_400_000);
 
-  const [user, channels, categories, settings, syncLogs, trangThaiSaoLuu, hasData, donMoCoi, chiPhiKhongDungLai, adsMoCoi, demWebhook, suKienCanXem, doiChieuKho, tonDongDon, tongDonCanXem, donKetCanXem, quyenN8n, trangThaiKhoaKetNoi, webhookPancake, trangThaiN8n] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId } }),
+  const [
+    shop,
+    channels,
+    categories,
+    settings,
+    syncLogs,
+    trangThaiSaoLuu,
+    hasData,
+    donMoCoi,
+    chiPhiKhongDungLai,
+    adsMoCoi,
+    demWebhook,
+    suKienCanXem,
+    doiChieuKho,
+    tonDongDon,
+    tongDonCanXem,
+    donKetCanXem,
+    quyenN8n,
+    trangThaiKhoaKetNoi,
+    webhookPancake,
+    trangThaiN8n,
+  ] = await Promise.all([
+    docShopProfile(),
     prisma.channel.findMany({ orderBy: { sortOrder: "asc" } }),
     prisma.expenseCategory.findMany({ include: { _count: { select: { expenses: true } } } }),
     // CHỈ lấy đúng key trang này hiển thị — Setting cũng chứa access/refresh token thô của
@@ -106,8 +155,7 @@ export default async function CaiDatPage() {
           in: [
             "defaultLowStockThreshold",
             KEY_MOC_VA_TON_KHO,
-            KEY_SO_LECH_GIA_VON,
-            KEY_MOC_KIEM_GIA_VON,
+            ...(coGiaVon ? [KEY_SO_LECH_GIA_VON, KEY_MOC_KIEM_GIA_VON] : []),
             ...KEY_HAN_TOKEN,
           ],
         },
@@ -117,14 +165,14 @@ export default async function CaiDatPage() {
     // Trạng thái sao lưu đọc RIÊNG dòng BACKUP mới nhất, KHÔNG lấy từ `syncLogs` (take: 10) ở
     // trên — lý do + truy vấn nằm trong `lib/backup/doc-trang-thai-sao-luu.ts` (tách ra khỏi page
     // để test khoá được đường đọc này).
-    docTrangThaiSaoLuu(),
+    chiChu(docTrangThaiSaoLuu),
     // Phạm vi của `hasData` + `donMoCoi` + `chiPhiKhongDungLai` + `adsMoCoi` nằm trong `data-admin.ts`
     // cùng chỗ
     // với `deleteAllData` — để lượt xóa và lượt đếm không bao giờ lệch danh sách bảng.
-    coDuLieuGiaoDich(),
-    demDonMoCoi(),
-    demChiPhiKhongDungLai(),
-    demAdsMoCoi(),
+    chiChu(coDuLieuGiaoDich),
+    chiChu(demDonMoCoi),
+    chiChu(demChiPhiKhongDungLai),
+    chiChu(demAdsMoCoi),
     prisma.rawPancakeWebhookEvent.groupBy({
       by: ["processedAs"],
       where: { source: "webhook", receivedAt: { gte: tuNgay } },
@@ -157,14 +205,14 @@ export default async function CaiDatPage() {
     // Lớp phòng thủ THỨ HAI cho quyền đọc kho khoá của n8n: code đã cấp lại quyền sau mỗi lượt
     // phục hồi đi qua app, nhưng nạp tay bằng psql hay dựng lại cụm theo runbook DR thì không.
     // Mất quyền = 10 workflow chết câm trong khi app vẫn xanh. Một lượt đọc catalog, tự im ở DB test.
-    docQuyenDocN8n(),
+    chiChu(docQuyenDocN8n),
     // Khóa kết nối 4 nguồn — hàm này là TẦNG CHE duy nhất: trường bí mật chỉ trả đuôi 4 ký tự,
     // giá trị đầy đủ không bao giờ rời server (test khóa trong khoa-ket-noi-khong-lo-secret).
-    docTrangThaiKhoaKetNoi(),
+    chiChu(docTrangThaiKhoaKetNoi),
     // Webhook Pancake không có khóa để điền — khối chỉ hiện URL dán vào Pancake + mốc sự kiện
     // gần nhất từng shop (đo webhook còn sống).
-    docTrangThaiWebhookPancake(),
-    docTrangThaiKetNoiN8n(),
+    chiChu(docTrangThaiWebhookPancake),
+    chiChu(docTrangThaiKetNoiN8n),
   ]);
   const defaultLowStockThreshold = Number(
     settings.find((s) => s.key === "defaultLowStockThreshold")?.value ?? "5",
@@ -182,7 +230,7 @@ export default async function CaiDatPage() {
         <PageTitle title="Cài đặt">
           <p className="text-sm text-muted-foreground">Cấu hình shop, kênh bán và dữ liệu</p>
         </PageTitle>
-        <AnchorTabs tabs={SETTINGS_TABS} />
+        <AnchorTabs tabs={SETTINGS_TABS.filter((t) => laChu || !MUC_CHI_CHU_SHOP.includes(t.id))} />
       </div>
 
       <SettingsSectionCard
@@ -190,11 +238,13 @@ export default async function CaiDatPage() {
         title="Thông tin shop"
         description="Tên shop, số điện thoại và logo hiển thị trên toàn app."
       >
-        <ShopInfoSection
-          shopName={user?.shopName ?? "HogiKids"}
-          shopPhone={user?.shopPhone ?? null}
-          shopLogoPath={user?.shopLogoPath ?? null}
-        />
+        <KhoiSua choPhepSua={choPhepSua}>
+          <ShopInfoSection
+            shopName={shop.shopName}
+            shopPhone={shop.shopPhone}
+            shopLogoPath={shop.shopLogoPath}
+          />
+        </KhoiSua>
       </SettingsSectionCard>
 
       <SettingsSectionCard
@@ -202,32 +252,36 @@ export default async function CaiDatPage() {
         title="Kênh bán"
         description="Bật/tắt kênh, phí sàn, phí thanh toán và màu nhận diện."
       >
-        <ChannelsSection
-          channels={channels.map((c) => ({
-            id: c.id,
-            name: c.name,
-            color: c.color,
-            isActive: c.isActive,
-            platformFeePct: c.platformFeePct,
-            paymentFeePct: c.paymentFeePct,
-          }))}
-        />
+        <KhoiSua choPhepSua={choPhepSua}>
+          <ChannelsSection
+            channels={channels.map((c) => ({
+              id: c.id,
+              name: c.name,
+              color: c.color,
+              isActive: c.isActive,
+              platformFeePct: c.platformFeePct,
+              paymentFeePct: c.paymentFeePct,
+            }))}
+          />
+        </KhoiSua>
       </SettingsSectionCard>
 
       <SettingsSectionCard
         id="danh-muc-chi-phi"
         title="Danh mục chi phí"
-        description="Danh mục hệ thống + tùy chỉnh dùng cho modal &quot;Thêm chi phí&quot; ở mọi màn."
+        description='Danh mục hệ thống + tùy chỉnh dùng cho modal "Thêm chi phí" ở mọi màn.'
       >
-        <ExpenseCategoriesSection
-          categories={categories.map((c) => ({
-            id: c.id,
-            name: c.name,
-            isSystem: c.isSystem,
-            isHidden: c.isHidden,
-            expenseCount: c._count.expenses,
-          }))}
-        />
+        <KhoiSua choPhepSua={choPhepSua}>
+          <ExpenseCategoriesSection
+            categories={categories.map((c) => ({
+              id: c.id,
+              name: c.name,
+              isSystem: c.isSystem,
+              isHidden: c.isHidden,
+              expenseCount: c._count.expenses,
+            }))}
+          />
+        </KhoiSua>
       </SettingsSectionCard>
 
       <SettingsSectionCard
@@ -235,7 +289,9 @@ export default async function CaiDatPage() {
         title="Ngưỡng cảnh báo tồn mặc định"
         description="Áp dụng cho SKU chưa có ngưỡng riêng ở Tồn kho."
       >
-        <StockThresholdSection defaultLowStockThreshold={defaultLowStockThreshold} />
+        <KhoiSua choPhepSua={choPhepSua}>
+          <StockThresholdSection defaultLowStockThreshold={defaultLowStockThreshold} />
+        </KhoiSua>
       </SettingsSectionCard>
 
       <SettingsSectionCard
@@ -246,19 +302,22 @@ export default async function CaiDatPage() {
         <div className="flex flex-col gap-5">
           {/* TRÊN CÙNG khối: mất quyền đọc kho khoá thì mọi thứ dưới đây đứng im mà vẫn trông bình
               thường — log không có dòng mới cũng không có dòng đỏ. Tự ẩn khi quyền còn đủ. */}
-          <CanhBaoQuyenN8n trangThai={quyenN8n} />
+          {laChu && quyenN8n && <CanhBaoQuyenN8n trangThai={quyenN8n} />}
           {/* Đặt TRƯỚC log đồng bộ: token hết hạn là nguyên nhân gốc của phần lớn lỗi trong log. */}
           <TokenExpiryPanel danhSach={hanToken} />
           {/* Ngay dưới bảng hạn token: thấy cảnh báo hết hạn là chỗ thay khóa nằm liền bên dưới. */}
-          <KhoaKetNoiSection trangThai={trangThaiKhoaKetNoi} webhookPancake={webhookPancake} />
+          {laChu && trangThaiKhoaKetNoi && webhookPancake && (
+            <KhoaKetNoiSection trangThai={trangThaiKhoaKetNoi} webhookPancake={webhookPancake} />
+          )}
           {/* Ngay dưới khối khóa: cùng một mạch cấu hình — điền khóa nguồn xong là nối n8n rồi
               bấm Cài workflows, không phải đi tìm ở mục khác. */}
-          <KetNoiN8nSection trangThai={trangThaiN8n} />
+          {laChu && trangThaiN8n && <KetNoiN8nSection trangThai={trangThaiN8n} />}
           <WebhookEventsSection
             demTheoKetCuc={demWebhook.map((d) => ({ processedAs: d.processedAs, soLuong: d._count._all }))}
             canXem={suKienCanXem}
             vaTonKho={vaTonKho}
             lechGiaVon={lechGiaVon}
+            hienGiaVon={coGiaVon}
             tenShop={tenShop}
           />
           {/* Sau webhook, trước log: log xanh KHÔNG chứng minh đủ đơn — phép so với bản sao
@@ -275,21 +334,24 @@ export default async function CaiDatPage() {
         </div>
       </SettingsSectionCard>
 
-      <SettingsSectionCard
-        id="du-lieu"
-        title="Dữ liệu"
-        description="Sao lưu, phục hồi, dựng lại từ kho thô và xoá dữ liệu giao dịch."
-      >
-        <DataSection
-          trangThaiSaoLuu={trangThaiSaoLuu}
-          hasData={hasData}
-          shopName={user?.shopName ?? "HogiKids"}
-          donMoCoi={donMoCoi}
-          chiPhi={chiPhiKhongDungLai}
-          adsMoCoi={adsMoCoi}
-        />
-      </SettingsSectionCard>
+      {laChu && trangThaiSaoLuu && hasData !== null && donMoCoi && chiPhiKhongDungLai && adsMoCoi && (
+        <SettingsSectionCard
+          id="du-lieu"
+          title="Dữ liệu"
+          description="Sao lưu, phục hồi, dựng lại từ kho thô và xoá dữ liệu giao dịch."
+        >
+          <DataSection
+            trangThaiSaoLuu={trangThaiSaoLuu}
+            hasData={hasData}
+            shopName={shop.shopName}
+            donMoCoi={donMoCoi}
+            chiPhi={chiPhiKhongDungLai}
+            adsMoCoi={adsMoCoi}
+          />
+        </SettingsSectionCard>
+      )}
 
+      {/* Đổi mật khẩu của CHÍNH mình — hiện cho mọi người đã đăng nhập, không theo `cai-dat:*`. */}
       <SettingsSectionCard id="bao-mat" title="Bảo mật" description="Đổi mật khẩu đăng nhập.">
         <SecuritySection />
       </SettingsSectionCard>

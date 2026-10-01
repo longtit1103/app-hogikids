@@ -6,14 +6,19 @@ import { prisma } from "@/lib/prisma";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 /**
- * Integration test (`hogikids_test`) cho 3 server action "khoản tiền khác". Mock `requireUser` (gọi
- * cookies() — không có request scope) + `revalidatePath` (cùng lý do), giống expenses-amount-guard.
+ * Integration test (`hogikids_test`) cho 3 server action "khoản tiền khác". Mock `docNguoiDungPhien`
+ * (đọc cookies() — không có request scope) + `revalidatePath` (cùng lý do), giống expenses-amount-guard.
  * Khoá các CỬA PHẢI TỪ CHỐI: ngày trống/không hợp lệ · ngày tương lai · amount 0/âm/vượt 2 tỷ · kind
  * lạ · id lạ — và message tiếng Việt đúng field để form tô đỏ đúng ô.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));

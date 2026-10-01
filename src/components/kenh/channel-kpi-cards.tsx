@@ -7,7 +7,9 @@ import { DeltaLine } from "@/components/kenh/channel-card-metric";
 import { formatPct1, formatRoas } from "@/components/kenh/channel-format";
 import { Switch } from "@/components/ui/switch";
 import { formatVnd } from "@/lib/format";
+import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
 import type { PnlBreakdown } from "@/lib/reports/pnl";
+import type { PnlChe, PnlCheTruong } from "@/lib/reports/pnl-che";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,7 +26,7 @@ import { cn } from "@/lib/utils";
 
 type Ratios = { aov: number | null; returnBomRatePct: number | null; roas: number | null };
 
-function deriveRatios(b: PnlBreakdown): Ratios {
+function deriveRatios(b: PnlCheTruong): Ratios {
   const returnDenom = b.orderCount + b.returnBomOrderCount;
   return {
     aov: b.orderCount ? b.revenue / b.orderCount : null,
@@ -66,7 +68,14 @@ function KpiCard({
   );
 }
 
-export function ChannelKpiCards({ current, previous }: { current: PnlBreakdown; previous: PnlBreakdown }) {
+/** Kỳ này + kỳ trước của 1 kênh — nhánh che (thiếu `gia-von-loi-nhuan:xem`) không có thẻ LN ròng. */
+export type KpiKenhDuLieu = KetQuaChe<
+  { current: PnlBreakdown; previous: PnlBreakdown },
+  { current: PnlChe; previous: PnlChe }
+>;
+
+export function ChannelKpiCards({ du }: { du: KpiKenhDuLieu }) {
+  const { current, previous } = du;
   const searchParams = useSearchParams();
   // Khởi tạo từ `?so_sanh=` (link từ /kenh mang theo "0"/"1") — mặc định bật
   // khi param vắng mặt (điều hướng thẳng), khớp mặc định Task 6.
@@ -140,15 +149,17 @@ export function ChannelKpiCards({ current, previous }: { current: PnlBreakdown; 
           direction="lower-better"
           compareOn={compareOn}
         />
-        <KpiCard
-          label="LN ròng"
-          valueText={formatVnd(current.netProfit)}
-          valueClassName={current.netProfit < 0 ? "text-error" : undefined}
-          current={current.netProfit}
-          previous={previous.netProfit}
-          previousText={formatVnd(previous.netProfit)}
-          compareOn={compareOn}
-        />
+        {du.coQuyenGiaVon && (
+          <KpiCard
+            label="LN ròng"
+            valueText={formatVnd(du.current.netProfit)}
+            valueClassName={du.current.netProfit < 0 ? "text-error" : undefined}
+            current={du.current.netProfit}
+            previous={du.previous.netProfit}
+            previousText={formatVnd(du.previous.netProfit)}
+            compareOn={compareOn}
+          />
+        )}
         <KpiCard
           label="ROAS"
           valueText={r.roas === null ? "—" : formatRoas(r.roas)}

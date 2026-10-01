@@ -20,7 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ghiChiPhiNhapHang } from "@/lib/actions/chi-phi-nhap-hang";
 import { formatVnd } from "@/lib/format";
-import type { PhieuNhapDeXuat } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
+import type { PhieuNhapDeXuat, PhieuNhapDeXuatChe } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
 
 /** Trần giống hệt form chi phí: Prisma `Int` (int32) chết ở 2.147.483.647. */
 const TRAN_TIEN = 2_000_000_000;
@@ -40,14 +40,23 @@ export function DuyetChiPhiNhapHang({
   deXuat,
   vanTay,
   quyHomNay,
+  choPhepSua = false,
 }: {
-  deXuat: PhieuNhapDeXuat[];
+  /** Bản che (không số lượng) khi người xem thiếu `gia-von-loi-nhuan:xem` — page quyết. */
+  deXuat: readonly (PhieuNhapDeXuat | PhieuNhapDeXuatChe)[];
   /** Vân tay danh sách lúc trang render — lượt ghi từ chối nếu danh sách đã đổi. */
   vanTay: string;
   /** Quỹ còn lại tới hôm nay; `null` = chưa mở sổ quỹ (chưa có dòng ghi tay nào). */
   quyHomNay: number | null;
+  /**
+   * Có `chi-phi:sua` (server tính). Thiếu/false ⇒ bảng chỉ đọc: không chọn/sửa số tiền, không khối
+   * "Ảnh hưởng nếu ghi" và không nút ghi (action `ghiChiPhiNhapHang` vẫn tự chặn).
+   */
+  choPhepSua?: boolean;
 }) {
   const router = useRouter();
+  // Cột SL chỉ khi server gửi số lượng (đủ quyền giá vốn) — narrow bằng khoá có mặt thật ở runtime.
+  const hienSoLuong = deXuat.every((d) => "soLuong" in d);
   const [dangChay, setDangChay] = useState(false);
   const [mo, setMo] = useState(false);
   // Mặc định CHỌN HẾT: phần lớn lượt duyệt là "đúng hết, ghi đi".
@@ -117,6 +126,7 @@ export function DuyetChiPhiNhapHang({
               <tr>
                 <th className="w-10 px-3 py-2">
                   <Checkbox
+                    disabled={!choPhepSua}
                     aria-label="Chọn tất cả phiếu"
                     checked={chon.size === deXuat.length}
                     onCheckedChange={(v) =>
@@ -127,7 +137,7 @@ export function DuyetChiPhiNhapHang({
                 <th className="px-3 py-2 font-medium">Ngày</th>
                 <th className="px-3 py-2 font-medium">Phiếu</th>
                 <th className="px-3 py-2 font-medium">Nhà cung cấp</th>
-                <th className="px-3 py-2 text-right font-medium">SL</th>
+                {hienSoLuong && <th className="px-3 py-2 text-right font-medium">SL</th>}
                 <th className="px-3 py-2 text-right font-medium">Dòng hàng</th>
                 <th className="px-3 py-2 font-medium">Ghi chú phiếu</th>
                 <th className="px-3 py-2 text-right font-medium">Số tiền ghi sổ</th>
@@ -141,6 +151,7 @@ export function DuyetChiPhiNhapHang({
                   <tr key={d.uuid} className="border-t border-hairline">
                     <td className="px-3 py-2">
                       <Checkbox
+                        disabled={!choPhepSua}
                         aria-label={`Chọn phiếu #${d.displayId ?? d.uuid.slice(0, 8)}`}
                         checked={daChon}
                         onCheckedChange={() => bat(d.uuid)}
@@ -165,9 +176,11 @@ export function DuyetChiPhiNhapHang({
                     <td className="max-w-[180px] truncate px-3 py-2 text-muted-foreground">
                       {d.nhaCungCap ?? "—"}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                      {d.soLuong.toLocaleString("vi-VN")}
-                    </td>
+                    {"soLuong" in d && hienSoLuong && (
+                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                        {d.soLuong.toLocaleString("vi-VN")}
+                      </td>
+                    )}
                     <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                       {d.soDongHang.toLocaleString("vi-VN")}
                     </td>
@@ -179,7 +192,7 @@ export function DuyetChiPhiNhapHang({
                         inputMode="numeric"
                         aria-label={`Số tiền ghi sổ cho phiếu #${d.displayId ?? d.uuid.slice(0, 8)}`}
                         aria-invalid={oSai || undefined}
-                        disabled={!daChon}
+                        disabled={!choPhepSua || !daChon}
                         className="w-36 text-right tabular-nums"
                         // Hiển thị có dấu chấm ngăn nghìn như mọi ô tiền khác trong app
                         // (`expense-form-modal.tsx`) — state bên dưới vẫn giữ chuỗi số sạch
@@ -207,64 +220,68 @@ export function DuyetChiPhiNhapHang({
         </p>
       </section>
 
-      <section className="flex flex-col gap-2 rounded-lg border border-hairline bg-surface-card p-4">
-        <h2 className="font-serif text-lg text-ink">Ảnh hưởng nếu ghi</h2>
-        <p className="text-sm text-ink">
-          Đang chọn <strong>{dangChon.length.toLocaleString("vi-VN")}</strong> phiếu, tổng{" "}
-          <strong>{formatVnd(tongChon)}</strong>.
-        </p>
-        {quyHomNay === null ? (
-          <p className="text-sm text-muted-foreground">
-            Chưa mở sổ quỹ nên chưa có số &quot;Quỹ còn lại&quot; để so — ghi xong bạn sẽ thấy khoản
-            này trừ vào quỹ ngay khi sổ quỹ có dòng đầu tiên.
-          </p>
-        ) : (
-          <p className="text-sm text-ink">
-            Quỹ còn lại: <strong>{formatVnd(quyHomNay)}</strong> →{" "}
-            <strong>{formatVnd(quyHomNay - tongChon)}</strong> (giảm {formatVnd(tongChon)}).
-          </p>
-        )}
-        <p className="text-sm text-muted-foreground">
-          <strong className="text-ink">Lãi/Lỗ KHÔNG đổi</strong> — Nhập hàng là dòng tiền, không phải
-          chi phí kinh doanh. Tiền hàng chỉ vào Lãi/Lỗ dưới dạng giá vốn khi món hàng được bán ra.
-        </p>
-      </section>
-
-      <Dialog open={mo} onOpenChange={setMo}>
-        <DialogTrigger
-          render={
-            <Button className="self-start" disabled={dangChon.length === 0 || !hopLe}>
-              Ghi {dangChon.length.toLocaleString("vi-VN")} phiếu vào Sổ chi phí
-            </Button>
-          }
-        />
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Xác nhận ghi chi phí nhập hàng</DialogTitle>
-            <DialogDescription>Xem kỹ trước khi bấm — thao tác này trừ tiền khỏi quỹ.</DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-2 text-sm">
-            <p>
-              Sẽ ghi <strong>{dangChon.length.toLocaleString("vi-VN")}</strong> dòng vào Sổ chi phí,
-              danh mục <strong>Nhập hàng</strong>, tổng <strong>{formatVnd(tongChon)}</strong>.
+      {choPhepSua && (
+        <>
+          <section className="flex flex-col gap-2 rounded-lg border border-hairline bg-surface-card p-4">
+            <h2 className="font-serif text-lg text-ink">Ảnh hưởng nếu ghi</h2>
+            <p className="text-sm text-ink">
+              Đang chọn <strong>{dangChon.length.toLocaleString("vi-VN")}</strong> phiếu, tổng{" "}
+              <strong>{formatVnd(tongChon)}</strong>.
             </p>
-            {quyHomNay !== null && (
-              <p>
-                Quỹ còn lại sẽ về <strong>{formatVnd(quyHomNay - tongChon)}</strong>. Lãi/Lỗ không đổi.
+            {quyHomNay === null ? (
+              <p className="text-sm text-muted-foreground">
+                Chưa mở sổ quỹ nên chưa có số &quot;Quỹ còn lại&quot; để so — ghi xong bạn sẽ thấy khoản
+                này trừ vào quỹ ngay khi sổ quỹ có dòng đầu tiên.
+              </p>
+            ) : (
+              <p className="text-sm text-ink">
+                Quỹ còn lại: <strong>{formatVnd(quyHomNay)}</strong> →{" "}
+                <strong>{formatVnd(quyHomNay - tongChon)}</strong> (giảm {formatVnd(tongChon)}).
               </p>
             )}
-            <p className="text-muted-foreground">
-              Ghi nhầm vẫn sửa hoặc xoá được từng dòng trong Sổ chi phí.
+            <p className="text-sm text-muted-foreground">
+              <strong className="text-ink">Lãi/Lỗ KHÔNG đổi</strong> — Nhập hàng là dòng tiền, không phải
+              chi phí kinh doanh. Tiền hàng chỉ vào Lãi/Lỗ dưới dạng giá vốn khi món hàng được bán ra.
             </p>
-          </div>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline">Huỷ</Button>} />
-            <Button onClick={ghi} disabled={dangChay}>
-              {dangChay ? "Đang ghi…" : "Ghi vào sổ"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </section>
+
+          <Dialog open={mo} onOpenChange={setMo}>
+            <DialogTrigger
+              render={
+                <Button className="self-start" disabled={dangChon.length === 0 || !hopLe}>
+                  Ghi {dangChon.length.toLocaleString("vi-VN")} phiếu vào Sổ chi phí
+                </Button>
+              }
+            />
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Xác nhận ghi chi phí nhập hàng</DialogTitle>
+                <DialogDescription>Xem kỹ trước khi bấm — thao tác này trừ tiền khỏi quỹ.</DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-col gap-2 text-sm">
+                <p>
+                  Sẽ ghi <strong>{dangChon.length.toLocaleString("vi-VN")}</strong> dòng vào Sổ chi phí,
+                  danh mục <strong>Nhập hàng</strong>, tổng <strong>{formatVnd(tongChon)}</strong>.
+                </p>
+                {quyHomNay !== null && (
+                  <p>
+                    Quỹ còn lại sẽ về <strong>{formatVnd(quyHomNay - tongChon)}</strong>. Lãi/Lỗ không đổi.
+                  </p>
+                )}
+                <p className="text-muted-foreground">
+                  Ghi nhầm vẫn sửa hoặc xoá được từng dòng trong Sổ chi phí.
+                </p>
+              </div>
+              <DialogFooter>
+                <DialogClose render={<Button variant="outline">Huỷ</Button>} />
+                <Button onClick={ghi} disabled={dangChay}>
+                  {dangChay ? "Đang ghi…" : "Ghi vào sổ"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
     </>
   );
 }

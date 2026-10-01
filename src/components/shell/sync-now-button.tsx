@@ -18,10 +18,16 @@ const TIMEOUT_MS = 120_000; // hết cửa sổ chờ n8n → báo chưa phản 
 /**
  * Nút "Đồng bộ ngay": hiển thị SyncLog PANCAKE gần nhất + badge OK/Lỗi; bấm → kích webhook n8n
  * rồi poll SyncLog mỗi 5s, CHỈ nhận log có `startedAt > lúc bấm` (không lấy log cũ) đã hết RUNNING.
+ *
+ * `choPhepDongBo` = người xem có `cai-dat:sua` (server tính, truyền boolean). Thiếu/false ⇒ KHÔNG render
+ * gì (cả dòng trạng thái — `getLatestSync` đằng nào cũng đòi quyền cài đặt). Ẩn là tiện dụng; cổng thật
+ * là `triggerSyncNow` ở server.
  */
 export function SyncNowButton({
+  choPhepDongBo = false,
   trongTopbar = false,
 }: {
+  choPhepDongBo?: boolean;
   /**
    * CHỈ Topbar bật (component dùng ở 4 nơi): dưới md thu thành icon 44px (nút chữ to lặp lại trên
    * mọi màn mà ít khi bấm) và ẩn dòng "Đồng bộ lúc…" ở md–xl (hàng Topbar có sidebar quá chật —
@@ -30,6 +36,11 @@ export function SyncNowButton({
    */
   trongTopbar?: boolean;
 } = {}) {
+  if (!choPhepDongBo) return null;
+  return <NutDongBoNgay trongTopbar={trongTopbar} />;
+}
+
+function NutDongBoNgay({ trongTopbar }: { trongTopbar: boolean }) {
   const [latest, setLatest] = useState<LatestSync>(null);
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -45,7 +56,7 @@ export function SyncNowButton({
   useEffect(() => {
     let alive = true;
     void getLatestSync("PANCAKE")
-      .then((l) => alive && setLatest(l))
+      .then((r) => alive && setLatest(r.ok ? r.data : null))
       .catch(() => {});
     return () => {
       alive = false;
@@ -68,7 +79,8 @@ export function SyncNowButton({
 
     clearTimers();
     pollRef.current = setInterval(async () => {
-      const l = await getLatestSync("PANCAKE").catch(() => null);
+      const r = await getLatestSync("PANCAKE").catch(() => null);
+      const l = r?.ok ? r.data : null;
       if (l && new Date(l.startedAt).getTime() > clickedAt && l.status !== "RUNNING") {
         setLatest(l);
         setBusy(false);

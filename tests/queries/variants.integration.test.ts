@@ -7,6 +7,8 @@ import {
 } from "@/lib/queries/variants";
 import { prisma } from "@/lib/prisma";
 
+import { CHE, DAY, nhanhChe, nhanhDay } from "../helpers/nhanh-quyen-gia-von";
+
 /**
  * Integration test queries variant (raw SQL ngưỡng 2 cột + KPI) trên DB test `hogikids_test`.
  * Dữ liệu: V1 tồn thấp (default 5), V2 thiếu giá vốn, V3 hết hàng (ngưỡng riêng 10).
@@ -64,7 +66,7 @@ afterAll(async () => {
 
 describe("getVariantListPage", () => {
   it("KPI toàn cục: tổng/thiếu giá vốn/tồn/low/giá trị vốn", async () => {
-    const { kpi } = await getVariantListPage({ page: 1 });
+    const { kpi } = nhanhDay(await getVariantListPage({ page: 1 }, DAY));
     expect(kpi.totalSku).toBe(3);
     expect(kpi.missingCost).toBe(1); // V2
     expect(kpi.totalStock).toBe(53);
@@ -74,7 +76,7 @@ describe("getVariantListPage", () => {
   });
 
   it("sort mặc định giá vốn desc + effectiveThreshold + isLow", async () => {
-    const { rows, total } = await getVariantListPage({ page: 1 });
+    const { rows, total } = nhanhDay(await getVariantListPage({ page: 1 }, DAY));
     expect(total).toBe(3);
     expect(rows.map((r) => r.sku)).toEqual(["Q-A", "Q-C", "Q-B"]); // 100000, 50000, 0
     const v1 = rows.find((r) => r.sku === "Q-A")!;
@@ -88,7 +90,7 @@ describe("getVariantListPage", () => {
   });
 
   it("lọc thiếu giá vốn", async () => {
-    const { rows, total } = await getVariantListPage({ page: 1, missingCost: true });
+    const { rows, total } = nhanhDay(await getVariantListPage({ page: 1, missingCost: true }, DAY));
     expect(total).toBe(1);
     expect(rows[0].sku).toBe("Q-B");
   });
@@ -96,28 +98,50 @@ describe("getVariantListPage", () => {
   it("lọc ĐÃ BÁN mà thiếu giá vốn — đơn HOÀN không tính là đã bán", async () => {
     // Q-B là biến thể duy nhất costPrice=0, và nó CHỈ nằm trong một đơn RETURNED ⇒ lọc thường trả
     // 1 dòng, lọc hành-động-được trả 0. Cùng định nghĩa "đơn hợp lệ" với pnl.ts.
-    const { total } = await getVariantListPage({ page: 1, soldMissingCost: true });
+    const { total } = nhanhDay(await getVariantListPage({ page: 1, soldMissingCost: true }, DAY));
     expect(total).toBe(0);
-    expect((await getVariantListPage({ page: 1, missingCost: true })).total).toBe(1);
+    expect((nhanhDay(await getVariantListPage({ page: 1, missingCost: true }, DAY))).total).toBe(1);
   });
 
   it("lọc sắp hết (isLow, gồm hết hàng)", async () => {
-    const { rows } = await getVariantListPage({ page: 1, lowOnly: true });
+    const { rows } = nhanhDay(await getVariantListPage({ page: 1, lowOnly: true }, DAY));
     expect(rows.map((r) => r.sku).sort()).toEqual(["Q-A", "Q-C"]);
   });
 
   it("search q theo sku/tên/label không phân biệt hoa-thường", async () => {
-    const { rows } = await getVariantListPage({ page: 1, q: "q-a" });
+    const { rows } = nhanhDay(await getVariantListPage({ page: 1, q: "q-a" }, DAY));
     expect(rows.map((r) => r.sku)).toEqual(["Q-A"]);
   });
 });
 
 describe("getVariantsForExport + countMissingCostVariants", () => {
   it("export không phân trang", async () => {
-    expect(await getVariantsForExport({})).toHaveLength(3);
-    expect(await getVariantsForExport({ lowOnly: true })).toHaveLength(2);
+    expect((nhanhDay(await getVariantsForExport({}, DAY))).rows).toHaveLength(3);
+    expect((nhanhDay(await getVariantsForExport({ lowOnly: true }, DAY))).rows).toHaveLength(2);
   });
   it("đếm thiếu giá vốn", async () => {
     expect(await countMissingCostVariants()).toBe(1);
+  });
+});
+
+describe("thiếu quyền giá vốn — nhánh che", () => {
+  it("không cột giá vốn/giá trị tồn, KPI chỉ còn số đếm", async () => {
+    const { rows, kpi, total } = nhanhChe(await getVariantListPage({ page: 1 }, CHE));
+    expect(total).toBe(3);
+    expect(Object.keys(kpi).sort()).toEqual(["lowCount", "totalSku", "totalStock"]);
+    for (const r of rows) {
+      expect(r).not.toHaveProperty("costPrice");
+      expect(r).not.toHaveProperty("stockValue");
+    }
+  });
+
+  it("sort 'Giá trị vốn' rơi về sort theo tồn — thứ tự theo giá vốn cũng là lộ giá vốn", async () => {
+    const { rows } = nhanhChe(await getVariantListPage({ page: 1, sort: "von" }, CHE));
+    expect(rows.map((r) => r.sku)).toEqual(["Q-B", "Q-A", "Q-C"]); // tồn 50, 3, 0
+  });
+
+  it("bộ lọc theo giá vốn bị bỏ qua — kết quả lọc 'thiếu giá vốn' chính là giá vốn = 0", async () => {
+    expect(nhanhChe(await getVariantListPage({ page: 1, missingCost: true }, CHE)).total).toBe(3);
+    expect(nhanhChe(await getVariantsForExport({ missingCost: true }, CHE)).rows).toHaveLength(3);
   });
 });

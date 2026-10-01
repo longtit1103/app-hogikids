@@ -2,7 +2,7 @@ import { startOfDay, startOfMonth, subMonths } from "date-fns";
 
 import { ChannelDonut } from "@/components/dashboard/channel-donut";
 import { ChuaSyncEmptyState } from "@/components/dashboard/chua-sync-empty-state";
-import { KpiCards } from "@/components/dashboard/kpi-cards";
+import { KpiCards, type KpiCardsDuLieu } from "@/components/dashboard/kpi-cards";
 import { LowStockCard } from "@/components/dashboard/low-stock-card";
 import { RevenueProfitChart } from "@/components/dashboard/revenue-profit-chart";
 import { SyncStatusCard, type SyncStatusRow } from "@/components/dashboard/sync-status-card";
@@ -18,16 +18,16 @@ import {
 import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import { ensureRecurringExpensesForMonths, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
 import { prisma } from "@/lib/prisma";
-import { getLowStockPreview } from "@/lib/queries/variants";
+import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
+import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
 import { calcPnl, computeChannelPnl } from "@/lib/reports/pnl";
+import { boPnlTheoQuyen, cheChannelPnl, dailySeriesTheoQuyen } from "@/lib/reports/pnl-che";
 import { computeDailySeries } from "@/lib/reports/daily-series";
-import { computeProductReport } from "@/lib/reports/product-report";
-import { requireUser } from "@/lib/session";
+import { SYNC_KINDS_DASHBOARD, taiKhoiChiTietDashboard } from "@/lib/dashboard/khoi-chi-tiet-theo-quyen";
+import { hrefDuocPhep } from "@/components/shell/nav-config";
 import { PageTitle } from "@/components/shell/page-title";
 
-import type { SyncKind } from "@prisma/client";
-
-const SYNC_KINDS: SyncKind[] = ["PANCAKE", "META_ADS", "TIKTOK_ADS", "TIKTOK_SHOP", "TIKTOK_SHOP_ANALYTICS"];
 const TOP_PRODUCTS_LIMIT = 5;
 
 type SearchParams = { tu?: string; den?: string; range?: string };
@@ -48,14 +48,19 @@ function buildKpiRanges(now: Date): { today: DateRange; thisMonth: DateRange; la
 }
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requireUser();
+  const nd = await yeuCauQuyenTrang("/", "tong-quan:xem");
+  // Thiếu `gia-von-loi-nhuan:xem`: `calcPnl`/`computeChannelPnl`/`computeDailySeries` VẪN tính đủ trong
+  // pnl.ts (ngoại lệ chốt 30/09, spec phân quyền §4.1) rồi chiếu DTO che TRƯỚC khi vào props bên dưới.
+  const quyen = quyenGiaVonCua(nd);
+  // Link trên trang chỉ dựng khi người xem vào được trang đích (cùng nguồn với menu).
+  const hrefs = hrefDuocPhep(nd);
 
   const [pancakeSyncCount, orderCount] = await Promise.all([
     prisma.syncLog.count({ where: { kind: "PANCAKE" } }),
     prisma.order.count(),
   ]);
   if (pancakeSyncCount === 0 && orderCount === 0) {
-    return <ChuaSyncEmptyState />;
+    return <ChuaSyncEmptyState choPhepDongBo={coQuyen(nd, "cai-dat:sua")} hrefDuocPhep={hrefs} />;
   }
 
   const sp = await searchParams;
@@ -82,9 +87,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     lastMonthSameDaysPnl,
     dailySeries,
     channelPnl,
-    productReport,
-    lowStock,
-    syncLogs,
+    khoiChiTiet,
   ] = await Promise.all([
     calcPnl(today),
     calcPnl(thisMonth),
@@ -95,14 +98,19 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     // rỗng nên không đổi số nào.
     computeDailySeries(clampRangeEndToNow(range, now)),
     computeChannelPnl(range),
-    computeProductReport(range),
-    getLowStockPreview(),
-    Promise.all(
-      SYNC_KINDS.map((kind) => prisma.syncLog.findFirst({ where: { kind }, orderBy: { startedAt: "desc" } }))
-    ),
+    // Top sản phẩm / tồn thấp / đồng bộ thuộc module khác: thiếu quyền ⇒ không query, không dựng thẻ.
+    taiKhoiChiTietDashboard(nd, range, quyen),
   ]);
+  const { productReport, lowStock, syncLogs } = khoiChiTiet;
 
-  const syncRows: SyncStatusRow[] = SYNC_KINDS.map((kind, i) => ({ kind, log: syncLogs[i] }));
+  const syncRows: SyncStatusRow[] | null = syncLogs
+    ? SYNC_KINDS_DASHBOARD.map((kind, i) => ({ kind, log: syncLogs[i] }))
+    : null;
+  // Rẽ nhánh che ở ĐÚNG một helper có test — không tự gọi `chePnl` rời ở page.
+  const kpi: KpiCardsDuLieu = boPnlTheoQuyen(
+    { today: todayPnl, thisMonth: thisMonthPnl, lastMonthSameDays: lastMonthSameDaysPnl },
+    quyen,
+  );
 
   return (
     <div className="flex flex-col gap-6" data-khoang-server={khoangServerThuocTinh(range)}>
@@ -110,21 +118,29 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <p className="text-sm text-muted-foreground">Sức khỏe kinh doanh 30 giây — bấm vào bất kỳ số nào để đi sâu</p>
       </PageTitle>
 
-      <KpiCards today={todayPnl} thisMonth={thisMonthPnl} lastMonthSameDays={lastMonthSameDaysPnl} />
+      {/* Thẻ doanh thu / LN ròng chỉ link sang Lãi/Lỗ khi người xem vào được tab đó (loi-lo ∧ giá vốn). */}
+      <KpiCards
+        du={kpi}
+        choPhepXemLoiLo={quyen.coQuyenGiaVon && coQuyen(nd, "tai-chinh-loi-lo:xem")}
+        hrefDuocPhep={hrefs}
+      />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <div className="lg:col-span-8">
-          <RevenueProfitChart points={dailySeries} />
+          <RevenueProfitChart series={dailySeriesTheoQuyen(dailySeries, quyen)} />
         </div>
         <div className="lg:col-span-4">
-          <ChannelDonut channels={channelPnl} />
+          {/* Donut chỉ cần doanh thu — luôn DTO che, kể cả chủ shop (bớt payload client). */}
+          <ChannelDonut channels={cheChannelPnl(channelPnl)} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <TopProductsCard products={productReport.slice(0, TOP_PRODUCTS_LIMIT)} />
-        <LowStockCard rows={lowStock.rows} total={lowStock.total} />
-        <SyncStatusCard rows={syncRows} />
+        {productReport && (
+          <TopProductsCard products={productReport.rows.slice(0, TOP_PRODUCTS_LIMIT)} hrefDuocPhep={hrefs} />
+        )}
+        {lowStock && <LowStockCard rows={lowStock.rows} total={lowStock.total} hrefDuocPhep={hrefs} />}
+        {syncRows && <SyncStatusCard rows={syncRows} choPhepDongBo={coQuyen(nd, "cai-dat:sua")} hrefDuocPhep={hrefs} />}
       </div>
     </div>
   );

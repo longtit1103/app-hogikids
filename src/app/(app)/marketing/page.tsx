@@ -26,7 +26,7 @@ import { lanChayOkGanNhatAnalyticsTheoStream } from "@/lib/reports/marketing/suc
 import { type LoaiTaiKhoanVideo, videoTiktok } from "@/lib/reports/marketing/video-tiktok";
 import { computeChannelDailyOrderCount } from "@/lib/reports/daily-series";
 import { calcPnl } from "@/lib/reports/pnl";
-import { requireUser } from "@/lib/session";
+import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
 import { KhoiAffiliate, TongQuanP1Section } from "@/components/marketing/tong-quan-p1-section";
 import { DONG_MOI_TRANG_MARKETING } from "@/components/marketing/phan-trang-marketing";
 import { PageTitle } from "@/components/shell/page-title";
@@ -69,7 +69,7 @@ function docKhoiNguon(v: string | undefined): KhoiNguon {
  * không được tự cộng lại đơn/doanh thu Pancake mà phải MƯỢN hàm đã có.
  */
 export default async function MarketingPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requireUser();
+  await yeuCauQuyenTrang("/marketing", "marketing:xem");
 
   const sp = await searchParams;
   const now = new Date();

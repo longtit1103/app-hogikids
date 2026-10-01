@@ -5,18 +5,30 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { importAdsExpenses, previewAdsImport } from "@/lib/actions/ads-import";
 import { parseAdsFile } from "@/lib/import/ads-csv";
+import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { prisma } from "@/lib/prisma";
+import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
+import { nguoiDungGia } from "./helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 /**
  * Integration test import CSV ads (`hogikids_test`) — chạy trên DB thật, chỉ
- * `requireUser` bị mock (nó gọi `cookies()`, không có request scope trong
+ * ngữ cảnh người dùng bị mock (`docNguoiDungPhien` gọi `cookies()`, không có request scope trong
  * vitest). Auth thật đã phủ ở e2e (login) + unit session riêng. Các test này
  * tập trung kiểm LOGIC dedupe/xung đột/idempotent.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
+// `ghiNhatKy` chạy BẢN THẬT; ca "nhật ký hỏng ⇒ không lưu" ép nó ném một lần.
+vi.mock("@/lib/nhat-ky/ghi-nhat-ky", async (goc) => {
+  const that = await goc<typeof import("@/lib/nhat-ky/ghi-nhat-ky")>();
+  return { ...that, ghiNhatKy: vi.fn(that.ghiNhatKy) };
+});
 // revalidatePath cần request scope (không có trong vitest) — no-op cho unit test.
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
@@ -383,5 +395,49 @@ describe("importAdsExpenses — xung đột ADS_API", () => {
     expect(await prisma.expense.count({ where: { source: "ADS_API" } })).toBe(0);
     // 5 ngày = 5 dòng IMPORT, không ngày nào bị đếm 2 lần.
     expect(await prisma.expense.count()).toBe(5);
+  });
+});
+
+describe("importAdsExpenses / previewAdsImport — quyền marketing + nhật ký", () => {
+  const form = () => makeForm(META_CSV, { preset: "META", channelId: "facebook" });
+  const dong = (hanhDong: string) => prisma.auditLog.findMany({ where: { hanhDong } });
+
+  beforeEach(async () => {
+    await prisma.auditLog.deleteMany();
+  });
+
+  it("chỉ marketing:xem ⇒ import KHONG_CO_QUYEN, không dòng chi phí nào; xem trước vẫn được", async () => {
+    const chiXem = nguoiDungGia({ id: "staff-mkt-xem", role: "STAFF", quyen: new Set(["marketing:xem"]) });
+    vi.mocked(docNguoiDungPhien).mockResolvedValueOnce(chiXem).mockResolvedValueOnce(chiXem);
+
+    expect(await importAdsExpenses(form())).toMatchObject({ ok: false, code: "KHONG_CO_QUYEN" });
+    expect((await previewAdsImport(form())).ok).toBe(true);
+
+    expect(await prisma.expense.count({ where: { categoryId: "ads" } })).toBe(0);
+    expect(await dong("TU_CHOI_QUYEN")).toEqual([
+      expect.objectContaining({ actorId: "staff-mkt-xem", ghiChu: { quyenThieu: "marketing:sua" } }),
+    ]);
+  });
+
+  it("không có quyền marketing ⇒ xem trước cũng bị từ chối (trả số chi tiêu API theo ngày)", async () => {
+    vi.mocked(docNguoiDungPhien).mockResolvedValueOnce(
+      nguoiDungGia({ id: "staff-kho", role: "STAFF", quyen: new Set(["ton-kho:xem"]) }),
+    );
+
+    expect(await previewAdsImport(form())).toMatchObject({ ok: false, code: "KHONG_CO_QUYEN" });
+  });
+
+  it("import OK ⇒ dòng ADS_IMPORT kèm số dòng đã nhập", async () => {
+    expect((await importAdsExpenses(form())).ok).toBe(true);
+
+    expect(await dong("ADS_IMPORT")).toEqual([expect.objectContaining({ ketQua: "OK", ghiChu: { soDong: 5 } })]);
+  });
+
+  it("nhật ký ném ⇒ cả lượt import rollback", async () => {
+    vi.mocked(ghiNhatKy).mockRejectedValueOnce(new Error("nhat-ky-hong"));
+
+    expect((await importAdsExpenses(form())).ok).toBe(false);
+
+    expect(await prisma.expense.count({ where: { categoryId: "ads" } })).toBe(0);
   });
 });

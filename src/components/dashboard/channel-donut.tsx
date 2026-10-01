@@ -4,13 +4,13 @@ import { useRouter } from "next/navigation";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 
 import { formatVnd } from "@/lib/format";
-import type { ChannelPnl } from "@/lib/reports/pnl";
+import type { ChannelPnlChe } from "@/lib/reports/pnl-che";
 
 const INACTIVE_COLOR = "#6c6a64"; // --muted
 
 type Slice = { key: string; name: string; revenue: number; color: string; href: string };
 
-function buildSlices(channels: ChannelPnl[]): Slice[] {
+function buildSlices(channels: ChannelPnlChe[]): Slice[] {
   const slices: Slice[] = channels
     .filter((c) => c.isActive)
     .map((c) => ({ key: c.channelId, name: c.name, revenue: c.revenue, color: c.color, href: `/kenh/${c.channelId}` }));
@@ -28,7 +28,8 @@ function buildSlices(channels: ChannelPnl[]): Slice[] {
  * cần thấy nhưng không cần chi tiết từng kênh). Click lát/dòng chú giải →
  * `/kenh/{id}`; lát gộp → `/kenh` (mục "Kênh đã tắt" cuối trang đó).
  */
-export function ChannelDonut({ channels }: { channels: ChannelPnl[] }) {
+/** Chỉ cần doanh thu — page luôn truyền DTO che (`cheChannelPnl`), không có lãi kênh trong props. */
+export function ChannelDonut({ channels }: { channels: ChannelPnlChe[] }) {
   const router = useRouter();
   const slices = buildSlices(channels);
   const total = slices.reduce((sum, s) => sum + s.revenue, 0);

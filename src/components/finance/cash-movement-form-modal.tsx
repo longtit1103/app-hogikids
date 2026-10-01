@@ -23,9 +23,10 @@ import {
   CASH_MOVEMENT_KINDS,
   isCashMovementKind,
   isInflow,
+  kindGanSoQuy,
   type CashMovementKind,
 } from "@/lib/cash-movements/cash-movement-kinds";
-import type { CashMovementRow } from "@/lib/cash-movements/cash-movement-queries";
+import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
 import { formatVnd } from "@/lib/format";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
@@ -37,8 +38,15 @@ import { SoTietKiemSelect, type SoTietKiemChon } from "./so-tiet-kiem-select";
 
 const QUERY_DATE_FORMAT = "yyyy-MM-dd";
 
-const KINDS_IN = CASH_MOVEMENT_KINDS.filter(isInflow);
-const KINDS_OUT = CASH_MOVEMENT_KINDS.filter((k) => !isInflow(k));
+/**
+ * Loại khoản hiện trong ô chọn. Thiếu `tai-chinh-so-quy:sua` ⇒ bỏ loại gắn khoản vay / sổ tiết kiệm —
+ * CÙNG `kindGanSoQuy` mà action (`kiemQuyenDongGanSoQuy`) dùng để đòi quyền Sổ quỹ, nên form không bao
+ * giờ mời chọn một loại server chắc chắn từ chối.
+ */
+function loaiChoChon(choPhepLoaiSoQuy: boolean): { vao: CashMovementKind[]; ra: CashMovementKind[] } {
+  const ds = choPhepLoaiSoQuy ? CASH_MOVEMENT_KINDS : CASH_MOVEMENT_KINDS.filter((k) => !kindGanSoQuy(k));
+  return { vao: ds.filter(isInflow), ra: ds.filter((k) => !isInflow(k)) };
+}
 
 type FormState = {
   date: string;
@@ -49,15 +57,22 @@ type FormState = {
   savingsId: string;
 };
 
-function buildInitialState(row: CashMovementRow | undefined): FormState {
+/** Dòng đem sửa — bản cơ bản (người thiếu quyền Sổ quỹ) không có liên kết khoản vay/sổ để prefill. */
+type DongSua = CashMovementRow | CashMovementRowCoBan;
+
+function lienKet(row: DongSua | undefined): { loanId: string | null; savingsId: string | null } {
+  return row && "loanId" in row ? { loanId: row.loanId, savingsId: row.savingsId } : { loanId: null, savingsId: null };
+}
+
+function buildInitialState(row: DongSua | undefined): FormState {
   if (row) {
     return {
       date: format(row.date, QUERY_DATE_FORMAT),
       kind: row.kind,
       amount: row.amount,
       description: row.description,
-      loanId: row.loanId ?? "",
-      savingsId: row.savingsId ?? "",
+      loanId: lienKet(row).loanId ?? "",
+      savingsId: lienKet(row).savingsId ?? "",
     };
   }
   return {
@@ -103,13 +118,18 @@ export type CashMovementFormModalProps = {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   /** Có = chế độ sửa (prefill). */
-  row?: CashMovementRow;
+  row?: DongSua;
   /** Khoản vay để chọn khi loại là Vay vốn / Trả nợ gốc (page đọc `listKhoanVay()`). */
   loans: KhoanVayRow[];
   /** Sổ tiết kiệm cho ô chọn khi loại dòng là `SAVINGS_OUT`/`SAVINGS_IN` (cửa 6). */
   soTietKiem: SoTietKiemRow[];
   /** Ngày mở sổ quỹ (`soQuy.d0`); null = chưa mở sổ. */
   d0: Date | null;
+  /**
+   * Có `tai-chinh-so-quy:sua` (server tính)? `false` ⇒ ô "Loại khoản" bỏ các loại gắn khoản vay / sổ
+   * tiết kiệm. Bắt buộc truyền — quên truyền không được phép rơi về "hiện hết".
+   */
+  choPhepLoaiSoQuy: boolean;
 };
 
 /**
@@ -149,9 +169,11 @@ export function CashMovementFormModal({
   loans,
   soTietKiem,
   d0,
+  choPhepLoaiSoQuy,
 }: CashMovementFormModalProps) {
   const router = useRouter();
   const isEdit = Boolean(row);
+  const loai = loaiChoChon(choPhepLoaiSoQuy);
   const todayStr = format(new Date(), QUERY_DATE_FORMAT);
 
   const [date, setDate] = useState(todayStr);
@@ -205,11 +227,11 @@ export function CashMovementFormModal({
   const laLoaiVay =
     kind === "LOAN_IN" || kind === "LOAN_REPAY" || kind === "DEPOSIT_OUT" || kind === "DEPOSIT_IN";
   const laTienGui = kind === "DEPOSIT_OUT" || kind === "DEPOSIT_IN";
-  const dsKhoanVay = locKhoanVay(loans, kind, row?.loanId ?? null);
+  const dsKhoanVay = locKhoanVay(loans, kind, lienKet(row).loanId);
   // Hai loại gắn SỔ TIẾT KIỆM (CHECK `CashMovement_savings_bat_buoc` ở DB) — cùng lý do với
   // `laLoaiVay`: thiếu nhánh này thì ô chọn sổ không hiện, bấm Lưu mới thấy lỗi thô từ DB.
   const laSoTietKiem = kind === "SAVINGS_OUT" || kind === "SAVINGS_IN";
-  const dsSoTietKiem = locSoTietKiem(soTietKiem, kind, row?.savingsId ?? null);
+  const dsSoTietKiem = locSoTietKiem(soTietKiem, kind, lienKet(row).savingsId);
   const canSave =
     Boolean(date) &&
     Boolean(kind) &&
@@ -299,7 +321,7 @@ export function CashMovementFormModal({
               <SelectContent>
                 <SelectGroup>
                   <SelectLabel>Tiền vào</SelectLabel>
-                  {KINDS_IN.map((k) => (
+                  {loai.vao.map((k) => (
                     <SelectItem key={k} value={k}>
                       {CASH_MOVEMENT_KIND_META[k].label}
                     </SelectItem>
@@ -307,7 +329,7 @@ export function CashMovementFormModal({
                 </SelectGroup>
                 <SelectGroup>
                   <SelectLabel>Tiền ra</SelectLabel>
-                  {KINDS_OUT.map((k) => (
+                  {loai.ra.map((k) => (
                     <SelectItem key={k} value={k}>
                       {CASH_MOVEMENT_KIND_META[k].label}
                     </SelectItem>

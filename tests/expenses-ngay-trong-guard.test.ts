@@ -13,9 +13,14 @@ import { seedReference, truncateBusinessTables } from "./helpers/test-db";
  * tháng tự đẻ thêm một dòng ngày 1. Suite chốt: cả bốn dạng ngày trống đều bị từ chối ở ô "date",
  * KHÔNG ghi gì; ngày hợp lệ vẫn qua (refine "hợp lệ" không chặn oan) và refine "tương lai" vẫn chạy.
  */
-vi.mock("@/lib/session", () => ({
-  requireUser: vi.fn(async () => "test-user-id"),
-}));
+// Ngữ cảnh người dùng giả (mặc định chủ shop) — action đi qua `congAction`, không có cookie trong vitest.
+vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
+  const { nguoiDungGia } = await import("./helpers/nguoi-dung-gia");
+  return {
+    ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
+    docNguoiDungPhien: vi.fn(async () => nguoiDungGia()),
+  };
+});
 // revalidatePath cần request scope (không có trong vitest) — no-op cho unit test.
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),

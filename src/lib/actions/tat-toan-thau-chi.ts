@@ -8,6 +8,7 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import {
   LoiHopDong,
   loiKhoanVay,
+  maLoiNhatKy,
   OPT_TX,
   soTienKySchema,
 } from "@/lib/actions/khoan-vay-chung";
@@ -17,7 +18,9 @@ import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/session";
+import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { congAction } from "@/lib/quyen/cong-action";
+import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
 import { chanDuNoAm, duNoSauKhiGhi, khoaKhoanVay } from "@/lib/so-quy/vi-tu-du-no";
 
 /**
@@ -56,9 +59,10 @@ const tatToanSchema = z.object({
   conDauDaThay: z.coerce.date().nullable(),
 });
 
-type ThamSoTatToan = z.infer<typeof tatToanSchema>;
+type ThamSoTatToan = z.infer<typeof tatToanSchema> & { nguoiDung: NguoiDung };
 
 async function chayTatToan({
+  nguoiDung,
   loanId,
   ngayTatToan,
   lai,
@@ -189,6 +193,14 @@ async function chayTatToan({
       throw new LoiHopDong(`Dư nợ sau tất toán phải bằng 0 (đang ${formatVnd(duNo)}) — tải lại trang`);
     }
 
+    // Câu CUỐI, cùng transaction giữ khoá `Loan`: nhật ký ném ⇒ lãi + gốc + đóng khoản rollback trọn.
+    await ghiNhatKy(tx, {
+      actor: nguoiDung,
+      hanhDong: "THAU_CHI_TAT_TOAN",
+      doiTuong: { loai: "Loan", id: loanId },
+      ghiChu: { ky: format(ngay, "yyyy-MM-dd") },
+    });
+
     return { lai, goc };
   }, OPT_TX);
 }
@@ -216,17 +228,25 @@ async function chayTatToanCoRetry(tham: ThamSoTatToan): Promise<{ lai: number; g
 export async function tatToanThauChi(
   input: unknown
 ): Promise<ActionResult<{ lai: number; goc: number }>> {
-  await requireUser();
+  const c = await congAction("tai-chinh-so-quy:sua");
+  if (!c.ok) return c;
+  const { nguoiDung } = c;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
 
   const parsed = tatToanSchema.safeParse(input);
   if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
 
   try {
-    const ket = await chayTatToanCoRetry(parsed.data);
+    const ket = await chayTatToanCoRetry({ ...parsed.data, nguoiDung });
     lamMoiTrang();
     return { ok: true, data: ket };
   } catch (e) {
+    await ghiNhatKyLoi({
+      actor: nguoiDung,
+      hanhDong: "THAU_CHI_TAT_TOAN",
+      doiTuong: { loai: "Loan", id: parsed.data.loanId },
+      ghiChu: { lyDo: maLoiNhatKy(e) },
+    });
     return { ok: false, ...loiKhoanVay(e, "Lỗi khi tất toán thấu chi") };
   }
 }

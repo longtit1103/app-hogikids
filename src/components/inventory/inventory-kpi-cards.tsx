@@ -2,7 +2,8 @@ import Link from "next/link";
 
 import { formatVnd } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { VariantKpi } from "@/lib/queries/variants";
+import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
+import type { VariantKpi, VariantKpiChe } from "@/lib/queries/variants";
 
 function Card({
   label,
@@ -45,26 +46,30 @@ function Card({
   );
 }
 
-export function InventoryKpiCards({ kpi }: { kpi: VariantKpi }) {
+/** Thiếu quyền giá vốn ⇒ không có thẻ "Giá trị vốn tồn" (props che từ server, không phải ẩn ở đây). */
+export function InventoryKpiCards({ du }: { du: KetQuaChe<{ kpi: VariantKpi }, { kpi: VariantKpiChe }> }) {
+  const { kpi } = du;
   return (
     // Mobile 2 cột: số đếm 1 cột, số tiền / thẻ dài chiếm đủ 2 cột (ảnh iPhone 26/09: 4 thẻ cao
     // xếp một cột cho 4 con số ngắn). Thứ tự DOM giữ nguyên = thứ tự nhìn.
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className={cn("grid grid-cols-2 gap-3", du.coQuyenGiaVon ? "lg:grid-cols-4" : "lg:grid-cols-3")}>
       <Card label="Tổng SKU" value={kpi.totalSku.toLocaleString("vi-VN")} />
       <Card label="Tổng tồn" value={`${kpi.totalStock.toLocaleString("vi-VN")} cái`} />
-      <Card
-        label="GIÁ TRỊ VỐN TỒN"
-        value={formatVnd(kpi.stockValue)}
-        dark
-        className="col-span-2 sm:col-span-1"
-        caption={
-          kpi.skusWithoutCostInValue > 0 ? (
-            <Link href="/san-pham?loc=thieu_gia_von" className="hover:underline">
-              * {kpi.skusWithoutCostInValue} SKU chưa có giá vốn
-            </Link>
-          ) : undefined
-        }
-      />
+      {du.coQuyenGiaVon && (
+        <Card
+          label="GIÁ TRỊ VỐN TỒN"
+          value={formatVnd(du.kpi.stockValue)}
+          dark
+          className="col-span-2 sm:col-span-1"
+          caption={
+            du.kpi.skusWithoutCostInValue > 0 ? (
+              <Link href="/san-pham?loc=thieu_gia_von" className="hover:underline">
+                * {du.kpi.skusWithoutCostInValue} SKU chưa có giá vốn
+              </Link>
+            ) : undefined
+          }
+        />
+      )}
       <Card
         label="SKU dưới ngưỡng"
         value={kpi.lowCount.toLocaleString("vi-VN")}

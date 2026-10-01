@@ -57,7 +57,16 @@ export type ExpenseLedgerParams = {
  * ở page) + các filter riêng, tự backfill chi phí định kỳ + query rồi render
  * KPI / donut cơ cấu / bảng. Tách khỏi `tai-chinh/page.tsx` để page mỏng.
  */
-export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams; range: DateRange }) {
+export async function ExpenseLedgerTab({
+  sp,
+  range,
+  choPhepSua = false,
+}: {
+  sp: ExpenseLedgerParams;
+  range: DateRange;
+  /** Có `chi-phi:sua`? `false` ⇒ ẩn nút thêm/nhập ads/thùng rác (server vẫn chặn ở cổng action). */
+  choPhepSua?: boolean;
+}) {
   // Backfill chi phí định kỳ cho MỌI tháng giao với range đang xem TRƯỚC khi
   // query sổ chi phí (range "Tùy chọn" có thể là tháng quá khứ/đa tháng).
   await ensureRecurringExpensesForMonths(monthStartsInRange(range));
@@ -164,11 +173,15 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
               </>
             )}
           </Link>
-          <Link href="/tai-chinh/thung-rac" className="text-sm text-muted-foreground underline">
-            Thùng rác
-          </Link>
-          <AdsImportButton channels={channels} />
-          <ExpenseAddButton categories={categories} channels={channels} />
+          {choPhepSua && (
+            <>
+              <Link href="/tai-chinh/thung-rac" className="text-sm text-muted-foreground underline">
+                Thùng rác
+              </Link>
+              <AdsImportButton channels={channels} />
+              <ExpenseAddButton categories={categories} channels={channels} />
+            </>
+          )}
         </div>
       </div>
 
@@ -192,10 +205,12 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
             <path d="M66 60v6l4 4" />
           </svg>
           <h2 className="font-serif text-lg text-ink">Chưa có khoản chi nào trong kỳ này</h2>
-          <div className="flex items-center gap-4">
-            <ExpenseAddButton categories={categories} channels={channels} />
-            <AdsImportButton channels={channels} variant="link" className="text-primary" />
-          </div>
+          {choPhepSua && (
+            <div className="flex items-center gap-4">
+              <ExpenseAddButton categories={categories} channels={channels} />
+              <AdsImportButton channels={channels} variant="link" className="text-primary" />
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -211,12 +226,13 @@ export async function ExpenseLedgerTab({ sp, range }: { sp: ExpenseLedgerParams;
             totalAmount={expensesPage.totalAmount}
             categories={categories}
             channels={channels}
+            choPhepSua={choPhepSua}
           />
         </>
       )}
 
       {/* Độc lập kỳ đang lọc ở trên — mẫu định kỳ là dữ liệu toàn cục, không theo range. */}
-      <KhoanChiDinhKySection items={recurringList} />
+      <KhoanChiDinhKySection items={recurringList} choPhepSua={choPhepSua} />
     </div>
   );
 }
