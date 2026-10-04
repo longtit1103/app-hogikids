@@ -220,18 +220,25 @@ class AdapterThieuUrl extends PrismaPg {
   }
 }
 
+/** Tuỳ chọn thêm cho script đo/kiểm: `logTruyVan` bật sự kiện `query` để gắn `client.$on("query", …)`. */
+export type TuyChonTaoClient = { logTruyVan: true };
+
 /**
  * Dựng `PrismaClient` nối tới `url` (URL kiểu Prisma 6, mang `?schema=`). `url` rỗng/thiếu ⇒ client
- * dựng được nhưng mọi truy vấn ném lỗi rõ ràng (xem `AdapterThieuUrl`).
+ * dựng được nhưng mọi truy vấn ném lỗi rõ ràng (xem `AdapterThieuUrl`). App KHÔNG truyền `tuyChon`.
  */
-export function taoPrismaClient(url: string | undefined): PrismaClient {
+export function taoPrismaClient(url: string | undefined): PrismaClient;
+export function taoPrismaClient(url: string | undefined, tuyChon: TuyChonTaoClient): PrismaClient<"query">;
+export function taoPrismaClient(url: string | undefined, tuyChon?: TuyChonTaoClient): PrismaClient<"query"> | PrismaClient {
+  const log = tuyChon?.logTruyVan ? ([{ emit: "event", level: "query" }] as const) : undefined;
   if (!url) {
     return new PrismaClient({
       adapter: new AdapterThieuUrl(
         "Chưa có URL database (DATABASE_URL trống) — từ chối kết nối. Script chạy ngoài container phải tự nạp .env (vd `npx tsx --env-file=.env …`).",
       ),
+      ...(log ? { log: [...log] } : {}),
     });
   }
   const { schema, pool } = cauHinhKetNoiTuUrl(url);
-  return new PrismaClient({ adapter: new PrismaPg(pool, { schema }) });
+  return new PrismaClient({ adapter: new PrismaPg(pool, { schema }), ...(log ? { log: [...log] } : {}) });
 }

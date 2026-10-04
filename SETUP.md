@@ -31,6 +31,12 @@ hệ thống — CA riêng của Supabase phải được máy tin). KHÔNG khai
 chỉ chấp nhận khi DB nằm cùng mạng nội bộ (docker network, Tailscale). Giá trị khác (`prefer`, `allow`,
 `verify-ca`…) và `sslcert`/`sslrootcert`/`sslkey` bị từ chối lúc khởi động.
 
+**Phía n8n KHÔNG kiểm chứng chỉ, kể cả khi app dùng `verify-full`.** Bước 2 ghi `n8nDbSsl` (chế độ TLS của
+credential Postgres mà n8n dựng) suy từ `DATABASE_URL`: `sslmode=require` HOẶC `verify-full` HOẶC host
+`*.supabase.co` ⇒ `require` (mã hoá, không kiểm chứng chỉ); còn lại ⇒ `disable`
+(`scripts/setup-clone/ghi-setting-ban-dau.ts` `ghiN8nDb`). Chấp nhận có chủ ý — credential n8n chỉ đọc qua role
+`n8n_config_ro`; cần kiểm chứng chỉ phía n8n thì sửa tay credential đó trong UI n8n.
+
 ## 2. Dựng database — một lệnh
 
 ```bash

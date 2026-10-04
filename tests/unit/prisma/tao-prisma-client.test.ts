@@ -135,6 +135,25 @@ describe("taoPrismaClient — thiếu URL", () => {
   });
 });
 
+describe("taoPrismaClient — tuỳ chọn logTruyVan (script đo/kiểm)", () => {
+  it("bật sự kiện query: $on nhận đúng câu SQL, và options `default_transaction_read_only` trong URL sống cùng search_path", async () => {
+    const goc = new URL(process.env.DATABASE_URL ?? "");
+    goc.searchParams.set("options", "-c default_transaction_read_only=on");
+    const client = taoPrismaClient(goc.toString(), { logTruyVan: true });
+    const cau: string[] = [];
+    client.$on("query", (e) => cau.push(e.query));
+    try {
+      const [r] = await client.$queryRaw<{ ro: string; sp: string }[]>`
+        SELECT current_setting('default_transaction_read_only') AS ro, current_setting('search_path') AS sp`;
+      expect(r?.ro).toBe("on");
+      expect(r?.sp).toContain(goc.searchParams.get("schema") ?? "public");
+      expect(cau.some((q) => /default_transaction_read_only/.test(q))).toBe(true);
+    } finally {
+      await client.$disconnect();
+    }
+  });
+});
+
 /**
  * LƯỚI: `new PrismaClient(` chỉ được xuất hiện trong `src/lib/tao-prisma-client.ts`. Client dựng trần
  * ở chỗ khác sẽ KHÔNG có adapter (Prisma 7 ném lúc dựng) — hoặc có adapter tự chế quên `search_path`,

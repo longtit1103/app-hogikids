@@ -110,11 +110,17 @@ describe("chủ shop ghi ⇒ dòng nhật ký OK trong transaction, không mang 
       hetHanEpoch: null,
       dataAccessHetHanEpoch: null,
     } as never);
-    vi.mocked(luuTokenMetaVaoKho).mockResolvedValue(1);
+    // Giả hàm lưu: chạy callback ghi-thêm như transaction thật (truyền client giả làm `tx`).
+    vi.mocked(luuTokenMetaVaoKho).mockImplementation(async (_t, ghiThem) => {
+      await ghiThem?.(prisma as never);
+      return 1;
+    });
 
     const r = await doiVaLuuTokenMeta("gia-tri-tuoi");
 
     expect(r.ok).toBe(true);
+    // Nhật ký đi QUA callback trong transaction lưu token, không ghi riêng sau đó.
+    expect(vi.mocked(luuTokenMetaVaoKho).mock.calls[0]?.[1]).toEqual(expect.any(Function));
     expect(dongNhatKy()).toEqual([expect.objectContaining({ hanhDong: "KHOA_KET_NOI_THAY_META", ketQua: "OK" })]);
     expect(JSON.stringify(dongNhatKy())).not.toContain("bi-mat");
   });

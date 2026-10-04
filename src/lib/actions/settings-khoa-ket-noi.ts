@@ -161,19 +161,19 @@ export async function doiVaLuuTokenMeta(tokenTuoi: string): Promise<ActionResult
   }
 
   try {
-    await luuTokenMetaVaoKho({
-      accessToken: doi.tokenMoi,
-      expireAt: doi.hetHanEpoch,
-      dataAccessExpireAt: doi.dataAccessHetHanEpoch,
-    });
+    // Nhật ký OK ghi TRONG transaction lưu 4 key token: một trong hai ném ⇒ rollback cả hai, không
+    // có token đã lưu mà thiếu dấu vết. Không mang token/hạn vào nhật ký.
+    await luuTokenMetaVaoKho(
+      {
+        accessToken: doi.tokenMoi,
+        expireAt: doi.hetHanEpoch,
+        dataAccessExpireAt: doi.dataAccessHetHanEpoch,
+      },
+      (tx) => ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.KHOA_KET_NOI_THAY_META }),
+    );
   } catch {
     return { ok: false, error: "Đổi token thành công nhưng LƯU thất bại — thử lại" };
   }
-  // `luuTokenMetaVaoKho` tự mở transaction của nó (dùng chung với route ingest, hàm duy nhất ghi 4 key
-  // token) và không nhận `tx` ⇒ nhật ký OK ghi ngay sau khi lưu xong, NGOÀI transaction đó. Nhật ký ném ⇒
-  // action ném (không báo thành công giả) dù token đã nằm trong kho: chấp nhận vì đưa vào trong tx cần
-  // sửa `src/lib/tokens/luu-token-meta.ts` (ngoài phạm vi đợt vá này). Không mang token/hạn vào nhật ký.
-  await ghiNhatKy(prisma, { actor: cong.nguoiDung, hanhDong: HANH_DONG.KHOA_KET_NOI_THAY_META });
 
   revalidatePath("/cai-dat");
   return {
