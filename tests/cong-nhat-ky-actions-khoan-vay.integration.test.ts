@@ -85,7 +85,16 @@ describe("khoản vay — lượt ghi thật ⇒ dòng nhật ký OK đúng mã"
     const id2 = await taoKhoan({ name: "Khoản xoá được" });
     expect((await xoaKhoanVay(id2)).ok).toBe(true);
 
-    expect(await nhatKy("VAY_TAO")).toMatchObject([{ ketQua: "OK", doiTuongId: id }, { doiTuongId: id2 }]);
+    // Hai lượt tạo liền nhau có thể trùng `thoiDiem` (cùng mili-giây) ⇒ thứ tự `nhatKy` không xác định;
+    // chỉ khẳng định ĐỦ hai dòng OK đúng hai id, không khẳng định thứ tự.
+    const tao = await nhatKy("VAY_TAO");
+    expect(tao).toHaveLength(2);
+    expect(tao).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ketQua: "OK", doiTuongId: id }),
+        expect.objectContaining({ ketQua: "OK", doiTuongId: id2 }),
+      ]),
+    );
     expect(await nhatKy("VAY_SUA")).toMatchObject([{ ketQua: "OK", doiTuongLoai: "Loan", doiTuongId: id }]);
     expect(await nhatKy("VAY_GHI_KY")).toMatchObject([{ ketQua: "OK", doiTuongId: id, ghiChu: { ky: "2026-10-10" } }]);
     expect(await nhatKy("VAY_XOA")).toMatchObject([{ ketQua: "OK", doiTuongId: id2, actorId: "test-user" }]);
