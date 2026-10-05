@@ -71,6 +71,65 @@ describe("deploy/docker-compose.n8n-mau.yml: không phơi LAN + không dùng :la
   });
 });
 
+describe("CI typecheck: bộ test âm script publish chạy offline, không token", () => {
+  // Bộ test này chạy git THẬT trên repo fixture; sự cố 28/09 một đột biến của nó đã đi tới push
+  // thật. Khoá các hàng rào mạng ở mức MÃ NGUỒN ci.yml: gỡ một lớp là đỏ ở đây trước khi tới runner.
+  const ci = doc(".github/workflows/ci.yml");
+  const batDau = ci.search(/^ {2}typecheck:$/m);
+  const sau = ci.slice(batDau + 1).search(/^ {2}[a-z][\w-]*:$/m);
+  const jobTypecheck = sau === -1 ? ci.slice(batDau) : ci.slice(batDau, batDau + 1 + sau);
+  const ten = "Bộ test âm script publish public (offline, không token)";
+
+  /** Khối của step tên `ten` (tới step kế tiếp), đã bỏ dòng comment. */
+  function khoiStep(): string {
+    const i = jobTypecheck.indexOf(`- name: ${ten}\n`);
+    expect(i, `thiếu step "${ten}" trong job typecheck`).toBeGreaterThan(-1);
+    const conLai = jobTypecheck.slice(i + 1);
+    const j = conLai.search(/^ {6}- /m);
+    return boDongComment(j === -1 ? conLai : conLai.slice(0, j));
+  }
+
+  it("NGUYÊN khối lệnh so từng dòng — thay `bash \"$T\"` bằng echo/exit 0 hay bỏ chặn gh là đỏ", () => {
+    const step = khoiStep();
+    const r = step.indexOf("run: |\n");
+    expect(r, "step không có run: |").toBeGreaterThan(-1);
+    const dong = step
+      .slice(r + "run: |\n".length)
+      .split("\n")
+      .map((d) => d.trim())
+      .filter(Boolean);
+    expect(dong).toEqual([
+      "T=scripts/test-publish-public-snapshot.sh",
+      "S=scripts/publish-public-snapshot.sh",
+      'if [ -f "$T" ] && [ -f "$S" ]; then',
+      'CHAN="$RUNNER_TEMP/chan-gh-that"',
+      'mkdir -p "$CHAN"',
+      String.raw`printf '#!/bin/sh\necho "gh thật bị chặn trong bước này" >&2\nexit 97\n' > "$CHAN/gh"`,
+      'chmod +x "$CHAN/gh"',
+      'PATH="$CHAN:$PATH" bash "$T"',
+      'elif [ ! -f "$T" ] && [ ! -f "$S" ]; then',
+      'echo "▸ Bỏ qua: đây là bản snapshot công khai (script publish + bộ test cố ý không có mặt)."',
+      "else",
+      'echo "✗ Chỉ thiếu MỘT trong hai ($T / $S) — trạng thái không nhất quán." >&2',
+      "exit 1",
+      "fi",
+    ]);
+  });
+
+  it("env ép GIT_ALLOW_PROTOCOL=file, có trần thời gian, không bị tắt/nuốt lỗi", () => {
+    const step = khoiStep();
+    expect(step).toMatch(/^ {8}env:\n(?: {10}.*\n)*? {10}GIT_ALLOW_PROTOCOL: file\n/m);
+    expect(step).toMatch(/^ {8}timeout-minutes: [1-9]\n/m);
+    expect(step).not.toMatch(/^\s+(?:-\s+)?(?:if|continue-on-error):/m);
+  });
+
+  it("job typecheck không cầm token: checkout không giữ credential, không secret/GITHUB_TOKEN/GH_TOKEN", () => {
+    const job = boDongComment(jobTypecheck);
+    expect(job).toMatch(/- uses: actions\/checkout@v\d+\n {8}with:\n {10}persist-credentials: false\n/);
+    expect(job).not.toMatch(/secrets\.|GITHUB_TOKEN|GH_TOKEN|github\.token/);
+  });
+});
+
 describe("CI: GITHUB_TOKEN mặc định chỉ đọc", () => {
   it("khai `permissions: contents: read` ở mức workflow", () => {
     const ci = doc(".github/workflows/ci.yml");

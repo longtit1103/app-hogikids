@@ -14,6 +14,10 @@ updates:
       # prisma + @prisma/client: ĐÃ lên major 7 (driver adapter pg, đo lại pg_locks 01/10/2026). Vẫn chặn
       # PR semver-major tự động (8.x) — nâng major Prisma đổi cách nối DB/sinh client, phải đi PR tay có
       # đo lại khoá test + review đối kháng. Gỡ ignore của gói nào khi quyết định của gói đó đổi.
+      # @types/node (chốt 05/10/2026): ghim ^24 cho khớp runtime Node 24 (CI + ảnh chạy) — chỉ nâng major
+      # cùng lúc nâng runtime.
+      # jsdom major 30 (hoãn 05/10/2026): yêu cầu Node ^22.22.2 || ^24.15.0 || >=26, máy dev đang Node 25
+      # nằm ngoài dải — đánh giá nâng ở private khi môi trường dev về dải hỗ trợ.
       # `ignore`/`update-types` CHỈ chặn version update thường — theo tài liệu GitHub, PR vá BẢO MẬT
       # (kể cả khi bản vá đó nằm ở major mới) KHÔNG bị chặn, Dependabot vẫn tự mở như bình thường.
       - dependency-name: "typescript"
@@ -23,6 +27,10 @@ updates:
       - dependency-name: "@prisma/client"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@prisma/adapter-pg"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"

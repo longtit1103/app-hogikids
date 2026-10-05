@@ -1,7 +1,8 @@
 name: CI
 
 # 4 job gác chất lượng mỗi PR vào main (KHÔNG chạy lại khi push main — xem `on:` dưới):
-#   typecheck  — cổng allowlist snapshot public (chạy TRƯỚC npm ci) + tsc --noEmit (không cần DB)
+#   typecheck  — cổng allowlist snapshot public + bộ test âm script publish (cả hai TRƯỚC npm ci,
+#                offline) + tsc --noEmit (không cần DB)
 #   unit       — Vitest (Postgres tạm: tạo schema app + migrate deploy trước, rồi vitest)
 #   e2e        — Playwright (Postgres tạm + browser; global-setup tự migrate + seed user)
 #   docker     — dựng ảnh y như lúc deploy (không push ảnh); ba job trên đều MÙ với lỗi chỉ vỡ trong ảnh
@@ -52,6 +53,10 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=app
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Job này không ghi gì lên repo ⇒ không để token nằm lại trong .git/config của workspace
+          # (bộ test âm script publish bên dưới chạy git thật, cắt mọi đường tới credential).
+          persist-credentials: false
       # Cổng allowlist của bản snapshot công khai: file nguồn mới nào chưa được phân loại
       # (allowlist hoặc luật exclude) thì lượt publish sẽ ABORT — nhưng cổng đó chỉ nổ lúc có
       # NGƯỜI chạy publish, tức muộn hơn hẳn lúc file được thêm vào (ca thật 20/08: lộ ra sau
@@ -75,6 +80,41 @@ jobs:
             echo "▸ Bỏ qua: đây là bản snapshot công khai (script + allowlist cố ý không có mặt)."
           else
             echo "✗ Chỉ thiếu MỘT trong hai ($S / $A) — trạng thái không nhất quán." >&2
+            exit 1
+          fi
+      - name: Bộ test âm script publish public (offline, không token)
+        # VÌ SAO: trước đây bộ test này chỉ chạy tay ⇒ một PR đổi hành vi script publish (thêm gói
+        # vào dependabot.yml sinh ra) làm nó ĐỎ mà CI vẫn xanh, phải vá bằng PR sau. Chạy ở đây để
+        # PR làm vỡ hợp đồng script publish bị chặn ngay. Cùng job typecheck, trước npm ci: chỉ cần
+        # bash + git + python3 có sẵn trên runner, đo local ~37 s, không đẻ job mới (job mới bị làm
+        # tròn lên ít nhất 1 phút hạn mức mỗi lượt).
+        # HÀNG RÀO MẠNG — bộ test chạy git THẬT trên repo fixture tạm (sự cố 28/09: một đột biến đi
+        # tới push thật). Ba lớp, lớp nào cũng đủ một mình chặn đường ra ngoài:
+        #   ① GIT_ALLOW_PROTOCOL=file: git chỉ đi giao thức file (fixture + bare cục bộ); https/ssh bị
+        #      từ chối. Bộ test tự export biến này; khai lại ở đây để gỡ khỏi script vẫn còn rào.
+        #   ② gh thật bị che bằng một gh luôn thất bại đứng đầu PATH — test cần gh thì tự đặt gh GIẢ
+        #      của nó lên TRƯỚC (PATH="$d/bin:$PATH"), còn mọi lời gọi lọt ra gh thật đều hỏng.
+        #   ③ không truyền token/secret nào vào env; checkout không giữ credential (xem trên);
+        #      GITHUB_TOKEN của workflow chỉ đọc.
+        # Bản snapshot công khai cố ý KHÔNG mang script publish lẫn bộ test ⇒ cùng luật ba nhánh với
+        # cổng allowlist ở trên: có cả hai ⇒ chạy · thiếu cả hai ⇒ bỏ qua · thiếu một ⇒ ĐỎ.
+        timeout-minutes: 5
+        env:
+          GIT_ALLOW_PROTOCOL: file
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          T=scripts/test-publish-public-snapshot.sh
+          S=scripts/publish-public-snapshot.sh
+          if [ -f "$T" ] && [ -f "$S" ]; then
+            CHAN="$RUNNER_TEMP/chan-gh-that"
+            mkdir -p "$CHAN"
+            printf '#!/bin/sh\necho "gh thật bị chặn trong bước này" >&2\nexit 97\n' > "$CHAN/gh"
+            chmod +x "$CHAN/gh"
+            PATH="$CHAN:$PATH" bash "$T"
+          elif [ ! -f "$T" ] && [ ! -f "$S" ]; then
+            echo "▸ Bỏ qua: đây là bản snapshot công khai (script publish + bộ test cố ý không có mặt)."
+          else
+            echo "✗ Chỉ thiếu MỘT trong hai ($T / $S) — trạng thái không nhất quán." >&2
             exit 1
           fi
       - uses: actions/setup-node@v7
