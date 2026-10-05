@@ -27,7 +27,10 @@ export default defineConfig({
     globalSetup: ["tests/global-setup-khoa-chay-chong.ts"],
     // tests/e2e/** are Playwright specs (`test.describe` from
     // @playwright/test), not vitest — exclude them from unit test discovery.
-    exclude: ["tests/e2e/**", "**/node_modules/**"],
+    // `**/.claude/**`: worktree của agent nằm ở `.claude/worktrees/<id>/` là bản sao CẢ repo — không
+    // loại thì `npm test` local chạy thêm mọi test của bản cũ trong đó (05/10: 756 file thừa, đỏ giả
+    // từ assertion đã vá ở main) và chúng giẫm cùng DB test. CI không có worktree nên không bị.
+    exclude: ["tests/e2e/**", "**/node_modules/**", "**/.claude/**"],
     // Integration test files share ONE real Postgres test DB and several do
     // unscoped `deleteMany()` on shared tables (Variant/Product…) in
     // `beforeAll` — running files in parallel (vitest's default) lets one
