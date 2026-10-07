@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { batLaiDinhKy } from "@/lib/actions/expenses";
 import type { LuaChonThangBatLai } from "@/lib/expenses/thang-cho-bat-lai";
+import { DINH_KY_TRUNG_MAU_DANG_CHAY } from "@/lib/expenses/mau-dinh-ky-trung";
 import { formatVnd } from "@/lib/format";
 
 export type NutBatLaiKhoanChiDinhKyProps = {
@@ -25,7 +26,7 @@ export type NutBatLaiKhoanChiDinhKyProps = {
 };
 
 /** Mã lỗi server khi đang có mẫu khác cùng danh mục + kênh chạy — phải xác nhận lần hai mới bật. */
-const MA_TRUNG = "DINH_KY_TRUNG_MAU_DANG_CHAY";
+const MA_TRUNG = DINH_KY_TRUNG_MAU_DANG_CHAY;
 /** Mã lỗi server khi tháng đã chọn không còn là tháng này/tháng sau — trang mở từ trước nửa đêm cuối tháng. */
 const MA_TRANG_CU = "TRANG_CU";
 

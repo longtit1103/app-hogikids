@@ -72,6 +72,7 @@ export const ALLOW_ACTION_KHONG_NHAT_KY: Readonly<Record<string, string>> = {
   "src/lib/actions/settings-khoa-ket-noi.ts#kiemTraKetNoiNguon": "Đọc kho + gọi thử nguồn ngoài, không ghi.",
   "src/lib/actions/settings-channels.ts#countRecomputableOrders": "Chỉ đếm đơn.",
   "src/lib/actions/sync.ts#getLatestSync": "Chỉ đọc SyncLog.",
+  "src/lib/actions/sync.ts#getTienDoDongBoNgay": "Chỉ đọc SyncLog (tiến độ lượt Đồng bộ ngay).",
   "src/lib/actions/khoang-ngay.ts#luuLuaChonKhoangNgay":
     "Không đọc/ghi DB — chỉ ghi cookie tuỳ chọn khoảng ngày của chính trình duyệt.",
 };

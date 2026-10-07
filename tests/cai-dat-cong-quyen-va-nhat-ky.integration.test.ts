@@ -27,7 +27,7 @@ import {
 } from "@/lib/actions/settings-expense-categories";
 import { updateDefaultLowStockThreshold } from "@/lib/actions/settings-low-stock";
 import { updateShopInfo } from "@/lib/actions/settings-shop-info";
-import { getLatestSync, triggerSyncNow } from "@/lib/actions/sync";
+import { getLatestSync, getTienDoDongBoNgay, triggerSyncNow } from "@/lib/actions/sync";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { prisma } from "@/lib/prisma";
 import type { Quyen } from "@/lib/quyen/danh-muc-quyen";
@@ -125,6 +125,15 @@ describe("hàm chỉ đọc đòi cai-dat:xem", () => {
     expect(await nhatKy("TU_CHOI_QUYEN")).toHaveLength(2);
   });
 
+  it("không có cai-dat:xem ⇒ getTienDoDongBoNgay bị từ chối (trả kèm error thô của SyncLog)", async () => {
+    vi.mocked(docNguoiDungPhien).mockResolvedValueOnce(KHONG_CAI_DAT);
+
+    expect(await getTienDoDongBoNgay(new Date().toISOString())).toMatchObject({
+      ok: false,
+      code: "KHONG_CO_QUYEN",
+    });
+  });
+
   it("có cai-dat:xem ⇒ getLatestSync trả mốc gần nhất (hoặc null khi chưa có lượt nào)", async () => {
     await prisma.syncLog.deleteMany({ where: { kind: "PANCAKE" } });
     vi.mocked(docNguoiDungPhien).mockResolvedValueOnce(CHI_XEM).mockResolvedValueOnce(CHI_XEM);
@@ -186,7 +195,16 @@ describe("có cai-dat:sua ⇒ ghi + dòng nhật ký OK đúng mã, đúng ngư�
 
   it("đồng bộ ngay: n8n nhận lệnh ⇒ DONG_BO_KICH_HOAT; n8n lỗi ⇒ không có dòng OK", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("ok", { status: 200 })));
-    expect(await triggerSyncNow()).toEqual({ ok: true, data: undefined });
+    const truocKhiBam = Date.now();
+    const kq = await triggerSyncNow();
+    // `mocBam` = giờ SERVER chụp trước khi gọi n8n — nút dùng để chỉ nhận SyncLog của lượt vừa bấm.
+    expect(kq).toEqual({ ok: true, data: { mocBam: expect.any(String) } });
+    // Cận dưới: chụp SAU lúc bắt đầu gọi; cận trên: không ở tương lai (mốc lệch tương lai ⇒ dòng
+    // SyncLog của chính lượt này rơi khỏi bộ lọc `startedAt >= mocBam` ⇒ nút báo "chưa phản hồi" giả).
+    if (kq.ok) {
+      expect(Date.parse(kq.data.mocBam)).toBeGreaterThanOrEqual(truocKhiBam);
+      expect(Date.parse(kq.data.mocBam)).toBeLessThanOrEqual(Date.now());
+    }
     vi.stubGlobal("fetch", vi.fn(async () => new Response("loi", { status: 500 })));
     expect((await triggerSyncNow()).ok).toBe(false);
 

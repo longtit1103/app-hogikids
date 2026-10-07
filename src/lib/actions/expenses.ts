@@ -12,6 +12,11 @@ import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { mauDinhKySinhChoThang } from "@/lib/expenses/ensure-recurring-expenses";
 import { khoaThangDinhKy, laLoiTrungDongDinhKyThang } from "@/lib/expenses/khoa-thang-dinh-ky";
+import {
+  DINH_KY_TRUNG_MAU_DANG_CHAY as MA_DINH_KY_TRUNG,
+  moDauCanhBaoMauTrung,
+  timMauTrung,
+} from "@/lib/expenses/mau-dinh-ky-trung";
 import { thangChoBatLai } from "@/lib/expenses/thang-cho-bat-lai";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
@@ -66,7 +71,13 @@ function blockRecurringAds(d: { categoryId: string; recurringMonthly: boolean })
 }
 
 const createExpenseSchema = z
-  .object({ ...baseExpenseFields, recurringMonthly: z.boolean().default(false) })
+  .object({
+    ...baseExpenseFields,
+    recurringMonthly: z.boolean().default(false),
+    // Chủ shop đã thấy cảnh báo "trùng mẫu đang chạy" và vẫn muốn lưu. Optional để bundle cũ không gửi
+    // cờ vẫn parse được (chỉ nhận thêm cảnh báo).
+    xacNhanTrung: z.boolean().optional(),
+  })
   .refine(requireAdsSource, { message: "Chọn nguồn ads", path: ["adsSource"] })
   .refine(blockRecurringAds, {
     message:
@@ -123,6 +134,11 @@ async function validateChannel(channelId: string | null): Promise<string | null>
  * cũ = khai khoản đã chạy từ tháng đó ⇒ các tháng từ đó tới nay là chi phí thật, bộ sinh vẫn ghi đủ;
  * còn đặt mốc = tháng hiện tại thì các tháng xen giữa mất trắng khỏi Lãi/Lỗ mà không ai hay. Tháng
  * TRƯỚC dòng đầu thì không bao giờ sinh lùi nữa.
+ *
+ * Cổng TRÙNG (chỉ khi bật lặp): đang có mẫu `active` cùng `categoryId` + `channelId` (null chỉ bằng
+ * null) mà CÙNG số tiền hoặc CÙNG mô tả không rỗng (`timMauTrung`) ⇒ từ chối `DINH_KY_TRUNG_MAU_DANG_CHAY`,
+ * không ghi gì, trừ khi `xacNhanTrung`. Dò SAU khi khoá nhóm (`khoaNhomMauDinhKy`) nên hai lượt tạo/bật
+ * lại cùng nhóm tuần tự (kể cả khi nhóm chưa có mẫu nào — khoá tư vấn theo nhóm). Không dò dòng ghi tay.
  */
 export async function createExpense(input: unknown): Promise<ActionResult> {
   const c = await congAction("chi-phi:sua");
@@ -141,9 +157,19 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
   const kenhLaiVay = chanKenhChoLaiVay(data);
   if (kenhLaiVay) return kenhLaiVay;
 
+  let trung: { description: string; amount: number } | null = null;
   try {
     if (data.recurringMonthly) {
-      await prisma.$transaction(async (tx) => {
+      trung = await prisma.$transaction(async (tx) => {
+        await khoaNhomMauDinhKy(tx, { categoryId: data.categoryId, channelId: data.channelId });
+        if (data.xacNhanTrung !== true) {
+          const dangChay = await tx.recurringExpense.findMany({
+            where: { active: true, categoryId: data.categoryId, channelId: data.channelId },
+            select: { description: true, amount: true },
+          });
+          const mauTrung = timMauTrung(dangChay, { description: data.description, amount: data.amount });
+          if (mauTrung) return mauTrung;
+        }
         const recurring = await tx.recurringExpense.create({
           data: {
             categoryId: data.categoryId,
@@ -174,6 +200,7 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
           doiTuong: { loai: "Expense", id: row.id },
           ghiChu: { thang: format(data.date, "yyyy-MM") },
         });
+        return null;
       });
     } else {
       // Bọc transaction chỉ để dòng nhật ký đi CÙNG câu ghi: nhật ký ném ⇒ khoản chi không lưu.
@@ -199,6 +226,16 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
     }
   } catch {
     return { ok: false, error: "Lỗi khi tạo khoản chi" };
+  }
+
+  if (trung) {
+    return {
+      ok: false,
+      code: MA_DINH_KY_TRUNG,
+      error:
+        moDauCanhBaoMauTrung(trung) +
+        'lưu tiếp là mỗi tháng trừ 2 lần. Đổi giá thì "Xoá và dừng lặp lại" khoản cũ trước.',
+    };
   }
 
   revalidatePath("/tai-chinh");
@@ -593,13 +630,10 @@ export async function batLaiDinhKy(
     case "TRANG_CU":
       return { ok: false, code: ketQua.loai, error: LOI_TRANG_CU };
     case "TRUNG": {
-      const moTa = ketQua.description.trim() === "" ? "(không mô tả)" : ketQua.description;
       return {
         ok: false,
-        code: "DINH_KY_TRUNG_MAU_DANG_CHAY",
-        error:
-          `Đang có khoản định kỳ '${moTa}' ${formatVnd(ketQua.amount)} cùng danh mục đang chạy — ` +
-          "bật lại sẽ trừ 2 lần mỗi tháng; nên dừng khoản kia trước.",
+        code: MA_DINH_KY_TRUNG,
+        error: moDauCanhBaoMauTrung(ketQua) + "bật lại sẽ trừ 2 lần mỗi tháng; nên dừng khoản kia trước.",
       };
     }
     case "DA_BAT":
@@ -621,6 +655,11 @@ async function khoaNhomMauDinhKy(
 ): Promise<void> {
   const kenh =
     nhom.channelId === null ? Prisma.sql`"channelId" IS NULL` : Prisma.sql`"channelId" = ${nhom.channelId}`;
+  // `FOR UPDATE` không khoá được gì khi nhóm CHƯA có dòng nào (mẫu đầu tiên của nhóm) — hai lượt tạo
+  // đồng thời đều thấy nhóm rỗng. Khoá tư vấn theo khoá nhóm lấp khe đó. Luôn lấy TRƯỚC khoá dòng (mọi
+  // caller đi qua helper này) nên không đẻ chu trình khoá; trùng băm chỉ tuần tự hoá thừa. `$executeRaw`
+  // vì hàm trả `void` (xem `khoa-land-don.ts`).
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`dinh-ky-nhom:${nhom.categoryId}|${nhom.channelId ?? ""}`}, 0))`;
   await tx.$queryRaw`SELECT id FROM "RecurringExpense" WHERE "categoryId" = ${nhom.categoryId} AND ${kenh} ORDER BY id FOR UPDATE`;
 }
 

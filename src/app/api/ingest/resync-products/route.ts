@@ -159,7 +159,9 @@ export async function POST(req: Request): Promise<Response> {
     // ĐẾM PHIẾU NHẬP CHƯA GHI — nối vào đây vì workflow `pancake-nightly` land stream `purchases`
     // TRƯỚC khi gọi endpoint này (STREAMS chạy hết rồi mới tới bước vá tồn), nên Bronze phiếu nhập
     // đã tươi nhất trong đêm. Cùng khuôn + cùng lý do nuốt lỗi với phép đếm giá vốn ngay trên: đếm
-    // chỉ là tín hiệu nhắc việc, KHÔNG được kéo sập lượt vá tồn.
+    // chỉ là tín hiệu nhắc việc, KHÔNG được kéo sập lượt vá tồn. (Nút "Đồng bộ ngay" cũng kéo
+    // `purchases` và đếm lại qua `/api/ingest/dem-gia-von` — cùng hàm, tính lại từ đầu; chồng nhau
+    // thì dải có thể lệch TẠM tới lượt đếm kế, không chạm tiền.)
     let soPhieuNhapChuaGhi: number | null = null;
     let soViecHauKiemPhieuNhap: number | null = null;
     try {

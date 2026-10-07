@@ -96,6 +96,7 @@ export const BANG_QUYEN_MONG_DOI: Readonly<Record<string, CongMongDoiCoKieu>> = 
   [`${A}/settings-low-stock.ts#updateDefaultLowStockThreshold`]: "cai-dat:sua",
   [`${A}/settings-shop-info.ts#updateShopInfo`]: "cai-dat:sua",
   [`${A}/sync.ts#getLatestSync`]: "cai-dat:xem",
+  [`${A}/sync.ts#getTienDoDongBoNgay`]: "cai-dat:xem",
   [`${A}/sync.ts#triggerSyncNow`]: "cai-dat:sua",
 
   // ── Owner-only: dữ liệu, khoá kết nối, n8n, tài khoản ──

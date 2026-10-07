@@ -8,16 +8,24 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getLatestSync, triggerSyncNow } from "@/lib/actions/sync";
+import { getLatestSync, getTienDoDongBoNgay, triggerSyncNow } from "@/lib/actions/sync";
 import type { LatestSync } from "@/lib/actions/sync-types";
+import {
+  ketLuanTienDo,
+  MA_MOC_NGOAI_DAI,
+  thongDiepKetLuan,
+  TRAN_MAY_KHACH_MS,
+} from "@/lib/ingest/tien-do-dong-bo-ngay";
 import { cn } from "@/lib/utils";
 
 const POLL_MS = 5000;
-const TIMEOUT_MS = 120_000; // hết cửa sổ chờ n8n → báo chưa phản hồi (KHÔNG báo thành công)
 
 /**
  * Nút "Đồng bộ ngay": hiển thị SyncLog PANCAKE gần nhất + badge OK/Lỗi; bấm → kích webhook n8n
- * rồi poll SyncLog mỗi 5s, CHỈ nhận log có `startedAt > lúc bấm` (không lấy log cũ) đã hết RUNNING.
+ * rồi poll tiến độ mỗi 5s. Lượt chỉ XONG khi gặp dòng SyncLog của BƯỚC CUỐI workflow
+ * (`/api/ingest/dem-gia-von`, `stats.mode`) sau mốc bấm — KHÔNG phải dòng đầu tiên (mỗi trang kéo là
+ * một dòng, dòng đầu về khi mới được một trang). Workflow chết giữa chừng ⇒ có lối ra theo trần
+ * (`tien-do-dong-bo-ngay.ts`), không quay mãi; bước cuối ERROR ⇒ báo lỗi, không báo "xong".
  *
  * `choPhepDongBo` = người xem có `cai-dat:sua` (server tính, truyền boolean). Thiếu/false ⇒ KHÔNG render
  * gì (cả dòng trạng thái — `getLatestSync` đằng nào cũng đòi quyền cài đặt). Ẩn là tiện dụng; cổng thật
@@ -67,7 +75,6 @@ function NutDongBoNgay({ trongTopbar }: { trongTopbar: boolean }) {
   const router = useRouter();
 
   const onClick = useCallback(async () => {
-    const clickedAt = Date.now();
     setBusy(true);
     const res = await triggerSyncNow();
     if (!res.ok) {
@@ -75,28 +82,51 @@ function NutDongBoNgay({ trongTopbar }: { trongTopbar: boolean }) {
       toast.error(res.error);
       return;
     }
+    const { mocBam } = res.data;
     toast.success("Đã gọi đồng bộ — đang chờ n8n…");
 
     clearTimers();
+    // Một lời hỏi một lúc: server action chậm hơn nhịp poll thì không chồng lời hỏi lên nhau.
+    let dangHoi = false;
     pollRef.current = setInterval(async () => {
-      const r = await getLatestSync("PANCAKE").catch(() => null);
-      const l = r?.ok ? r.data : null;
-      if (l && new Date(l.startedAt).getTime() > clickedAt && l.status !== "RUNNING") {
-        setLatest(l);
-        setBusy(false);
+      if (dangHoi) return;
+      dangHoi = true;
+      try {
+        const r = await getTienDoDongBoNgay(mocBam).catch(() => null);
+        if (r && !r.ok && r.code === MA_MOC_NGOAI_DAI) {
+          // Server từ chối mốc (ngoài dải theo dõi) ⇒ hỏi lại cũng vô ích: dừng, báo rõ.
+          clearTimers();
+          setBusy(false);
+          toast.error(r.error);
+          return;
+        }
+        if (!r?.ok) return; // hỏng lẻ ⇒ hỏi lại nhịp sau; hỏng mãi ⇒ lưới cuối phía máy khách
+        const thongDiep = thongDiepKetLuan(ketLuanTienDo(r.data));
+        if (!thongDiep) return;
+
         clearTimers();
+        setBusy(false);
+        void getLatestSync("PANCAKE")
+          .then((l) => {
+            if (l.ok) setLatest(l.data);
+          })
+          .catch(() => {});
         // Nạp lại số của trang đang xem VÀ bỏ bản tải sẵn của các tab (thanh tab dưới tải sẵn
-        // `prefetch`, giữ tới 5 phút) — không có dòng này thì "Đồng bộ xong" mà số vẫn cũ.
-        router.refresh();
-        if (l.status === "OK") toast.success("Đồng bộ xong");
-        else toast.error(l.error ?? "Đồng bộ lỗi");
+        // `prefetch`, giữ tới 5 phút) — không có dòng này thì "Đồng bộ xong" mà số vẫn cũ. Gọi cả khi
+        // lỗi/dừng giữa chừng: phần dữ liệu đã về vẫn là dữ liệu thật.
+        if (r.data.soLuot > 0) router.refresh();
+        if (thongDiep.muc === "thanh-cong") toast.success(thongDiep.noiDung);
+        else if (thongDiep.muc === "canh-bao") toast.warning(thongDiep.noiDung);
+        else toast.error(thongDiep.noiDung);
+      } finally {
+        dangHoi = false;
       }
     }, POLL_MS);
     timeoutRef.current = setTimeout(() => {
       clearTimers();
       setBusy(false);
-      toast.error("n8n chưa phản hồi — kiểm tra workflow");
-    }, TIMEOUT_MS);
+      toast.error("Không theo dõi được tiến độ đồng bộ — tải lại trang để xem kết quả");
+    }, TRAN_MAY_KHACH_MS);
   }, [clearTimers, router]);
 
   // RUNNING treo do app crash đã được withSyncLog cleanup >15' → không kẹt disabled vĩnh viễn.

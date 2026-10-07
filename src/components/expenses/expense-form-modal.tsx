@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { createExpense, stopRecurring, updateExpense } from "@/lib/actions/expenses";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
+import { DINH_KY_TRUNG_MAU_DANG_CHAY as MA_DINH_KY_TRUNG } from "@/lib/expenses/mau-dinh-ky-trung";
 import { formatVnd } from "@/lib/format";
 
 const NONE = "__none__"; // sentinel: Select không nhận value="" cho "Không gắn kênh"
@@ -144,6 +145,9 @@ export function ExpenseFormModal({
   const [channelTouched, setChannelTouched] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  // Cảnh báo "đang có khoản định kỳ trùng" của server, kèm ảnh chụp nội dung form LÚC GỬI. Chỉ còn hiệu
+  // lực khi nội dung hiện tại vẫn khớp ảnh chụp (xem `canhBaoTrung` bên dưới).
+  const [canhBaoDaNhan, setCanhBaoDaNhan] = useState<{ cau: string; anhChup: string } | null>(null);
   const [stoppingRecurring, setStoppingRecurring] = useState(false);
   const initialSnapshotRef = useRef("");
 
@@ -161,9 +165,24 @@ export function ExpenseFormModal({
     setRecurringMonthly(initial.recurringMonthly);
     setChannelTouched(Boolean(preset?.lockChannel));
     setFieldErrors({});
+    setCanhBaoDaNhan(null);
     initialSnapshotRef.current = JSON.stringify(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, expense?.id]);
+
+  // Xác nhận chỉ có giá trị cho đúng nội dung đã được cảnh báo: sửa BẤT KỲ ô nào (kể cả trong lúc
+  // request còn bay) ⇒ ảnh chụp lệch ⇒ cảnh báo biến mất và lần Lưu sau để server dò lại — cờ không
+  // được "dính" sang nội dung khác.
+  const anhChupHienTai = JSON.stringify({
+    date,
+    categoryId,
+    adsSource,
+    amount,
+    channelId,
+    description,
+    recurringMonthly,
+  });
+  const canhBaoTrung = canhBaoDaNhan?.anhChup === anhChupHienTai ? canhBaoDaNhan.cau : null;
 
   function isDirty(): boolean {
     const current: FormState = { date, categoryId, adsSource, amount, channelId, description, recurringMonthly };
@@ -240,6 +259,7 @@ export function ExpenseFormModal({
     }
     setFieldErrors({});
     setSaving(true);
+    const anhChupLucGui = anhChupHienTai;
     const input = {
       date: new Date(`${date}T00:00:00+07:00`),
       categoryId,
@@ -247,18 +267,21 @@ export function ExpenseFormModal({
       amount,
       channelId: khoaKenhLaiVay ? null : channelId,
       description,
-      ...(isEdit ? {} : { recurringMonthly }),
+      ...(isEdit ? {} : { recurringMonthly, xacNhanTrung: canhBaoTrung !== null }),
     };
     try {
       const res = isEdit && expense ? await updateExpense(expense.id, input) : await createExpense(input);
       if (!res.ok) {
-        if (res.field) {
+        if (res.code === MA_DINH_KY_TRUNG) {
+          setCanhBaoDaNhan({ cau: res.error, anhChup: anhChupLucGui });
+        } else if (res.field) {
           setFieldErrors({ [res.field]: res.error });
         } else {
           toast.error(res.error);
         }
         return;
       }
+      setCanhBaoDaNhan(null);
       toast.success(isEdit ? "Đã cập nhật chi phí" : (createSuccessMessage ?? `Đã thêm chi phí ${formatVnd(amount)}`));
       onOpenChange(false);
       router.refresh();
@@ -420,6 +443,12 @@ export function ExpenseFormModal({
             </div>
           )}
 
+          {canhBaoTrung && (
+            <p className="text-sm text-warning" data-testid="expense-canh-bao-dinh-ky-trung">
+              {canhBaoTrung}
+            </p>
+          )}
+
           {showStopRecurring && (
             <Button type="button" variant="destructive" disabled={stoppingRecurring} onClick={handleStopRecurring}>
               {stoppingRecurring ? "Đang dừng…" : "Dừng lặp lại"}
@@ -431,8 +460,13 @@ export function ExpenseFormModal({
           <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
             Hủy
           </Button>
-          <Button type="button" disabled={!canSave} onClick={handleSubmit}>
-            {saving ? "Đang lưu…" : "Lưu"}
+          <Button
+            type="button"
+            variant={canhBaoTrung ? "destructive" : "default"}
+            disabled={!canSave}
+            onClick={handleSubmit}
+          >
+            {saving ? "Đang lưu…" : canhBaoTrung ? "Vẫn lưu" : "Lưu"}
           </Button>
         </DialogFooter>
       </DialogContent>

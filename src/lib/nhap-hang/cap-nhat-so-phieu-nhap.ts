@@ -11,10 +11,15 @@ import {
  * Đếm lại việc phiếu nhập còn treo rồi chốt vào 3 ô `Setting` — nguồn số cho dải nhắc việc toàn app.
  * Khuôn y hệt `capNhatSoLechGiaVon`, chỉ khác là có HAI loại việc (chờ duyệt / hậu kiểm).
  *
- * MỘT CHỖ DUY NHẤT vì có hai đường gọi: lượt đêm (`POST /api/ingest/resync-products`, chạy SAU khi
- * stream `purchases` đã land) và ngay sau lượt ghi ở `ghiChiPhiNhapHang` — không có đường thứ hai
- * thì dải vẫn kêu "4 phiếu chờ" bằng số của đêm trước cho tới 03:00 hôm sau, chủ shop vừa duyệt
- * xong vẫn thấy y nguyên và tưởng nút không ăn.
+ * MỘT CHỖ DUY NHẤT vì có BA đường gọi: lượt đêm (`POST /api/ingest/resync-products`, chạy SAU khi
+ * stream `purchases` đã land), nút "Đồng bộ ngay" (`POST /api/ingest/dem-gia-von` — từ 2026-10-07
+ * workflow `pancake-sync-now` cũng kéo `purchases` shop kho rồi mới gọi bước đếm này) và ngay sau
+ * lượt ghi ở `ghiChiPhiNhapHang` — thiếu một đường thì dải vẫn kêu "4 phiếu chờ" bằng số của đêm
+ * trước cho tới 03:00 hôm sau, chủ shop vừa nhập/duyệt xong vẫn thấy y nguyên và tưởng nút không ăn.
+ *
+ * Tính lại TỪ ĐẦU rồi ghi đè (không cộng dồn) ⇒ gọi lặp không đếm đôi. KHÔNG khoá: đọc (Bronze + Sổ
+ * chi phí) rồi mới ghi, nên hai đường CHỒNG nhau có thể để lượt ghi SAU đè số cũ hơn ⇒ dải nhắc việc
+ * báo lệch TẠM tới lượt đếm kế tiếp. Không ghi sai tiền: màn duyệt tính trực tiếp mỗi lần mở.
  *
  * NÉM khi hỏng — bên gọi tự quyết nuốt hay không. Chỉ ghi 3 ô cấu hình: KHÔNG chạm tiền.
  */

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
-import { format } from "date-fns";
+import { format, startOfMonth } from "date-fns";
 
 import { testPrisma } from "./ingest-raw";
 import { INGEST_SECRET_TEST, TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
@@ -124,6 +124,57 @@ test.describe("Chi phí", () => {
       const mau = await prisma.recurringExpense.findMany({ where: { description: desc }, select: { id: true } });
       await prisma.expense.deleteMany({ where: { recurringId: { in: mau.map((m) => m.id) } } });
       await prisma.recurringExpense.deleteMany({ where: { description: desc } });
+      await prisma.$disconnect();
+    }
+  });
+
+  test("Bật lặp khi đã có mẫu cùng danh mục + số tiền → cảnh báo, 'Vẫn lưu' mới tạo", async ({ page }) => {
+    const prefix = `E2E trùng định kỳ ${Date.now()}`;
+    const moTaMoi = `${prefix} mới`;
+    const prisma = testPrisma();
+    // Số tiền riêng cho ca này để không đụng mẫu của spec khác trong DB e2e dùng chung.
+    await prisma.recurringExpense.create({
+      data: {
+        categoryId: "packaging",
+        amount: 654_321,
+        dayOfMonth: 7,
+        description: `${prefix} cũ`,
+        active: true,
+        activeFrom: startOfMonth(new Date()),
+      },
+    });
+    try {
+      await page.goto("/tai-chinh?tab=so-chi-phi");
+      await page.getByRole("button", { name: "+ Thêm chi phí" }).first().click();
+      const dialog = page.getByRole("dialog");
+      await pickSelectOption(page, "Chọn danh mục", "Đóng gói");
+      await dialog.getByPlaceholder("0").fill("654321");
+      await dialog.locator("textarea").fill(moTaMoi);
+      await dialog.getByRole("switch").click();
+      await dialog.getByRole("button", { name: "Lưu", exact: true }).click();
+
+      // Lần đầu: server từ chối, hiện cảnh báo + nút đổi thành "Vẫn lưu", chưa có mẫu mới.
+      await expect(dialog.getByTestId("expense-canh-bao-dinh-ky-trung")).toContainText(`${prefix} cũ`);
+      expect(await prisma.recurringExpense.count({ where: { description: moTaMoi } })).toBe(0);
+
+      // Sửa một ô ⇒ cảnh báo biến mất, nút trở lại "Lưu" (xác nhận không dính sang nội dung khác).
+      await dialog.locator("textarea").fill(`${moTaMoi}!`);
+      await expect(dialog.getByTestId("expense-canh-bao-dinh-ky-trung")).toHaveCount(0);
+      await expect(dialog.getByRole("button", { name: "Lưu", exact: true })).toBeVisible();
+      // Trả về ĐÚNG nội dung server đã dò ⇒ cảnh báo gắn với nội dung đó hiện lại, nút lại là "Vẫn lưu".
+      await dialog.locator("textarea").fill(moTaMoi);
+      await expect(dialog.getByTestId("expense-canh-bao-dinh-ky-trung")).toBeVisible();
+
+      await dialog.getByRole("button", { name: "Vẫn lưu" }).click();
+      await expect(page.getByText(/Đã thêm chi phí/)).toBeVisible();
+      expect(await prisma.recurringExpense.count({ where: { description: moTaMoi } })).toBe(1);
+    } finally {
+      const mau = await prisma.recurringExpense.findMany({
+        where: { description: { startsWith: prefix } },
+        select: { id: true },
+      });
+      await prisma.expense.deleteMany({ where: { recurringId: { in: mau.map((m) => m.id) } } });
+      await prisma.recurringExpense.deleteMany({ where: { description: { startsWith: prefix } } });
       await prisma.$disconnect();
     }
   });

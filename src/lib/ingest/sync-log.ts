@@ -47,21 +47,28 @@ export async function coLuotDangChay(kind?: SyncKind): Promise<boolean> {
  *      đọc `rowsUpserted`, badge /cai-dat xanh, banner chỉ bật với ERROR.
  *
  * `syncLogId` truyền xuống để ingest gắn lineage (Bronze `syncLogId`: dòng raw này đến từ lần sync nào).
+ *
+ * `dauNhanDien` (tuỳ chọn): vài trường GẮN VÀO `stats` NGAY TỪ dòng RUNNING và GIỮ ở cả nhánh OK lẫn
+ * ERROR. Cần cho đường nào phải nhận ra "dòng này là bước X" bất kể kết cục — vd bước cuối của
+ * "Đồng bộ ngay" (`stats.mode`), mốc kết thúc mà nút bấm chờ. Không truyền thì hành vi y như cũ
+ * (RUNNING/ERROR không có `stats` trừ khi có cảnh báo).
  */
 export async function withSyncLog(
   kind: SyncKind,
   fn: (warnings: string[], syncLogId: string) => Promise<Record<string, unknown>>,
+  opts: { dauNhanDien?: Record<string, string> } = {},
 ): Promise<Response> {
+  const dau = opts.dauNhanDien;
   await prisma.syncLog.updateMany({
     where: { kind, status: "RUNNING", startedAt: { lt: new Date(Date.now() - STALE_MS) } },
     data: { status: "ERROR", finishedAt: new Date(), error: "treo do app restart" },
   });
 
-  const log = await prisma.syncLog.create({ data: { kind, status: "RUNNING" } });
+  const log = await prisma.syncLog.create({ data: { kind, status: "RUNNING", ...(dau ? { stats: dau } : {}) } });
   const warnings: string[] = [];
   try {
     const { loiSauKhiGhi, ...result } = await fn(warnings, log.id);
-    const stats = { ...result, warnings: capWarnings(warnings) };
+    const stats = { ...dau, ...result, warnings: capWarnings(warnings) };
     const loi = typeof loiSauKhiGhi === "string" && loiSauKhiGhi ? loiSauKhiGhi : null;
     await prisma.syncLog.update({
       where: { id: log.id },
@@ -75,7 +82,8 @@ export async function withSyncLog(
     // GIỮ warnings đã thu được, đừng vứt. Chúng là thứ nói ĐƠN NÀO hỏng và vì sao — mà lượt hỏng
     // mới đúng là lượt cần chẩn đoán nhất. Trước đây nhánh này chỉ ghi `error`, nên một thông báo
     // kiểu "xem cảnh báo trong cùng lượt này" trỏ tới chỗ không tồn tại.
-    const stats = warnings.length ? { warnings: capWarnings(warnings) } : undefined;
+    const stats =
+      warnings.length || dau ? { ...dau, ...(warnings.length ? { warnings: capWarnings(warnings) } : {}) } : undefined;
     await prisma.syncLog.update({
       where: { id: log.id },
       data: { status: "ERROR", finishedAt: new Date(), error, ...(stats ? { stats } : {}) },

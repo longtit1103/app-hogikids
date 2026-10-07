@@ -33,8 +33,9 @@ const TIMEOUT_MS = 15 * 60_000;
  *
  * KẾT LUẬN THEO NHẬT KÝ, KHÔNG theo lời gọi: lượt quét cả bảng có thể chạy quá ~100s và bị
  * Cloudflare cắt kết nối, lúc đó lời gọi báo lỗi trong khi server vẫn đang chạy. Nên sau khi bấm,
- * component poll `SyncLog` PANCAKE (chỉ nhận log có `startedAt` sau lúc bấm, đã hết RUNNING) — y
- * cách nút "Đồng bộ ngay" làm. Lời gọi về trước thì dùng luôn số liệu chi tiết của nó; hai đường về
+ * component poll `SyncLog` PANCAKE (chỉ nhận log có `startedAt` sau lúc bấm, đã hết RUNNING) — lượt
+ * dựng lại là MỘT request nên dòng đầu tiên chính là dòng kết thúc (khác nút "Đồng bộ ngay": workflow
+ * nhiều trang, phải chờ dòng bước cuối). Lời gọi về trước thì dùng luôn số liệu chi tiết của nó; hai đường về
  * cùng lúc thì `daKetLuan` bảo đảm chỉ báo 1 lần.
  *
  * Nút bị khoá khi có lượt đồng bộ / dựng lại đang chạy (server cũng từ chối lượt thứ hai).

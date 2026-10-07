@@ -283,6 +283,7 @@ const CHI_DOC: Record<string, string> = {
   "n8n-ket-noi.kiemTraKetNoiN8n": "đọc kho khoá + GET danh sách workflow bên n8n, không ghi",
   "shopee-wallet-import.previewShopeeWalletImport": "đọc file ví + checksum, không ghi",
   "sync.getLatestSync": "đọc mốc đồng bộ gần nhất",
+  "sync.getTienDoDongBoNgay": "đọc SyncLog tiến độ lượt Đồng bộ ngay",
 };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
