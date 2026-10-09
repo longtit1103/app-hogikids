@@ -62,6 +62,20 @@ export const BANG_QUYEN_MONG_DOI: Readonly<Record<string, CongMongDoiCoKieu>> = 
   [`${A}/so-tiet-kiem.ts#xoaSoTietKiem`]: "tai-chinh-so-quy:sua",
   [`${A}/tat-toan-so-tiet-kiem.ts#tatToanSoTietKiem`]: "tai-chinh-so-quy:sua",
   [`${A}/tat-toan-so-tiet-kiem.ts#moLaiSoTietKiem`]: "tai-chinh-so-quy:sua",
+  // Nợ phải trả — thẻ tín dụng (P4): hồ sơ theo quyền Sổ quỹ; chốt sao kê chỉ chủ shop (spec §5.7).
+  [`${A}/the-tin-dung.ts#taoThe`]: "tai-chinh-so-quy:sua",
+  [`${A}/the-tin-dung.ts#suaThe`]: "tai-chinh-so-quy:sua",
+  [`${A}/the-tin-dung.ts#dongThe`]: "tai-chinh-so-quy:sua",
+  [`${A}/the-tin-dung.ts#xoaThe`]: "tai-chinh-so-quy:sua",
+  [`${A}/the-tin-dung.ts#ganNenTang`]: "tai-chinh-so-quy:sua",
+  [`${A}/the-tin-dung.ts#xoaGanNenTang`]: "tai-chinh-so-quy:sua",
+  [`${A}/chot-sao-ke.ts#chotSaoKe`]: "CHU_SHOP",
+  [`${A}/uoc-tinh-sao-ke.ts#docUocTinhSaoKe`]: "CHU_SHOP",
+  [`${A}/vi-ads.ts#taoViAds`]: "CHU_SHOP",
+  [`${A}/vi-ads.ts#suaViAds`]: "CHU_SHOP",
+  [`${A}/vi-ads.ts#xoaViAds`]: "CHU_SHOP",
+  [`${A}/bat-no-phai-tra.ts#xacNhanBatNoPhaiTra`]: "CHU_SHOP",
+  [`${A}/bat-no-phai-tra.ts#docChenhLechTaiM`]: "CHU_SHOP",
   [`${A}/so-quy-quy-toi-thieu.ts#datQuyToiThieu`]: "tai-chinh-so-quy:sua",
 
   // ── Chi phí ──
@@ -119,6 +133,17 @@ export const BANG_QUYEN_MONG_DOI: Readonly<Record<string, CongMongDoiCoKieu>> = 
   [`${A}/tai-khoan.ts#xoaTaiKhoan`]: "CHU_SHOP",
   [`${A}/tai-khoan.ts#datLaiMatKhau`]: "CHU_SHOP",
 
+  // Nợ phải trả — phiếu nhập (P3): hồ sơ + trả gộp thuộc Sổ quỹ; huỷ / "đã giải thích" chỉ chủ shop.
+  [`${A}/phieu-nhap-no.ts#ghiNhanPhieuVaoSoNo`]: "tai-chinh-so-quy:sua",
+  [`${A}/phieu-nhap-no.ts#capNhatTongPhieu`]: "tai-chinh-so-quy:sua",
+  [`${A}/phieu-nhap-no.ts#capNhatDaTraTruoc`]: "tai-chinh-so-quy:sua",
+  [`${A}/phieu-nhap-no.ts#danhDauHuyPhieu`]: "CHU_SHOP",
+  [`${A}/phieu-nhap-no.ts#boQuaLechDaGiaiThich`]: "CHU_SHOP",
+  [`${A}/phieu-nhap-no.ts#xoaPhieu`]: "tai-chinh-so-quy:sua",
+  [`${A}/tra-tien-hang.ts#traTienHangGop`]: "tai-chinh-so-quy:sua",
+  // Điều chỉnh mở sổ nợ (CUTOVER_*): chỉ chủ shop sửa số/mô tả.
+  [`${A}/cash-movements.ts#suaDieuChinhChuyenDoi`]: "CHU_SHOP",
+
   // ── Route có cổng (spec §3.5, §4.3 — quyền ghép còn lại kiểm trong thân) ──
   "src/app/api/backup/route.ts#POST": "CHU_SHOP",
   "src/app/api/restore/route.ts#POST": "CHU_SHOP",
@@ -151,6 +176,7 @@ export const BANG_QUYEN_MONG_DOI: Readonly<Record<string, CongMongDoiCoKieu>> = 
     "chi-phi:xem",
   ],
   "src/app/(app)/tai-chinh/chi-phi-nhap-hang/page.tsx#default": "chi-phi:xem",
+  "src/app/(app)/tai-chinh/no-phai-tra/page.tsx#default": "CHU_SHOP",
   "src/app/(app)/tai-chinh/thung-rac/page.tsx#default": THUNG_RAC,
   "src/app/(app)/quan-tri/page.tsx#default": "CHU_SHOP",
   "src/app/(app)/quan-tri/nhat-ky/page.tsx#default": "CHU_SHOP",

@@ -45,6 +45,9 @@ const FLOW: CashFlow = {
   actualIn: { tiktok: null, shopee: null },
 };
 
+/** Lựa chọn nợ phải trả giả (đã bật) — chỉ để soi page truyền đúng chỗ, không đọc DB. */
+const LUA_CHON_NO = { mocM: new Date("2026-11-01T00:00:00+07:00"), the: [], phieu: [], vi: [] };
+
 const m = vi.hoisted(() => {
   const khong = () => vi.fn().mockResolvedValue(null);
   return {
@@ -55,6 +58,8 @@ const m = vi.hoisted(() => {
     tongDangGui: vi.fn(),
     listSoTietKiem: vi.fn().mockResolvedValue([]),
     tongLaiDaNhanTrongKy: vi.fn().mockResolvedValue(0),
+    docLuaChonDongTienNo: vi.fn(),
+    docMocM: vi.fn(),
     khong,
   };
 });
@@ -78,6 +83,11 @@ vi.mock("@/lib/tiet-kiem/so-tiet-kiem-queries", () => ({
   listSoTietKiem: m.listSoTietKiem,
   tongLaiDaNhanTrongKy: m.tongLaiDaNhanTrongKy,
 }));
+vi.mock("@/lib/no-phai-tra/lua-chon-dong-tien-no", () => ({ docLuaChonDongTienNo: m.docLuaChonDongTienNo }));
+vi.mock("@/lib/no-phai-tra/cong-bat-no-phai-tra", async (goc) => ({
+  ...(await goc<typeof import("@/lib/no-phai-tra/cong-bat-no-phai-tra")>()),
+  docMocM: m.docMocM,
+}));
 vi.mock("@/lib/so-quy/doi-chieu-so-du-chot", () => ({
   docSoDuChot: async () => null,
   ghepDoiChieuSoDuChot: () => ({}),
@@ -95,7 +105,7 @@ vi.mock("@/components/bao-cao/report-export-buttons", () => ({
   hrefXuatPnl: () => "",
 }));
 vi.mock("@/components/finance/cash-flow-tab", () => ({ CashFlowTab: function CashFlowTab() { return null; } }));
-vi.mock("@/components/finance/expense-ledger-tab", () => ({ ExpenseLedgerTab: () => null }));
+vi.mock("@/components/finance/expense-ledger-tab", () => ({ ExpenseLedgerTab: function ExpenseLedgerTab() { return null; } }));
 vi.mock("@/components/finance/so-quy-dong-chay-tab", () => ({ SoQuyDongChayTab: () => null }));
 vi.mock("@/components/shell/page-title", () => ({ PageTitle: () => null }));
 
@@ -140,6 +150,8 @@ beforeEach(() => {
   m.tongDangGui.mockResolvedValue({ tong: 0, daoHanGanNhat: null, gocDaoHanGanNhat: 0, laiDaoHanGanNhat: 0 });
   m.listSoTietKiem.mockResolvedValue([]);
   m.tongLaiDaNhanTrongKy.mockResolvedValue(0);
+  m.docLuaChonDongTienNo.mockResolvedValue(LUA_CHON_NO);
+  m.docMocM.mockResolvedValue(null);
 });
 
 describe("dongTienKhongLaiTietKiem", () => {
@@ -184,6 +196,93 @@ describe("tab Dòng tiền — lãi tiết kiệm + liên kết khoản vay theo
   });
 });
 
+describe("tab Dòng tiền — lựa chọn nợ phải trả cho form ghi tay", () => {
+  type KhoiNo = { noPhaiTra: unknown; choPhepSuaDieuChinh: boolean };
+
+  it("thiếu so-quy:sua (chỉ xem) ⇒ KHÔNG đọc lựa chọn nợ, form không có 4 loại nợ", async () => {
+    dat("STAFF", "tai-chinh-dong-tien:xem", "tai-chinh-dong-tien:sua", "tai-chinh-so-quy:xem");
+    const el = await dungTrang("dong-tien");
+    const dongTien = tim(el, "CashFlowTab")?.props.dongTien as KhoiNo;
+    expect(m.docLuaChonDongTienNo).not.toHaveBeenCalled();
+    expect(dongTien.noPhaiTra).toBeNull();
+    expect(dongTien.choPhepSuaDieuChinh).toBe(false);
+  });
+
+  it("có so-quy:sua (nhân sự) ⇒ đọc + truyền lựa chọn nợ, nhưng KHÔNG mở sửa điều chỉnh mở sổ", async () => {
+    dat("STAFF", "tai-chinh-dong-tien:xem", "tai-chinh-dong-tien:sua", "tai-chinh-so-quy:xem", "tai-chinh-so-quy:sua");
+    const el = await dungTrang("dong-tien");
+    const dongTien = tim(el, "CashFlowTab")?.props.dongTien as KhoiNo;
+    expect(m.docLuaChonDongTienNo).toHaveBeenCalledTimes(1);
+    expect(dongTien.noPhaiTra).toBe(LUA_CHON_NO);
+    expect(dongTien.choPhepSuaDieuChinh).toBe(false);
+  });
+
+  it("chủ shop ⇒ lựa chọn nợ + mở sửa điều chỉnh mở sổ; chưa bật (null) ⇒ truyền null", async () => {
+    dat("OWNER");
+    const el = await dungTrang("dong-tien");
+    const dongTien = tim(el, "CashFlowTab")?.props.dongTien as KhoiNo;
+    expect(dongTien.noPhaiTra).toBe(LUA_CHON_NO);
+    expect(dongTien.choPhepSuaDieuChinh).toBe(true);
+
+    m.docLuaChonDongTienNo.mockResolvedValue(null);
+    const el2 = await dungTrang("dong-tien");
+    expect((tim(el2, "CashFlowTab")?.props.dongTien as KhoiNo).noPhaiTra).toBeNull();
+  });
+});
+
+describe("tab Sổ chi phí — ô 'Trừ vào thẻ' theo quyền Sổ quỹ", () => {
+  // Ô hiện theo quyền SỬA Sổ quỹ — cùng quyền action đòi khi gắn thẻ (review S1+S2: người chỉ có
+  // :xem mà thấy ô rồi bị từ chối là mâu thuẫn). Chỉ :xem ⇒ ô ẩn, không đọc thẻ.
+  it("chỉ chi-phi:sua hoặc thêm so-quy:xem ⇒ choPhepTruThe false; có so-quy:sua ⇒ true", async () => {
+    dat("STAFF", "chi-phi:xem", "chi-phi:sua");
+    const el = await dungTrang("so-chi-phi");
+    expect(tim(el, "ExpenseLedgerTab")?.props).toMatchObject({ choPhepSua: true, choPhepTruThe: false });
+
+    dat("STAFF", "chi-phi:xem", "chi-phi:sua", "tai-chinh-so-quy:xem");
+    const el2 = await dungTrang("so-chi-phi");
+    expect(tim(el2, "ExpenseLedgerTab")?.props).toMatchObject({ choPhepSua: true, choPhepTruThe: false });
+
+    dat("STAFF", "chi-phi:xem", "chi-phi:sua", "tai-chinh-so-quy:xem", "tai-chinh-so-quy:sua");
+    const el3 = await dungTrang("so-chi-phi");
+    expect(tim(el3, "ExpenseLedgerTab")?.props).toMatchObject({ choPhepSua: true, choPhepTruThe: true });
+  });
+});
+
+describe("cảnh báo 'kỳ chưa ghi Nhập hàng' sau mốc bật nợ — độc lập quyền Sổ quỹ", () => {
+  const CANH_BAO = "kỳ chưa ghi khoản Nhập hàng nào";
+
+  it("page: người chỉ có Dòng tiền vẫn nhận cờ đã bật (mốc M không cần quyền Sổ quỹ)", async () => {
+    m.docMocM.mockResolvedValue(new Date("2026-11-01T00:00:00+07:00"));
+    dat("STAFF", "tai-chinh-dong-tien:xem");
+    const el = await dungTrang("dong-tien");
+    expect((tim(el, "CashFlowTab")?.props.dongTien as { daBatNoPhaiTra: boolean }).daBatNoPhaiTra).toBe(true);
+    expect(tim(el, "CashFlowTab")?.props.quy).toBeNull();
+  });
+
+  it("tab: chỉ Dòng tiền + đã bật + kỳ không có Nhập hàng ⇒ KHÔNG cảnh báo sai; chưa bật ⇒ cảnh báo như cũ", async () => {
+    const { CashFlowTab } = await vi.importActual<typeof import("@/components/finance/cash-flow-tab")>(
+      "@/components/finance/cash-flow-tab",
+    );
+    const khoi = (daBat: boolean) => ({
+      flow: dongTienKhongLaiTietKiem(FLOW),
+      movements: [],
+      viTiktok: null,
+      choPhepSua: false,
+      choPhepSuaDongSoQuy: false,
+      hienLaiTietKiem: false,
+      noPhaiTra: null,
+      choPhepSuaDieuChinh: false,
+      daBatNoPhaiTra: daBat,
+    });
+    expect(renderToStaticMarkup(<CashFlowTab dongTien={khoi(true)} quy={null} isCurrentMonth={false} />)).not.toContain(
+      CANH_BAO,
+    );
+    expect(renderToStaticMarkup(<CashFlowTab dongTien={khoi(false)} quy={null} isCurrentMonth={false} />)).toContain(
+      CANH_BAO,
+    );
+  });
+});
+
 describe("thanh tab /tai-chinh", () => {
   it("chỉ Sổ quỹ ⇒ thanh tab CÓ 'Dòng tiền' (đường vào khối Khoản vay/Tiết kiệm), tab mặc định vẫn Sổ quỹ", async () => {
     dat("STAFF", "tai-chinh-so-quy:xem");
@@ -214,6 +313,9 @@ describe("CashFlowTab — câu công thức theo quyền", () => {
       choPhepSua: false,
       choPhepSuaDongSoQuy: false,
       hienLaiTietKiem: hien,
+      noPhaiTra: null,
+      choPhepSuaDieuChinh: false,
+      daBatNoPhaiTra: false,
     });
 
     const thieu = renderToStaticMarkup(<CashFlowTab dongTien={khoi(false)} quy={null} isCurrentMonth={false} />);

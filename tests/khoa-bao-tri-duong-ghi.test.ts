@@ -44,7 +44,12 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { POST as backupPost } from "@/app/api/backup/route";
 import { importAdsExpenses } from "@/lib/actions/ads-import";
-import { createCashMovement, deleteCashMovement, updateCashMovement } from "@/lib/actions/cash-movements";
+import {
+  createCashMovement,
+  deleteCashMovement,
+  suaDieuChinhChuyenDoi,
+  updateCashMovement,
+} from "@/lib/actions/cash-movements";
 import { updateVariantCost, updateVariantThreshold, updateProductCost, updateProductThreshold, importCostPrices } from "@/lib/actions/cost-price";
 import { deleteAllData, dungLaiTuKhoTho } from "@/lib/actions/data-admin";
 import { ghiChiPhiNhapHang } from "@/lib/actions/chi-phi-nhap-hang";
@@ -90,6 +95,19 @@ import { luuSoDuChotThang, xoaSoDuChotThang } from "@/lib/actions/so-du-chot-tha
 import { datQuyToiThieu } from "@/lib/actions/so-quy-quy-toi-thieu";
 import { moLaiSoTietKiem, tatToanSoTietKiem } from "@/lib/actions/tat-toan-so-tiet-kiem";
 import { tatToanThauChi } from "@/lib/actions/tat-toan-thau-chi";
+import {
+  boQuaLechDaGiaiThich,
+  capNhatDaTraTruoc,
+  capNhatTongPhieu,
+  danhDauHuyPhieu,
+  ghiNhanPhieuVaoSoNo,
+  xoaPhieu,
+} from "@/lib/actions/phieu-nhap-no";
+import { traTienHangGop } from "@/lib/actions/tra-tien-hang";
+import { chotSaoKe } from "@/lib/actions/chot-sao-ke";
+import { dongThe, ganNenTang, suaThe, taoThe, xoaGanNenTang, xoaThe } from "@/lib/actions/the-tin-dung";
+import { suaViAds, taoViAds, xoaViAds } from "@/lib/actions/vi-ads";
+import { xacNhanBatNoPhaiTra } from "@/lib/actions/bat-no-phai-tra";
 import { LOI_DANG_PHUC_HOI, thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
@@ -115,6 +133,7 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["cash-movements.createCashMovement", () => createCashMovement({})],
   ["cash-movements.updateCashMovement", () => updateCashMovement("id-gia", {})],
   ["cash-movements.deleteCashMovement", () => deleteCashMovement("id-gia")],
+  ["cash-movements.suaDieuChinhChuyenDoi", () => suaDieuChinhChuyenDoi("id-gia", {})],
   // Khoản vay (tab Dòng tiền, spec 260907): hồ sơ + con dấu kỳ trả — lùi mất giữa lượt phục hồi là ghi trùng lãi/gốc.
   ["khoan-vay.taoKhoanVay", () => taoKhoanVay({})],
   ["khoan-vay.suaKhoanVay", () => suaKhoanVay("id-gia", {})],
@@ -194,6 +213,30 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   // Duyệt chi phí nhập hàng từ phiếu Pancake (spec 260917): mỗi dòng là hàng chục triệu trừ thẳng
   // vào quỹ. Lùi mất giữa lượt phục hồi là phiếu quay lại danh sách "chờ duyệt" và bị ghi lần hai.
   ["chi-phi-nhap-hang.ghiChiPhiNhapHang", () => ghiChiPhiNhapHang({})],
+  // Nợ phải trả — phiếu nhập (P3): hồ sơ nghĩa vụ + dòng SUPPLIER_PAY. Lùi mất giữa lượt phục hồi là
+  // phiếu quay về "chưa ghi nhận" trong khi tiền đã trả nằm đâu đó, hoặc đợt trả gộp bị ghi lần hai.
+  ["phieu-nhap-no.ghiNhanPhieuVaoSoNo", () => ghiNhanPhieuVaoSoNo({})],
+  ["phieu-nhap-no.capNhatTongPhieu", () => capNhatTongPhieu({})],
+  ["phieu-nhap-no.capNhatDaTraTruoc", () => capNhatDaTraTruoc({})],
+  ["phieu-nhap-no.danhDauHuyPhieu", () => danhDauHuyPhieu({})],
+  ["phieu-nhap-no.xoaPhieu", () => xoaPhieu({})],
+  ["phieu-nhap-no.boQuaLechDaGiaiThich", () => boQuaLechDaGiaiThich({})],
+  ["tra-tien-hang.traTienHangGop", () => traTienHangGop({})],
+  // Nợ phải trả — thẻ tín dụng (P4): hồ sơ thẻ + mốc gắn nền tảng + kỳ sao kê là điểm tựa của dư nợ;
+  // lùi mất giữa lượt phục hồi là dư nợ mất neo, hoặc chốt sao kê ghi lại lần hai với mã yêu cầu mới.
+  ["the-tin-dung.taoThe", () => taoThe({})],
+  ["the-tin-dung.suaThe", () => suaThe("id-gia", {})],
+  ["the-tin-dung.dongThe", () => dongThe("id-gia")],
+  ["the-tin-dung.xoaThe", () => xoaThe("id-gia")],
+  ["the-tin-dung.ganNenTang", () => ganNenTang({})],
+  ["the-tin-dung.xoaGanNenTang", () => xoaGanNenTang("id-gia")],
+  ["chot-sao-ke.chotSaoKe", () => chotSaoKe({})],
+  // Nợ phải trả — hồ sơ ví ads trả trước + bước xác nhận bật: bước bật ghi Setting M + neo + điều chỉnh
+  // quỹ một lần; lùi mất giữa lượt phục hồi là quỹ quay về công thức cũ trong khi hồ sơ đã ghi đè.
+  ["vi-ads.taoViAds", () => taoViAds({})],
+  ["vi-ads.suaViAds", () => suaViAds("id-gia", {})],
+  ["vi-ads.xoaViAds", () => xoaViAds("id-gia")],
+  ["bat-no-phai-tra.xacNhanBatNoPhaiTra", () => xacNhanBatNoPhaiTra({})],
 ];
 
 beforeAll(async () => {
@@ -271,6 +314,8 @@ const CHI_DOC: Record<string, string> = {
     "ghi phiên (cookie); lastLoginAt + nhật ký là best-effort, TỰ BỎ QUA khi dangPhucHoi() — chặn đăng nhập lúc phục hồi không giúp giữ dữ liệu",
   "auth.logout": "xoá phiên (cookie); nhật ký đăng xuất best-effort, TỰ BỎ QUA khi dangPhucHoi()",
   "cost-price.previewCostImport": "đọc file + đối chiếu, không ghi",
+  "uoc-tinh-sao-ke.docUocTinhSaoKe": "chỉ đọc dư nợ ước tính của thẻ tại một ngày (form chốt sao kê), không ghi",
+  "bat-no-phai-tra.docChenhLechTaiM": "chỉ đọc chênh lệch quỹ ↔ tiền thật tại ngày bật nợ phải trả, không ghi",
   "cong-gia-von.kiemQuyenXemGiaVon":
     "KHÔNG phải Server Action (file không \"use server\") — bước hai của cổng giá vốn, chỉ ghi dòng TU_CHOI_QUYEN qua ghiNhatKyLoi (tự bỏ qua lúc phục hồi)",
   "data-admin.coDuLieuGiaoDich": "đếm",

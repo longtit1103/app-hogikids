@@ -15,7 +15,10 @@ import {
 } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { chanNhapHangSauM, LoiNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
+import { docMocM, khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { congAction } from "@/lib/quyen/cong-action";
+import { laLoiDongTienBan, OPT_TX_DONG_TIEN, THONG_BAO_KHOA_DONG_TIEN_BAN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 
 /**
  * Ghi chi phí nhập hàng từ phiếu nhập Pancake — bản BẤM DUYỆT của màn `/tai-chinh/chi-phi-nhap-hang`.
@@ -62,6 +65,12 @@ export async function ghiChiPhiNhapHang(
   // Cùng cổng với mọi action ghi khác. Literal `LOI_DANG_PHUC_HOI` là thứ lưới AST
   // `tests/khoa-bao-tri-duong-ghi.test.ts` soi để biết action này đã khai đúng đường ghi.
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+
+  // Đã bật theo dõi nợ ⇒ màn duyệt KHÔNG ghi chi phí "Nhập hàng" nữa, kể cả phiếu ngày trước M: phiếu đi
+  // đường "Ghi nhận vào sổ nợ" (`PhieuNhapNo`, tiền rời quỹ ngày trả thật). Ghi Expense lùi trước M sau khi
+  // bật là đổi quỹ tháng cũ mà điều chỉnh mở sổ (cố định một lần) không biết — spec §5.3.
+  const mocM = await docMocM();
+  if (mocM !== null) return { ok: false, code: "DA_BAT_NO_PHAI_TRA", error: new LoiNhapHangSauM(mocM).message };
 
   const parsed = ghiSchema.safeParse(input);
   if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
@@ -126,6 +135,13 @@ export async function ghiChiPhiNhapHang(
     // `Expense.refId @unique` — cổng chống ghi trùng ở tầng DB; không có nó thì một phiếu vừa được
     // ghi ở tab khác sẽ làm HỎNG CẢ LƯỢT (P2002 abort transaction Postgres).
     daGhi = await prisma.$transaction(async (tx) => {
+      // CÂU ĐẦU: khoá SHARED với bước bật (EXCLUSIVE). Không khoá thì cổng dưới đọc M = null lúc bước bật
+      // chưa commit, chèn Nhập hàng ngày ≥ M mà bước bật đã kiểm xong "không còn Nhập hàng sau M" ⇒ bật thành
+      // công với dòng lọt (quỹ trừ hai lần). Ngược lại bước bật chờ lượt ghi này commit rồi mới kiểm ⇒ thấy
+      // dòng vừa ghi, từ chối `CON_NHAP_HANG_SAU_M`. Đặt trước mọi khoá khác (thứ tự chung với `createExpense`).
+      await khoaChiaSeBatNoPhaiTra(tx);
+      // Cổng cuối TRONG transaction (bước bật commit giữa lượt đọc M ở trên và câu ghi): từng dòng ngày ≥ M.
+      for (const d of canGhi) await chanNhapHangSauM(tx, { categoryId: "purchase", date: d.phieu.ngay });
       const kq = await tx.expense.createMany({
         data: canGhi.map((d) => ({
           date: d.phieu.ngay,
@@ -149,10 +165,12 @@ export async function ghiChiPhiNhapHang(
         });
       }
       return kq.count;
-    });
+    }, OPT_TX_DONG_TIEN);
   } catch (e) {
     // `skipDuplicates` đã nuốt P2002 nên tới đây là lỗi KHÁC (mất kết nối, out-of-range…). Vẫn dịch
     // riêng P2002 phòng khi driver đổi hành vi — im lặng ở đây là chủ shop tưởng đã ghi xong.
+    if (e instanceof LoiNhapHangSauM) return { ok: false, code: e.code, error: e.message };
+    if (laLoiDongTienBan(e)) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
     const code = (e as { code?: string })?.code;
     if (code === "P2002") {
       return {

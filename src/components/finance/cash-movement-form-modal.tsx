@@ -17,62 +17,109 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createCashMovement, updateCashMovement } from "@/lib/actions/cash-movements";
+import { createCashMovement, suaDieuChinhChuyenDoi, updateCashMovement } from "@/lib/actions/cash-movements";
 import {
   CASH_MOVEMENT_KIND_META,
   CASH_MOVEMENT_KINDS,
-  isCashMovementKind,
-  isInflow,
+  chieuTien,
+  isCashMovementKindGhiTay,
+  KIND_CUTOVER,
+  KIND_NO_PHAI_TRA_GHI_TAY,
   kindGanSoQuy,
-  type CashMovementKind,
+  type CashMovementKindGhiTay,
 } from "@/lib/cash-movements/cash-movement-kinds";
 import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
 import { formatVnd } from "@/lib/format";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import type { LuaChonDongTienNo } from "@/lib/no-phai-tra/lua-chon-dong-tien-no";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 
+import { HoSoNoSelect } from "./ho-so-no-select";
 import { KhoanVaySelect } from "./khoan-vay-select";
+import { locPhieuChoForm, locTheChoForm, locViChoForm } from "./loc-ho-so-no-cho-form";
 import { SoTietKiemSelect, type SoTietKiemChon } from "./so-tiet-kiem-select";
 
 const QUERY_DATE_FORMAT = "yyyy-MM-dd";
+
+/** Mục đầu ô nguồn nạp của `ADS_TOPUP` = `cardId` null (tiền rời quỹ ngay, không cộng nợ thẻ). */
+const MUC_NAP_TU_NGAN_HANG = "Nạp từ ngân hàng (không qua thẻ)";
 
 /**
  * Loại khoản hiện trong ô chọn. Thiếu `tai-chinh-so-quy:sua` ⇒ bỏ loại gắn khoản vay / sổ tiết kiệm —
  * CÙNG `kindGanSoQuy` mà action (`kiemQuyenDongGanSoQuy`) dùng để đòi quyền Sổ quỹ, nên form không bao
  * giờ mời chọn một loại server chắc chắn từ chối.
  */
-function loaiChoChon(choPhepLoaiSoQuy: boolean): { vao: CashMovementKind[]; ra: CashMovementKind[] } {
-  const ds = choPhepLoaiSoQuy ? CASH_MOVEMENT_KINDS : CASH_MOVEMENT_KINDS.filter((k) => !kindGanSoQuy(k));
-  return { vao: ds.filter(isInflow), ra: ds.filter((k) => !isInflow(k)) };
+function loaiChoChon(
+  choPhepLoaiSoQuy: boolean,
+  daBatNoPhaiTra: boolean
+): { vao: CashMovementKindGhiTay[]; ra: CashMovementKindGhiTay[] } {
+  const cu = choPhepLoaiSoQuy ? CASH_MOVEMENT_KINDS : CASH_MOVEMENT_KINDS.filter((k) => !kindGanSoQuy(k));
+  // 4 loại nợ phải trả CHỈ khi đã bật (server truyền `noPhaiTra`) VÀ có quyền Sổ quỹ — action đòi đúng hai
+  // điều đó. `CUTOVER_*` KHÔNG BAO GIỜ ở đây: chỉ bước xác nhận bật tạo.
+  const ds: CashMovementKindGhiTay[] = [...cu, ...(choPhepLoaiSoQuy && daBatNoPhaiTra ? KIND_NO_PHAI_TRA_GHI_TAY : [])];
+  // `ADS_TOPUP` không chiều cố định: nạp từ ngân hàng là RA nên nằm nhóm Tiền ra.
+  const vao = ds.filter((k) => chieuTien(k, { coCard: false }) === "IN");
+  return { vao, ra: ds.filter((k) => !vao.includes(k)) };
 }
+
+/** Câu nhắc thêm dưới ô loại cho kind nợ phải trả (spec §5.7) — ngoài câu gợi ý chung của META. */
+const NHAC_THEM_NO: Partial<Record<CashMovementKindGhiTay, string>> = {
+  SUPPLIER_PAY: "Trả nhiều phiếu một lần: dùng nút \"Trả tiền hàng\" ở khối Nợ phải trả (tab Sổ quỹ).",
+  CARD_PAY: "Chỉ ghi lần trả sao kê. Quảng cáo/chi đã cà thẻ KHÔNG ghi lại ở đây.",
+  ADS_TOPUP: "Nạp bằng thẻ: chọn thẻ bên dưới — dòng không trừ quỹ mà cộng vào nợ thẻ.",
+};
 
 type FormState = {
   date: string;
-  kind: CashMovementKind | "";
+  kind: CashMovementKindGhiTay | "";
   amount: number;
   description: string;
   loanId: string;
   savingsId: string;
+  cardId: string;
+  phieuNhapId: string;
+  viAdsId: string;
 };
 
 /** Dòng đem sửa — bản cơ bản (người thiếu quyền Sổ quỹ) không có liên kết khoản vay/sổ để prefill. */
 type DongSua = CashMovementRow | CashMovementRowCoBan;
 
-function lienKet(row: DongSua | undefined): { loanId: string | null; savingsId: string | null } {
-  return row && "loanId" in row ? { loanId: row.loanId, savingsId: row.savingsId } : { loanId: null, savingsId: null };
+type LienKet = {
+  loanId: string | null;
+  savingsId: string | null;
+  cardId: string | null;
+  phieuNhapId: string | null;
+  viAdsId: string | null;
+};
+
+function lienKet(row: DongSua | undefined): LienKet {
+  if (row && "loanId" in row) {
+    return {
+      loanId: row.loanId,
+      savingsId: row.savingsId,
+      cardId: row.cardId,
+      phieuNhapId: row.phieuNhapId,
+      viAdsId: row.viAdsId,
+    };
+  }
+  return { loanId: null, savingsId: null, cardId: null, phieuNhapId: null, viAdsId: null };
 }
 
 function buildInitialState(row: DongSua | undefined): FormState {
   if (row) {
     return {
       date: format(row.date, QUERY_DATE_FORMAT),
-      kind: row.kind,
+      // `CUTOVER_*` đi chế độ "điều chỉnh mở sổ" (chỉ số + mô tả) — ô loại không dùng nên để trống.
+      kind: isCashMovementKindGhiTay(row.kind) ? row.kind : "",
       amount: row.amount,
       description: row.description,
       loanId: lienKet(row).loanId ?? "",
       savingsId: lienKet(row).savingsId ?? "",
+      cardId: lienKet(row).cardId ?? "",
+      phieuNhapId: lienKet(row).phieuNhapId ?? "",
+      viAdsId: lienKet(row).viAdsId ?? "",
     };
   }
   return {
@@ -82,6 +129,9 @@ function buildInitialState(row: DongSua | undefined): FormState {
     description: "",
     loanId: "",
     savingsId: "",
+    cardId: "",
+    phieuNhapId: "",
+    viAdsId: "",
   };
 }
 
@@ -93,7 +143,7 @@ function buildInitialState(row: DongSua | undefined): FormState {
  *  - `LOAN_REPAY` chỉ cần khoản còn hiệu lực.
  * Khoản của chính dòng đang sửa luôn giữ lại, nếu không nó biến mất khỏi ô ngay lúc mở form Sửa.
  */
-function locKhoanVay(loans: KhoanVayRow[], kind: CashMovementKind | "", loanIdDangSua: string | null) {
+function locKhoanVay(loans: KhoanVayRow[], kind: CashMovementKindGhiTay | "", loanIdDangSua: string | null) {
   const laTienGui = kind === "DEPOSIT_OUT" || kind === "DEPOSIT_IN";
   return loans.filter(
     (l) =>
@@ -130,6 +180,11 @@ export type CashMovementFormModalProps = {
    * tiết kiệm. Bắt buộc truyền — quên truyền không được phép rơi về "hiện hết".
    */
   choPhepLoaiSoQuy: boolean;
+  /**
+   * Đã bật theo dõi nợ phải trả ⇒ mốc M + thẻ / phiếu / ví để chọn (server đọc `docLuaChonDongTienNo`).
+   * Không truyền / null ⇒ form KHÔNG liệt kê 4 loại nợ (action cũng từ chối khi chưa bật).
+   */
+  noPhaiTra?: LuaChonDongTienNo | null;
 };
 
 /**
@@ -150,7 +205,7 @@ export type CashMovementFormModalProps = {
  */
 function locSoTietKiem(
   sos: SoTietKiemRow[],
-  kind: CashMovementKind | "",
+  kind: CashMovementKindGhiTay | "",
   savingsIdDangSua: string | null
 ): SoTietKiemChon[] {
   return sos
@@ -170,18 +225,24 @@ export function CashMovementFormModal({
   soTietKiem,
   d0,
   choPhepLoaiSoQuy,
+  noPhaiTra = null,
 }: CashMovementFormModalProps) {
   const router = useRouter();
   const isEdit = Boolean(row);
-  const loai = loaiChoChon(choPhepLoaiSoQuy);
+  // Dòng điều chỉnh mở sổ nợ: chỉ sửa số tiền + mô tả (chủ shop) qua action riêng — spec §5.8.
+  const laDieuChinh = row !== undefined && (KIND_CUTOVER as readonly string[]).includes(row.kind);
+  const loai = loaiChoChon(choPhepLoaiSoQuy, noPhaiTra !== null);
   const todayStr = format(new Date(), QUERY_DATE_FORMAT);
 
   const [date, setDate] = useState(todayStr);
-  const [kind, setKind] = useState<CashMovementKind | "">("");
+  const [kind, setKind] = useState<CashMovementKindGhiTay | "">("");
   const [amount, setAmount] = useState(0);
   const [description, setDescription] = useState("");
   const [loanId, setLoanId] = useState("");
   const [savingsId, setSavingsId] = useState("");
+  const [cardId, setCardId] = useState("");
+  const [phieuNhapId, setPhieuNhapId] = useState("");
+  const [viAdsId, setViAdsId] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   // Đã bấm Lưu một lần trên một ngày sớm hơn D0 ⇒ lượt bấm sau mới thật sự gửi (xem `handleSubmit`).
@@ -198,6 +259,9 @@ export function CashMovementFormModal({
     setDescription(initial.description);
     setLoanId(initial.loanId);
     setSavingsId(initial.savingsId);
+    setCardId(initial.cardId);
+    setPhieuNhapId(initial.phieuNhapId);
+    setViAdsId(initial.viAdsId);
     setFieldErrors({});
     setHoiTruocD0(false);
     initialSnapshotRef.current = JSON.stringify(initial);
@@ -205,7 +269,7 @@ export function CashMovementFormModal({
   }, [open, row?.id]);
 
   function isDirty(): boolean {
-    const current: FormState = { date, kind, amount, description, loanId, savingsId };
+    const current: FormState = { date, kind, amount, description, loanId, savingsId, cardId, phieuNhapId, viAdsId };
     return JSON.stringify(current) !== initialSnapshotRef.current;
   }
 
@@ -215,7 +279,7 @@ export function CashMovementFormModal({
   }
 
   function handleKindChange(value: string | null) {
-    setKind(isCashMovementKind(value) ? value : "");
+    setKind(isCashMovementKindGhiTay(value) ? value : "");
     setFieldErrors((prev) => ({ ...prev, kind: "" }));
   }
 
@@ -232,16 +296,51 @@ export function CashMovementFormModal({
   // `laLoaiVay`: thiếu nhánh này thì ô chọn sổ không hiện, bấm Lưu mới thấy lỗi thô từ DB.
   const laSoTietKiem = kind === "SAVINGS_OUT" || kind === "SAVINGS_IN";
   const dsSoTietKiem = locSoTietKiem(soTietKiem, kind, lienKet(row).savingsId);
-  const canSave =
-    Boolean(date) &&
-    Boolean(kind) &&
-    amount > 0 &&
-    (!laLoaiVay || Boolean(loanId)) &&
-    (!laSoTietKiem || Boolean(savingsId)) &&
-    !saving;
+  // Bốn loại nợ phải trả (CHECK `CashMovement_kind_khoa_bat_buoc`): thẻ / phiếu / ví bắt buộc theo loại;
+  // `ADS_TOPUP` thêm ô thẻ TUỲ CHỌN (nạp bằng thẻ). Cùng lý do với `laLoaiVay`: thiếu ô thì lỗi thô từ DB.
+  const dangSuaNo = row ? { kind: row.kind, cardId: lienKet(row).cardId, phieuNhapId: lienKet(row).phieuNhapId } : null;
+  const canThe = kind === "CARD_PAY";
+  const coOThe = canThe || kind === "ADS_TOPUP";
+  const canPhieu = kind === "SUPPLIER_PAY" || kind === "SUPPLIER_REFUND";
+  const canVi = kind === "ADS_TOPUP";
+  const laNo = coOThe || canPhieu;
+  const nhanMocM = noPhaiTra ? format(noPhaiTra.mocM, "dd/MM/yyyy") : "";
+  const canSave = laDieuChinh
+    ? amount > 0 && description.trim().length > 0 && !saving
+    : Boolean(date) &&
+      Boolean(kind) &&
+      amount > 0 &&
+      (!laLoaiVay || Boolean(loanId)) &&
+      (!laSoTietKiem || Boolean(savingsId)) &&
+      (!canThe || Boolean(cardId)) &&
+      (!canPhieu || Boolean(phieuNhapId)) &&
+      (!canVi || Boolean(viAdsId)) &&
+      !saving;
   const ngayTruocD0 = ngayTruocMoSo(date, d0);
 
+  async function luuDieuChinh() {
+    if (!row) return;
+    setFieldErrors({});
+    setSaving(true);
+    try {
+      const res = await suaDieuChinhChuyenDoi(row.id, { amount, description });
+      if (!res.ok) {
+        if (res.field) setFieldErrors({ [res.field]: res.error });
+        else toast.error(res.error);
+        return;
+      }
+      toast.success("Đã cập nhật dòng điều chỉnh mở sổ nợ");
+      onOpenChange(false);
+      router.refresh();
+    } catch {
+      toast.error("Lưu thất bại — kiểm tra kết nối");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSubmit() {
+    if (laDieuChinh) return luuDieuChinh();
     if (!kind || !date) return;
     // D0 = MIN(CashMovement.date) toàn bảng, KHÔNG cấu hình ở Cài đặt: một dòng ghi lùi ngày kéo D0
     // lùi theo và MỌI số Đầu kỳ/Cuối kỳ của các tháng đã xem đổi im lặng. Hỏi lại bằng chính nút Lưu
@@ -260,6 +359,9 @@ export function CashMovementFormModal({
       description,
       loanId: loanId || null,
       savingsId: savingsId || null,
+      cardId: coOThe ? cardId || null : null,
+      phieuNhapId: canPhieu ? phieuNhapId || null : null,
+      viAdsId: canVi ? viAdsId || null : null,
     };
     try {
       const res = isEdit && row ? await updateCashMovement(row.id, input) : await createCashMovement(input);
@@ -284,15 +386,26 @@ export function CashMovementFormModal({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[85vh] max-w-md overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Sửa khoản tiền" : "Nhập quỹ / rút quỹ"}</DialogTitle>
+          <DialogTitle>
+            {laDieuChinh ? "Sửa điều chỉnh mở sổ nợ" : isEdit ? "Sửa khoản tiền" : "Nhập quỹ / rút quỹ"}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
+          {laDieuChinh && (
+            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+              Điều chỉnh MỘT LẦN lúc bật theo dõi nợ ({row && format(row.date, "dd/MM/yyyy")}) — chỉ sửa được số tiền
+              và lý do. Quỹ mọi ngày từ đó đổi theo.
+            </p>
+          )}
+          {!laDieuChinh && (
+          <>
           <Field label="Ngày" error={fieldErrors.date}>
             <Input
               type="date"
               value={date}
               max={todayStr}
+              min={laNo && noPhaiTra ? format(noPhaiTra.mocM, QUERY_DATE_FORMAT) : undefined}
               onChange={(e) => {
                 setDate(e.target.value);
                 setFieldErrors((prev) => ({ ...prev, date: "" }));
@@ -300,6 +413,9 @@ export function CashMovementFormModal({
                 setHoiTruocD0(false);
               }}
             />
+            {laNo && noPhaiTra && (
+              <p className="text-xs text-muted-foreground">Từ {nhanMocM} (ngày bật theo dõi nợ) tới hôm nay.</p>
+            )}
             {d0 === null && (
               <p className="text-xs text-muted-foreground">
                 Đây là khoản đầu tiên — quỹ sẽ tính từ ngày này.
@@ -338,9 +454,56 @@ export function CashMovementFormModal({
               </SelectContent>
             </Select>
             {kind && <p className="text-xs text-muted-foreground">{CASH_MOVEMENT_KIND_META[kind].hint}</p>}
+            {kind && NHAC_THEM_NO[kind] && <p className="text-xs text-amber-700">{NHAC_THEM_NO[kind]}</p>}
           </Field>
+          </>
+          )}
 
-          {laLoaiVay && (
+          {!laDieuChinh && noPhaiTra && coOThe && (
+            <HoSoNoSelect
+              label={canThe ? "Thẻ" : "Nguồn nạp"}
+              placeholder="Chọn thẻ"
+              mucKhongChon={canThe ? undefined : MUC_NAP_TU_NGAN_HANG}
+              options={locTheChoForm(noPhaiTra, dangSuaNo)}
+              value={cardId}
+              onChange={(id) => {
+                setCardId(id);
+                setFieldErrors((prev) => ({ ...prev, cardId: "" }));
+              }}
+              error={fieldErrors.cardId}
+              emptyMessage="Chưa có thẻ nào đang mở — thêm thẻ ở khối Thẻ tín dụng (tab Sổ quỹ) trước."
+            />
+          )}
+          {!laDieuChinh && noPhaiTra && canPhieu && (
+            <HoSoNoSelect
+              label="Phiếu nhập"
+              placeholder="Chọn phiếu"
+              options={locPhieuChoForm(noPhaiTra, kind, dangSuaNo)}
+              value={phieuNhapId}
+              onChange={(id) => {
+                setPhieuNhapId(id);
+                setFieldErrors((prev) => ({ ...prev, phieuNhapId: "" }));
+              }}
+              error={fieldErrors.phieuNhapId}
+              emptyMessage="Chưa có phiếu nào trong sổ nợ — ghi nhận phiếu ở màn Chi phí nhập hàng trước."
+            />
+          )}
+          {!laDieuChinh && noPhaiTra && canVi && (
+            <HoSoNoSelect
+              label="Ví quảng cáo"
+              placeholder="Chọn ví"
+              options={locViChoForm(noPhaiTra)}
+              value={viAdsId}
+              onChange={(id) => {
+                setViAdsId(id);
+                setFieldErrors((prev) => ({ ...prev, viAdsId: "" }));
+              }}
+              error={fieldErrors.viAdsId}
+              emptyMessage="Chưa có hồ sơ ví quảng cáo trả trước — ví được khai ở bước bật theo dõi nợ."
+            />
+          )}
+
+          {!laDieuChinh && laLoaiVay && (
             <KhoanVaySelect
               loans={dsKhoanVay}
               coKhoanVay={loans.length > 0}
@@ -362,7 +525,7 @@ export function CashMovementFormModal({
             />
           )}
 
-          {laSoTietKiem && (
+          {!laDieuChinh && laSoTietKiem && (
             <SoTietKiemSelect
               sos={dsSoTietKiem}
               value={savingsId}

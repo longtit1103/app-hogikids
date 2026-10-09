@@ -37,6 +37,8 @@ describe("enum CashMovementKind — 2 loại dòng tiền tiết kiệm sinh lã
     expect(kinds).toEqual([
       "LOAN_IN", "CAPITAL_IN", "DIRECT_SALE", "OTHER_IN", "LOAN_REPAY", "CAPITAL_OUT",
       "DEPOSIT_OUT", "DEPOSIT_IN", "SAVINGS_OUT", "SAVINGS_IN",
+      // Nợ phải trả (10/2026) nối TIẾP sau — hai giá trị tiết kiệm vẫn đúng vị trí của chúng.
+      "CARD_PAY", "SUPPLIER_PAY", "SUPPLIER_REFUND", "CUTOVER_ADJ_IN", "CUTOVER_ADJ_OUT", "ADS_TOPUP",
     ]);
   });
 });

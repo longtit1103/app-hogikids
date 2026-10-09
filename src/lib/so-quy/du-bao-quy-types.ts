@@ -30,7 +30,12 @@ export type LoaiKhoanDuKien =
    * Chi phí định kỳ đang bật CHƯA sinh dòng: lần phát sinh sau hôm nay (trong cửa sổ), và lần của THÁNG
    * NÀY đã tới hạn mà chưa sinh (chưa ai mở tháng) ⇒ tính vào hôm nay.
    */
-  | "DINH_KY";
+  | "DINH_KY"
+  /**
+   * Phần sao kê thẻ tín dụng còn phải trả (nợ phải trả, spec §5.5): mỗi thẻ tối đa HAI khoản — phần kỳ
+   * trước còn treo (hạn cũ) và phần kỳ mới — đặt tại `max(hạn, ngày mai)`. KHÔNG tự ghi tiền.
+   */
+  | "TRA_THE";
 
 export type KhoanDuKien = {
   ngay: KhoaNgay;

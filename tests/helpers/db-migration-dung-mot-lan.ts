@@ -130,21 +130,10 @@ export function xoaThuMucMigrationsTam(thuMucMigrations: string): void {
 }
 
 /**
- * `prisma migrate deploy` (đúng bản Prisma của repo) với thư mục migrations chỉ định.
- *
- * Prisma 7 đọc thư mục migrations từ file cấu hình (`migrations.path` trong `prisma.config.ts` của
- * repo trỏ CỨNG `prisma/migrations`) — cờ `--schema` không còn kéo theo thư mục migrations cạnh
- * schema. Chỉ đổi `--schema` là lặng lẽ áp bộ migration ĐẦY ĐỦ của repo thay cho bộ tạm (bỏ M1 /
- * M1 bị chèn lỗi) ⇒ test "đời trước M1" xanh giả. Vì vậy dựng một `prisma.config.ts` TẠM cạnh bộ
- * migration tạm (đường dẫn tuyệt đối, URL đọc từ `DATABASE_URL` của tiến trình con) và gọi
- * `--config`. File tạm cố ý không import gì: nó nằm ngoài repo nên không resolve được package.
- * Lệnh thất bại (exit ≠ 0) ⇒ ném Error kèm stdout/stderr của Prisma.
+ * Dựng `schema.prisma` + `prisma.config.ts` TẠM cạnh bộ migration tạm — lý do ở chú thích `apMigrations`
+ * (Prisma 7 đọc thư mục migrations từ file cấu hình, cờ `--schema` không kéo theo). Trả đường dẫn config.
  */
-export function apMigrations(url: string, thuMucMigrations: string): void {
-  kiemUrlMigration(url);
-  if (path.basename(thuMucMigrations) !== "migrations") {
-    throw new Error(`apMigrations: thư mục phải tên "migrations" — nhận ${thuMucMigrations}`);
-  }
+function vietConfigTam(thuMucMigrations: string): string {
   const thuMucGoc = path.dirname(thuMucMigrations);
   const schemaTam = path.join(thuMucGoc, "schema.prisma");
   copyFileSync(SCHEMA_PRISMA_REPO, schemaTam);
@@ -160,6 +149,26 @@ export function apMigrations(url: string, thuMucMigrations: string): void {
       "",
     ].join("\n"),
   );
+  return configTam;
+}
+
+/**
+ * `prisma migrate deploy` (đúng bản Prisma của repo) với thư mục migrations chỉ định.
+ *
+ * Prisma 7 đọc thư mục migrations từ file cấu hình (`migrations.path` trong `prisma.config.ts` của
+ * repo trỏ CỨNG `prisma/migrations`) — cờ `--schema` không còn kéo theo thư mục migrations cạnh
+ * schema. Chỉ đổi `--schema` là lặng lẽ áp bộ migration ĐẦY ĐỦ của repo thay cho bộ tạm (bỏ M1 /
+ * M1 bị chèn lỗi) ⇒ test "đời trước M1" xanh giả. Vì vậy dựng một `prisma.config.ts` TẠM cạnh bộ
+ * migration tạm (đường dẫn tuyệt đối, URL đọc từ `DATABASE_URL` của tiến trình con) và gọi
+ * `--config`. File tạm cố ý không import gì: nó nằm ngoài repo nên không resolve được package.
+ * Lệnh thất bại (exit ≠ 0) ⇒ ném Error kèm stdout/stderr của Prisma.
+ */
+export function apMigrations(url: string, thuMucMigrations: string): void {
+  kiemUrlMigration(url);
+  if (path.basename(thuMucMigrations) !== "migrations") {
+    throw new Error(`apMigrations: thư mục phải tên "migrations" — nhận ${thuMucMigrations}`);
+  }
+  const configTam = vietConfigTam(thuMucMigrations);
   try {
     execFileSync("npx", ["prisma", "migrate", "deploy", "--config", configTam], {
       env: { ...process.env, DATABASE_URL: url },
@@ -171,5 +180,40 @@ export function apMigrations(url: string, thuMucMigrations: string): void {
     throw new Error(
       `prisma migrate deploy thất bại (exit ${loi.status ?? "?"}):\n${loi.stdout ?? ""}\n${loi.stderr ?? ""}`,
     );
+  }
+}
+
+/**
+ * So schema THẬT của DB migration (sau khi `apMigrations`) với `prisma/schema.prisma` của repo bằng
+ * `prisma migrate diff --from-config-datasource --to-schema --exit-code`. Trả `null` khi KHÔNG lệch;
+ * lệch ⇒ trả bản SQL Prisma muốn chạy thêm (để test in ra cho người sửa). CHECK viết tay không nằm
+ * trong phép so — Prisma không quản CHECK. CHỈ ĐỌC: lệnh diff không ghi gì vào DB.
+ */
+export function lechSchemaVoiDb(url: string, thuMucMigrations: string): string | null {
+  kiemUrlMigration(url);
+  const configTam = vietConfigTam(thuMucMigrations);
+  try {
+    execFileSync(
+      "npx",
+      [
+        "prisma",
+        "migrate",
+        "diff",
+        "--config",
+        configTam,
+        "--from-config-datasource",
+        "--to-schema",
+        SCHEMA_PRISMA_REPO,
+        "--script",
+        "--exit-code",
+      ],
+      { env: { ...process.env, DATABASE_URL: url }, stdio: "pipe", encoding: "utf8" },
+    );
+    return null;
+  } catch (e) {
+    const loi = e as { status?: number | null; stdout?: string; stderr?: string };
+    // `--exit-code`: 2 = có khác biệt (stdout là SQL), mọi mã khác là lỗi chạy lệnh.
+    if (loi.status === 2) return loi.stdout ?? "";
+    throw new Error(`prisma migrate diff thất bại (exit ${loi.status ?? "?"}):\n${loi.stdout ?? ""}\n${loi.stderr ?? ""}`);
   }
 }

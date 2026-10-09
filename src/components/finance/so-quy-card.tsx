@@ -1,6 +1,7 @@
 import { format } from "date-fns";
 
 import { formatVnd } from "@/lib/format";
+import type { SauKhiTraHetNo } from "@/lib/no-phai-tra/sau-khi-tra-het-no";
 import { nhanCuoiKySoQuy } from "@/lib/so-quy/cong-thuc-so-quy";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
@@ -68,6 +69,20 @@ function ONho({
   );
 }
 
+/** Dòng phụ "Sau khi trả hết nợ" — quỹ hôm nay trừ mọi nghĩa vụ đang nợ (thẻ + tiền hàng). */
+function DongSauKhiTraHetNo({ t }: { t: SauKhiTraHetNo }) {
+  return (
+    <div className="mt-3 rounded-xl bg-surface-card p-3" data-testid="so-quy-sau-khi-tra-het-no">
+      <p className="text-xs text-muted-foreground">Sau khi trả hết nợ</p>
+      <p className={`mt-1 font-serif text-xl ${t.conLai < 0 ? "text-error" : "text-ink"}`}>{formatVnd(t.conLai)}</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        = quỹ hôm nay {formatVnd(t.quyHomNay)} − nợ thẻ tín dụng (ước tính) {formatVnd(t.noThe)} − nợ tiền hàng
+        nhà cung cấp {formatVnd(t.noPhieu)}
+      </p>
+    </div>
+  );
+}
+
 export function SoQuyCard({
   soQuy,
   isCurrentMonth,
@@ -77,6 +92,8 @@ export function SoQuyCard({
   tietKiem,
   viTiktok = null,
   choPhepNhapQuy = false,
+  sauKhiTraHetNo = null,
+  adsTiktokQuaThe,
 }: {
   soQuy: SoQuyThangDayDu;
   isCurrentMonth: boolean;
@@ -92,6 +109,17 @@ export function SoQuyCard({
    * — nút ghi một `CashMovement`, action đòi quyền dòng tiền). Thiếu/false ⇒ chỉ câu thông báo.
    */
   choPhepNhapQuy?: boolean;
+  /**
+   * Chỉ có SAU khi bật theo dõi nợ phải trả (null = chưa bật ⇒ thẻ Quỹ y như cũ). Quỹ hôm nay trừ nợ thẻ
+   * (ước tính) và nợ tiền hàng nhà cung cấp — hai khoản nghĩa vụ NGOÀI quỹ.
+   */
+  sauKhiTraHetNo?: SauKhiTraHetNo | null;
+  /**
+   * Đã bật VÀ TikTok Ads đang gắn một thẻ (mốc gắn ≤ hôm nay) — ads TikTok đi qua nợ thẻ, hiệu "Sổ chi phí −
+   * sàn trừ ví" thôi là số trả thẻ. Thiếu prop ⇒ coi như gắn khi đã bật. Đã bật mà TikTok chưa gắn thẻ ⇒
+   * công thức cũ còn nguyên (ads trừ quỹ theo ngày chạy, ví cộng lại) nên footnote cũ vẫn đúng.
+   */
+  adsTiktokQuaThe?: boolean;
 }) {
   if (soQuy.d0 === null) {
     return (
@@ -164,6 +192,7 @@ export function SoQuyCard({
         <ONho nhan={cuoiKy.nhan} tien={soQuy.cuoiKy} ghiChu={cuoiKy.ghiChu} />
       </div>
       <OViTiktokConLai vi={viTiktok} />
+      {sauKhiTraHetNo !== null && <DongSauKhiTraHetNo t={sauKhiTraHetNo} />}
 
       <div className="mt-3 flex flex-col gap-1 border-t border-hairline pt-2 text-xs text-muted-foreground">
         <p>
@@ -191,7 +220,13 @@ export function SoQuyCard({
             phí bị xoá). In "trả thẻ ≈ −500.000 ₫" ở đây làm chủ shop kết luận app tính sai; phải nói
             thẳng là quỹ đang tính dư đúng phần chênh. */}
         {(soChiPhi !== 0 || sanTruVi !== 0) &&
-          (sanTruVi > soChiPhi ? (
+          ((adsTiktokQuaThe ?? sauKhiTraHetNo !== null) && sauKhiTraHetNo !== null ? (
+            // Sau mốc bật: ads TikTok gắn thẻ đi qua nợ thẻ, quỹ chỉ giảm lúc trả thẻ — hiệu "Sổ chi phí −
+            // sàn trừ ví" không còn nghĩa là số trả thẻ, và tổng Sổ chi phí gồm cả phần trước mốc.
+            <p data-testid="so-quy-ghi-chu-ads-tiktok">
+              Ads TikTok sau mốc theo dõi nợ: trả qua thẻ, xem khối Thẻ tín dụng
+            </p>
+          ) : sanTruVi > soChiPhi ? (
             <p>
               Ads TikTok: Sổ chi phí {formatVnd(soChiPhi)} · sàn trừ ví {formatVnd(sanTruVi)} — sàn
               trừ ví nhiều hơn ads đã ghi sổ; có thể lượt đồng bộ ads còn thiếu; quỹ đang tính dư{" "}

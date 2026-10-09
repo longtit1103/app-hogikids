@@ -1,6 +1,7 @@
 import { QUYEN_CHU_SHOP } from "@/lib/quyen/cong-action";
 import type { Quyen } from "@/lib/quyen/danh-muc-quyen";
 import { coQuyen, laChuShop, type NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
+import { isCashMovementKindTatCa, KIND_CUTOVER, kindNoPhaiTra } from "@/lib/cash-movements/cash-movement-kinds";
 import { BANG_THUNG_RAC, type BangThungRac } from "@/lib/thung-rac/chup-anh-ban-ghi";
 
 /**
@@ -16,6 +17,10 @@ export const QUYEN_THEO_BANG: Readonly<Record<BangThungRac, Quyen>> = Object.fre
   Loan: "tai-chinh-so-quy:sua",
   SoTietKiem: "tai-chinh-so-quy:sua",
   ThuNhap: "tai-chinh-so-quy:sua",
+  // Nợ phải trả — hồ sơ thẻ / phiếu nợ / ví ads thuộc khối Sổ quỹ (spec §5.7).
+  PhieuNhapNo: "tai-chinh-so-quy:sua",
+  TheTinDung: "tai-chinh-so-quy:sua",
+  ViAdsTraTruoc: "tai-chinh-so-quy:sua",
 });
 
 /** Vào màn thùng rác cần ÍT NHẤT MỘT trong ba quyền `sua` (mảng = "ít nhất một" ở cổng). */
@@ -55,8 +60,19 @@ export function anhDongTienGanSoQuy(anh: unknown): boolean {
   if (anh === null || typeof anh !== "object" || Array.isArray(anh)) return true;
   const chinh = (anh as { chinh?: unknown }).chinh;
   if (chinh === null || typeof chinh !== "object" || Array.isArray(chinh)) return true;
-  const { loanId, savingsId } = chinh as { loanId?: unknown; savingsId?: unknown };
-  return (loanId !== null && loanId !== undefined) || (savingsId !== null && savingsId !== undefined);
+  const c = chinh as Record<string, unknown>;
+  // Năm khoá hồ sơ (khoản vay · sổ · thẻ · phiếu nhập · ví ads) HOẶC kind nợ phải trả (điều chỉnh mở sổ
+  // `CUTOVER_*` không mang khoá nào nhưng vẫn thuộc khối Sổ quỹ) ⇒ dòng gắn Sổ quỹ.
+  const coKhoa = ["loanId", "savingsId", "cardId", "phieuNhapId", "viAdsId"].some(
+    (k) => c[k] !== null && c[k] !== undefined
+  );
+  return coKhoa || (isCashMovementKindTatCa(c.kind) && kindNoPhaiTra(c.kind));
+}
+
+/** Ảnh là dòng điều chỉnh mở sổ nợ (`CUTOVER_*`) — khôi phục/xoá vĩnh viễn CHỈ chủ shop (spec §5.8). */
+function anhLaDieuChinhMoSo(anh: unknown): boolean {
+  const chinh = (anh as { chinh?: { kind?: unknown } } | null)?.chinh;
+  return typeof chinh?.kind === "string" && (KIND_CUTOVER as readonly string[]).includes(chinh.kind);
 }
 
 /** Các loại bản ghi người dùng được thấy/thao tác trong thùng rác. Chủ shop ⇒ tất cả. */
@@ -93,5 +109,8 @@ export function kiemQuyenBang(nd: NguoiDung, bang: string, anh: unknown): void {
   if (!coQuyen(nd, quyen)) throw new LoiThieuQuyenThungRac(quyen);
   if (bang === "CashMovement" && anhDongTienGanSoQuy(anh) && !coQuyen(nd, QUYEN_DONG_GAN_SO_QUY)) {
     throw new LoiThieuQuyenThungRac(QUYEN_DONG_GAN_SO_QUY);
+  }
+  if (bang === "CashMovement" && anhLaDieuChinhMoSo(anh) && !laChuShop(nd)) {
+    throw new LoiThieuQuyenThungRac(QUYEN_CHU_SHOP);
   }
 }

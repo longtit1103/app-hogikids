@@ -22,6 +22,7 @@ import type { TransformStats } from "@/lib/bronze/transform-from-raw";
 import { coLuotDangChay, withSyncLog } from "@/lib/ingest/sync-log";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 import { congChuShopAction } from "@/lib/quyen/cong-action";
 import { docShopProfileKhongCache } from "@/lib/shop-profile/doc-shop-profile";
@@ -36,6 +37,10 @@ import { docShopProfileKhongCache } from "@/lib/shop-profile/doc-shop-profile";
  * vay) — là giao dịch, xoá cùng `Expense`. Cũng như chi phí nhập tay, kho thô
  * KHÔNG có bản gốc để dựng lại, nên dialog phải nói rõ số dòng sắp mất.
  *
+ * Xoá kèm cả khối NỢ PHẢI TRẢ (thẻ tín dụng + kỳ sao kê + gắn nền tảng, phiếu nhập còn nợ, ví ads trả
+ * trước, mã yêu cầu ghi) và DUY NHẤT một khoá cấu hình `Setting.noPhaiTraTuNgay` (mốc M): mốc đó là
+ * thước đo của chính sổ vừa xoá — giữ lại thì sổ mới sinh ra đã "bật" mà không có neo nào.
+ *
  * GIỮ LẠI — cố ý, đừng "dọn" thêm:
  *  - TOÀN BỘ kho thô (Bronze): bản gốc Pancake là đường dựng lại Silver duy
  *    nhất (`dungLaiTuKhoTho`). Xoá kho thô = mất vĩnh viễn, chỉ backup mới cứu.
@@ -43,8 +48,8 @@ import { docShopProfileKhongCache } from "@/lib/shop-profile/doc-shop-profile";
  *    đồng bộ chỉ prefill giá lúc CREATE, nên xoá đi là đốt công nhập giá vốn
  *    của chủ shop, trong khi bản thân sản phẩm thì lượt đồng bộ đêm dựng lại
  *    được.
- *  - `User`, `ShopProfile`, `AuditLog`, `Channel`, `ExpenseCategory` và TOÀN BỘ `Setting`: đó là cấu hình,
- *    không phải giao dịch.
+ *  - `User`, `ShopProfile`, `AuditLog`, `Channel`, `ExpenseCategory` và `Setting` (TRỪ đúng khoá
+ *    `noPhaiTraTuNgay` — xem trên): đó là cấu hình, không phải giao dịch.
  *  - `SyncLog` kind BACKUP: đó là NGUỒN SỰ THẬT DUY NHẤT của dòng trạng thái
  *    "Sao lưu" ở màn Cài đặt (`lib/backup/trang-thai-sao-luu.ts`) — không phải
  *    sổ sách giao dịch. Quy trình đúng là "Sao lưu ngay rồi mới xoá": xoá dấu
@@ -106,6 +111,19 @@ export async function deleteAllData(shopNameConfirm: string): Promise<ActionResu
       await tx.soTietKiem.deleteMany();
       // Hồ sơ khoản vay — SAU CashMovement (FK `onDelete: Restrict`, con trước cha). Cùng diện.
       await tx.loan.deleteMany();
+      // NỢ PHẢI TRẢ — SAU `expense.deleteMany()` (Expense.cardId) và `cashMovement.deleteMany()`
+      // (cardId/phieuNhapId/viAdsId), cùng FK Restrict: con trước cha. `Expense` đã xoá TRỌN ở trên nên
+      // không cần bước gỡ `cardId` về NULL. Thẻ là cha của kỳ sao kê + gắn nền tảng ⇒ xoá SAU hai bảng đó.
+      await tx.kySaoKeThe.deleteMany();
+      await tx.ganNenTangThe.deleteMany();
+      await tx.phieuNhapNo.deleteMany();
+      await tx.viAdsTraTruoc.deleteMany();
+      await tx.theTinDung.deleteMany();
+      // Mã yêu cầu ghi: kết quả lưu sẵn của các lượt ghi tiền vừa bị xoá — giữ lại thì một lượt gửi lại
+      // cùng mã sẽ được trả "đã ghi rồi" cho dòng tiền không còn tồn tại.
+      await tx.yeuCauGhi.deleteMany();
+      // Mốc bật M — khoá Setting DUY NHẤT lượt xoá chạm tới (xem đầu file).
+      await tx.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
       // THÙNG RÁC: ảnh chụp của đúng những bảng vừa xoá ở trên. Đây là lệnh "xoá sạch dữ liệu giao
       // dịch" nên giữ lại thùng rác là để lại một đường khôi phục đúng thứ chủ shop vừa cố ý xoá.
       // Không FK nào trỏ tới/đi ra từ bảng này ⇒ đặt đâu trong transaction cũng an toàn; đặt ở đây
@@ -178,6 +196,14 @@ export async function coDuLieuGiaoDich(): Promise<boolean> {
     // Thùng rác cũng nằm trong danh sách xoá ở trên ⇒ phải đếm, nếu không dialog báo "Không có dữ
     // liệu để xóa" rồi lượt xoá vẫn âm thầm dọn sạch thùng rác.
     prisma.banGhiDaXoa.count(),
+    // Khối nợ phải trả + mốc bật: cùng nằm trong danh sách xoá ⇒ phải đếm (cùng lý do thùng rác).
+    prisma.theTinDung.count(),
+    prisma.kySaoKeThe.count(),
+    prisma.ganNenTangThe.count(),
+    prisma.phieuNhapNo.count(),
+    prisma.viAdsTraTruoc.count(),
+    prisma.yeuCauGhi.count(),
+    prisma.setting.count({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } }),
     prisma.tiktokSettlement.count(),
     prisma.tiktokAdsSettlement.count(),
     prisma.tiktokPayment.count(),

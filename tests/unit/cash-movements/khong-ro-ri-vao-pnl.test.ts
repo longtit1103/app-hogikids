@@ -42,7 +42,16 @@ const CAM =
   // `soDuChot|prisma\.soDuChotThang` (23/09, S6 #1): bản chốt số dư THẬT cuối tháng là thước đo của trục
   // dòng tiền — cùng luật với `CashMovement`, không bao giờ vào Lãi/Lỗ. Token có tiền tố `soDu` cố ý:
   // `chot` trần khớp chữ "chốt" tiếng Việt có sẵn khắp comment P&L, lưới sẽ đỏ oan.
-  /cash-movements|cashMovement|so-quy|khoan-vay|prisma\.loan\b|DEPOSIT_OUT|DEPOSIT_IN|SAVINGS_OUT|SAVINGS_IN|lib\/tiet-kiem|prisma\.soTietKiem\b|soDuChot|prisma\.soDuChotThang\b|paidAtShop/i;
+  //
+  // NỢ PHẢI TRẢ (10/2026): thẻ tín dụng, phiếu nhập còn nợ, ví ads trả trước, mã yêu cầu ghi — trục
+  // dòng tiền thuần, P&L KHÔNG BAO GIỜ biết tới (Lãi/Lỗ không đổi một byte khi bật). Cùng hai khuôn như
+  // sổ tiết kiệm: delegate Prisma (đường rò ngắn nhất) + literal kind (`if (kind === "CARD_PAY")` copy
+  // sang file P&L đọc được biến có sẵn trong scope). `SUPPLIER_`/`CUTOVER_` là TIỀN TỐ cố ý — bắt cả hai
+  // chiều mỗi cặp. `lib/no-phai-tra` có tiền tố thư mục cùng lý do `lib/tiet-kiem`.
+  // Delegate KHÔNG kèm tiền tố `prisma.` (review P1): `tx.theTinDung` trong transaction cũng là đường
+  // rò. `cardId` trần (§5.7/§7.11 "pnl.ts không đọc cardId"): P&L tự lọc `{ cardId: null }` là bỏ
+  // chi phí trả bằng thẻ khỏi Lãi/Lỗ — chi phí vẫn là chi phí dù trả bằng gì.
+  /cash-movements|cashMovement|so-quy|khoan-vay|prisma\.loan\b|DEPOSIT_OUT|DEPOSIT_IN|SAVINGS_OUT|SAVINGS_IN|lib\/tiet-kiem|prisma\.soTietKiem\b|soDuChot|prisma\.soDuChotThang\b|paidAtShop|\.(theTinDung|kySaoKeThe|ganNenTangThe|phieuNhapNo|yeuCauGhi|viAdsTraTruoc)\b|\bcardId\b|CARD_PAY|SUPPLIER_|CUTOVER_|ADS_TOPUP|lib\/no-phai-tra/i;
 
 const FILE_CAM = [
   "src/lib/reports/pnl.ts",
@@ -152,6 +161,35 @@ describe("khoản tiền khác (CashMovement) không rò rỉ vào P&L", () => {
     expect('href: "/tai-chinh?tab=dong-tien#tiet-kiem",').not.toMatch(CAM);
     expect("const incomes = await prisma.thuNhap.findMany({ where: { date: khoang } });").not.toMatch(CAM);
     expect("financialIncome: incomes.reduce((s, i) => s + i.amount, 0),").not.toMatch(CAM);
+  });
+
+  // Nợ phải trả: đọc thẳng hồ sơ qua delegate, nhắc literal kind mới, hay import module đều phải bị bắt.
+  it("regex CAM bắt đường rò rỉ nợ phải trả (delegate, kind mới, lib/no-phai-tra)", () => {
+    for (const ca of [
+      "await prisma.theTinDung.findMany({})",
+      "await prisma.kySaoKeThe.findFirst({})",
+      "await prisma.ganNenTangThe.findMany({})",
+      "await prisma.phieuNhapNo.aggregate({})",
+      "await prisma.yeuCauGhi.findUnique({})",
+      "await prisma.viAdsTraTruoc.findMany({})",
+      'if (kind === "CARD_PAY") tongChi += amount;',
+      'const traNcc = row.kind === "SUPPLIER_PAY";',
+      'const hoan = row.kind === "SUPPLIER_REFUND";',
+      'if (kind === "CUTOVER_ADJ_IN") thu += amount;',
+      'const ra = kind === "CUTOVER_ADJ_OUT";',
+      'if (kind === "ADS_TOPUP") chiAds += amount;',
+      'import { daBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";',
+      // Delegate qua `tx` của transaction (không lộ chữ `prisma.`) + lọc theo cột thẻ:
+      "const soThe = await tx.theTinDung.count();",
+      "await tx.viAdsTraTruoc.findMany({})",
+      "where: { date: khoang, cardId: null },",
+      "const quaThe = e.cardId !== null;",
+    ]) {
+      expect(ca).toMatch(CAM);
+    }
+    // ĐƯỜNG HỢP LỆ — P&L vẫn đọc Expense (kể cả dòng có cardId) theo ngày chi như mọi dòng khác:
+    expect("const expenses = await prisma.expense.findMany({ where: { date: khoang } });").not.toMatch(CAM);
+    expect("const ads = rows.filter((e) => e.categoryId === \"ads\");").not.toMatch(CAM);
   });
 
   // Lưới đọc theo DANH SÁCH CỐ ĐỊNH `FILE_CAM` — file mới KHÔNG tự động bị canh. Không có ca này

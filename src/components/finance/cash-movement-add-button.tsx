@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import type { LuaChonDongTienNo } from "@/lib/no-phai-tra/lua-chon-dong-tien-no";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 
@@ -18,6 +19,7 @@ export function CashMovementAddButton({
   soTietKiem,
   d0,
   choPhepLoaiSoQuy,
+  noPhaiTra = null,
 }: {
   loans: KhoanVayRow[];
   /** Sổ tiết kiệm cho ô chọn ở form ghi tay khi loại dòng là `SAVINGS_OUT`/`SAVINGS_IN`. */
@@ -26,6 +28,8 @@ export function CashMovementAddButton({
   d0: Date | null;
   /** Có `tai-chinh-so-quy:sua`? `false` ⇒ form không liệt kê loại gắn khoản vay / sổ tiết kiệm. */
   choPhepLoaiSoQuy: boolean;
+  /** Đã bật theo dõi nợ ⇒ form liệt kê thêm 4 loại nợ phải trả (null = chưa bật). */
+  noPhaiTra?: LuaChonDongTienNo | null;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -41,6 +45,7 @@ export function CashMovementAddButton({
         soTietKiem={soTietKiem}
         d0={d0}
         choPhepLoaiSoQuy={choPhepLoaiSoQuy}
+        noPhaiTra={noPhaiTra}
       />
     </>
   );

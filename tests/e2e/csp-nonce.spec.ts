@@ -35,6 +35,8 @@ const CAC_TRANG = [
   "/tai-chinh?tab=so-quy",
   "/tai-chinh?tab=so-chi-phi",
   "/tai-chinh/chi-phi-nhap-hang",
+  "/tai-chinh/no-phai-tra",
+  "/tai-chinh/no-phai-tra?tab=xac-nhan",
   "/tai-chinh/thung-rac",
   "/bao-cao",
   "/bao-cao?tab=xu-huong",

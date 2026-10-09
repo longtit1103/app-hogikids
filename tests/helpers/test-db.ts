@@ -99,6 +99,14 @@ export async function truncateBusinessTables(): Promise<void> {
   await prisma.cashMovement.deleteMany();
   await prisma.soTietKiem.deleteMany(); // sổ tiết kiệm — xoá SAU ThuNhap + CashMovement (FK Restrict)
   await prisma.loan.deleteMany(); // hồ sơ khoản vay — xoá SAU CashMovement (FK Restrict)
+  // Nợ phải trả — SAU Expense + CashMovement (FK Restrict cardId/phieuNhapId/viAdsId); kỳ sao kê +
+  // gắn nền tảng TRƯỚC thẻ (con trước cha).
+  await prisma.kySaoKeThe.deleteMany();
+  await prisma.ganNenTangThe.deleteMany();
+  await prisma.phieuNhapNo.deleteMany();
+  await prisma.viAdsTraTruoc.deleteMany();
+  await prisma.theTinDung.deleteMany();
+  await prisma.yeuCauGhi.deleteMany();
   // Thùng rác khôi phục — không FK nào cả hai chiều, xoá độc lập. Bỏ sót thì ảnh chụp của suite
   // trước sống sang suite sau và mọi phép đếm dòng thùng rác đều lệch.
   await prisma.banGhiDaXoa.deleteMany();

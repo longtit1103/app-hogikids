@@ -1,6 +1,16 @@
 import { format } from "date-fns";
 
-import type { CashMovement, Expense, Loan, SoTietKiem, ThuNhap } from "@/generated/prisma/client";
+import type {
+  CashMovement,
+  Expense,
+  KySaoKeThe,
+  Loan,
+  PhieuNhapNo,
+  SoTietKiem,
+  TheTinDung,
+  ThuNhap,
+  ViAdsTraTruoc,
+} from "@/generated/prisma/client";
 
 import { CASH_MOVEMENT_KIND_META } from "@/lib/cash-movements/cash-movement-kinds";
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
@@ -23,9 +33,19 @@ export const BANG_THUNG_RAC = [
   "ThuNhap",
   "Loan",
   "SoTietKiem",
+  // Nợ phải trả — hồ sơ (không mang tiền tự thân). Thẻ chụp KÈM neo/kỳ sao kê con (`AnhBanGhi.kySaoKe`).
+  "PhieuNhapNo",
+  "TheTinDung",
+  "ViAdsTraTruoc",
 ] as const;
 
 export type BangThungRac = (typeof BANG_THUNG_RAC)[number];
+
+/**
+ * Bảng có thể DỰNG LẠI từ ảnh: 8 bảng đứng tên một mục thùng rác + `KySaoKeThe` (chỉ đi KÈM thẻ, không
+ * bao giờ là một mục riêng — kỳ sao kê thật không xoá được, neo 0 xoá cùng thẻ).
+ */
+export type BangDung = BangThungRac | "KySaoKeThe";
 
 /**
  * Trường được chụp của từng bảng — liệt kê TƯỜNG MINH thay vì trải nguyên object, vì hai lý do:
@@ -34,12 +54,19 @@ export type BangThungRac = (typeof BANG_THUNG_RAC)[number];
  * phục ra một bản ghi khác bản gốc. Lưới `tests/unit/thung-rac/chup-anh-ban-ghi.test.ts` đối chiếu
  * bảng này với schema Prisma bằng máy nên ca (2) luôn đỏ ngay.
  */
-export const TRUONG_CHUP: Record<BangThungRac, readonly string[]> = {
+export const TRUONG_CHUP: Record<BangDung, readonly string[]> = {
   Expense: [
     "id", "date", "categoryId", "adsSource", "description", "channelId",
     "amount", "source", "refId", "recurringId", "recurringMonth", "createdAt",
+    // Nợ phải trả: "trừ vào thẻ". Ảnh chụp trước khi có cột không mang khoá ⇒ khôi phục ra NULL (đúng).
+    "cardId",
   ],
-  CashMovement: ["id", "date", "kind", "amount", "description", "loanId", "savingsId", "createdAt"],
+  CashMovement: [
+    "id", "date", "kind", "amount", "description", "loanId", "savingsId", "createdAt",
+    // Nợ phải trả: thẻ / phiếu nhập / ví ads + mã yêu cầu ghi (truy vết). Khôi phục dòng kind mới phải
+    // đi đủ cổng nợ phải trả — việc của phase mở đường ghi các kind đó.
+    "cardId", "phieuNhapId", "viAdsId", "yeuCauId",
+  ],
   ThuNhap: ["id", "date", "kind", "amount", "description", "savingsId", "refId", "createdAt"],
   Loan: [
     "id", "name", "lender", "duNoMoSo", "startDate", "annualRateBp", "termMonths",
@@ -50,6 +77,16 @@ export const TRUONG_CHUP: Record<BangThungRac, readonly string[]> = {
     "id", "name", "bank", "principal", "startDate", "termMonths", "maturityDate",
     "annualRateBp", "loanId", "closedAt", "note", "createdAt",
   ],
+  PhieuNhapNo: [
+    "id", "refId", "shopId", "maPhieu", "ngayPhieu", "tongTien", "daTraTruoc", "daHuy",
+    "lechDaGiaiThich", "lechDaGiaiThichSo", "note", "createdAt",
+  ],
+  TheTinDung: ["id", "ten", "nganHang", "ngayChotSaoKe", "ngayHanTra", "closedAt", "note", "createdAt"],
+  KySaoKeThe: [
+    "id", "cardId", "ngayChot", "soDu", "hanTra", "daTraTruocMoSo", "laNeoMoSo", "uocTinhLucChot",
+    "note", "createdAt",
+  ],
+  ViAdsTraTruoc: ["id", "nenTang", "soDuNeo", "ngayNeo", "nguonNap", "note", "createdAt"],
 };
 
 /**
@@ -57,12 +94,16 @@ export const TRUONG_CHUP: Record<BangThungRac, readonly string[]> = {
  * phục phải đổi NGƯỢC đúng những cột này — quên một cột là Prisma nhận string và ném lỗi kiểu, hoặc
  * tệ hơn, ghi vào một ngày lệch múi giờ.
  */
-export const TRUONG_NGAY: Record<BangThungRac, readonly string[]> = {
+export const TRUONG_NGAY: Record<BangDung, readonly string[]> = {
   Expense: ["date", "createdAt"],
   CashMovement: ["date", "createdAt"],
   ThuNhap: ["date", "createdAt"],
   Loan: ["startDate", "firstDueDate", "lastDueHandled", "closedAt", "createdAt"],
   SoTietKiem: ["startDate", "maturityDate", "closedAt", "createdAt"],
+  PhieuNhapNo: ["ngayPhieu", "createdAt"],
+  TheTinDung: ["closedAt", "createdAt"],
+  KySaoKeThe: ["ngayChot", "hanTra", "createdAt"],
+  ViAdsTraTruoc: ["ngayNeo", "createdAt"],
 };
 
 /** Ghi chú khôi phục — những thứ KHÔNG nằm trong chính bản ghi bị xoá nhưng mất theo nó. */
@@ -84,6 +125,8 @@ export type AnhBanGhi = {
   cashMovements: Record<string, unknown>[];
   /** Thu nhập (lãi tiết kiệm) bị xoá kèm sổ. */
   thuNhap: Record<string, unknown>[];
+  /** Neo / kỳ sao kê bị xoá KÈM thẻ (chỉ `TheTinDung`). Ảnh cũ không có khoá ⇒ coi như rỗng. */
+  kySaoKe?: Record<string, unknown>[];
   ghiChu: GhiChuKhoiPhuc;
 };
 
@@ -95,7 +138,10 @@ export type NguonAnh =
   | { bang: "CashMovement"; banGhi: CashMovement }
   | { bang: "ThuNhap"; banGhi: ThuNhap }
   | { bang: "Loan"; banGhi: Loan; cashMovements: CashMovement[]; ghiChu?: GhiChuKhoiPhuc }
-  | { bang: "SoTietKiem"; banGhi: SoTietKiem; cashMovements: CashMovement[]; thuNhap: ThuNhap[] };
+  | { bang: "SoTietKiem"; banGhi: SoTietKiem; cashMovements: CashMovement[]; thuNhap: ThuNhap[] }
+  | { bang: "PhieuNhapNo"; banGhi: PhieuNhapNo }
+  | { bang: "TheTinDung"; banGhi: TheTinDung; kySaoKe: KySaoKeThe[] }
+  | { bang: "ViAdsTraTruoc"; banGhi: ViAdsTraTruoc };
 
 /** Nhãn loại thu nhập — v1 chỉ một loại, nhưng để `Record` thì thêm loại mới là lỗi biên dịch. */
 const NHAN_THU_NHAP: Record<ThuNhap["kind"], string> = { LAI_TIET_KIEM: "Lãi tiết kiệm" };
@@ -112,7 +158,7 @@ function ghepNhan(viec: string, soTien: number, ngay: Date, duoi: string[]): str
 }
 
 /** Serialize: chỉ giữ cột đã khai, `Date` → chuỗi ISO (JSONB không có kiểu ngày). */
-function chuanHoa(bang: BangThungRac, banGhi: Record<string, unknown>): Record<string, unknown> {
+function chuanHoa(bang: BangDung, banGhi: Record<string, unknown>): Record<string, unknown> {
   const ra: Record<string, unknown> = {};
   for (const truong of TRUONG_CHUP[bang]) {
     const gt = banGhi[truong];
@@ -126,7 +172,7 @@ function chuanHoa(bang: BangThungRac, banGhi: Record<string, unknown>): Record<s
  * Xuất ra để `khoi-phuc-ban-ghi.ts` dùng; giữ cạnh `chuanHoa` để hai chiều không bao giờ lệch.
  */
 export function doiNguocBanGhi(
-  bang: BangThungRac,
+  bang: BangDung,
   raw: Record<string, unknown>
 ): Record<string, unknown> {
   const ra: Record<string, unknown> = { ...raw };
@@ -160,6 +206,7 @@ export function dungAnhBanGhi(nguon: NguonAnh): ThongTinAnh {
   const cashMovements = "cashMovements" in nguon ? nguon.cashMovements : [];
   const thuNhap = "thuNhap" in nguon && Array.isArray(nguon.thuNhap) ? nguon.thuNhap : [];
   const ghiChu = "ghiChu" in nguon && nguon.ghiChu ? nguon.ghiChu : {};
+  const kySaoKe = nguon.bang === "TheTinDung" ? nguon.kySaoKe : [];
 
   const anh: AnhBanGhi = {
     ban: 1,
@@ -169,6 +216,9 @@ export function dungAnhBanGhi(nguon: NguonAnh): ThongTinAnh {
     ),
     thuNhap: thuNhap.map((t) => chuanHoa("ThuNhap", t as unknown as Record<string, unknown>)),
     ghiChu,
+    ...(kySaoKe.length > 0
+      ? { kySaoKe: kySaoKe.map((k) => chuanHoa("KySaoKeThe", k as unknown as Record<string, unknown>)) }
+      : {}),
   };
 
   switch (nguon.bang) {
@@ -233,6 +283,24 @@ export function dungAnhBanGhi(nguon: NguonAnh): ThongTinAnh {
         ngay: s.startDate,
         anh,
       };
+    }
+    case "PhieuNhapNo": {
+      const p = nguon.banGhi;
+      const duoi = [
+        p.daHuy ? "đã huỷ" : "",
+        p.daTraTruoc > 0 ? `đã trả trước ${formatVnd(p.daTraTruoc)}` : "",
+      ];
+      return { nhan: ghepNhan(`Phiếu nợ ${p.maPhieu}`, p.tongTien, p.ngayPhieu, duoi), soTien: p.tongTien, ngay: p.ngayPhieu, anh };
+    }
+    case "TheTinDung": {
+      const t = nguon.banGhi;
+      // Hồ sơ thẻ không có cột tiền; chỉ thẻ không giao dịch, không kỳ thật, neo 0 mới xoá được ⇒ 0 đúng nghĩa.
+      const duoi = [t.nganHang, kySaoKe.length > 0 ? `kèm ${kySaoKe.length} neo dư nợ` : ""];
+      return { nhan: ghepNhan(`Thẻ ${t.ten}`, 0, t.createdAt, duoi), soTien: 0, ngay: t.createdAt, anh };
+    }
+    case "ViAdsTraTruoc": {
+      const v = nguon.banGhi;
+      return { nhan: ghepNhan(`Ví quảng cáo ${v.nenTang}`, v.soDuNeo, v.ngayNeo, ["số dư neo"]), soTien: v.soDuNeo, ngay: v.ngayNeo, anh };
     }
   }
 }

@@ -11,6 +11,7 @@ import { LoiFileQuaNhieuDong } from "@/lib/import/xlsx-shared";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
+import { chanNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
 import { congAction } from "@/lib/quyen/cong-action";
 
 /**
@@ -441,6 +442,9 @@ export async function importAdsExpenses(formData: FormData): Promise<
 
       // Bước 5: chèn phần còn lại.
       if (toInsert.length > 0) {
+        // Hàng rào CẤU TRÚC (lưới `khoa-duong-ghi-nhap-hang-sau-m`): đường import này hôm nay chỉ ghi danh
+        // mục quảng cáo nên không bao giờ chặn — nhưng ai đổi `categoryId` ở đây thì cổng đã đứng sẵn.
+        for (const r of toInsert) await chanNhapHangSauM(tx, { categoryId: ADS_CATEGORY_ID, date: r.date });
         await tx.expense.createMany({
           data: toInsert.map((r) => ({
             date: r.date,

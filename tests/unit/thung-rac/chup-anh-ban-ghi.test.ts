@@ -240,8 +240,11 @@ function cotDateTimeTrongSchema(model: string): string[] {
     .map(([ten]) => ten);
 }
 
+/** Mọi bảng DỰNG LẠI được: 8 bảng đứng tên mục + `KySaoKeThe` (đi kèm thẻ). */
+const BANG_DUNG = [...BANG_THUNG_RAC, "KySaoKeThe"] as const;
+
 describe("bảng cột được chụp phải khớp schema Prisma", () => {
-  it.each(BANG_THUNG_RAC)("%s: chụp đủ mọi cột vô hướng", (bang) => {
+  it.each(BANG_DUNG)("%s: chụp đủ mọi cột vô hướng", (bang) => {
     // `<Model>ScalarFieldEnum` = mọi cột vô hướng (kể cả enum, khoá ngoại), KHÔNG có quan hệ — đúng
     // tập `kind !== "object"` của DMMF trước đây, do chính client sinh ra từ schema.
     const cotThat = Object.values(Prisma[`${bang}ScalarFieldEnum`]);
@@ -252,7 +255,7 @@ describe("bảng cột được chụp phải khớp schema Prisma", () => {
     ).toEqual([...cotThat].sort());
   });
 
-  it.each(BANG_THUNG_RAC)("%s: khai đủ mọi cột kiểu DateTime", (bang) => {
+  it.each(BANG_DUNG)("%s: khai đủ mọi cột kiểu DateTime", (bang) => {
     const cotNgay = cotDateTimeTrongSchema(bang);
     // Chặn parser tự hỏng thành "không thấy cột ngày nào" rồi xanh giả: 5 bảng tiền đều có ít nhất
     // một cột ngày (createdAt/ngày phát sinh).

@@ -1,8 +1,10 @@
 import type { ThuNhapKind } from "@/generated/prisma/client";
 import { startOfDay } from "date-fns";
 
-import { CASH_MOVEMENT_KIND_META, isInflow } from "@/lib/cash-movements/cash-movement-kinds";
+import { CASH_MOVEMENT_KIND_META, chieuTien } from "@/lib/cash-movements/cash-movement-kinds";
 import { type DateRange } from "@/lib/date-range";
+import { docNguCanhLocTrongRequest } from "@/lib/no-phai-tra/doc-ngu-canh-loc";
+import type { NguCanhLoc } from "@/lib/no-phai-tra/the-cua-dong-chi";
 import { prisma } from "@/lib/prisma";
 import {
   dungDongChay,
@@ -35,14 +37,17 @@ function noi(nhan: string, moTa: string): string {
   return m === "" ? nhan : `${nhan} — ${m}`;
 }
 
-/** 7 lượt đọc song song (cùng bộ lọc với `docTongNguon`) ⇒ danh sách khoản tiền chưa xếp của [tu, den]. */
-async function docSuKien(tu: Date, den: Date): Promise<SuKienQuy[]> {
+/**
+ * 7 lượt đọc song song (cùng bộ lọc với `docTongNguon`, CÙNG `ctx` với thẻ) ⇒ danh sách khoản tiền chưa
+ * xếp của [tu, den]. Dòng Expense thẻ/ví ads đã gánh (sau M) bị loại bởi chính `loc.chiPhi` — không lọc thêm.
+ */
+async function docSuKien(tu: Date, den: Date, ctx: NguCanhLoc): Promise<SuKienQuy[]> {
   const khoang = bien(tu, den);
-  const loc = boLocNguonQuy(khoang);
+  const loc = boLocNguonQuy(khoang, ctx);
   const [ghiTay, tiktok, shopee, chiPhi, adsVi, thuNhap, banTrucTiep] = await Promise.all([
     prisma.cashMovement.findMany({
       where: loc.ghiTay,
-      select: { id: true, date: true, kind: true, amount: true, description: true },
+      select: { id: true, date: true, kind: true, amount: true, description: true, cardId: true },
     }),
     prisma.tiktokPayment.findMany({
       where: loc.tiktokVeBank,
@@ -77,13 +82,16 @@ async function docSuKien(tu: Date, den: Date): Promise<SuKienQuy[]> {
 
   const suKien: SuKienQuy[] = [];
 
-  // Chiều vào/ra SUY từ `kind` (một định nghĩa duy nhất ở cash-movement-kinds) — y như tổng của thẻ.
+  // Chiều vào/ra SUY từ `kind` (một định nghĩa duy nhất ở cash-movement-kinds) — y như tổng của thẻ:
+  // `ADS_TOPUP` nạp bằng thẻ không chạm quỹ ⇒ không thành dòng; nạp từ ngân hàng ⇒ `napViTuBank`.
   for (const m of ghiTay) {
+    const chieu = chieuTien(m.kind, { coCard: m.cardId !== null });
+    if (chieu === "KHONG_QUY") continue;
     suKien.push({
       key: `GHI_TAY:${m.id}`,
       ngay: m.date,
       nguon: "GHI_TAY",
-      truong: isInflow(m.kind) ? "ghiTayVao" : "ghiTayRa",
+      truong: m.kind === "ADS_TOPUP" ? "napViTuBank" : chieu === "IN" ? "ghiTayVao" : "ghiTayRa",
       giaTri: m.amount,
       dienGiai: noi(CASH_MOVEMENT_KIND_META[m.kind].label, m.description),
     });
@@ -168,10 +176,12 @@ async function docSuKien(tu: Date, den: Date): Promise<SuKienQuy[]> {
 
 /**
  * Sổ quỹ dòng chạy của kỳ `range`. Số đầu/cuối kỳ LẤY TỪ THẺ (`tinhSoQuyThang`), các dòng đọc riêng
- * rồi đối chiếu — không bao giờ dùng số tự cộng thay số thẻ.
+ * rồi đối chiếu — không bao giờ dùng số tự cộng thay số thẻ. Thẻ và dòng đọc bằng MỘT `ctx`; thiếu ⇒
+ * bản nhớ theo request (đường đọc lúc render).
  */
-export async function docSoQuyDongChay(range: DateRange): Promise<SoQuyDongChay> {
-  const the = await tinhSoQuyThang(range);
+export async function docSoQuyDongChay(range: DateRange, ctxVao?: NguCanhLoc): Promise<SoQuyDongChay> {
+  const ctx = ctxVao ?? (await docNguCanhLocTrongRequest());
+  const the = await tinhSoQuyThang(range, ctx);
   if (the.d0 === null) return { trangThai: "CHUA_MO_SO" };
   const d0 = the.d0;
   if (the.truocMoSo) return { trangThai: "TRUOC_MO_SO", d0 };
@@ -179,7 +189,7 @@ export async function docSoQuyDongChay(range: DateRange): Promise<SoQuyDongChay>
   // CÙNG cách `tinhSoQuyThang` tính `batDau` — lệch mốc là dòng ngày mở sổ bị đếm hai lần hoặc mất.
   const tu = startOfDay(range.from) > d0 ? startOfDay(range.from) : d0;
   const den = range.to;
-  const { dong, tongThu, tongChi } = dungDongChay(the.dauKy, await docSuKien(tu, den));
+  const { dong, tongThu, tongChi } = dungDongChay(the.dauKy, await docSuKien(tu, den, ctx));
 
   const cuoiKyTuDong = the.dauKy + tongThu - tongChi;
   return {

@@ -3,9 +3,17 @@ import { cache } from "react";
 import type { Prisma } from "@/generated/prisma/client";
 import { addMonths, endOfDay, endOfMonth, format, startOfDay, startOfMonth, subDays } from "date-fns";
 
-import { isInflow } from "@/lib/cash-movements/cash-movement-kinds";
+import { chieuTien } from "@/lib/cash-movements/cash-movement-kinds";
 import { type DateRange } from "@/lib/date-range";
 import { mauDinhKySinhChoThang, ngayDenHanDinhKy } from "@/lib/expenses/ensure-recurring-expenses";
+import {
+  dieuKienChiPhiTruQuy,
+  dieuKienViTiktokCongLai,
+} from "@/lib/no-phai-tra/dieu-kien-chi-phi-tru-quy";
+import { laNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
+import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { docNguCanhLoc, docNguCanhLocTrongRequest } from "@/lib/no-phai-tra/doc-ngu-canh-loc";
+import type { NguCanhLoc } from "@/lib/no-phai-tra/the-cua-dong-chi";
 import { prisma } from "@/lib/prisma";
 import {
   ghepSoQuyThang,
@@ -41,8 +49,11 @@ export function bien(tu: Date | null, den: Date): KhoangNgayQuy {
  * sớm muộn trôi nhau (thêm/bớt một điều kiện ở một bên), và bảng chi tiết cộng ra số khác thẻ.
  *
  * Mỗi nguồn neo đúng CỘT NGÀY tiền thật vào/ra: đổi sang cột khác (vd ngày đồng bộ) là tiền nhảy kỳ.
+ *
+ * `ctx` (nợ phải trả): mốc M + lịch sử gắn nền tảng ads ↔ thẻ. `mocM` null ⇒ hai nguồn `chiPhi` /
+ * `adsTiktokTruVi` y hệt bộ lọc cũ; bật ⇒ bỏ phần thẻ/ví ads đã gánh (`dieu-kien-chi-phi-tru-quy.ts`).
  */
-export function boLocNguonQuy(khoang: KhoangNgayQuy) {
+export function boLocNguonQuy(khoang: KhoangNgayQuy, ctx: NguCanhLoc) {
   return {
     /** Ghi tay — mọi loại; chiều vào/ra suy từ `kind` lúc cộng, không lọc ở đây. */
     ghiTay: { date: khoang } satisfies Prisma.CashMovementWhereInput,
@@ -50,23 +61,30 @@ export function boLocNguonQuy(khoang: KhoangNgayQuy) {
     tiktokVeBank: { status: "PAID", paidTime: khoang } satisfies Prisma.TiktokPaymentWhereInput,
     /** Ví Shopee: CHỈ lệnh rút (có dấu — dòng đảo lệnh rút mang dương), theo mốc giao dịch ví. */
     shopeeRutVi: { type: "WITHDRAWAL", txnTime: khoang } satisfies Prisma.ShopeeSettlementWhereInput,
-    /** Sổ chi phí — MỌI danh mục (kể cả Nhập hàng: tiền thật ra khỏi quỹ dù không vào Lãi/Lỗ), mọi nguồn. */
-    chiPhi: { date: khoang } satisfies Prisma.ExpenseWhereInput,
-    /** Ads TikTok sàn trừ thẳng vào ví, theo mốc tạo lệnh. */
-    adsTiktokTruVi: { orderCreateTime: khoang } satisfies Prisma.TiktokAdsSettlementWhereInput,
+    /**
+     * Sổ chi phí — MỌI danh mục (kể cả Nhập hàng: tiền thật ra khỏi quỹ dù không vào Lãi/Lỗ), mọi nguồn,
+     * TRỪ phần đã có thẻ/ví gánh (sau mốc M): chi trừ vào thẻ, ads nền tảng đã gắn thẻ, ads ví trả trước.
+     */
+    chiPhi: dieuKienChiPhiTruQuy(ctx, khoang) satisfies Prisma.ExpenseWhereInput,
+    /** Ads TikTok sàn trừ thẳng vào ví, theo mốc tạo lệnh — chỉ phần trước khi thẻ gánh ads TikTok. */
+    adsTiktokTruVi: dieuKienViTiktokCongLai(ctx, khoang) satisfies Prisma.TiktokAdsSettlementWhereInput,
     /** Thu nhập tài chính đã nhận, theo ngày tiền về. */
     thuNhap: { date: khoang } satisfies Prisma.ThuNhapWhereInput,
   };
 }
 
-/** 7 lượt đọc song song → 8 con số của `TongNguon`. Kỳ rỗng (tu > den) là hợp lệ: mọi số 0. */
-export async function docTongNguon(tu: Date | null, den: Date): Promise<TongNguon> {
+/**
+ * 7 lượt đọc song song → 9 con số của `TongNguon`. Kỳ rỗng (tu > den) là hợp lệ: mọi số 0.
+ * Thiếu `ctx` ⇒ tự đọc tươi (`docNguCanhLoc()` trần) — caller đọc nhiều kỳ cùng lượt nên truyền một ctx.
+ */
+export async function docTongNguon(tu: Date | null, den: Date, ctx?: NguCanhLoc): Promise<TongNguon> {
   if (tu !== null && startOfDay(tu) > endOfDay(den)) return { ...TONG_RONG };
   const khoang = bien(tu, den);
-  const loc = boLocNguonQuy(khoang);
+  const loc = boLocNguonQuy(khoang, ctx ?? (await docNguCanhLoc()));
 
   const [ghiTay, tiktok, shopee, chiPhi, adsVi, thuNhap, banTrucTiep] = await Promise.all([
-    prisma.cashMovement.groupBy({ by: ["kind"], where: loc.ghiTay, _sum: { amount: true } }),
+    // Nhóm theo CẢ `cardId`: chiều của `ADS_TOPUP` phụ thuộc dòng (nạp bằng thẻ không chạm quỹ).
+    prisma.cashMovement.groupBy({ by: ["kind", "cardId"], where: loc.ghiTay, _sum: { amount: true } }),
     prisma.tiktokPayment.aggregate({ where: loc.tiktokVeBank, _sum: { settlementValue: true } }),
     prisma.shopeeSettlement.aggregate({ where: loc.shopeeRutVi, _sum: { amount: true } }),
     prisma.expense.aggregate({ where: loc.chiPhi, _sum: { amount: true } }),
@@ -83,11 +101,16 @@ export async function docTongNguon(tu: Date | null, den: Date): Promise<TongNguo
   ]);
 
   // Chiều vào/ra SUY từ `kind` (một định nghĩa duy nhất ở cash-movement-kinds) — không cột riêng.
+  // `ADS_TOPUP`: không thẻ ⇒ nguồn riêng `napViTuBank`; có thẻ ⇒ KHONG_QUY, không vào nguồn nào.
   let ghiTayVao = 0;
   let ghiTayRa = 0;
+  let napViTuBank = 0;
   for (const g of ghiTay) {
     const tien = g._sum.amount ?? 0;
-    if (isInflow(g.kind)) ghiTayVao += tien;
+    const chieu = chieuTien(g.kind, { coCard: g.cardId !== null });
+    if (chieu === "KHONG_QUY") continue;
+    if (g.kind === "ADS_TOPUP") napViTuBank += tien;
+    else if (chieu === "IN") ghiTayVao += tien;
     else ghiTayRa += tien;
   }
 
@@ -100,6 +123,7 @@ export async function docTongNguon(tu: Date | null, den: Date): Promise<TongNguo
     adsTiktokViCoDau: adsVi._sum.settlementAmount ?? 0,
     thuNhap: thuNhap._sum.amount ?? 0,
     banTrucTiep,
+    napViTuBank,
   };
 }
 
@@ -147,10 +171,13 @@ async function docDinhKyChuaGhi(d0: Date | null, den: Date): Promise<DinhKyChuaG
   const bienTren = endOfDay(den) < homNay ? endOfDay(den) : homNay;
   if (bienTren < d0) return DINH_KY_RONG;
 
-  const active = await prisma.recurringExpense.findMany({
-    where: { active: true },
-    select: { id: true, dayOfMonth: true, activeFrom: true },
-  });
+  const [active, mocM] = await Promise.all([
+    prisma.recurringExpense.findMany({
+      where: { active: true },
+      select: { id: true, dayOfMonth: true, activeFrom: true, categoryId: true },
+    }),
+    docMocM(),
+  ]);
   if (active.length === 0) return DINH_KY_RONG;
 
   const tuThang = startOfMonth(d0);
@@ -173,6 +200,9 @@ async function docDinhKyChuaGhi(d0: Date | null, den: Date): Promise<DinhKyChuaG
       if (!mauDinhKySinhChoThang(r.activeFrom, m)) continue;
       const ngayDenHan = ngayDenHanDinhKy(r.dayOfMonth, m);
       if (ngayDenHan < d0 || ngayDenHan > bienTren) continue; // chưa tới hạn hoặc trước ngày mở sổ
+      // Mẫu "Nhập hàng" sau mốc bật nợ: bộ sinh CỐ Ý bỏ lần này (cùng vị từ) ⇒ không phải "thiếu" —
+      // không thì cảnh báo đòi mở tháng mà mở ra bộ sinh cũng không sinh, không bao giờ tắt.
+      if (laNhapHangSauM({ categoryId: r.categoryId, date: ngayDenHan }, mocM)) continue;
       if (boDaSinh.has(`${r.id}:${key}`)) continue; // đã sinh — không thiếu
 
       soKhoan++;
@@ -243,17 +273,21 @@ async function docCanhBao(
 
 async function docAdsTiktok(
   d0: Date,
-  den: Date
+  den: Date,
+  ctx: NguCanhLoc
 ): Promise<{ soChiPhi: number; sanTruVi: number }> {
   const khoang = bien(d0, den);
+  const loc = boLocNguonQuy(khoang, ctx);
   const [soSach, vi] = await Promise.all([
+    // Ads TikTok của Sổ chi phí mà quỹ ĐANG TRỪ (cùng bộ lọc `chiPhi`): từ khi thẻ gánh ads TikTok, cả
+    // dòng sổ lẫn phần ví cộng lại cùng bị cắt ở một mốc — so hai vế lệch mốc là cờ "ví vượt sổ" kêu sai.
     prisma.expense.aggregate({
-      where: { categoryId: "ads", adsSource: "TIKTOK_ADS", date: khoang },
+      where: { AND: [loc.chiPhi, { categoryId: "ads", adsSource: "TIKTOK_ADS" }] },
       _sum: { amount: true },
     }),
     // Cùng bộ lọc với phần quỹ cộng lại — so hai số ads chỉ có nghĩa khi đọc đúng tập mà quỹ cộng.
     prisma.tiktokAdsSettlement.aggregate({
-      where: boLocNguonQuy(khoang).adsTiktokTruVi,
+      where: loc.adsTiktokTruVi,
       _sum: { settlementAmount: true },
     }),
   ]);
@@ -264,9 +298,15 @@ async function docAdsTiktok(
 /**
  * 4 số sổ quỹ của kỳ đang xem + quỹ tới hôm nay. ĐẦU KỲ là luỹ kế [D0, trước from] nên
  * `CUỐI KỲ(N) ≡ ĐẦU KỲ(N+1)` tự đúng theo cấu trúc, không cần bảng số dư.
+ *
+ * MỘT `ctx` cho mọi lượt đọc của lời gọi (đầu kỳ, trong kỳ, tới hôm nay, ads): đọc ctx riêng từng lượt
+ * thì một lần bật xen giữa làm đầu kỳ và cuối kỳ tính theo hai công thức khác nhau.
  */
-export async function tinhSoQuyThang(range: DateRange): Promise<SoQuyThangDayDu> {
-  const d0 = await ngayMoSoTrongRequest();
+export async function tinhSoQuyThang(range: DateRange, ctxVao?: NguCanhLoc): Promise<SoQuyThangDayDu> {
+  const [d0, ctx] = await Promise.all([
+    ngayMoSoTrongRequest(),
+    ctxVao ?? docNguCanhLocTrongRequest(),
+  ]);
   if (d0 === null) {
     const canhBao = await docCanhBao(null, new Date(), ADS_RONG);
     return {
@@ -282,7 +322,7 @@ export async function tinhSoQuyThang(range: DateRange): Promise<SoQuyThangDayDu>
       // Cảnh báo luỹ kế TỚI HÔM NAY (giống `toiHomNay` bên dưới) — không phải theo `range` đang xem,
       // vì kỳ này nằm TRỌN trước D0 nên chẳng có "range" nào để neo cửa sổ cảnh báo cả.
       docCanhBao(d0, new Date(), ADS_RONG),
-      docTongNguon(d0, new Date()),
+      docTongNguon(d0, new Date(), ctx),
     ]);
     return {
       ...ghepSoQuyThang(d0, TONG_RONG, TONG_RONG, toiHomNay, true),
@@ -294,10 +334,10 @@ export async function tinhSoQuyThang(range: DateRange): Promise<SoQuyThangDayDu>
   const batDau = startOfDay(range.from) > d0 ? startOfDay(range.from) : d0;
   const [truocThang, trongThang, toiHomNay, adsTiktok] = await Promise.all([
     // Rỗng khi kỳ bắt đầu ngay tại D0 (không có ngày nào trước đó để cộng).
-    batDau <= d0 ? Promise.resolve({ ...TONG_RONG }) : docTongNguon(d0, subDays(batDau, 1)),
-    docTongNguon(batDau, range.to),
-    docTongNguon(d0, new Date()),
-    docAdsTiktok(d0, range.to),
+    batDau <= d0 ? Promise.resolve({ ...TONG_RONG }) : docTongNguon(d0, subDays(batDau, 1), ctx),
+    docTongNguon(batDau, range.to, ctx),
+    docTongNguon(d0, new Date(), ctx),
+    docAdsTiktok(d0, range.to, ctx),
   ]);
   // Cảnh báo chạy SAU: cờ `adsViVuotSo` so hai số ads của chính cửa sổ vừa đọc, không đọc lại DB.
   // `dinhKyChuaGhi` neo TỚI HÔM NAY (giống `toiHomNay` ở trên) — cảnh báo nói về quỹ hiện tại của

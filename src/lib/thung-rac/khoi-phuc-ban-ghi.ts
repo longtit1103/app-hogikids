@@ -2,6 +2,8 @@ import type { Prisma } from "@/generated/prisma/client";
 
 import { laLoiTrungDongDinhKyThang } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { chanHoanVuotDaTra, khoaHoSoNo, LoiHoSoNo } from "@/lib/no-phai-tra/ho-so-dong-tien-no";
 import { prisma } from "@/lib/prisma";
 import {
   laLoiDongTienBan,
@@ -96,6 +98,18 @@ async function taoLai(tx: Prisma.TransactionClient, { bang, data }: BanGhiCanDun
     case "SoTietKiem":
       await tx.soTietKiem.create({ data: data as unknown as Prisma.SoTietKiemUncheckedCreateInput });
       return;
+    case "PhieuNhapNo":
+      await tx.phieuNhapNo.create({ data: data as unknown as Prisma.PhieuNhapNoUncheckedCreateInput });
+      return;
+    case "TheTinDung":
+      await tx.theTinDung.create({ data: data as unknown as Prisma.TheTinDungUncheckedCreateInput });
+      return;
+    case "KySaoKeThe":
+      await tx.kySaoKeThe.create({ data: data as unknown as Prisma.KySaoKeTheUncheckedCreateInput });
+      return;
+    case "ViAdsTraTruoc":
+      await tx.viAdsTraTruoc.create({ data: data as unknown as Prisma.ViAdsTraTruocUncheckedCreateInput });
+      return;
   }
 }
 
@@ -141,6 +155,11 @@ async function noiLaiSoTietKiem(
 export async function khoiPhucBanGhiDaXoa(id: string, actor: NguoiDung): Promise<KetQuaKhoiPhuc> {
   try {
     const canhBao = await prisma.$transaction(async (tx) => {
+      // CÂU ĐẦU, VÔ ĐIỀU KIỆN: khoá SHARED với bước bật nợ phải trả (bước bật giữ EXCLUSIVE). Nhiều cổng bên
+      // dưới đọc M (`docMocM`: thẻ phải có neo, ví neo 0 + chống hồi tố, cửa sổ ngày dòng tiền nợ) — không
+      // khoá thì một lượt khôi phục chen giữa lúc bước bật đang chạy đọc M = null, dựng lại thẻ/ví mà bước
+      // bật không thấy. Khoá trước mọi khoá dòng (`Loan`, hồ sơ nợ) — cùng thứ tự với `taoThe`/`taoViAds`.
+      await khoaChiaSeBatNoPhaiTra(tx);
       const dong = await tx.banGhiDaXoa.findUnique({ where: { id } });
       if (!dong) throw new LoiKhongKhoiPhuc("Không tìm thấy mục trong thùng rác");
 
@@ -165,13 +184,21 @@ export async function khoiPhucBanGhiDaXoa(id: string, actor: NguoiDung): Promise
       const anh = dong.anh as unknown as AnhBanGhi;
       const bang = dong.bang as BangThungRac;
       const canDung = tachAnh(bang, anh);
-      const { loanIds, savingsIds } = chaCanKhoa(canDung);
+      const { loanIds, savingsIds, cardIds, phieuIds, viAdsIds } = chaCanKhoa(canDung);
 
       // KHOÁ TRƯỚC MỌI THỨ, `Loan` rồi `SoTietKiem`: vị từ dư nợ / tiền gửi / số đang gửi đều cộng
       // lại từ bảng dòng tiền, mà ReadCommitted không thấy dòng chưa commit của lượt song song. Không
       // khoá thì hai lượt cùng đọc một cái tổng cũ rồi cùng ghi (xem `vi-tu-du-no.ts`).
       await khoaCacKhoanVay(tx, loanIds);
       await khoaCacSoTietKiem(tx, savingsIds);
+      // Rồi tới hồ sơ nợ phải trả (thẻ → phiếu → ví, thứ tự của `khoaHoSoNo`): khôi phục trả thẻ / trả tiền
+      // hàng mà không khoá là lượt đóng thẻ / huỷ phiếu song song đọc trạng thái cũ. Một cụm không bao giờ
+      // vừa có cha khoản vay vừa có cha nợ (CHECK `CashMovement_toi_da_mot_ho_so`), thứ tự này chỉ là hợp đồng.
+      await khoaHoSoNo(tx, [
+        ...cardIds.map((cardId) => ({ cardId, phieuNhapId: null, viAdsId: null })),
+        ...phieuIds.map((phieuNhapId) => ({ cardId: null, phieuNhapId, viAdsId: null })),
+        ...viAdsIds.map((viAdsId) => ({ cardId: null, phieuNhapId: null, viAdsId })),
+      ]);
 
       // `daKhoiPhuc = false`: câu CAS ở trên vừa CHỨNG MINH cột đó đang null, không phải đoán.
       const tinhTrang = await doTinhTrang(tx, false, canDung);
@@ -190,6 +217,8 @@ export async function khoiPhucBanGhiDaXoa(id: string, actor: NguoiDung): Promise
         await chanTienGuiAm(tx, loanId);
       }
       for (const savingsId of savingsIds) await chanSoDuTietKiemAm(tx, savingsId);
+      // Khôi phục một dòng hoàn tiền NCC: trần Σ hoàn ≤ đã trả của phiếu (phiếu đã khoá ở trên).
+      await chanHoanVuotDaTra(tx, phieuIds);
 
       // Câu CUỐI của transaction: mọi cổng đã qua ⇒ chỉ lượt khôi phục thật có dấu vết.
       await ghiNhatKy(tx, {
@@ -214,6 +243,8 @@ export async function khoiPhucBanGhiDaXoa(id: string, actor: NguoiDung): Promise
     if (e instanceof LoiDuNoAm) return { ok: false, lyDo: CAU_SO_DU_AM.duNo };
     if (e instanceof LoiTienGuiAm) return { ok: false, lyDo: CAU_SO_DU_AM.tienGui };
     if (e instanceof LoiSoDuTietKiemAm) return { ok: false, lyDo: CAU_SO_DU_AM.soDuTietKiem };
+    // Trần hoàn tiền phiếu (`chanHoanVuotDaTra`) — câu đã nêu phiếu + hai số, dùng thẳng.
+    if (e instanceof LoiHoSoNo) return { ok: false, lyDo: e.message };
     // Phép dò `thangDaCoDinhKy` chạy TRƯỚC câu ghi (ReadCommitted): bộ sinh định kỳ của một lượt
     // render song song vẫn chen được dòng thay thế vào giữa. UNIQUE `(recurringId, recurringMonth)`
     // là cổng cuối — cả transaction rollback (con dấu "đã khôi phục" tan theo), trả đúng câu dò trước.

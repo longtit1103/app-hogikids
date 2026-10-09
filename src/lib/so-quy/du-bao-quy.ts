@@ -7,6 +7,7 @@ import type {
   LoaiKhoanDuKien,
 } from "@/lib/so-quy/du-bao-quy-types";
 import type { KyDuKien } from "@/lib/so-quy/lich-tra-no";
+import type { PhaiTra } from "@/lib/no-phai-tra/ky-sao-ke";
 
 /**
  * Lõi THUẦN (không DB, không đọc đồng hồ — nhận `homNay`) của biểu đồ quỹ + dự báo "quỹ sắp cạn".
@@ -182,6 +183,11 @@ export type MauDinhKy = {
   dayOfMonth: number;
   description: string;
   activeFrom: KhoaNgay | null;
+  /**
+   * Lần phát sinh có ngày ≥ khoá này bộ sinh BỎ QUA (mẫu "Nhập hàng" sau mốc bật nợ phải trả M —
+   * `ensureRecurringExpensesChiTiet`). Không có / null ⇒ không bỏ.
+   */
+  boQuaTuNgay?: KhoaNgay | null;
 };
 
 /** Khoá "mẫu đã sinh dòng trong tháng" — `recurringId|yyyy-MM` (tháng theo giờ VN). */
@@ -226,6 +232,7 @@ export function khoanDinhKy(
       if (m.activeFrom !== null && tienTo < m.activeFrom.slice(0, 7)) continue;
       const ngayPhatSinh = `${tienTo}-${pad2(Math.min(m.dayOfMonth, soNgay))}`;
       if (ngayPhatSinh > den) continue;
+      if (m.boQuaTuNgay != null && ngayPhatSinh >= m.boQuaTuNgay) continue;
       if (daSinh.has(khoaDaSinh(m.id, ngayPhatSinh))) continue;
       // Vòng lặp bắt đầu từ tháng hiện tại ⇒ `ngayPhatSinh ≤ homNay` chỉ có thể là tháng hiện tại.
       const denHan = ngayPhatSinh <= homNay;
@@ -248,7 +255,34 @@ export function khoanDinhKy(
 }
 
 /** Thứ tự loại khi cùng ngày — cố định để danh sách tất định giữa các lần tải. */
-const THU_TU_LOAI: Record<LoaiKhoanDuKien, number> = { DA_GHI: 0, KY_TRA_NO: 1, DINH_KY: 2 };
+const THU_TU_LOAI: Record<LoaiKhoanDuKien, number> = { DA_GHI: 0, KY_TRA_NO: 1, TRA_THE: 2, DINH_KY: 3 };
+
+/** Một thẻ + số phải trả theo sao kê (`docPhaiTraCacThe`) — đầu vào thuần của `khoanTraThe`. */
+export type TheCanTra = { ten: string; phaiTra: PhaiTra | null };
+
+/**
+ * Khoản dự kiến TRẢ THẺ (spec §5.5): mỗi thẻ duyệt `[phanTruoc, phanMoi]`, phần khác null thành MỘT khoản
+ * `TRA_THE` tại `max(hạn, ngày mai)`, `soTien` âm. Nhãn theo HẠN THẬT: "quá hạn từ dd/MM" khi hạn < hôm nay,
+ * "đến hạn hôm nay" khi bằng, còn lại "hạn dd/MM". Khoản rơi ngoài cửa sổ (hạn > `den`) bỏ — `ghepDuBao`
+ * chỉ nhận khoản trong cửa sổ. Không có `CARD_PAY` tương lai (ngày ghi tay ≤ hôm nay) ⇒ không trùng `DA_GHI`.
+ */
+export function khoanTraThe(cacThe: readonly TheCanTra[], homNay: KhoaNgay, den: KhoaNgay): KhoanDuKien[] {
+  const ngayMai = congNgay(homNay, 1);
+  const ra: KhoanDuKien[] = [];
+  for (const the of cacThe) {
+    for (const phan of [the.phaiTra?.phanTruoc ?? null, the.phaiTra?.phanMoi ?? null]) {
+      if (phan === null || phan.soTien <= 0) continue;
+      const han = khoaNgayVn(phan.hanTra);
+      const ngay = han > ngayMai ? han : ngayMai;
+      if (ngay > den) continue;
+      // Nhãn ngắn dd/MM (spec §5.5) — hạn thẻ luôn trong vòng vài tuần quanh hôm nay.
+      const ddMM = `${han.slice(8, 10)}/${han.slice(5, 7)}`;
+      const duoi = phan.quaHan ? `quá hạn từ ${ddMM}` : phan.denHanHomNay ? "đến hạn hôm nay" : `hạn ${ddMM}`;
+      ra.push({ ngay, soTien: -phan.soTien, moTa: `${the.ten} — ${duoi}`, loai: "TRA_THE" });
+    }
+  }
+  return ra;
+}
 
 export type KetQuaDuBao = {
   duBao: DiemSoDu[];

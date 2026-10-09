@@ -52,3 +52,26 @@ describe("ngayMoSoTrongRequest chỉ dùng trên đường đọc lúc render", 
     }
   });
 });
+
+/**
+ * Cùng luật cho ngữ cảnh nợ phải trả nhớ theo request (mốc M + lịch sử gắn nền tảng ↔ thẻ): chỉ đường đọc
+ * lúc render. Action bật công tắc / sửa gắn thẻ rồi đọc lại quỹ trong cùng lượt mà dùng bản nhớ là tính
+ * quỹ theo công thức CŨ ngay sau khi bật. Đường ghi gọi `docNguCanhLoc()` trần.
+ */
+const DUOC_DUNG_NGU_CANH_NHO = [
+  "lib/no-phai-tra/doc-ngu-canh-loc.ts", // nơi định nghĩa
+  "lib/so-quy/so-quy-queries.ts", // `tinhSoQuyThang` thiếu ctx
+  "lib/so-quy/dong-chay-so-quy-queries.ts", // `docSoQuyDongChay` thiếu ctx
+  "lib/so-quy/du-bao-quy-queries.ts", // biểu đồ + banner dự báo (chỉ render)
+  "lib/reports/cash-flow.ts", // `computeCashFlow` — tab Dòng tiền, cùng bản chụp với thẻ Quỹ cùng trang
+  "lib/no-phai-tra/the-tin-dung-queries.ts", // `docTheKemTrangThai` — khối Nợ phải trả, cùng trang với thẻ Quỹ
+];
+
+describe("docNguCanhLocTrongRequest chỉ dùng trên đường đọc lúc render", () => {
+  it("đúng danh sách file được dùng bản nhớ", () => {
+    const dungBanNho = docTatCa(SRC)
+      .filter((f) => f.noiDung.includes("docNguCanhLocTrongRequest"))
+      .map((f) => f.file);
+    expect(dungBanNho.sort()).toEqual([...DUOC_DUNG_NGU_CANH_NHO].sort());
+  });
+});

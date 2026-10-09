@@ -41,6 +41,22 @@ function docTatCa(thuMuc: string, tienTo = ""): { file: string; noiDung: string 
   return ra;
 }
 
+/**
+ * NỢ PHẢI TRẢ (10/2026): dư nợ thẻ (`du-no-the`, P4) và số dư ví ads trả trước (`so-du-vi-ads`) là số
+ * ƯỚC TÍNH từ neo + giao dịch — không phải tiền đã rời/vào tài khoản. Quỹ chỉ trừ tiền thẻ lúc TRẢ THẺ
+ * (`CARD_PAY`) và tiền ví lúc NẠP (`ADS_TOPUP`); lấy thêm dư nợ/số dư ví vào công thức là trừ hai lần.
+ * Khoá riêng bốn file tính quỹ (thẻ, công thức, dòng chạy, dự báo) — module khác của Sổ quỹ (vd đối chiếu
+ * số dư chốt) có thể cần đọc dư nợ để GIẢI THÍCH chênh, không cộng vào quỹ. Bắt mọi đường import (alias
+ * hay relative) nhờ tiền tố thư mục `no-phai-tra/`.
+ */
+const CAM_SO_DU_TINH_TOAN = /no-phai-tra\/(du-no-the|so-du-vi-ads)/;
+const FILE_CAM_SO_DU_TINH_TOAN = [
+  "so-quy-queries.ts",
+  "cong-thuc-so-quy.ts",
+  "dong-chay-so-quy-queries.ts",
+  "du-bao-quy-queries.ts",
+];
+
 const NGOAI_LE_DON_HANG = "tien-ban-truc-tiep.ts";
 const moiFile = docTatCa(THU_MUC);
 /**
@@ -101,6 +117,25 @@ describe("src/lib/so-quy không dùng tiền dự kiến / net sàn chốt", () 
     expect(thanBoLoc![1]).toMatch(/orderedAt:\s*khoang/);
 
     expect(src).not.toMatch(/itemsTotal|discount|platformFeeEst|netRevenue/);
+  });
+
+  it.each(FILE_CAM_SO_DU_TINH_TOAN.map((f) => [f] as const))(
+    "%s không import số dư ước tính của nợ phải trả (dư nợ thẻ, số dư ví ads)",
+    (file) => {
+      const f = moiFile.find((x) => x.file === file);
+      expect(f, `${file} phải tồn tại — đổi tên thì sửa lưới`).toBeDefined();
+      expect(f!.noiDung).not.toMatch(CAM_SO_DU_TINH_TOAN);
+    }
+  );
+
+  it("regex CAM_SO_DU_TINH_TOAN bắt alias lẫn relative, không bắt bộ lọc trừ quỹ (tự kiểm lưới)", () => {
+    expect('import { duNoThe } from "@/lib/no-phai-tra/du-no-the";').toMatch(CAM_SO_DU_TINH_TOAN);
+    expect('import { soDuViAds } from "../no-phai-tra/so-du-vi-ads";').toMatch(CAM_SO_DU_TINH_TOAN);
+    expect('import type { X } from "@/lib/no-phai-tra/du-no-the-types";').toMatch(CAM_SO_DU_TINH_TOAN);
+    expect('import { dieuKienChiPhiTruQuy } from "@/lib/no-phai-tra/dieu-kien-chi-phi-tru-quy";').not.toMatch(
+      CAM_SO_DU_TINH_TOAN
+    );
+    expect('import { docNguCanhLoc } from "@/lib/no-phai-tra/doc-ngu-canh-loc";').not.toMatch(CAM_SO_DU_TINH_TOAN);
   });
 
   it("regex CAM bắt được các khuôn rò rỉ (tự kiểm lưới)", () => {

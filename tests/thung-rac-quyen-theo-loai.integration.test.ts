@@ -103,7 +103,9 @@ describe("bảng quyền thùng rác", () => {
   it("bangDuocPhep: chủ shop ⇒ tất cả; kế toán chi phí ⇒ chỉ Expense; không quyền sửa ⇒ rỗng", () => {
     expect(bangDuocPhep(chuShop()).sort()).toEqual([...BANG_THUNG_RAC].sort());
     expect(bangDuocPhep(KE_TOAN_CHI_PHI)).toEqual(["Expense"]);
-    expect(bangDuocPhep(KE_TOAN_SO_QUY).sort()).toEqual(["Loan", "SoTietKiem", "ThuNhap"]);
+    expect(bangDuocPhep(KE_TOAN_SO_QUY).sort()).toEqual(
+      ["Loan", "PhieuNhapNo", "SoTietKiem", "TheTinDung", "ThuNhap", "ViAdsTraTruoc"]
+    );
     expect(bangDuocPhep(nhanVien("chi-phi:xem", "tai-chinh-so-quy:xem"))).toEqual([]);
   });
 });

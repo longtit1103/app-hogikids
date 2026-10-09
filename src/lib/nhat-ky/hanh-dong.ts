@@ -72,6 +72,24 @@ export const HANH_DONG = {
   // dòng trong `ANH_XA_ACTION_HANH_DONG`).
   SAO_LUU_TAI: "SAO_LUU_TAI",
   PHUC_HOI: "PHUC_HOI",
+  // Nợ phải trả — phiếu nhập (P3)
+  NHAP_HANG_GHI_NO: "NHAP_HANG_GHI_NO",
+  NHAP_HANG_SUA_NO: "NHAP_HANG_SUA_NO",
+  NHAP_HANG_HUY_NO: "NHAP_HANG_HUY_NO",
+  NHAP_HANG_XOA_NO: "NHAP_HANG_XOA_NO",
+  // Nợ phải trả — thẻ tín dụng (P4)
+  THE_TAO: "THE_TAO",
+  THE_SUA: "THE_SUA",
+  THE_DONG: "THE_DONG",
+  THE_XOA: "THE_XOA",
+  THE_GAN_NEN_TANG: "THE_GAN_NEN_TANG",
+  THE_XOA_GAN_NEN_TANG: "THE_XOA_GAN_NEN_TANG",
+  THE_CHOT_SAO_KE: "THE_CHOT_SAO_KE",
+  // Nợ phải trả — ví ads trả trước + bước xác nhận bật
+  VI_ADS_TAO: "VI_ADS_TAO",
+  VI_ADS_SUA: "VI_ADS_SUA",
+  VI_ADS_XOA: "VI_ADS_XOA",
+  NO_PHAI_TRA_BAT: "NO_PHAI_TRA_BAT",
 } as const;
 
 export type HanhDong = (typeof HANH_DONG)[keyof typeof HANH_DONG];
@@ -119,6 +137,7 @@ export const ANH_XA_ACTION_HANH_DONG: Record<string, HanhDong> = {
   createCashMovement: HANH_DONG.DONG_TIEN_TAO,
   updateCashMovement: HANH_DONG.DONG_TIEN_SUA,
   deleteCashMovement: HANH_DONG.DONG_TIEN_XOA,
+  suaDieuChinhChuyenDoi: HANH_DONG.DONG_TIEN_SUA,
   luuSoDuChotThang: HANH_DONG.CHOT_SO_DU_LUU,
   xoaSoDuChotThang: HANH_DONG.CHOT_SO_DU_XOA,
   importShopeeWallet: HANH_DONG.VI_SHOPEE_IMPORT,
@@ -142,4 +161,25 @@ export const ANH_XA_ACTION_HANH_DONG: Record<string, HanhDong> = {
   ghiChiPhiNhapHang: HANH_DONG.NHAP_HANG_GHI_CHI_PHI,
   khoiPhucBanGhi: HANH_DONG.THUNG_RAC_KHOI_PHUC,
   xoaVinhVienBanGhi: HANH_DONG.THUNG_RAC_XOA_VINH_VIEN,
+  // Nợ phải trả — phiếu nhập (P3)
+  ghiNhanPhieuVaoSoNo: HANH_DONG.NHAP_HANG_GHI_NO,
+  capNhatTongPhieu: HANH_DONG.NHAP_HANG_SUA_NO,
+  capNhatDaTraTruoc: HANH_DONG.NHAP_HANG_SUA_NO,
+  boQuaLechDaGiaiThich: HANH_DONG.NHAP_HANG_SUA_NO,
+  danhDauHuyPhieu: HANH_DONG.NHAP_HANG_HUY_NO,
+  xoaPhieu: HANH_DONG.NHAP_HANG_XOA_NO,
+  traTienHangGop: HANH_DONG.DONG_TIEN_TAO,
+  // Nợ phải trả — thẻ tín dụng (P4)
+  taoThe: HANH_DONG.THE_TAO,
+  suaThe: HANH_DONG.THE_SUA,
+  dongThe: HANH_DONG.THE_DONG,
+  xoaThe: HANH_DONG.THE_XOA,
+  ganNenTang: HANH_DONG.THE_GAN_NEN_TANG,
+  xoaGanNenTang: HANH_DONG.THE_XOA_GAN_NEN_TANG,
+  chotSaoKe: HANH_DONG.THE_CHOT_SAO_KE,
+  // Nợ phải trả — ví ads trả trước + bước xác nhận bật
+  taoViAds: HANH_DONG.VI_ADS_TAO,
+  suaViAds: HANH_DONG.VI_ADS_SUA,
+  xoaViAds: HANH_DONG.VI_ADS_XOA,
+  xacNhanBatNoPhaiTra: HANH_DONG.NO_PHAI_TRA_BAT,
 };

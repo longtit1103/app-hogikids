@@ -8,7 +8,7 @@ import { ExpenseStructureChart } from "@/components/expenses/expense-structure-c
 import { ExpenseTable } from "@/components/expenses/expense-table";
 import { KhoanChiDinhKySection } from "@/components/finance/khoan-chi-dinh-ky-section";
 import { type DateRange } from "@/lib/date-range";
-import { ensureRecurringExpensesForMonths, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
+import { ensureRecurringExpensesForMonthsChiTiet, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
 import {
   getExpenseSummary,
   getExpensesPage,
@@ -22,6 +22,7 @@ import {
   KEY_SO_VIEC_HAU_KIEM_PHIEU_NHAP,
   trangThaiPhieuNhapChuaGhi,
 } from "@/lib/nhap-hang/trang-thai-phieu-nhap";
+import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docSoTrang } from "@/lib/pagination";
 import { prisma } from "@/lib/prisma";
 
@@ -61,17 +62,25 @@ export async function ExpenseLedgerTab({
   sp,
   range,
   choPhepSua = false,
+  choPhepTruThe = false,
 }: {
   sp: ExpenseLedgerParams;
   range: DateRange;
   /** Có `chi-phi:sua`? `false` ⇒ ẩn nút thêm/nhập ads/thùng rác (server vẫn chặn ở cổng action). */
   choPhepSua?: boolean;
+  /**
+   * Có `tai-chinh-so-quy:xem`? Thẻ tín dụng là hồ sơ của Sổ quỹ — thiếu ⇒ KHÔNG đọc danh sách thẻ, form chi
+   * phí không có ô "Trừ vào thẻ" (tên thẻ không lộ ra người chỉ có quyền chi phí). Action gắn/đổi thẻ còn
+   * đòi `tai-chinh-so-quy:sua`.
+   */
+  choPhepTruThe?: boolean;
 }) {
   // Backfill chi phí định kỳ cho MỌI tháng giao với range đang xem TRƯỚC khi
   // query sổ chi phí (range "Tùy chọn" có thể là tháng quá khứ/đa tháng).
-  await ensureRecurringExpensesForMonths(monthStartsInRange(range));
+  // `boQuaNhapHang` > 0 ⇒ mẫu "Nhập hàng" còn chạy nhưng bị bỏ sau mốc bật nợ phải trả — khối định kỳ nhắc.
+  const { boQuaNhapHang } = await ensureRecurringExpensesForMonthsChiTiet(monthStartsInRange(range));
 
-  const [categoriesAll, channels, mocPhieuNhap] = await Promise.all([
+  const [categoriesAll, channels, mocPhieuNhap, mocNoPhaiTra] = await Promise.all([
     prisma.expenseCategory.findMany(),
     prisma.channel.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
     // Chỉ ĐỌC 3 ô `Setting` do lượt đêm chốt — KHÔNG đếm ở đây (phép đếm phải quét trọn Bronze).
@@ -83,7 +92,22 @@ export async function ExpenseLedgerTab({
       },
       select: { key: true, value: true },
     }),
+    // Ô "Trừ vào thẻ" của form chi phí: chỉ có nghĩa SAU khi bật theo dõi nợ phải trả, chỉ cho người ghi
+    // có quyền xem Sổ quỹ (thẻ thuộc Sổ quỹ).
+    choPhepSua && choPhepTruThe ? docMocM() : Promise.resolve(null),
   ]);
+  // Chỉ tên + id thẻ đang mở (không số dư): đủ cho ô chọn; số dư là dữ liệu của quyền Sổ quỹ.
+  const theTinDung =
+    mocNoPhaiTra === null
+      ? undefined
+      : {
+          mocM: format(mocNoPhaiTra, "yyyy-MM-dd"),
+          the: await prisma.theTinDung.findMany({
+            where: { closedAt: null },
+            select: { id: true, ten: true },
+            orderBy: { createdAt: "asc" },
+          }),
+        };
 
   const phieuNhapChuaGhi = trangThaiPhieuNhapChuaGhi(
     mocPhieuNhap.find((s) => s.key === KEY_SO_PHIEU_NHAP_CHUA_GHI)?.value,
@@ -179,7 +203,7 @@ export async function ExpenseLedgerTab({
                 Thùng rác
               </Link>
               <AdsImportButton channels={channels} />
-              <ExpenseAddButton categories={categories} channels={channels} />
+              <ExpenseAddButton categories={categories} channels={channels} theTinDung={theTinDung} />
             </>
           )}
         </div>
@@ -207,7 +231,7 @@ export async function ExpenseLedgerTab({
           <h2 className="font-serif text-lg text-ink">Chưa có khoản chi nào trong kỳ này</h2>
           {choPhepSua && (
             <div className="flex items-center gap-4">
-              <ExpenseAddButton categories={categories} channels={channels} />
+              <ExpenseAddButton categories={categories} channels={channels} theTinDung={theTinDung} />
               <AdsImportButton channels={channels} variant="link" className="text-primary" />
             </div>
           )}
@@ -227,12 +251,13 @@ export async function ExpenseLedgerTab({
             categories={categories}
             channels={channels}
             choPhepSua={choPhepSua}
+            theTinDung={theTinDung}
           />
         </>
       )}
 
       {/* Độc lập kỳ đang lọc ở trên — mẫu định kỳ là dữ liệu toàn cục, không theo range. */}
-      <KhoanChiDinhKySection items={recurringList} choPhepSua={choPhepSua} />
+      <KhoanChiDinhKySection items={recurringList} choPhepSua={choPhepSua} boQuaNhapHang={boQuaNhapHang} />
     </div>
   );
 }

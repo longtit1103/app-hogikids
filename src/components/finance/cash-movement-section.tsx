@@ -1,5 +1,6 @@
 import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
 import { formatVnd } from "@/lib/format";
+import type { LuaChonDongTienNo } from "@/lib/no-phai-tra/lua-chon-dong-tien-no";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 
@@ -24,6 +25,8 @@ export function CashMovementSection({
   d0,
   choPhepSua = false,
   choPhepSuaDongSoQuy = false,
+  noPhaiTra = null,
+  choPhepSuaDieuChinh = false,
 }: {
   inTotal: number;
   outTotal: number;
@@ -38,6 +41,13 @@ export function CashMovementSection({
   choPhepSua?: boolean;
   /** Có `tai-chinh-so-quy:sua`? Thiếu ⇒ dòng gắn khoản vay / sổ tiết kiệm không có nút sửa/xoá. */
   choPhepSuaDongSoQuy?: boolean;
+  /**
+   * Đã bật theo dõi nợ phải trả ⇒ `docLuaChonDongTienNo()` (mốc M + thẻ/phiếu/ví). Null/không truyền ⇒
+   * form và bảng hành xử y như trước khi có nợ phải trả.
+   */
+  noPhaiTra?: LuaChonDongTienNo | null;
+  /** Chủ shop? Mở nút sửa dòng điều chỉnh mở sổ nợ (`CUTOVER_*`). */
+  choPhepSuaDieuChinh?: boolean;
 }) {
   return (
     <div id="ghi-tay" className="scroll-mt-20 rounded-xl border border-hairline p-4">
@@ -55,6 +65,7 @@ export function CashMovementSection({
             soTietKiem={soTietKiem}
             d0={d0}
             choPhepLoaiSoQuy={choPhepSuaDongSoQuy}
+            noPhaiTra={noPhaiTra}
           />
         )}
       </div>
@@ -78,6 +89,8 @@ export function CashMovementSection({
           d0={d0}
           choPhepSua={choPhepSua}
           choPhepSuaDongSoQuy={choPhepSuaDongSoQuy}
+          noPhaiTra={noPhaiTra}
+          choPhepSuaDieuChinh={choPhepSuaDieuChinh}
         />
       </div>
     </div>

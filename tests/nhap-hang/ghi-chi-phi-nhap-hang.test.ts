@@ -32,8 +32,14 @@ vi.mock("@/lib/prisma", () => {
       findMany: (...a: unknown[]) => findMany(...(a as [])),
       createMany: (...a: unknown[]) => createMany(...(a as [{ data: unknown[] }])),
     },
+    // Công tắc nợ phải trả (`Setting.noPhaiTraTuNgay`) chưa có ⇒ chưa bật: action đọc nó ĐẦU TIÊN và cổng
+    // "Nhập hàng sau M" đọc lại trong transaction.
+    setting: { findUnique: async () => null },
     // Dòng nhật ký đi cùng transaction ghi — client giả dùng chính nó làm `tx`.
     auditLog: { create: () => auditLogCreate() },
+    // Khoá SHARED với bước bật (câu đầu transaction ghi): đọc/đặt `lock_timeout` + `pg_advisory_xact_lock_shared`.
+    $queryRaw: async () => [{ cu: "0" }],
+    $executeRaw: async () => 0,
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
   };
   return { prisma };

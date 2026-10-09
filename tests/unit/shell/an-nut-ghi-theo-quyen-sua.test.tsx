@@ -130,6 +130,8 @@ describe("ExpenseTable — Sửa/Xóa dòng theo chi-phi:sua", () => {
     source: "MANUAL",
     recurringId: null,
     refId: null,
+    cardId: null,
+    tenThe: null,
   };
   const props = { rows: [dong], count: 1, totalAmount: 200_000, categories: [], channels: [] };
 

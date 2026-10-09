@@ -6,6 +6,7 @@ import {
 } from "@/lib/cash-movements/cash-movement-queries";
 import { type DateRange } from "@/lib/date-range";
 import { getExpenseSummary, type CategoryBreakdownItem } from "@/lib/expenses/expense-queries";
+import { docNguCanhLocTrongRequest } from "@/lib/no-phai-tra/doc-ngu-canh-loc";
 import { prisma } from "@/lib/prisma";
 import { calcPnlCore, pnlOrderSelect, toPnlOrderInput } from "@/lib/reports/pnl";
 
@@ -106,6 +107,10 @@ export type ShopeeCashIn = {
  */
 export async function computeCashFlow(range: DateRange): Promise<CashFlow> {
   const to = endOfDay(range.to);
+  // Tiền ra thật: bỏ khoản thẻ/ví ads đã gánh (sau mốc M) — CÙNG bộ lọc Sổ quỹ, `cashOut` = phần
+  // Expense của Σchi thẻ Quỹ cùng kỳ. Công tắc tắt ⇒ y cũ. Bản NHỚ theo request: cùng bản chụp ngữ cảnh với
+  // thẻ Quỹ trên cùng trang (chỉ gọi lúc render `/tai-chinh`, không có đường ghi rồi đọc).
+  const chiTienThat = await docNguCanhLocTrongRequest();
   const [
     orderRows,
     expSummary,
@@ -122,7 +127,7 @@ export async function computeCashFlow(range: DateRange): Promise<CashFlow> {
       where: { orderedAt: { gte: range.from, lte: to } },
       select: pnlOrderSelect,
     }),
-    getExpenseSummary(range),
+    getExpenseSummary(range, { chiTienThat }),
     // [Tiền đã về] Silver TikTok — độc lập P&L. net theo statement_time, ads theo
     // order_create_time, bank theo paid_time (status=PAID).
     // `_count` đi kèm `_sum` ở MỌI aggregate dưới đây: "kỳ này có dữ liệu chưa" phải hỏi bằng SỐ
@@ -176,7 +181,7 @@ export async function computeCashFlow(range: DateRange): Promise<CashFlow> {
   const pending = calcPnlCore(orders, [], { statusIn: ["PENDING", "SHIPPING"] });
 
   const expectedIn = completed.netRevenue;
-  const cashOut = expSummary.total; // gồm mọi danh mục kể cả "purchase" (Nhập hàng)
+  const cashOut = expSummary.total; // mọi danh mục kể cả "purchase" (Nhập hàng), trừ phần thẻ/ví ads gánh
   const thuNhapTaiChinh = thuNhapAgg._sum.amount ?? 0;
 
   const net = settleAgg._sum.settlementAmount ?? 0;

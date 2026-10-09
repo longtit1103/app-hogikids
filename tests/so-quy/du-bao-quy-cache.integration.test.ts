@@ -21,16 +21,19 @@ const nho = vi.hoisted(() => ({
   soLanTinh: 0,
   /** D0 (`ngayMoSo`) cũng nhớ theo request — bảng riêng, không lẫn vào phép đếm phần dự báo. */
   bangD0: new Map<unknown, unknown>(),
+  /** Ngữ cảnh nợ phải trả (mốc M + gắn thẻ) cũng nhớ theo request — bảng riêng, không đếm. */
+  bangNguCanh: new Map<unknown, unknown>(),
 }));
 
 vi.mock("react", async (goc) => ({
   ...(await goc<typeof import("react")>()),
   cache: <A, R>(fn: (a: A) => R) => {
     const laD0 = fn.name === "ngayMoSo";
+    const laNguCanh = fn.name === "docNguCanhLocMacDinh";
     return (a: A): R => {
-      const bang = laD0 ? nho.bangD0 : nho.bang;
+      const bang = laD0 ? nho.bangD0 : laNguCanh ? nho.bangNguCanh : nho.bang;
       if (!bang.has(a)) {
-        if (!laD0) nho.soLanTinh += 1;
+        if (!laD0 && !laNguCanh) nho.soLanTinh += 1;
         bang.set(a, fn(a));
       }
       return bang.get(a) as R;
@@ -49,6 +52,7 @@ beforeEach(async () => {
   await truncateBusinessTables();
   nho.bang.clear();
   nho.bangD0.clear();
+  nho.bangNguCanh.clear();
   nho.soLanTinh = 0;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(HOM_NAY);

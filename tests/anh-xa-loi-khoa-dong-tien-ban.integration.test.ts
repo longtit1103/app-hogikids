@@ -121,6 +121,10 @@ async function dongTraGocDaXoa(): Promise<string> {
     description: "Trả gốc",
     loanId,
     savingsId: null,
+    cardId: null,
+    phieuNhapId: null,
+    viAdsId: null,
+    yeuCauId: null,
     createdAt: new Date(2026, 6, 10),
   };
   const { nhan, soTien, ngay, anh } = dungAnhBanGhi({ bang: "CashMovement", banGhi });

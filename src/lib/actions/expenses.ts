@@ -21,7 +21,13 @@ import { thangChoBatLai } from "@/lib/expenses/thang-cho-bat-lai";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
-import { congAction } from "@/lib/quyen/cong-action";
+import { daBatNoPhaiTra, khoaChiaSeBatNoPhaiTra, LoiChuaBat } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { khoaVaKiemCacTheConMo, LoiHoSoNo } from "@/lib/no-phai-tra/ho-so-dong-tien-no";
+import { chanNhapHangSauM, LoiNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
+import { ngayTienMoiSchema } from "@/lib/no-phai-tra/ngay-tien-moi-schema";
+import { congAction, kiemThemQuyen } from "@/lib/quyen/cong-action";
+import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
+import { laLoiDongTienBan, OPT_TX_DONG_TIEN, THONG_BAO_KHOA_DONG_TIEN_BAN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import { chupVaoThungRac } from "@/lib/thung-rac/ghi-thung-rac";
 
 /**
@@ -58,7 +64,71 @@ const baseExpenseFields = {
     .max(2_000_000_000, "Số tiền quá lớn (tối đa 2 tỷ)"),
   channelId: z.string().nullable().default(null),
   description: z.string().max(200, "Tối đa 200 ký tự").default(""),
+  // "Trừ vào thẻ" (spec §5.6): khoản chi nhập tay trả bằng thẻ tín dụng — không trừ quỹ lúc chi, cộng
+  // vào dư nợ thẻ; quỹ giảm lúc trả thẻ. Bỏ trống/null = trừ quỹ ngay như cũ.
+  // `undefined` (form cũ không gửi ô này) ≠ `null` (bỏ chọn thẻ): sửa bằng form không biết ô thẻ thì GIỮ
+  // thẻ đang có — rơi về null là lặng lẽ chuyển khoản chi từ nợ thẻ sang trừ quỹ.
+  cardId: z.string().cuid("Chọn thẻ").nullable().optional(),
 };
+
+/**
+ * Quảng cáo KHÔNG gắn thẻ tay (quyết định 08/10, spec §5.6): ads trả thẻ đi theo NỀN TẢNG gắn thẻ
+ * (`GanNenTangThe`) — một nguồn sự thật cho cả quỹ lẫn nợ thẻ. Cho gắn tay nữa là hai đường cho cùng một
+ * khoản ads, và dòng ads TikTok ghi tay mang thẻ lúc TikTok chưa gắn làm quỹ phồng đúng phần ví (review
+ * P2 GHI NHẬN 3). Ads ghi tay muốn trả thẻ ⇒ gắn nền tảng của nó vào thẻ.
+ */
+function chanTheChoAds(d: { categoryId: string; cardId?: string | null }): boolean {
+  return !(d.categoryId === "ads" && d.cardId != null);
+}
+const LOI_THE_CHO_ADS = {
+  message: "Quảng cáo trả thẻ đi theo nền tảng gắn thẻ (Sổ quỹ → Thẻ tín dụng) — không chọn thẻ ở khoản chi",
+  path: ["cardId"],
+};
+
+/**
+ * Cổng "trừ vào thẻ" chạy TRƯỚC transaction (cần đọc M): có thẻ ⇒ đã bật theo dõi nợ + ngày ≥ M
+ * (spec §5.8 — trước M khoản chi đã trừ quỹ lúc chi). `null` = qua cổng (kể cả khi không chọn thẻ).
+ */
+async function congTheChiPhi(d: { cardId: string | null; date: Date }): Promise<ActionResult | null> {
+  if (d.cardId === null) return null;
+  let mocM: Date;
+  try {
+    mocM = await daBatNoPhaiTra();
+  } catch (e) {
+    if (e instanceof LoiChuaBat) return { ok: false, code: e.code, field: "cardId", error: e.message };
+    throw e;
+  }
+  const ngay = ngayTienMoiSchema(mocM).safeParse(d.date);
+  if (!ngay.success) {
+    return { ok: false, field: "date", error: ngay.error.issues[0]?.message ?? "Ngày không hợp lệ" };
+  }
+  return null;
+}
+
+/**
+ * Quyền THÊM khi khoản chi GẮN hoặc ĐỔI thẻ (kể cả gỡ thẻ): đổi dư nợ thẻ là việc của Sổ quỹ ⇒ đòi
+ * `tai-chinh-so-quy:sua` ngoài `chi-phi:sua` (khuôn `kiemQuyenDongGanSoQuy` của dòng tiền). Gọi TRƯỚC mọi
+ * cổng đọc thẻ: câu lỗi của chúng ("Thẻ X đã đóng", "Thẻ X chỉ theo dõi từ sau…") mang TÊN thẻ — người
+ * thiếu quyền chỉ nhận câu chung `KHONG_CO_QUYEN`. Giữ nguyên thẻ đang có (sửa số/mô tả) thì không đòi.
+ */
+async function kiemQuyenGanThe(nguoiDung: NguoiDung, doiThe: boolean): Promise<ActionResult | null> {
+  if (!doiThe) return null;
+  const q = await kiemThemQuyen(nguoiDung, "tai-chinh-so-quy:sua");
+  return q.ok ? null : q;
+}
+
+/** Lỗi hồ sơ thẻ ném trong transaction ⇒ `ActionResult`; lỗi khác ⇒ null (caller dịch câu chung). */
+function loiTheChiPhi(e: unknown): ActionResult | null {
+  // Đường ghi "Nhập hàng" ĐÓNG từ M (spec §5.3) — nói đúng ô danh mục để chủ shop biết đi đường phiếu nợ.
+  if (e instanceof LoiNhapHangSauM) return { ok: false, field: "categoryId", code: e.code, error: e.message };
+  // Chờ khoá chung với bước bật (hoặc khoá thẻ) quá hạn ⇒ transaction đã lùi trọn, bấm lại là được.
+  if (laLoiDongTienBan(e)) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
+  if (!(e instanceof LoiHoSoNo)) return null;
+  // `field: "id"` không phải ô nào trên form — bỏ để modal rơi về toast (khuôn `cash-movements.ts`).
+  return e.field === "id"
+    ? { ok: false, code: e.code, error: e.message }
+    : { ok: false, field: e.field, code: e.code, error: e.message };
+}
 
 /** Danh mục "ads" bắt buộc chọn nguồn ads — dùng chung cho create/update. */
 function requireAdsSource(d: { categoryId: string; adsSource?: string }): boolean {
@@ -83,11 +153,18 @@ const createExpenseSchema = z
     message:
       "Chi phí quảng cáo không hỗ trợ lặp hàng tháng — số ads tự về mỗi đêm hoặc nhập qua Import CSV",
     path: ["recurringMonthly"],
+  })
+  .refine(chanTheChoAds, LOI_THE_CHO_ADS)
+  // Dòng định kỳ là `source=RECURRING` — CHECK `Expense_card_chi_manual` chỉ cho MANUAL gắn thẻ (spec §4).
+  .refine((d) => !(d.recurringMonthly && d.cardId != null), {
+    message: "Khoản lặp hàng tháng chưa hỗ trợ trừ vào thẻ — bỏ chọn thẻ hoặc tắt lặp",
+    path: ["cardId"],
   });
 
 const updateExpenseSchema = z
   .object(baseExpenseFields)
-  .refine(requireAdsSource, { message: "Chọn nguồn ads", path: ["adsSource"] });
+  .refine(requireAdsSource, { message: "Chọn nguồn ads", path: ["adsSource"] })
+  .refine(chanTheChoAds, LOI_THE_CHO_ADS);
 
 /**
  * Lãi vay KHÔNG phân bổ kênh (bất biến #1, cùng luật `fixed`) — cổng DÙNG CHUNG cho tạo mới lẫn sửa,
@@ -139,6 +216,13 @@ async function validateChannel(channelId: string | null): Promise<string | null>
  * null) mà CÙNG số tiền hoặc CÙNG mô tả không rỗng (`timMauTrung`) ⇒ từ chối `DINH_KY_TRUNG_MAU_DANG_CHAY`,
  * không ghi gì, trừ khi `xacNhanTrung`. Dò SAU khi khoá nhóm (`khoaNhomMauDinhKy`) nên hai lượt tạo/bật
  * lại cùng nhóm tuần tự (kể cả khi nhóm chưa có mẫu nào — khoá tư vấn theo nhóm). Không dò dòng ghi tay.
+ *
+ * KHOÁ CHUNG VỚI BƯỚC BẬT (danh mục Nhập hàng): câu ĐẦU của transaction là `khoaChiaSeBatNoPhaiTra(tx)`,
+ * rồi mới `chanNhapHangSauM(tx)` đọc M. Không khoá thì lượt tạo đọc M = null giữa lúc bước bật (EXCLUSIVE)
+ * chưa commit, chèn Nhập hàng ngày ≥ M mà bước bật đã kiểm xong "không còn Nhập hàng sau M" ⇒ dòng lọt, quỹ
+ * trừ hai lần. Khoá chung PHẢI đứng TRƯỚC mọi khoá dòng (thẻ `FOR UPDATE`, nhóm mẫu): giữ khoá thẻ rồi mới
+ * xin khoá chung thì khoá chéo với bước bật — bước bật giữ EXCLUSIVE rồi chèn `KySaoKeThe` cần KEY SHARE trên
+ * đúng dòng thẻ đang bị `FOR UPDATE`. Danh mục khác không ghi Nhập hàng ⇒ không khoá.
  */
 export async function createExpense(input: unknown): Promise<ActionResult> {
   const c = await congAction("chi-phi:sua");
@@ -156,11 +240,25 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
   if (channelError) return { ok: false, error: channelError, field: "channelId" };
   const kenhLaiVay = chanKenhChoLaiVay(data);
   if (kenhLaiVay) return kenhLaiVay;
+  const quyenThe = await kiemQuyenGanThe(nguoiDung, (data.cardId ?? null) !== null);
+  if (quyenThe) return quyenThe;
+  let congThe: ActionResult | null;
+  try {
+    congThe = await congTheChiPhi({ cardId: data.cardId ?? null, date: data.date });
+  } catch {
+    return { ok: false, error: "Lỗi khi tạo khoản chi" };
+  }
+  if (congThe) return congThe;
 
   let trung: { description: string; amount: number } | null = null;
   try {
     if (data.recurringMonthly) {
       trung = await prisma.$transaction(async (tx) => {
+        // CÂU ĐẦU (khi là Nhập hàng): khoá SHARED với bước bật — lý do ở chú thích `createExpense`.
+        if (data.categoryId === "purchase") await khoaChiaSeBatNoPhaiTra(tx);
+        // Mẫu định kỳ "Nhập hàng" sau M: mọi lần phát sinh từ nay đều ≥ M nên bộ sinh sẽ bỏ hết — chặn
+        // ngay lúc dựng mẫu (spec §5.3 "form mẫu chặn chọn purchase") bằng ngày HÔM NAY, không theo ngày dòng đầu.
+        await chanNhapHangSauM(tx, { categoryId: data.categoryId, date: new Date() });
         await khoaNhomMauDinhKy(tx, { categoryId: data.categoryId, channelId: data.channelId });
         if (data.xacNhanTrung !== true) {
           const dangChay = await tx.recurringExpense.findMany({
@@ -201,10 +299,15 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
           ghiChu: { thang: format(data.date, "yyyy-MM") },
         });
         return null;
-      });
+      }, OPT_TX_DONG_TIEN);
     } else {
       // Bọc transaction chỉ để dòng nhật ký đi CÙNG câu ghi: nhật ký ném ⇒ khoản chi không lưu.
       await prisma.$transaction(async (tx) => {
+        // CÂU ĐẦU (khi là Nhập hàng): khoá SHARED với bước bật, TRƯỚC khoá thẻ bên dưới.
+        if (data.categoryId === "purchase") await khoaChiaSeBatNoPhaiTra(tx);
+        await chanNhapHangSauM(tx, { categoryId: data.categoryId, date: data.date });
+        // Trừ vào thẻ: khoá thẻ rồi mới đọc "còn mở" — lượt đóng thẻ song song không lọt dòng vào thẻ đã đóng.
+        await khoaVaKiemCacTheConMo(tx, [], { cardId: data.cardId ?? null, date: data.date });
         const row = await tx.expense.create({
           data: {
             date: data.date,
@@ -214,6 +317,7 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
             channelId: data.channelId,
             amount: data.amount,
             source: "MANUAL",
+            cardId: data.cardId ?? null,
           },
         });
         await ghiNhatKy(tx, {
@@ -222,10 +326,10 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
           doiTuong: { loai: "Expense", id: row.id },
           ghiChu: { thang: format(data.date, "yyyy-MM") },
         });
-      });
+      }, OPT_TX_DONG_TIEN);
     }
-  } catch {
-    return { ok: false, error: "Lỗi khi tạo khoản chi" };
+  } catch (e) {
+    return loiTheChiPhi(e) ?? { ok: false, error: "Lỗi khi tạo khoản chi" };
   }
 
   if (trung) {
@@ -299,10 +403,38 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
   }
   const kenhLaiVay = chanKenhChoLaiVay(data);
   if (kenhLaiVay) return kenhLaiVay;
+  // CHECK `Expense_card_chi_manual`: chỉ khoản chi NHẬP TAY gắn được thẻ (định kỳ/import thì không).
+  const cardIdMoi = data.cardId === undefined ? existing.cardId : data.cardId;
+  const quyenThe = await kiemQuyenGanThe(nguoiDung, cardIdMoi !== existing.cardId);
+  if (quyenThe) return quyenThe;
+  // Form không gửi ô thẻ mà dòng đang trừ thẻ, rồi đổi danh mục sang ads — zod không thấy thẻ nên kiểm lại.
+  if (!chanTheChoAds({ categoryId: data.categoryId, cardId: cardIdMoi })) {
+    return { ok: false, field: "cardId", error: LOI_THE_CHO_ADS.message };
+  }
+  if (cardIdMoi !== null && existing.source !== "MANUAL") {
+    return { ok: false, field: "cardId", error: "Chỉ khoản chi nhập tay mới trừ vào thẻ được" };
+  }
+  let congThe: ActionResult | null;
+  try {
+    congThe = await congTheChiPhi({ cardId: cardIdMoi, date: data.date });
+  } catch {
+    return { ok: false, error: "Lỗi khi cập nhật khoản chi" };
+  }
+  if (congThe) return congThe;
 
   let chanDoiThang: ActionResult | null;
   try {
     chanDoiThang = await prisma.$transaction(async (tx) => {
+      // CÂU ĐẦU, VÔ ĐIỀU KIỆN: khoá SHARED với bước bật (lý do + thứ tự khoá: chú thích `createExpense`).
+      // Vô điều kiện vì danh mục CŨ đọc ngoài transaction có thể đã đổi; lượt sửa đổi sang/khỏi Nhập hàng hay
+      // dời ngày dòng Nhập hàng đều đổi tập "Nhập hàng sau M" mà bước bật kiểm. Khoá SHARED rẻ, chỉ chờ khi
+      // bước bật đang chạy.
+      await khoaChiaSeBatNoPhaiTra(tx);
+      // Đổi danh mục SANG "Nhập hàng" hay dời ngày một dòng Nhập hàng qua M đều là ghi Nhập hàng sau M.
+      await chanNhapHangSauM(tx, { categoryId: data.categoryId, date: data.date });
+      // Gắn / gỡ / đổi thẻ đổi dư nợ của CẢ thẻ cũ lẫn thẻ mới ⇒ khoá cả hai (thứ tự id), cả hai phải mở.
+      // Thẻ MỚI còn phải qua cửa sổ neo đầu tiên (spec §5.8) — ngày ≤ neo thì khoản chi rơi khỏi cả quỹ lẫn nợ.
+      await khoaVaKiemCacTheConMo(tx, [existing.cardId], { cardId: cardIdMoi, date: data.date });
       if (existing.recurringId !== null && !isSameMonth(existing.date, data.date)) {
         // KHOÁ dòng mẫu tới hết transaction: "Bật lại" (`batLaiDinhKy`) cũng UPDATE đúng dòng này nên
         // phải CHỜ — không chen được vào giữa lúc cổng đọc "mẫu đã dừng" và lúc dòng bị dời (chen vào
@@ -316,8 +448,10 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
         const chan = chanDoiThangDinhKy(mau, existing.date, data.date);
         if (chan) return chan;
       }
-      await tx.expense.update({
-        where: { id },
+      // Hàng rào thẻ không đổi: khoá thẻ ở trên giành theo `cardId` của bản đọc NGOÀI transaction — dòng
+      // vừa bị lượt khác chuyển sang thẻ khác thì ta đang khoá nhầm thẻ (khuôn `ghiCoHangRaoCha`).
+      const { count } = await tx.expense.updateMany({
+        where: { id, cardId: existing.cardId },
         data: {
           date: data.date,
           categoryId: data.categoryId,
@@ -325,11 +459,15 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
           amount: data.amount,
           channelId: data.channelId,
           description: data.description,
+          cardId: cardIdMoi,
           // Khoá tháng đi THEO ngày (CHECK `Expense_recurringMonth_khop_ngay`): lượt dời tháng mà cổng
           // trên cho qua vẫn phải chiếm đúng ô "1 dòng/mẫu/tháng" của tháng mới.
           ...(existing.recurringId !== null ? { recurringMonth: khoaThangDinhKy(data.date) } : {}),
         },
       });
+      if (count === 0) {
+        throw new LoiHoSoNo("Khoản chi vừa được sửa ở nơi khác — tải lại trang rồi sửa lại", "id", "KHONG_TIM_THAY_HO_SO");
+      }
       await ghiNhatKy(tx, {
         actor: nguoiDung,
         hanhDong: "CHI_PHI_SUA",
@@ -337,7 +475,7 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
         ghiChu: { thang: format(data.date, "yyyy-MM") },
       });
       return null;
-    });
+    }, OPT_TX_DONG_TIEN);
   } catch (e) {
     // Tháng đích đã có dòng của CHÍNH mẫu này (UNIQUE `(recurringId, recurringMonth)`) — trước khi có
     // ràng buộc, lượt dời này lọt thành 2 dòng cùng khoản chi trong một tháng (chi phí tính 2 lần).
@@ -351,7 +489,7 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
           "Sửa hoặc xoá dòng sẵn có của tháng đó trước.",
       };
     }
-    return { ok: false, error: "Lỗi khi cập nhật khoản chi" };
+    return loiTheChiPhi(e) ?? { ok: false, error: "Lỗi khi cập nhật khoản chi" };
   }
   if (chanDoiThang) return chanDoiThang;
 
@@ -461,9 +599,13 @@ export async function deleteExpense(
 
   try {
     await prisma.$transaction(async (tx) => {
-      // Khoá mẫu TRƯỚC khi chạm dòng `Expense` — cùng thứ tự với `updateExpense` (mẫu → Expense). Ngược
-      // thứ tự (xoá Expense rồi mới UPDATE mẫu) thì hai tab sửa + "Xoá và dừng" cùng một dòng khoá chéo
-      // nhau; Postgres huỷ một lượt (không lệch tiền nhưng người dùng gặp lỗi chung vô cớ).
+      // THỨ TỰ KHOÁ cùng `updateExpense`: thẻ → mẫu định kỳ → dòng `Expense`. Thẻ trước: một thứ tự toàn
+      // app, không dựa vào CHECK `Expense_card_chi_manual` (dòng định kỳ không mang thẻ) để khỏi giữ chéo.
+      // Khoản chi trừ vào thẻ: xoá là đổi dư nợ thẻ ⇒ khoá thẻ, thẻ phải còn mở (thẻ đóng có dư nợ 0).
+      await khoaVaKiemCacTheConMo(tx, [existing.cardId], null);
+      // Khoá mẫu TRƯỚC khi chạm dòng `Expense` (mẫu → Expense, như `updateExpense`). Ngược thứ tự (xoá
+      // Expense rồi mới UPDATE mẫu) thì hai tab sửa + "Xoá và dừng" cùng một dòng khoá chéo nhau; Postgres
+      // huỷ một lượt (không lệch tiền nhưng người dùng gặp lỗi chung vô cớ).
       if (tatDinhKy !== null) {
         await tx.$queryRaw`SELECT id FROM "RecurringExpense" WHERE id = ${tatDinhKy} FOR UPDATE`;
       }
@@ -474,6 +616,10 @@ export async function deleteExpense(
       if (!banGhi) throw new Error("Không tìm thấy khoản chi");
       // Cổng ADS_API kiểm lại trên bản vừa đọc: lượt sửa xen giữa có thể đã biến nó thành dòng khoá.
       if (banGhi.source === "ADS_API") throw new Error(ADS_API_LOCKED_ERROR);
+      // Thẻ đã khoá theo bản đọc ngoài transaction — dòng vừa đổi thẻ thì đang khoá nhầm thẻ.
+      if (banGhi.cardId !== existing.cardId) {
+        throw new LoiHoSoNo("Khoản chi vừa được sửa ở nơi khác — tải lại trang rồi xoá lại", "id", "KHONG_TIM_THAY_HO_SO");
+      }
 
       await chupVaoThungRac(tx, {
         bang: "Expense",
@@ -502,7 +648,7 @@ export async function deleteExpense(
       doiTuong: { loai: "Expense", id },
       ghiChu: { lyDo: maLoiNhatKy(e) },
     });
-    return { ok: false, error: "Lỗi khi xoá khoản chi" };
+    return loiTheChiPhi(e) ?? { ok: false, error: "Lỗi khi xoá khoản chi" };
   }
 
   revalidatePath("/tai-chinh");

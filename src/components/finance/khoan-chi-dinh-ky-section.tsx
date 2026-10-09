@@ -19,10 +19,17 @@ import { thangChoBatLai } from "@/lib/expenses/thang-cho-bat-lai";
 export function KhoanChiDinhKySection({
   items,
   choPhepSua = false,
+  boQuaNhapHang = 0,
 }: {
   items: RecurringExpenseRow[];
   /** Có `chi-phi:sua` (server tính). Thiếu/false ⇒ không nút "Bật lại" (action vẫn tự chặn). */
   choPhepSua?: boolean;
+  /**
+   * Số lần phát sinh của mẫu "Nhập hàng" bị bộ sinh BỎ QUA vì rơi vào/sau mốc bật theo dõi nợ phải trả
+   * (`ensureRecurringExpensesChiTiet`, các tháng đang xem). > 0 ⇒ nhắc chủ shop: mẫu vẫn "Đang chạy"
+   * nhưng không sinh nữa — tiền hàng đi phiếu nợ + "Trả tiền hàng".
+   */
+  boQuaNhapHang?: number;
 }) {
   if (items.length === 0) return null;
 
@@ -31,10 +38,18 @@ export function KhoanChiDinhKySection({
   const thang = thangChoBatLai(new Date());
 
   return (
-    <details className="rounded-xl border border-hairline bg-surface-card p-4">
+    // Có lần bị bỏ ⇒ mở sẵn: lời nhắc nằm trong khối gấp thì không ai thấy.
+    <details className="rounded-xl border border-hairline bg-surface-card p-4" open={boQuaNhapHang > 0 || undefined}>
       <summary className="cursor-pointer text-sm font-medium text-ink">
         Khoản chi định kỳ ({soDangChay} đang chạy · {soDaDung} đã dừng)
       </summary>
+
+      {boQuaNhapHang > 0 && (
+        <p data-testid="dinh-ky-bo-qua-nhap-hang" className="mt-3 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+          Mẫu Nhập hàng không còn sinh sau ngày bật theo dõi nợ (bỏ qua {boQuaNhapHang} lần) — tiền hàng giờ ghi
+          nhận qua phiếu nợ và trả bằng &quot;Trả tiền hàng&quot; ở tab Dòng tiền. Nên dừng mẫu này.
+        </p>
+      )}
 
       <div className="mt-3 overflow-x-auto">
         <table className="w-full text-xs">

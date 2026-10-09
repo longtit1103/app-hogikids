@@ -242,6 +242,7 @@ describe("docSoQuyDongChay — khớp thẻ Quỹ trên DB thật", () => {
       adsTiktokViCoDau: -2_000_000,
       thuNhap: 2_000_000,
       banTrucTiep: 930_000,
+      napViTuBank: 0,
     });
   });
 

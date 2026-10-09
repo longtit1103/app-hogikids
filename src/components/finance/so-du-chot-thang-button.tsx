@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { xoaSoDuChotThang } from "@/lib/actions/so-du-chot-thang";
 import type { BanChot, KhoanCauTruc } from "@/lib/so-quy/doi-chieu-so-du-chot";
+import { NGU_CANH_CHOT_CU, type NguCanhChot } from "@/lib/so-quy/ngu-canh-chot-no-phai-tra";
 
 import { SoDuChotThangFormModal } from "./so-du-chot-thang-form-modal";
 
@@ -22,6 +23,7 @@ export function SoDuChotThangButton({
   thangNhan,
   chot,
   cauTruc,
+  nguCanhChot = NGU_CANH_CHOT_CU,
 }: {
   /** ISO của ngày đầu tháng — khoá gửi lên action (server tự `thangChot` lại). */
   thangIso: string;
@@ -29,6 +31,7 @@ export function SoDuChotThangButton({
   thangNhan: string;
   chot: (BanChot & { note: string }) | null;
   cauTruc: KhoanCauTruc;
+  nguCanhChot?: NguCanhChot;
 }) {
   const router = useRouter();
   const [openForm, setOpenForm] = useState(false);
@@ -73,6 +76,7 @@ export function SoDuChotThangButton({
         thangNhan={thangNhan}
         chot={chot}
         cauTruc={cauTruc}
+        nguCanhChot={nguCanhChot}
       />
 
       <Dialog open={openXoa} onOpenChange={setOpenXoa}>

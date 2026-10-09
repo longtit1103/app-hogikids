@@ -46,6 +46,11 @@ const m = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
+// Màn nhập hàng đọc mốc bật nợ phải trả (sau bật là màn khác) — ở đây canh màn CHƯA bật.
+vi.mock("@/lib/no-phai-tra/cong-bat-no-phai-tra", async (goc) => ({
+  ...(await goc<typeof import("@/lib/no-phai-tra/cong-bat-no-phai-tra")>()),
+  docMocM: async () => null,
+}));
 vi.mock("@/lib/quan-tri/tai-khoan-queries", () => ({ listTaiKhoan: m.listTaiKhoan }));
 vi.mock("@/lib/quan-tri/nhat-ky-queries", () => ({ listNhatKy: m.listNhatKy, listHanhDongDaCo: m.listHanhDongDaCo }));
 vi.mock("@/components/quan-tri/bang-tai-khoan", () => ({ BangTaiKhoan: () => null }));
@@ -167,7 +172,7 @@ describe("/tai-chinh/thung-rac — danh sách lọc theo loại được phép",
     expect(bangDaHoi()).toEqual(["Expense"]);
   });
 
-  it("chỉ dòng tiền (sửa) ⇒ chỉ CashMovement; chỉ sổ quỹ (sửa) ⇒ Loan/SoTietKiem/ThuNhap", async () => {
+  it("chỉ dòng tiền (sửa) ⇒ chỉ CashMovement; chỉ sổ quỹ (sửa) ⇒ Loan/SoTietKiem/ThuNhap + 3 hồ sơ nợ phải trả", async () => {
     dat("STAFF", "tai-chinh-dong-tien:xem", "tai-chinh-dong-tien:sua");
     await ThungRacPage({ searchParams: Promise.resolve({}) });
     expect(bangDaHoi()).toEqual(["CashMovement"]);
@@ -178,7 +183,7 @@ describe("/tai-chinh/thung-rac — danh sách lọc theo loại được phép",
     m.listThungRac.mockResolvedValue({ rows: [], total: 0 });
     dat("STAFF", "tai-chinh-so-quy:xem", "tai-chinh-so-quy:sua");
     await ThungRacPage({ searchParams: Promise.resolve({}) });
-    expect([...bangDaHoi()].sort()).toEqual(["Loan", "SoTietKiem", "ThuNhap"]);
+    expect([...bangDaHoi()].sort()).toEqual(["Loan", "PhieuNhapNo", "SoTietKiem", "TheTinDung", "ThuNhap", "ViAdsTraTruoc"]);
   });
 
   it("chủ shop ⇒ mọi loại", async () => {

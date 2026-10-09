@@ -12,7 +12,7 @@ import { SanPhamBanChayKenh } from "@/components/kenh/san-pham-ban-chay-kenh";
 import { Badge } from "@/components/ui/badge";
 import { clampRangeEndToNow, khoangServerThuocTinh, previousComparableRange, resolveRangeFromParams, serializeDateRange } from "@/lib/date-range";
 import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
-import type { ExpenseRow } from "@/lib/expenses/expense-queries";
+import { sangExpenseRow, type ExpenseRow } from "@/lib/expenses/expense-queries";
 import { slugToStatus } from "@/lib/orders/order-status-meta";
 import { docSoTrang } from "@/lib/pagination";
 import { prisma } from "@/lib/prisma";
@@ -110,22 +110,9 @@ export default async function KenhChiTietPage({
       prisma.channel.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
     ]);
 
-  const adsExpenseRows: ExpenseRow[] = adsExpenseRecords.map((e) => ({
-    id: e.id,
-    date: e.date,
-    categoryId: e.categoryId,
-    categoryName: e.category.name,
-    categoryIsHidden: e.category.isHidden,
-    adsSource: e.adsSource,
-    description: e.description,
-    channelId: e.channelId,
-    channelName: e.channel?.name ?? null,
-    channelColor: e.channel?.color ?? null,
-    amount: e.amount,
-    source: e.source,
-    recurringId: e.recurringId,
-    refId: e.refId,
-  }));
+  // Bảng ads của kênh — dựng dòng qua CÙNG hàm với Sổ chi phí (trang này là file P&L, không tự đọc
+  // hồ sơ thẻ; ads cũng không bao giờ "trừ vào thẻ" ở khoản chi).
+  const adsExpenseRows: ExpenseRow[] = adsExpenseRecords.map(sangExpenseRow);
 
   const roas = current.ads > 0 ? current.revenue / current.ads : null;
   // `calcPnl` tính đủ (ngoại lệ chốt 30/09) — thiếu quyền giá vốn thì chiếu DTO che trước khi vào props.

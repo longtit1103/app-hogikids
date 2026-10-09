@@ -2,6 +2,8 @@ import { Prisma } from "@/generated/prisma/client";
 import { differenceInCalendarDays, endOfDay, subDays } from "date-fns";
 
 import { type DateRange } from "@/lib/date-range";
+import { dieuKienChiPhiTruQuy } from "@/lib/no-phai-tra/dieu-kien-chi-phi-tru-quy";
+import type { NguCanhLoc } from "@/lib/no-phai-tra/the-cua-dong-chi";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -31,31 +33,45 @@ export type ExpenseSummary = {
  *    Pancake trên Order, không phải Expense).
  *  - `adsTotal`: danh mục "ads" mọi nguồn (ADS_API + IMPORT + MANUAL).
  *  - kỳ trước = lùi đúng (differenceInCalendarDays(to, from) + 1) ngày.
+ *
+ * `opts.chiTienThat` (tab Dòng tiền — TIỀN THẬT ra): mọi tổng chỉ gồm phần TRỪ QUỸ, cùng bộ lọc Sổ quỹ
+ * (`dieuKienChiPhiTruQuy`) — bỏ khoản thẻ/ví ads đã gánh sau mốc M. Không truyền (tab Sổ chi phí) ⇒ mọi
+ * dòng như cũ: chi phí vẫn là chi phí dù trả bằng gì.
  */
-export async function getExpenseSummary(range: DateRange): Promise<ExpenseSummary> {
+export async function getExpenseSummary(
+  range: DateRange,
+  opts?: { chiTienThat?: NguCanhLoc }
+): Promise<ExpenseSummary> {
   const from = range.from;
   const to = endOfDay(range.to);
   const spanDays = differenceInCalendarDays(range.to, range.from) + 1;
   const prevFrom = subDays(from, spanDays);
   const prevTo = subDays(to, spanDays);
 
+  const ctx = opts?.chiTienThat;
+  /** where của khoảng [gte, lte]: Sổ chi phí = mọi dòng; tiền thật = phần trừ quỹ. */
+  const trongKhoang = (gte: Date, lte: Date): Prisma.ExpenseWhereInput =>
+    ctx === undefined ? { date: { gte, lte } } : dieuKienChiPhiTruQuy(ctx, { gte, lte });
+  const chiAds = (w: Prisma.ExpenseWhereInput): Prisma.ExpenseWhereInput =>
+    ctx === undefined ? { categoryId: "ads", ...w } : { AND: [w, { categoryId: "ads" }] };
+
   const [grouped, prevAgg, adsAgg, prevAdsAgg, categories] = await Promise.all([
     prisma.expense.groupBy({
       by: ["categoryId"],
-      where: { date: { gte: from, lte: to } },
+      where: trongKhoang(from, to),
       _sum: { amount: true },
     }),
     prisma.expense.aggregate({
       _sum: { amount: true },
-      where: { date: { gte: prevFrom, lte: prevTo } },
+      where: trongKhoang(prevFrom, prevTo),
     }),
     prisma.expense.aggregate({
       _sum: { amount: true },
-      where: { categoryId: "ads", date: { gte: from, lte: to } },
+      where: chiAds(trongKhoang(from, to)),
     }),
     prisma.expense.aggregate({
       _sum: { amount: true },
-      where: { categoryId: "ads", date: { gte: prevFrom, lte: prevTo } },
+      where: chiAds(trongKhoang(prevFrom, prevTo)),
     }),
     prisma.expenseCategory.findMany({ select: { id: true, name: true } }),
   ]);
@@ -175,6 +191,10 @@ export type ExpenseRow = {
   recurringId: string | null;
   /** `LOAN:{loanId}:{yyyy-MM-dd}` = dòng lãi do duyệt kỳ trả nợ sinh ra (hộp xoá nói rõ). */
   refId: string | null;
+  /** "Trừ vào thẻ" (nợ phải trả §5.6) — form sửa điền sẵn; null = trừ quỹ ngay như mọi khoản chi. */
+  cardId: string | null;
+  /** Tên thẻ của `cardId` cho nhãn nhỏ trên bảng; null khi không gắn thẻ. */
+  tenThe: string | null;
 };
 
 function buildOrderBy(sort: ExpenseListParams["sort"]): Prisma.ExpenseOrderByWithRelationInput {
@@ -227,13 +247,27 @@ export async function getExpensesPage(
       orderBy: buildOrderBy(p.sort),
       skip: (p.page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
-      include: { category: true, channel: true },
+      include: { category: true, channel: true, theTinDung: { select: { ten: true } } },
     }),
     prisma.expense.count({ where }),
     prisma.expense.aggregate({ _sum: { amount: true }, where }),
   ]);
 
-  const rows: ExpenseRow[] = records.map((e) => ({
+  return { rows: records.map(sangExpenseRow), count, totalAmount: agg._sum.amount ?? 0 };
+}
+
+/** Dòng Expense kèm danh mục + kênh (+ tên thẻ nếu câu đọc có lấy) — đầu vào của `sangExpenseRow`. */
+export type ExpenseKemQuanHe = Prisma.ExpenseGetPayload<{ include: { category: true; channel: true } }> & {
+  theTinDung?: { ten: string } | null;
+};
+
+/**
+ * Bản ghi Prisma → `ExpenseRow` — MỘT chỗ dựng cho mọi bảng chi phí (Sổ chi phí, tab ads của trang kênh)
+ * để thêm cột không phải sửa nhiều nơi. Câu đọc không lấy tên thẻ ⇒ `tenThe` null (nhãn không hiện),
+ * `cardId` vẫn đúng giá trị thật cho form sửa.
+ */
+export function sangExpenseRow(e: ExpenseKemQuanHe): ExpenseRow {
+  return {
     id: e.id,
     date: e.date,
     categoryId: e.categoryId,
@@ -248,7 +282,7 @@ export async function getExpensesPage(
     source: e.source,
     recurringId: e.recurringId,
     refId: e.refId,
-  }));
-
-  return { rows, count, totalAmount: agg._sum.amount ?? 0 };
+    cardId: e.cardId,
+    tenThe: e.theTinDung?.ten ?? null,
+  };
 }

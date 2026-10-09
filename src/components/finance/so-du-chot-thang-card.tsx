@@ -3,7 +3,12 @@ import Link from "next/link";
 
 import { serializeDateRange } from "@/lib/date-range";
 import { formatVnd } from "@/lib/format";
-import { cauChenhLech, type DoiChieuSoDuChot } from "@/lib/so-quy/doi-chieu-so-du-chot";
+import {
+  cauChenhLech,
+  NGU_CANH_CHOT_CU,
+  type DoiChieuSoDuChot,
+  type NguCanhChot,
+} from "@/lib/so-quy/doi-chieu-so-du-chot";
 
 import { SoDuChotThangButton } from "./so-du-chot-thang-button";
 
@@ -56,11 +61,14 @@ export function SoDuChotThangCard({
   doiChieu,
   isCurrentMonth,
   choPhepSua = false,
+  nguCanhChot = NGU_CANH_CHOT_CU,
 }: {
   doiChieu: DoiChieuSoDuChot;
   isCurrentMonth: boolean;
   /** Có `tai-chinh-dong-tien:sua` (server tính) — thiếu/false ⇒ không nút Chốt/Sửa/Xoá (action vẫn tự chặn). */
   choPhepSua?: boolean;
+  /** Nợ phải trả của tháng đang chốt (đã bật chưa, có ví trả trước không) — đổi câu dặn / câu giải thích. */
+  nguCanhChot?: NguCanhChot;
 }) {
   const thangNhan = format(doiChieu.thang, "MM/yyyy");
   const { cauTruc } = doiChieu;
@@ -103,7 +111,7 @@ export function SoDuChotThangCard({
             </p>
           </div>
           {choPhepSua && (
-            <SoDuChotThangButton thangIso={thangIso} thangNhan={thangNhan} chot={null} cauTruc={cauTruc} />
+            <SoDuChotThangButton thangIso={thangIso} thangNhan={thangNhan} chot={null} cauTruc={cauTruc} nguCanhChot={nguCanhChot} />
           )}
         </div>
         <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
@@ -117,7 +125,7 @@ export function SoDuChotThangCard({
     );
   }
 
-  const cau = cauChenhLech(chenhLech, cauTruc);
+  const cau = cauChenhLech(chenhLech, cauTruc, nguCanhChot);
 
   return (
     <div className="rounded-xl border border-hairline p-4" data-testid="so-du-chot-card">
@@ -132,7 +140,7 @@ export function SoDuChotThangCard({
           </p>
         </div>
         {choPhepSua && (
-          <SoDuChotThangButton thangIso={thangIso} thangNhan={thangNhan} chot={chot} cauTruc={cauTruc} />
+          <SoDuChotThangButton thangIso={thangIso} thangNhan={thangNhan} chot={chot} cauTruc={cauTruc} nguCanhChot={nguCanhChot} />
         )}
       </div>
 

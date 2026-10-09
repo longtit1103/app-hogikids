@@ -6,9 +6,18 @@ import { Pencil, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CASH_MOVEMENT_KIND_META, isInflow, kindGanSoQuy, signedAmount } from "@/lib/cash-movements/cash-movement-kinds";
+import {
+  CASH_MOVEMENT_KIND_META,
+  isCashMovementKind,
+  isInflow,
+  isKindNoPhaiTraGhiTay,
+  KIND_CUTOVER,
+  kindGanSoQuy,
+  signedAmount,
+} from "@/lib/cash-movements/cash-movement-kinds";
 import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
 import { formatVnd } from "@/lib/format";
+import type { LuaChonDongTienNo } from "@/lib/no-phai-tra/lua-chon-dong-tien-no";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 
@@ -29,6 +38,8 @@ export function CashMovementTable({
   d0,
   choPhepSua = false,
   choPhepSuaDongSoQuy = false,
+  noPhaiTra = null,
+  choPhepSuaDieuChinh = false,
 }: {
   /** Bản cơ bản (không tên/id khoản vay, sổ) khi người xem thiếu `tai-chinh-so-quy:xem`. */
   rows: readonly (CashMovementRow | CashMovementRowCoBan)[];
@@ -44,6 +55,10 @@ export function CashMovementTable({
    * không có nút sửa/xoá (server vẫn chặn ở action).
    */
   choPhepSuaDongSoQuy?: boolean;
+  /** Đã bật theo dõi nợ ⇒ mốc M + hồ sơ chọn được (form sửa dòng nợ phải trả cần). Null ⇒ dòng nợ không có nút. */
+  noPhaiTra?: LuaChonDongTienNo | null;
+  /** Chủ shop? Dòng điều chỉnh mở sổ nợ (`CUTOVER_*`) CHỈ chủ shop sửa số/mô tả, không xoá (spec §5.8). */
+  choPhepSuaDieuChinh?: boolean;
 }) {
   const [editingRow, setEditingRow] = useState<DongBang | null>(null);
   const [deletingRow, setDeletingRow] = useState<DongBang | null>(null);
@@ -61,22 +76,50 @@ export function CashMovementTable({
    * nói được nợ của ai, tiền nằm ở sổ nào. Hai tên không bao giờ cùng có (CHECK loại trừ ở DB).
    */
   function kindBadge(row: DongBang) {
-    const tenKhoan = "loanName" in row ? (row.loanName ?? row.savingsName) : null;
+    const tenKhoan = "loanName" in row ? (row.loanName ?? row.savingsName ?? row.tenHoSoNo) : null;
     return (
       <div className="flex flex-col items-start gap-0.5">
-        <Badge variant={isInflow(row.kind) ? "secondary" : "outline"}>{CASH_MOVEMENT_KIND_META[row.kind].label}</Badge>
+        <Badge variant={row.kind !== "ADS_TOPUP" && isInflow(row.kind) ? "secondary" : "outline"}>
+          {CASH_MOVEMENT_KIND_META[row.kind].label}
+        </Badge>
         {tenKhoan && <span className="text-xs text-muted-foreground">{tenKhoan}</span>}
       </div>
     );
   }
 
   function amountText(row: DongBang) {
-    return <span className="tabular-nums text-ink">{formatVnd(signedAmount(row.kind, row.amount))}</span>;
+    // `ADS_TOPUP`: chiều theo nguồn nạp (thẻ ⇒ không chạm quỹ) mà hàng bảng không mang `cardId` ⇒ hiện
+    // số trần, KHÔNG gắn dấu đoán.
+    // Bản đủ (quyền Sổ quỹ) có `cardId`: nạp từ ngân hàng là RA (−), nạp bằng thẻ không chạm quỹ (số trần).
+    const soTien =
+      row.kind === "ADS_TOPUP"
+        ? "cardId" in row && row.cardId === null
+          ? -row.amount
+          : row.amount
+        : signedAmount(row.kind, row.amount);
+    return <span className="tabular-nums text-ink">{formatVnd(soTien)}</span>;
   }
 
   function rowActions(row: DongBang) {
     if (!choPhepSua) return null;
-    if (kindGanSoQuy(row.kind) && !choPhepSuaDongSoQuy) return null;
+    // Điều chỉnh mở sổ nợ: CHỈ sửa số/mô tả (chủ shop), không xoá — một lần, cố định (spec §5.8).
+    if ((KIND_CUTOVER as readonly string[]).includes(row.kind)) {
+      if (!choPhepSuaDieuChinh) return null;
+      return (
+        <div className="flex items-center justify-end gap-3">
+          <button type="button" aria-label="Sửa" onClick={() => setEditingRow(row)} className="text-muted-foreground hover:text-ink">
+            <Pencil className="size-4" />
+          </button>
+        </div>
+      );
+    }
+    // 4 loại nợ phải trả (trả thẻ, trả NCC, NCC hoàn, nạp ví): cần quyền Sổ quỹ + danh sách hồ sơ cho form.
+    if (isKindNoPhaiTraGhiTay(row.kind)) {
+      if (!choPhepSuaDongSoQuy || noPhaiTra === null) return null;
+    } else {
+      if (!isCashMovementKind(row.kind)) return null;
+      if (kindGanSoQuy(row.kind) && !choPhepSuaDongSoQuy) return null;
+    }
     return (
       <div className="flex items-center justify-end gap-3">
         <button type="button" aria-label="Sửa" onClick={() => setEditingRow(row)} className="text-muted-foreground hover:text-ink">
@@ -142,6 +185,7 @@ export function CashMovementTable({
         soTietKiem={soTietKiem}
         d0={d0}
         choPhepLoaiSoQuy={choPhepSuaDongSoQuy}
+        noPhaiTra={noPhaiTra}
       />
       <CashMovementDeleteDialog open={Boolean(deletingRow)} onOpenChange={(o) => !o && setDeletingRow(null)} row={deletingRow} />
     </div>

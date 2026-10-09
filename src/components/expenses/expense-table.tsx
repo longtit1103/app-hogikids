@@ -7,7 +7,7 @@ import { format } from "date-fns";
 import { ArrowDown, ArrowUp, ChevronsUpDown, Pencil, Trash2 } from "lucide-react";
 
 import { ExpenseDeleteDialog } from "@/components/expenses/expense-delete-dialog";
-import { ExpenseFormModal } from "@/components/expenses/expense-form-modal";
+import { ExpenseFormModal, type ExpenseFormModalProps } from "@/components/expenses/expense-form-modal";
 import { ExpenseTableToolbar } from "@/components/expenses/expense-table-toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -46,6 +46,15 @@ function sourceBadge(source: string) {
   }
 }
 
+/**
+ * Nhãn nhỏ "trừ thẻ <tên>" dưới mô tả: khoản chi này cộng vào dư nợ thẻ, quỹ chỉ giảm lúc trả thẻ —
+ * nhìn bảng phải biết ngay vì số tiền vẫn vào Lãi/Lỗ như mọi dòng.
+ */
+function NhanTruThe({ tenThe }: { tenThe: string | null }) {
+  if (tenThe === null) return null;
+  return <span className="block text-xs text-muted-foreground">trừ thẻ {tenThe}</span>;
+}
+
 function categoryLabelFor(row: ExpenseRow): string {
   if (row.categoryId === "ads" && row.adsSource) {
     return `${row.categoryName} · ${ADS_SOURCE_LABEL[row.adsSource] ?? row.adsSource}`;
@@ -69,6 +78,8 @@ type ExpenseTableProps = {
   channels: { id: string; name: string; color: string }[];
   /** Có `chi-phi:sua` (server tính). Thiếu/false ⇒ không nút Sửa/Xóa trên dòng (action vẫn tự chặn). */
   choPhepSua?: boolean;
+  /** Thẻ cho ô "Trừ vào thẻ" của form sửa (chỉ có sau khi bật theo dõi nợ phải trả). */
+  theTinDung?: ExpenseFormModalProps["theTinDung"];
 };
 
 export function ExpenseTable({
@@ -78,6 +89,7 @@ export function ExpenseTable({
   categories,
   channels,
   choPhepSua = false,
+  theTinDung,
 }: ExpenseTableProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -247,6 +259,7 @@ export function ExpenseTable({
                   </TableCell>
                   <TableCell className="max-w-[240px] truncate" title={row.description}>
                     {row.description || "—"}
+                    <NhanTruThe tenThe={row.tenThe} />
                   </TableCell>
                   <TableCell>
                     {row.channelName ? (
@@ -280,6 +293,7 @@ export function ExpenseTable({
                   <span className="text-sm font-medium text-ink">{formatVnd(row.amount)}</span>
                 </div>
                 <p className="text-sm text-ink">{row.description || "—"}</p>
+                <NhanTruThe tenThe={row.tenThe} />
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>{format(row.date, "dd/MM/yyyy")}</span>
                   <span className="flex items-center gap-1.5">
@@ -330,6 +344,7 @@ export function ExpenseTable({
         categories={categories}
         channels={channels}
         expense={editingRow ?? undefined}
+        theTinDung={theTinDung}
       />
       <ExpenseDeleteDialog
         open={Boolean(deletingRow)}

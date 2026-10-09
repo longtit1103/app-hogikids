@@ -11,6 +11,7 @@ import { luuSoDuChotThang } from "@/lib/actions/so-du-chot-thang";
 import { formatVnd } from "@/lib/format";
 import { formatAmountInput, parseAmountInput, parseSignedAmountInput } from "@/lib/format-amount-input";
 import type { BanChot, KhoanCauTruc } from "@/lib/so-quy/doi-chieu-so-du-chot";
+import { CAU_VI_ADS_TRA_TRUOC, NGU_CANH_CHOT_CU, type NguCanhChot } from "@/lib/so-quy/ngu-canh-chot-no-phai-tra";
 
 /**
  * Modal "Chốt số dư cuối tháng" — 3 ô: số dư ngân hàng (CHO ÂM — thấu chi), tiền mặt, ghi chú.
@@ -67,6 +68,7 @@ export function SoDuChotThangFormModal({
   thangNhan,
   chot,
   cauTruc,
+  nguCanhChot = NGU_CANH_CHOT_CU,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -77,6 +79,8 @@ export function SoDuChotThangFormModal({
   chot: (BanChot & { note: string }) | null;
   /** Để dặn đúng số: đang thấu chi bao nhiêu, đang gửi bao nhiêu. */
   cauTruc: KhoanCauTruc;
+  /** Đã bật nợ phải trả trong/trước tháng này ⇒ bỏ câu "trừ nợ thẻ"; có ví trả trước ⇒ thêm gợi ý chênh âm. */
+  nguCanhChot?: NguCanhChot;
 }) {
   const router = useRouter();
   const [bankRaw, setBankRaw] = useState("");
@@ -153,11 +157,23 @@ export function SoDuChotThangFormModal({
               onChange={(e) => setBankRaw(hienBank(e.target.value))}
             />
             <p className="text-xs text-muted-foreground">đang thấu chi thì gõ số âm, ví dụ -20.000.000</p>
-            {/* Ads trả bằng thẻ tín dụng: sổ đã trừ ngay ngày chạy ads, tiền chỉ rời ngân hàng lúc trả sao kê. */}
-            <p className="text-xs text-warning" data-testid="so-du-chot-nhac-the-tin-dung">
-              Đang nợ thẻ tín dụng (quảng cáo chưa thanh toán sao kê)? Lấy số dư ngân hàng TRỪ dư nợ thẻ rồi
-              mới gõ — sổ đã trừ chi phí quảng cáo ngay ngày chạy.
-            </p>
+            {/* Trước khi bật nợ phải trả: ads trả bằng thẻ tín dụng đã trừ sổ ngay ngày chạy, tiền chỉ rời ngân
+                hàng lúc trả sao kê. SAU khi bật thì nợ thẻ nằm ngoài quỹ — ô ngân hàng gõ đúng số thật, không trừ gì. */}
+            {nguCanhChot.sauBatNoPhaiTra ? (
+              <p className="text-xs text-muted-foreground" data-testid="so-du-chot-sau-bat-no-phai-tra">
+                Đã theo dõi nợ phải trả: gõ đúng số dư ngân hàng, KHÔNG trừ dư nợ thẻ — nợ thẻ nằm ngoài quỹ.
+              </p>
+            ) : (
+              <p className="text-xs text-warning" data-testid="so-du-chot-nhac-the-tin-dung">
+                Đang nợ thẻ tín dụng (quảng cáo chưa thanh toán sao kê)? Lấy số dư ngân hàng TRỪ dư nợ thẻ rồi
+                mới gõ — sổ đã trừ chi phí quảng cáo ngay ngày chạy.
+              </p>
+            )}
+            {nguCanhChot.coHoSoViAds && (
+              <p className="text-xs text-muted-foreground" data-testid="so-du-chot-goi-y-vi-ads">
+                Sổ nhiều hơn ngân hàng? {CAU_VI_ADS_TRA_TRUOC}
+              </p>
+            )}
           </Field>
           <Field id="chot-tien-mat" label="Tiền mặt" error={fieldErrors.tienMat}>
             <Input

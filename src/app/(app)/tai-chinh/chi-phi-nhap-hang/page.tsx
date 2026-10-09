@@ -2,12 +2,17 @@ import { format } from "date-fns";
 import Link from "next/link";
 
 import { DuyetChiPhiNhapHang } from "@/components/nhap-hang/duyet-chi-phi-nhap-hang";
+import { GhiNhanPhieuVaoSoNo } from "@/components/no-phai-tra/ghi-nhan-phieu-vao-so-no";
+import { HauKiemPhieuKhoi } from "@/components/no-phai-tra/hau-kiem-phieu-khoi";
 import { formatVnd } from "@/lib/format";
 import { docDeXuatPhieuNhap } from "@/lib/nhap-hang/doc-phieu-nhap-bronze";
 import { chePhieuNhapDeXuat, vanTayDeXuatPhieuNhap } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
+import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { docPhieuChoGhiNo } from "@/lib/no-phai-tra/doc-phieu-cho-ghi-no";
+import { hauKiemPhieu } from "@/lib/no-phai-tra/phieu-nhap-no-queries";
 import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
 import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
-import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
+import { coQuyen, laChuShop } from "@/lib/quyen/nguoi-dung-phien";
 import { tinhQuyTuTong } from "@/lib/so-quy/cong-thuc-so-quy";
 import { docTongNguon } from "@/lib/so-quy/so-quy-queries";
 
@@ -27,11 +32,19 @@ export default async function ChiPhiNhapHangPage() {
 
   const { deXuat, daGhi, boQuaTruocD0, canhBao, d0, soPhieuNhapThat } = await docDeXuatPhieuNhap();
 
+  // SAU khi bật theo dõi nợ phải trả: màn này ghi NGHĨA VỤ (sổ nợ), không ghi chi phí nhập hàng nữa
+  // (action cũ đã đóng cho phiếu từ mốc M). Chưa bật ⇒ màn y như cũ.
+  const mocM = await docMocM();
+  const sauBat = mocM !== null;
+  const coQuyXem = coQuyen(nd, "tai-chinh-so-quy:xem");
+  const [phieuChoGhiNo, hauKiem] =
+    sauBat && coQuyXem ? await Promise.all([docPhieuChoGhiNo(), hauKiemPhieu()]) : [[], []];
+
   // Quỹ tới HÔM NAY — số để nói "ghi xong quỹ còn bao nhiêu". Đọc đúng đường `docTongNguon` mà thẻ
   // Quỹ còn lại dùng (tiền THẬT, không đụng số dự kiến), nên hai màn không bao giờ lệch nhau.
   // Số quỹ thuộc quyền Sổ quỹ — thiếu thì KHÔNG đọc (null = màn tự bỏ câu "quỹ còn lại").
   const quyHomNay =
-    d0 === null || !coQuyen(nd, "tai-chinh-so-quy:xem")
+    d0 === null || sauBat || !coQuyXem
       ? null
       : tinhQuyTuTong(await docTongNguon(d0, new Date()));
 
@@ -40,49 +53,75 @@ export default async function ChiPhiNhapHangPage() {
       <div className="flex flex-col gap-1">
         <h1 className="font-serif text-2xl text-ink">Chi phí nhập hàng từ Pancake</h1>
         <p className="text-sm text-muted-foreground">
-          App đối chiếu phiếu nhập bên Pancake với Sổ chi phí và đề xuất những phiếu chưa vào sổ.
-          App không tự ghi: Pancake không lưu số bạn đã trả cho nhà cung cấp, chỉ bạn biết.
+          {sauBat
+            ? "Ghi nhận phiếu nhập bên Pancake vào sổ nợ phải trả. Tổng phiếu lấy từ Pancake; Pancake không lưu số bạn đã trả cho nhà cung cấp nên phần đã trả do bạn khai."
+            : "App đối chiếu phiếu nhập bên Pancake với Sổ chi phí và đề xuất những phiếu chưa vào sổ. App không tự ghi: Pancake không lưu số bạn đã trả cho nhà cung cấp, chỉ bạn biết."}
         </p>
       </div>
 
-      {canhBao.length > 0 && (
-        <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/10 p-4">
-          <p className="text-sm font-semibold text-ink">Cần kiểm lại trước khi ghi</p>
-          <ul className="list-disc pl-5 text-sm text-ink">
-            {canhBao.map((c) => (
-              <li key={c}>{c}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {deXuat.length === 0 ? (
-        /*
-          KHÔNG được khẳng định "mọi phiếu nhập bên Pancake đều đã có trong Sổ chi phí": phiếu trước
-          ngày mở sổ, phiếu đã huỷ và phiếu mang trạng thái app chưa biết đều KHÔNG vào sổ mà vẫn rơi
-          vào nhánh này. Câu khẳng định sai ở đây từng che đúng ca nguy nhất — một phiếu 80 triệu
-          mang mã lạ bị bỏ câm. Nói bối cảnh bằng số thật (`soPhieuNhapThat`) rồi chỉ sang khối cảnh
-          báo ngay trên.
-        */
-        <div className="rounded-lg border border-hairline bg-surface-card p-6 text-sm text-muted-foreground">
-          Không có phiếu nhập nào chờ ghi. App đã soi{" "}
-          {soPhieuNhapThat.toLocaleString("vi-VN")} phiếu nhập hàng bên Pancake — những phiếu trước
-          ngày mở sổ quỹ, phiếu đã huỷ và phiếu mang trạng thái app chưa biết không được đề xuất
-          {canhBao.length > 0 ? " (xem phần cần kiểm lại ở trên)" : ""}. App đối chiếu lại mỗi đêm
-          lúc 03:00 sau lượt đồng bộ Pancake.
-        </div>
+      {sauBat ? (
+        coQuyXem ? (
+          <>
+            <HauKiemPhieuKhoi
+              canhBao={hauKiem}
+              choPhepSua={coQuyen(nd, "tai-chinh-so-quy:sua")}
+              laChuShop={laChuShop(nd)}
+            />
+            <GhiNhanPhieuVaoSoNo
+              phieu={phieuChoGhiNo}
+              mocM={format(mocM, "yyyy-MM-dd")}
+              laChuShop={laChuShop(nd)}
+              choPhepSua={coQuyen(nd, "tai-chinh-so-quy:sua")}
+            />
+          </>
+        ) : (
+          <div className="rounded-lg border border-hairline bg-surface-card p-6 text-sm text-muted-foreground">
+            Đã bật theo dõi nợ phải trả: phiếu nhập được ghi nhận vào sổ nợ ở mục Sổ quỹ — cần quyền Sổ quỹ để
+            xem và ghi.
+          </div>
+        )
       ) : (
-        <DuyetChiPhiNhapHang
-          // Thiếu quyền giá vốn ⇒ bỏ số lượng (tổng ÷ số lượng = giá nhập ≈ giá vốn), giữ tổng phiếu.
-          deXuat={quyenGiaVonCua(nd).coQuyenGiaVon ? deXuat : chePhieuNhapDeXuat(deXuat)}
-          // Vân tay của ĐÚNG danh sách đang hiện trên màn — lượt ghi từ chối nếu nó đã đổi.
-          vanTay={vanTayDeXuatPhieuNhap(deXuat)}
-          quyHomNay={quyHomNay}
-          choPhepSua={coQuyen(nd, "chi-phi:sua")}
-        />
+        <>
+      {canhBao.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning/10 p-4">
+            <p className="text-sm font-semibold text-ink">Cần kiểm lại trước khi ghi</p>
+            <ul className="list-disc pl-5 text-sm text-ink">
+              {canhBao.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {deXuat.length === 0 ? (
+          /*
+            KHÔNG được khẳng định "mọi phiếu nhập bên Pancake đều đã có trong Sổ chi phí": phiếu trước
+            ngày mở sổ, phiếu đã huỷ và phiếu mang trạng thái app chưa biết đều KHÔNG vào sổ mà vẫn rơi
+            vào nhánh này. Câu khẳng định sai ở đây từng che đúng ca nguy nhất — một phiếu 80 triệu
+            mang mã lạ bị bỏ câm. Nói bối cảnh bằng số thật (`soPhieuNhapThat`) rồi chỉ sang khối cảnh
+            báo ngay trên.
+          */
+          <div className="rounded-lg border border-hairline bg-surface-card p-6 text-sm text-muted-foreground">
+            Không có phiếu nhập nào chờ ghi. App đã soi{" "}
+            {soPhieuNhapThat.toLocaleString("vi-VN")} phiếu nhập hàng bên Pancake — những phiếu trước
+            ngày mở sổ quỹ, phiếu đã huỷ và phiếu mang trạng thái app chưa biết không được đề xuất
+            {canhBao.length > 0 ? " (xem phần cần kiểm lại ở trên)" : ""}. App đối chiếu lại mỗi đêm
+            lúc 03:00 sau lượt đồng bộ Pancake.
+          </div>
+        ) : (
+          <DuyetChiPhiNhapHang
+            // Thiếu quyền giá vốn ⇒ bỏ số lượng (tổng ÷ số lượng = giá nhập ≈ giá vốn), giữ tổng phiếu.
+            deXuat={quyenGiaVonCua(nd).coQuyenGiaVon ? deXuat : chePhieuNhapDeXuat(deXuat)}
+            // Vân tay của ĐÚNG danh sách đang hiện trên màn — lượt ghi từ chối nếu nó đã đổi.
+            vanTay={vanTayDeXuatPhieuNhap(deXuat)}
+            quyHomNay={quyHomNay}
+            choPhepSua={coQuyen(nd, "chi-phi:sua")}
+          />
+        )}
+        </>
       )}
 
-      {boQuaTruocD0.soPhieu > 0 && d0 !== null && (
+      {!sauBat && boQuaTruocD0.soPhieu > 0 && d0 !== null && (
         <p className="text-sm text-muted-foreground">
           Đã bỏ qua {boQuaTruocD0.soPhieu.toLocaleString("vi-VN")} phiếu nhập trước ngày mở sổ quỹ (
           {format(d0, "dd/MM/yyyy")}) — tổng {formatVnd(boQuaTruocD0.tongTien)}. Tiền đó coi như đã

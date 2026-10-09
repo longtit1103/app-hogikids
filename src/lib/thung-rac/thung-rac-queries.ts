@@ -26,6 +26,9 @@ export const NHAN_LOAI_THUNG_RAC: Record<BangThungRac, string> = {
   ThuNhap: "Thu nhập",
   Loan: "Khoản vay",
   SoTietKiem: "Sổ tiết kiệm",
+  PhieuNhapNo: "Phiếu nợ nhập hàng",
+  TheTinDung: "Thẻ tín dụng",
+  ViAdsTraTruoc: "Ví quảng cáo",
 };
 
 export type ThungRacRow = {
@@ -51,6 +54,11 @@ const DONG_TIEN_TRON_SQL = Prisma.sql`(
   jsonb_typeof("anh" -> 'chinh') = 'object'
   AND COALESCE(jsonb_typeof("anh" -> 'chinh' -> 'loanId'), 'null') = 'null'
   AND COALESCE(jsonb_typeof("anh" -> 'chinh' -> 'savingsId'), 'null') = 'null'
+  AND COALESCE(jsonb_typeof("anh" -> 'chinh' -> 'cardId'), 'null') = 'null'
+  AND COALESCE(jsonb_typeof("anh" -> 'chinh' -> 'phieuNhapId'), 'null') = 'null'
+  AND COALESCE(jsonb_typeof("anh" -> 'chinh' -> 'viAdsId'), 'null') = 'null'
+  AND COALESCE("anh" -> 'chinh' ->> 'kind', '') NOT IN
+    ('CARD_PAY', 'SUPPLIER_PAY', 'SUPPLIER_REFUND', 'CUTOVER_ADJ_IN', 'CUTOVER_ADJ_OUT', 'ADS_TOPUP')
 )`;
 
 type DongThungRacTho = {

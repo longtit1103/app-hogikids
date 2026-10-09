@@ -36,6 +36,8 @@ describe("dấu từng dòng — suy từ công thức thẻ Quỹ", () => {
     ["ads TikTok trừ ví (âm) ⇒ thu", sk({ nguon: "ADS_TIKTOK_TRU_VI", truong: "adsTiktokViCoDau", giaTri: -3 }), 3, 0],
     ["thu nhập tài chính ⇒ thu", sk({ nguon: "THU_NHAP", truong: "thuNhap", giaTri: 11 }), 11, 0],
     ["bán trực tiếp ⇒ thu", sk({ nguon: "BAN_TRUC_TIEP", truong: "banTrucTiep", giaTri: 13 }), 13, 0],
+    // Nạp ví ads trả trước TỪ NGÂN HÀNG (`ADS_TOPUP` không thẻ) — tiền rời quỹ ngày nạp.
+    ["nạp ví ads từ ngân hàng ⇒ chi", sk({ nguon: "GHI_TAY", truong: "napViTuBank", giaTri: 10 }), 0, 10],
   ])("%s", (_ten, s, thu, chi) => {
     const { dong, tongThu, tongChi } = dungDongChay(0, [s]);
     expect(dong).toHaveLength(1);

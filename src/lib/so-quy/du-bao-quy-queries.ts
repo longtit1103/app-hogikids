@@ -12,6 +12,7 @@ import {
   khoanDaGhi,
   khoanDinhKy,
   khoanKyTraNo,
+  khoanTraThe,
   soDuCuoiNgay,
   SO_NGAY_DU_BAO,
   SO_NGAY_LICH_SU,
@@ -25,6 +26,8 @@ import type {
   KhoanDuKien,
 } from "@/lib/so-quy/du-bao-quy-types";
 import { listKhoanVay } from "@/lib/so-quy/khoan-vay-queries";
+import { docNguCanhLocTrongRequest } from "@/lib/no-phai-tra/doc-ngu-canh-loc";
+import { docPhaiTraCacThe } from "@/lib/no-phai-tra/phai-tra-the-queries";
 
 /**
  * Đọc biểu đồ quỹ (90 ngày) + dự báo "quỹ sắp cạn" (30 ngày). Lõi tính ở `du-bao-quy.ts` (thuần).
@@ -86,10 +89,10 @@ async function docKhoanKyTraNo(bayGio: Date, homNay: KhoaNgay, den: KhoaNgay): P
  * Chi phí định kỳ đang bật, lần phát sinh từ tháng hiện tại tới `den` mà tháng đó chưa sinh dòng — lần
  * đã tới hạn trong tháng hiện tại mà chưa sinh dòng tính vào hôm nay (`khoanDinhKy`).
  */
-async function docKhoanDinhKy(homNay: KhoaNgay, den: KhoaNgay): Promise<KhoanDuKien[]> {
+async function docKhoanDinhKy(homNay: KhoaNgay, den: KhoaNgay, mocM: Date | null): Promise<KhoanDuKien[]> {
   const mau = await prisma.recurringExpense.findMany({
     where: { active: true },
-    select: { id: true, amount: true, dayOfMonth: true, description: true, activeFrom: true },
+    select: { id: true, amount: true, dayOfMonth: true, description: true, activeFrom: true, categoryId: true },
   });
   if (mau.length === 0) return [];
   // Dòng đã sinh trong các tháng mà cửa sổ chạm — cổng "1 dòng/mẫu/tháng" của chính bộ sinh.
@@ -107,8 +110,22 @@ async function docKhoanDinhKy(homNay: KhoaNgay, den: KhoaNgay): Promise<KhoanDuK
   for (const e of daSinhDong) {
     if (e.recurringId !== null) daSinh.add(khoaDaSinh(e.recurringId, khoaNgayVn(e.date)));
   }
-  const mauCoMoc = mau.map((m) => ({ ...m, activeFrom: m.activeFrom ? khoaNgayVn(m.activeFrom) : null }));
+  // Mẫu "Nhập hàng" sau mốc bật nợ: bộ sinh bỏ mọi lần ≥ M (`laNhapHangSauM`) ⇒ dự báo cũng không trừ.
+  const mauCoMoc = mau.map(({ categoryId, ...m }) => ({
+    ...m,
+    activeFrom: m.activeFrom ? khoaNgayVn(m.activeFrom) : null,
+    boQuaTuNgay: categoryId === "purchase" && mocM !== null ? khoaNgayVn(mocM) : null,
+  }));
   return khoanDinhKy(mauCoMoc, homNay, den, daSinh);
+}
+
+/**
+ * Phần sao kê thẻ còn phải trả — CHỈ khi đã bật theo dõi nợ (`mocM` null ⇒ dự báo y hệt trước, không thêm
+ * câu đọc nào). Đứng ở ngày `homNay` (đầu ngày VN): `phaiTra` so hạn thật với chính ngày đó.
+ */
+async function docKhoanTraThe(homNay: KhoaNgay, den: KhoaNgay, mocM: Date | null): Promise<KhoanDuKien[]> {
+  if (mocM === null) return [];
+  return khoanTraThe(await docPhaiTraCacThe(dauNgayVn(homNay)), homNay, den);
 }
 
 type PhanDuBao =
@@ -146,10 +163,13 @@ async function docPhanDuBao(homNay: KhoaNgay): Promise<PhanDuBao> {
   const ngayMai = congNgay(homNay, 1);
   const den = congNgay(homNay, SO_NGAY_DU_BAO);
 
-  const [tuongLai, kyTraNo, dinhKy, nguong] = await Promise.all([
-    docSoQuyDongChay({ from: dauNgayVn(ngayMai), to: dauNgayVn(den) }),
+  // Ngữ cảnh nợ phải trả nhớ theo request: phần dự báo và lịch sử (`docDuBaoQuy`) cùng một công thức quỹ.
+  const ctx = await docNguCanhLocTrongRequest();
+  const [tuongLai, kyTraNo, dinhKy, traThe, nguong] = await Promise.all([
+    docSoQuyDongChay({ from: dauNgayVn(ngayMai), to: dauNgayVn(den) }, ctx),
     docKhoanKyTraNo(bayGio, homNay, den),
-    docKhoanDinhKy(homNay, den),
+    docKhoanDinhKy(homNay, den, ctx.mocM),
+    docKhoanTraThe(homNay, den, ctx.mocM),
     docNguongQuy(),
   ]);
   if (tuongLai.trangThai === "CHUA_MO_SO") return { trangThai: "CHUA_MO_SO" };
@@ -177,7 +197,7 @@ async function docPhanDuBao(homNay: KhoaNgay): Promise<PhanDuBao> {
     homNay,
     quyHomNay,
     nguong: nguong.nguong,
-    khoan: [...daGhi, ...kyTraNo, ...dinhKy],
+    khoan: [...daGhi, ...kyTraNo, ...dinhKy, ...traThe],
   });
   return { trangThai: "CO_SO", homNay, quyHomNay, ...nguong, ...ketQua };
 }
@@ -255,8 +275,9 @@ export async function docDuBaoQuy(): Promise<DuBaoQuy> {
   const homNay = khoaNgayVn(new Date());
   const dauLichSu = congNgay(homNay, -(SO_NGAY_LICH_SU - 1));
 
+  const ctx = await docNguCanhLocTrongRequest();
   const [lichSuDong, phan] = await Promise.all([
-    docSoQuyDongChay({ from: dauNgayVn(dauLichSu), to: dauNgayVn(homNay) }),
+    docSoQuyDongChay({ from: dauNgayVn(dauLichSu), to: dauNgayVn(homNay) }, ctx),
     docPhanDuBaoTrongRequest(homNay),
   ]);
   try {

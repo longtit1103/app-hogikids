@@ -73,6 +73,9 @@ export const ALLOW_ACTION_KHONG_NHAT_KY: Readonly<Record<string, string>> = {
   "src/lib/actions/settings-channels.ts#countRecomputableOrders": "Chỉ đếm đơn.",
   "src/lib/actions/sync.ts#getLatestSync": "Chỉ đọc SyncLog.",
   "src/lib/actions/sync.ts#getTienDoDongBoNgay": "Chỉ đọc SyncLog (tiến độ lượt Đồng bộ ngay).",
+  "src/lib/actions/uoc-tinh-sao-ke.ts#docUocTinhSaoKe": "Chỉ đọc: dư nợ ước tính của thẻ tại một ngày (form chốt sao kê), không ghi.",
+  "src/lib/actions/bat-no-phai-tra.ts#docChenhLechTaiM":
+    "Chỉ đọc: chênh lệch quỹ app ↔ tiền thật tại ngày bật nợ phải trả (bước 2 màn xác nhận), không ghi.",
   "src/lib/actions/khoang-ngay.ts#luuLuaChonKhoangNgay":
     "Không đọc/ghi DB — chỉ ghi cookie tuỳ chọn khoảng ngày của chính trình duyệt.",
 };

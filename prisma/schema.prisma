@@ -203,38 +203,45 @@ enum ExpenseSource {
 }
 
 model Expense {
-  id          String          @id @default(cuid())
-  date        DateTime
-  categoryId  String
-  category    ExpenseCategory @relation(fields: [categoryId], references: [id])
-  adsSource   String? // META | TIKTOK_ADS khi categoryId="ads"
-  description String
-  channelId   String?
-  channel     Channel?        @relation(fields: [channelId], references: [id])
-  amount      Int
-  source      ExpenseSource   @default(MANUAL)
-  refId       String?         @unique // idempotency cho ADS_API: "META:2026-07-04:{campaignId}" (source viết HOA) — ingest lại không trùng
-  recurringId String?
+  id             String          @id @default(cuid())
+  date           DateTime
+  categoryId     String
+  category       ExpenseCategory @relation(fields: [categoryId], references: [id])
+  adsSource      String? // META | TIKTOK_ADS khi categoryId="ads"
+  description    String
+  channelId      String?
+  channel        Channel?        @relation(fields: [channelId], references: [id])
+  amount         Int
+  source         ExpenseSource   @default(MANUAL)
+  refId          String?         @unique // idempotency cho ADS_API: "META:2026-07-04:{campaignId}" (source viết HOA) — ingest lại không trùng
+  recurringId    String?
   /// Khoá tháng `yyyy-MM` (giờ VN) của dòng ĐỊNH KỲ — CHỈ có khi `recurringId` có (CHECK dưới DB), và
   /// phải khớp tháng VN của `date` (CHECK). Mọi writer lấy từ `khoaThangDinhKy(date)`
   /// (`src/lib/expenses/khoa-thang-dinh-ky.ts`). Dòng thường giữ NULL ⇒ không vướng unique dưới đây.
   recurringMonth String?
-  createdAt   DateTime        @default(now())
+  /// "Trừ vào thẻ tín dụng" (nợ phải trả §5.6): khoản chi tay KHÔNG rời quỹ ngày ghi mà cộng vào dư
+  /// nợ thẻ, tiền rời quỹ lúc trả thẻ (`CashMovement` `CARD_PAY`). CHỈ dòng `source = MANUAL` (CHECK
+  /// `Expense_card_chi_manual`): ads ADS_API/IMPORT suy thẻ từ `GanNenTangThe`, định kỳ chưa hỗ trợ thẻ.
+  /// P&L KHÔNG đọc cột này — chi phí vẫn vào Lãi/Lỗ đúng ngày `date` như mọi dòng khác.
+  cardId         String?
+  theTinDung     TheTinDung?     @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  createdAt      DateTime        @default(now())
 
-  @@index([date])
-  @@index([categoryId, date])
   /// Mỗi mẫu định kỳ TỐI ĐA 1 dòng/tháng — do Postgres bảo đảm, bộ sinh chèn `ON CONFLICT DO NOTHING`.
   @@unique([recurringId, recurringMonth])
+  @@index([date])
+  @@index([categoryId, date])
+  @@index([cardId])
 }
 
 model RecurringExpense {
-  id          String  @id @default(cuid())
+  id          String    @id @default(cuid())
   categoryId  String
   amount      Int
   dayOfMonth  Int
   description String
   channelId   String?
-  active      Boolean @default(true)
+  active      Boolean   @default(true)
   /// Mốc bắt đầu sinh (đầu tháng, giờ VN): mẫu chỉ sinh `Expense` cho tháng >= tháng của mốc. NULL =
   /// không cận dưới (mẫu dựng trước khi có cột — hành vi cũ). Tạo mẫu mới / bật lại mẫu đã dừng đều
   /// đặt mốc ⇒ không bao giờ ghi lùi chi phí vào tháng trước khi mẫu chạy hay các tháng đã dừng.
@@ -262,6 +269,22 @@ enum CashMovementKind {
   /// Ngân hàng trả lại ĐÚNG PHẦN GỐC sổ tiết kiệm sinh lãi — VÀO. TUYỆT ĐỐI không gồm lãi: lãi đi
   /// đường `ThuNhap` (ghi lãi vào đây là đếm 2 lần).
   SAVINGS_IN
+  /// Trả nợ thẻ tín dụng từ tài khoản — RA, gắn `cardId`. Đây là lúc tiền THẬT rời quỹ cho ads/chi đã
+  /// cà thẻ; KHÔNG phải chi phí (chi phí đã vào P&L theo ngày chạy/ngày chi).
+  CARD_PAY
+  /// Trả tiền hàng cho nhà cung cấp — RA, gắn `phieuNhapId`. Tiền thật rời quỹ ngày trả, không phải
+  /// ngày lập phiếu; KHÔNG vào P&L ("Nhập hàng" là dòng tiền).
+  SUPPLIER_PAY
+  /// Nhà cung cấp hoàn tiền (trả thừa / phiếu huỷ sau khi đã trả) — VÀO, gắn `phieuNhapId`.
+  SUPPLIER_REFUND
+  /// Điều chỉnh quỹ MỘT LẦN tại mốc bật theo dõi nợ M — VÀO. Không gắn hồ sơ nào, mô tả bắt buộc;
+  /// CHỈ bước xác nhận bật tạo, không bao giờ có trong form/action thường.
+  CUTOVER_ADJ_IN
+  /// Như `CUTOVER_ADJ_IN` nhưng chiều RA.
+  CUTOVER_ADJ_OUT
+  /// Nạp ví ads trả trước (Shopee Ads), gắn `viAdsId`. Chiều tiền THEO NGUỒN NẠP: không `cardId` = nạp
+  /// từ ngân hàng ⇒ RA khỏi quỹ; có `cardId` = nạp bằng thẻ ⇒ KHÔNG chạm quỹ (cộng vào nợ thẻ).
+  ADS_TOPUP
 }
 
 /// Khoản tiền ghi tay NGOÀI sàn và NGOÀI Sổ chi phí (vay/góp/rút vốn, trả nợ gốc, bán trực tiếp, thu
@@ -270,6 +293,8 @@ enum CashMovementKind {
 /// `source`/`refId`; xoá theo hợp đồng "Xóa dữ liệu giao dịch" (data-admin.ts); rebuild-from-raw KHÔNG đụng.
 /// `kind` LOAN_IN/LOAN_REPAY BẮT BUỘC `loanId` (CHECK `CashMovement_loan_bat_buoc` ở migration + zod ở
 /// action): dòng vay/trả gốc không gắn khoản vay là dư nợ "mồ côi", không bao giờ đối chiếu lại được.
+/// Một dòng thuộc TỐI ĐA MỘT hồ sơ trong 5 khoá `loanId`/`savingsId`/`cardId`/`phieuNhapId`/`viAdsId`
+/// (CHECK `CashMovement_toi_da_mot_ho_so`); ngoại lệ DUY NHẤT `ADS_TOPUP` được `viAdsId` + `cardId`.
 model CashMovement {
   id          String           @id @default(cuid())
   date        DateTime
@@ -280,11 +305,27 @@ model CashMovement {
   loan        Loan?            @relation(fields: [loanId], references: [id], onDelete: Restrict)
   savingsId   String?
   soTietKiem  SoTietKiem?      @relation(fields: [savingsId], references: [id], onDelete: Restrict)
+  /// Thẻ tín dụng — BẮT BUỘC với `CARD_PAY`, tuỳ chọn với `ADS_TOPUP` (nạp ví bằng thẻ), cấm ở kind
+  /// khác (CHECK `CashMovement_kind_khoa_bat_buoc`).
+  cardId      String?
+  theTinDung  TheTinDung?      @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  /// Phiếu nhập còn nợ — BẮT BUỘC với `SUPPLIER_PAY`/`SUPPLIER_REFUND`, cấm ở kind khác.
+  phieuNhapId String?
+  phieuNhap   PhieuNhapNo?     @relation(fields: [phieuNhapId], references: [id], onDelete: Restrict)
+  /// Ví ads trả trước — BẮT BUỘC với `ADS_TOPUP`, cấm ở kind khác.
+  viAdsId     String?
+  viAds       ViAdsTraTruoc?   @relation(fields: [viAdsId], references: [id], onDelete: Restrict)
+  /// Mã yêu cầu ghi (`YeuCauGhi.id`) đã sinh dòng này — CHỈ để truy vết, KHÔNG unique, KHÔNG khoá
+  /// ngoại: một yêu cầu trả gộp sinh N dòng, và xoá dòng tiền KHÔNG xoá `YeuCauGhi`.
+  yeuCauId    String?
   createdAt   DateTime         @default(now())
 
   @@index([date])
   @@index([loanId])
   @@index([savingsId])
+  @@index([cardId])
+  @@index([phieuNhapId])
+  @@index([viAdsId])
 }
 
 /// Hồ sơ khoản vay — CHỈ mô tả (spec §5.1). TUYỆT ĐỐI không tự sinh dòng tiền: gốc đi qua CashMovement
@@ -408,6 +449,133 @@ model ThuNhap {
 /// lại `pnl-line-items.ts` trước.
 enum ThuNhapKind {
   LAI_TIET_KIEM
+}
+
+// ── Nợ phải trả: tiền hàng NCC + thẻ tín dụng + ví ads trả trước ────────────────────────────────
+// Trục DÒNG TIỀN thuần — KHÔNG BAO GIỜ vào P&L (lưới tests/unit/cash-movements/khong-ro-ri-vao-pnl.test.ts).
+// Nhập tay 100% ⇒ rebuild-from-raw và deploy/restore.sh KHÔNG đụng. Mọi đường ghi TIỀN mới bị từ chối
+// khi `Setting.noPhaiTraTuNgay` (mốc M) còn rỗng — cổng `daBatNoPhaiTra` (src/lib/no-phai-tra/).
+
+/// Thẻ tín dụng — hồ sơ thuần, KHÔNG có cột dư nợ: dư nợ suy từ neo `KySaoKeThe` gần nhất + giao dịch
+/// sau neo (lưu 2 chỗ là lệch 2 chỗ). Tháng thiếu ngày chốt/hạn (vd 31 ở tháng 30 ngày) ⇒ ngày cuối
+/// tháng. CHECK `TheTinDung_ngay_1_31`.
+model TheTinDung {
+  id            String          @id @default(cuid())
+  ten           String
+  nganHang      String          @default("")
+  /// Ngày chốt sao kê trong tháng, 1..31.
+  ngayChotSaoKe Int
+  /// Ngày hạn trả trong tháng, 1..31 — mỗi thẻ một ngày riêng.
+  ngayHanTra    Int
+  /// Chỉ đóng khi dư nợ ước tính = 0, không nền tảng nào đang gắn, kỳ mới nhất còn phải trả = 0.
+  closedAt      DateTime?
+  note          String          @default("")
+  createdAt     DateTime        @default(now())
+  kySaoKe       KySaoKeThe[]
+  ganNenTang    GanNenTangThe[]
+  movements     CashMovement[]
+  expenses      Expense[]
+}
+
+/// LỊCH SỬ neo dư nợ thẻ, không ghi đè: "dư nợ tổng CUỐI NGÀY `ngayChot` = `soDu`". Công thức tại ngày
+/// t dùng neo có `ngayChot` lớn nhất ≤ t, chỉ cộng/trừ giao dịch SAU ngày neo. `laNeoMoSo = true` ⇒
+/// neo tại M−1, `hanTra` NULL (CHECK `KySaoKeThe_neo_mo_so_khong_han`); `false` ⇒ sao kê thật, `hanTra`
+/// bắt buộc (CHECK `KySaoKeThe_sao_ke_co_han`). `soDu` ≥ 0 (CHECK `KySaoKeThe_so_du_khong_am`).
+model KySaoKeThe {
+  id             String     @id @default(cuid())
+  cardId         String
+  the            TheTinDung @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  ngayChot       DateTime
+  soDu           Int
+  hanTra         DateTime?
+  /// Phần của kỳ này ĐÃ trả trước mốc M — chỉ cho kỳ cuối trước M (tiền đó đã rời quỹ trước M).
+  daTraTruocMoSo Int        @default(0)
+  laNeoMoSo      Boolean    @default(false)
+  /// Dư nợ app ước tính lúc chốt — để đối chiếu với `soDu` thật trên sao kê, không dùng tính toán.
+  uocTinhLucChot Int?
+  note           String     @default("")
+  createdAt      DateTime   @default(now())
+
+  @@unique([cardId, ngayChot])
+}
+
+/// Nền tảng ads → thẻ trả, hiệu lực từ `tuNgay` (thực tế từ `max(M, tuNgay)`). Đổi thẻ = THÊM dòng,
+/// không sửa dòng cũ — lịch sử trước đó giữ nguyên cách tính.
+model GanNenTangThe {
+  id      String     @id @default(cuid())
+  cardId  String
+  the     TheTinDung @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  /// Mã nền tảng như `Expense.adsSource` (META | TIKTOK_ADS | SHOPEE_ADS…).
+  nenTang String
+  tuNgay  DateTime
+
+  @@unique([nenTang, tuNgay])
+  @@index([cardId])
+}
+
+/// Nghĩa vụ của một phiếu nhập Pancake (ẢNH CHỤP lúc ghi nhận, không tự đổi theo Bronze — hậu kiểm chỉ
+/// CẢNH BÁO). Còn nợ = (daHuy ? 0 : tongTien) − daTraTruoc − Σ SUPPLIER_PAY + Σ SUPPLIER_REFUND; âm =
+/// trả thừa / cần thu hồi. Tiền đã trả KHÔNG BAO GIỜ tự xoá.
+model PhieuNhapNo {
+  id                String         @id @default(cuid())
+  /// Khoá phiếu nhập Pancake (cùng khuôn `Expense.refId` của chi phí nhập hàng).
+  refId             String         @unique
+  shopId            String
+  maPhieu           String
+  ngayPhieu         DateTime
+  tongTien          Int
+  /// Phần đã trả TRƯỚC mốc M (đã rời quỹ qua Expense Nhập hàng cũ) — không đếm lại.
+  daTraTruoc        Int            @default(0)
+  daHuy             Boolean        @default(false)
+  /// Chủ shop xác nhận "đã giải thích" lệch Expense ≠ daTraTruoc; tự tắt khi số đổi.
+  lechDaGiaiThich   Boolean        @default(false)
+  /// Số Sổ chi phí (Expense.amount cùng refId; không có dòng ⇒ 0) TẠI LÚC chủ shop giải thích lệch.
+  /// Hậu kiểm chỉ ẩn cảnh báo khi Expense hiện tại vẫn đúng số này — Expense đổi/xoá tiếp ⇒ hiện lại.
+  lechDaGiaiThichSo Int?
+  note              String         @default("")
+  createdAt         DateTime       @default(now())
+  movements         CashMovement[]
+
+  @@index([ngayPhieu])
+}
+
+/// Kết quả một yêu cầu ghi có mã (chống ghi lặp khi mất phản hồi). BỀN: không xoá theo dòng tiền.
+/// Bước giữ mã chèn bằng `INSERT … ON CONFLICT (id) DO NOTHING` (KHÔNG bắt P2002 — unique vi phạm
+/// làm Postgres huỷ cả transaction); gửi lại cùng id + cùng `bamNoiDung` ⇒ trả `ketQua` cũ.
+model YeuCauGhi {
+  /// uuid client sinh cho MỘT lượt bấm.
+  id         String   @id
+  /// TRA_GOP_NCC | XAC_NHAN_BAT | CHOT_SAO_KE | …
+  loai       String
+  /// sha256 của payload đã chuẩn hoá khoá (`bamNoiDung`, src/lib/no-phai-tra/yeu-cau-ghi.ts).
+  bamNoiDung String
+  /// NULL chỉ trong khe giữa bước giữ mã và bước ghi kết quả của CÙNG một transaction — đã commit thì
+  /// luôn có. Đọc thấy NULL sau commit = đường ghi quên `ghiKetQua`.
+  ketQua     Json?
+  createdAt  DateTime @default(now())
+}
+
+/// Ví ads TRẢ TRƯỚC (Shopee Ads) — "túi" ngoài quỹ, chiều ngược thẻ. Số dư ví(t) = `soDuNeo` + Σ nạp
+/// (`ADS_TOPUP`) − Σ chi ads của nền tảng, đều SAU `ngayNeo`. Tiền rời quỹ theo NGUỒN NẠP, không theo
+/// ngày chạy ads. Một nền tảng một ví.
+model ViAdsTraTruoc {
+  id        String         @id @default(cuid())
+  nenTang   String         @unique
+  /// Số dư ví thật cuối ngày `ngayNeo` (= M − 1), chủ shop đọc trên trang quảng cáo.
+  soDuNeo   Int
+  ngayNeo   DateTime
+  /// Nguồn nạp MẶC ĐỊNH của ví (từng lần nạp vẫn chọn được thẻ hay ngân hàng ở form ghi tay). Chỉ
+  /// ngân hàng / thẻ: nạp từ ví bán hàng Shopee chưa nhận diện tự động được nên không tạo được hồ sơ.
+  nguonNap  NguonNapViAds  @default(BANK)
+  note      String         @default("")
+  createdAt DateTime       @default(now())
+  movements CashMovement[]
+}
+
+/// Nguồn nạp mặc định của ví ads trả trước.
+enum NguonNapViAds {
+  BANK
+  CARD
 }
 
 enum SyncKind {

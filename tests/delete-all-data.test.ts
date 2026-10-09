@@ -11,6 +11,7 @@ import {
   type ChiPhiKhongDungLai,
 } from "@/lib/actions/data-admin";
 import { landRaw } from "@/lib/bronze/land-raw";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { prisma } from "@/lib/prisma";
 import { DANH_MUC_QUYEN } from "@/lib/quyen/danh-muc-quyen";
@@ -266,6 +267,55 @@ async function seedFullDataset(): Promise<void> {
   });
 }
 
+/** Dọn khối nợ phải trả — con trước cha (kỳ sao kê, gắn nền tảng trước thẻ). */
+async function xoaNoPhaiTra(): Promise<void> {
+  await prisma.kySaoKeThe.deleteMany();
+  await prisma.ganNenTangThe.deleteMany();
+  await prisma.phieuNhapNo.deleteMany();
+  await prisma.viAdsTraTruoc.deleteMany();
+  await prisma.theTinDung.deleteMany();
+  await prisma.yeuCauGhi.deleteMany();
+}
+
+/**
+ * Seed MỘT dòng cho mỗi bảng nợ phải trả + dòng tiền/chi phí trỏ vào chúng + mốc bật M. Ghi thẳng bằng
+ * Prisma (không qua action — action của các kind này chưa mở ở P1).
+ */
+async function seedNoPhaiTra(): Promise<void> {
+  const the = await prisma.theTinDung.create({ data: { ten: "Thẻ VPBank", ngayChotSaoKe: 25, ngayHanTra: 10 } });
+  await prisma.kySaoKeThe.create({
+    data: { cardId: the.id, ngayChot: new Date("2026-06-30T00:00:00+07:00"), soDu: 5_000_000, laNeoMoSo: true },
+  });
+  await prisma.ganNenTangThe.create({
+    data: { cardId: the.id, nenTang: "META", tuNgay: new Date("2026-07-01T00:00:00+07:00") },
+  });
+  const phieu = await prisma.phieuNhapNo.create({
+    data: {
+      refId: "PURCHASE:714995134:del-1",
+      shopId: "714995134",
+      maPhieu: "PN-DEL-1",
+      ngayPhieu: new Date("2026-07-02T00:00:00+07:00"),
+      tongTien: 53_600_000,
+    },
+  });
+  const vi = await prisma.viAdsTraTruoc.create({
+    data: { nenTang: "SHOPEE_ADS", soDuNeo: 0, ngayNeo: new Date("2026-06-30T23:59:59+07:00") },
+  });
+  const ngay = new Date("2026-07-05T00:00:00+07:00");
+  await prisma.cashMovement.createMany({
+    data: [
+      { date: ngay, kind: "CARD_PAY", amount: 3_000_000, cardId: the.id, yeuCauId: "ycg-del-1" },
+      { date: ngay, kind: "SUPPLIER_PAY", amount: 20_000_000, phieuNhapId: phieu.id },
+      { date: ngay, kind: "ADS_TOPUP", amount: 1_000_000, viAdsId: vi.id, cardId: the.id },
+    ],
+  });
+  await prisma.expense.create({
+    data: { date: ngay, categoryId: "other", description: "Phí thường niên thẻ", amount: 499_000, cardId: the.id },
+  });
+  await prisma.yeuCauGhi.create({ data: { id: "ycg-del-1", loai: "TRA_GOP_NCC", bamNoiDung: "x", ketQua: { ok: true } } });
+  await prisma.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: "2026-07-01" } });
+}
+
 async function clearAll(): Promise<void> {
   // Con trước cha; thêm syncLog + setting + user (không nằm trong truncateBusinessTables).
   // Dọn cả kho thô + settlement vì test tự seed chúng (deleteAllData cố ý KHÔNG xoá kho thô).
@@ -279,6 +329,7 @@ async function clearAll(): Promise<void> {
   await prisma.cashMovement.deleteMany();
   await prisma.soTietKiem.deleteMany(); // SAU ThuNhap + CashMovement (FK Restrict)
   await prisma.loan.deleteMany(); // SAU CashMovement (FK Restrict)
+  await xoaNoPhaiTra(); // SAU Expense + CashMovement (FK Restrict cardId/phieuNhapId/viAdsId)
   await prisma.soDuChotThang.deleteMany(); // không FK — sót là seed lượt sau vấp UNIQUE `thang`
   await prisma.syncLog.deleteMany();
   await prisma.rawPancakeOrder.deleteMany();
@@ -395,6 +446,27 @@ describe("deleteAllData", () => {
     const backup = await prisma.syncLog.findFirst({ where: { kind: "BACKUP" } });
     expect(backup?.status).toBe("OK");
     expect(backup?.finishedAt).toEqual(MOC_SAO_LUU);
+  });
+
+  it("khối NỢ PHẢI TRẢ + mốc bật M ⇒ xoá sạch; Setting chỉ mất ĐÚNG khoá noPhaiTraTuNgay", async () => {
+    await seedNoPhaiTra();
+    const settingTruoc = await prisma.setting.count();
+    const res = await deleteAllData(SHOP_NAME);
+    expect(res.ok).toBe(true);
+
+    expect(await prisma.theTinDung.count()).toBe(0);
+    expect(await prisma.kySaoKeThe.count()).toBe(0);
+    expect(await prisma.ganNenTangThe.count()).toBe(0);
+    expect(await prisma.phieuNhapNo.count()).toBe(0);
+    expect(await prisma.viAdsTraTruoc.count()).toBe(0);
+    // Mã yêu cầu ghi: sót là lượt gửi lại được trả "đã ghi rồi" cho dòng tiền không còn tồn tại.
+    expect(await prisma.yeuCauGhi.count()).toBe(0);
+    expect(await prisma.cashMovement.count()).toBe(0);
+    expect(await prisma.expense.count()).toBe(0);
+    // Mốc M đi theo sổ; MỌI khoá Setting khác còn nguyên.
+    expect(await prisma.setting.findUnique({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } })).toBeNull();
+    expect(await prisma.setting.count()).toBe(settingTruoc - 1);
+    expect(await coDuLieuGiaoDich()).toBe(false);
   });
 
   it("GIỮ kho thô — bản gốc Pancake là đường dựng lại Silver duy nhất", async () => {
@@ -638,6 +710,20 @@ describe("coDuLieuGiaoDich", () => {
     await prisma.cashMovement.create({
       data: { date: new Date("2026-07-06T00:00:00+07:00"), kind: "CAPITAL_OUT", amount: 500_000, description: "còn lại" },
     });
+
+    expect(await coDuLieuGiaoDich()).toBe(true);
+  });
+
+  it("CHỈ còn hồ sơ nợ phải trả (thẻ, không dòng tiền) → vẫn true", async () => {
+    await xoaHetGiaoDich();
+    await prisma.theTinDung.create({ data: { ten: "Thẻ còn lại", ngayChotSaoKe: 25, ngayHanTra: 10 } });
+
+    expect(await coDuLieuGiaoDich()).toBe(true);
+  });
+
+  it("CHỈ còn mốc bật M trong Setting → vẫn true (nút xoá phải chạm khoá đó)", async () => {
+    await xoaHetGiaoDich();
+    await prisma.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: "2026-07-01" } });
 
     expect(await coDuLieuGiaoDich()).toBe(true);
   });

@@ -21,6 +21,7 @@ const T: TongNguon = {
   adsTiktokViCoDau: -1_500_000,
   thuNhap: 0,
   banTrucTiep: 0,
+  napViTuBank: 0,
 };
 
 /** Cùng fixture mẫu nhưng CÓ 8,5tr lãi sổ tiết kiệm đã nhận trong kỳ (bảng `ThuNhap`). */
@@ -45,6 +46,14 @@ describe("tinhQuyTuTong", () => {
     const t = { ...TONG_RONG, banTrucTiep: 930_000 };
     expect(tinhQuyTuTong(t)).toBe(930_000);
     expect(thuChiTuTong(t)).toEqual({ thu: 930_000, chi: 0 });
+  });
+
+  // Nạp ví ads trả trước TỪ NGÂN HÀNG (`ADS_TOPUP` không thẻ) là tiền thật rời quỹ ngày nạp — nguồn
+  // RIÊNG, không gộp `ghiTayRa`, vì cùng kind đó nạp bằng thẻ thì KHÔNG chạm quỹ (docTongNguon bỏ hẳn).
+  it("nạp ví ads từ ngân hàng 10 ⇒ quỹ −10, xếp vế CHI", () => {
+    const t = { ...TONG_RONG, napViTuBank: 10 };
+    expect(tinhQuyTuTong(t)).toBe(-10);
+    expect(thuChiTuTong(t)).toEqual({ thu: 0, chi: 10 });
   });
 
   it("thu − chi ≡ số dư", () => {

@@ -20,7 +20,10 @@ import { doiSoatTienVe } from "@/lib/reports/doi-soat-tien-ve";
 import { doiSoatTienVeShopee } from "@/lib/reports/doi-soat-tien-ve-shopee";
 import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
 import type { Quyen } from "@/lib/quyen/danh-muc-quyen";
-import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
+import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { docKhoiNoPhaiTra } from "@/lib/no-phai-tra/doc-khoi-no-phai-tra";
+import { docLuaChonDongTienNo } from "@/lib/no-phai-tra/lua-chon-dong-tien-no";
+import { coQuyen, laChuShop } from "@/lib/quyen/nguoi-dung-phien";
 import { listKhoanVay } from "@/lib/so-quy/khoan-vay-queries";
 import { docSoDuChot, ghepDoiChieuSoDuChot, tinhKhoanCauTruc } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import { docDuBaoQuy } from "@/lib/so-quy/du-bao-quy-queries";
@@ -199,7 +202,14 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
       </div>
     );
   } else if (tab === "so-chi-phi") {
-    content = <ExpenseLedgerTab sp={sp} range={range} choPhepSua={coQuyen(nd, "chi-phi:sua")} />;
+    content = (
+      <ExpenseLedgerTab
+        sp={sp}
+        range={range}
+        choPhepSua={coQuyen(nd, "chi-phi:sua")}
+        choPhepTruThe={coQuyen(nd, "tai-chinh-so-quy:sua")}
+      />
+    );
   } else if (tab === "so-quy") {
     // Sổ quỹ theo THÁNG — CÙNG kỳ + CÙNG thứ tự ensureRecurring→đọc với tab Dòng tiền, không thì
     // "Cuối kỳ" của hai tab lệch nhau.
@@ -249,6 +259,12 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
               console.error("[tai-chinh] docViTiktokConLaiToiThieu lỗi — ẩn ô Còn ở ví TikTok", e);
               return null;
             }),
+            // Lựa chọn thẻ/phiếu/ví cho 4 loại nợ ở form ghi tay — action đòi `tai-chinh-so-quy:sua`, nên
+            // thiếu quyền đó thì KHÔNG đọc (form không mời chọn loại chắc chắn bị từ chối). Chưa bật ⇒ null.
+            coQuyen(nd, "tai-chinh-so-quy:sua") ? docLuaChonDongTienNo() : null,
+            // Đã bật theo dõi nợ? Chỉ là MỘT NGÀY (không số Sổ quỹ nào) ⇒ đọc không cần quyền Sổ quỹ: cảnh
+            // báo "kỳ chưa ghi Nhập hàng" đổi luật sau mốc M cho MỌI người xem Dòng tiền.
+            docMocM(),
           ])
         : null,
       coQuy
@@ -264,6 +280,8 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
             // Danh sách sổ cho bảng + thẻ đến hạn, và Σ lãi đã nhận TRONG KỲ cho dòng tổng.
             listSoTietKiem(),
             tongLaiDaNhanTrongKy(monthRange),
+            // Khối "Nợ phải trả" (thẻ tín dụng + phiếu nhập còn nợ) — cùng quyền Sổ quỹ với khối Khoản vay.
+            docKhoiNoPhaiTra(),
           ])
         : null,
       // Bản chốt số dư THẬT của tháng đang xem + tháng liền trước. Chỉ dùng để ghép với `soQuy` nên
@@ -275,7 +293,7 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
 
     let khoiQuy: NhomQuy | null = null;
     if (nhomQuy) {
-      const [soQuy, loans, tietKiemTong, soTietKiem, laiTietKiemTrongKy] = nhomQuy;
+      const [soQuy, loans, tietKiemTong, soTietKiem, laiTietKiemTrongKy, noPhaiTra] = nhomQuy;
       // Thấu chi + tiền đang gửi: hai khoản làm tiền thật lệch sổ mà KHÔNG phải sai sổ — cùng phép
       // lọc với footnote thẻ Quỹ, nhưng thẻ chốt cần chúng dưới dạng SỐ để tự cộng/loại trừ.
       const doiChieu = banChotCap
@@ -300,11 +318,13 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
         laiTietKiemTrongKy,
         choPhepSua: coQuyen(nd, "tai-chinh-so-quy:sua"),
         choPhepGhiDongTien: coQuyen(nd, "tai-chinh-dong-tien:sua"),
+        noPhaiTra,
+        laChuShop: laChuShop(nd),
       };
     }
     let khoiDongTien: NhomDongTien | null = null;
     if (nhomDongTien) {
-      const [flow, doiSoat, doiSoatShopee, movements, viTiktok] = nhomDongTien;
+      const [flow, doiSoat, doiSoatShopee, movements, viTiktok, luaChonNo, mocNoPhaiTra] = nhomDongTien;
       khoiDongTien = {
         // Lãi tiết kiệm thuộc Sổ quỹ — thiếu quyền thì bỏ khỏi cả dòng tách lẫn số chênh lệch.
         flow: coQuy ? flow : dongTienKhongLaiTietKiem(flow),
@@ -315,6 +335,9 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
         choPhepSua: coQuyen(nd, "tai-chinh-dong-tien:sua"),
         choPhepSuaDongSoQuy: coQuyen(nd, "tai-chinh-so-quy:sua"),
         hienLaiTietKiem: coQuy,
+        noPhaiTra: luaChonNo,
+        choPhepSuaDieuChinh: laChuShop(nd),
+        daBatNoPhaiTra: mocNoPhaiTra !== null,
       };
     }
     content = (

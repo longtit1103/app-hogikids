@@ -846,11 +846,14 @@ describe("hàng rào cha khi bản đọc ngoài transaction đã cũ", () => {
     vi.restoreAllMocks();
   });
 
-  /** Ép đúng lượt đọc `truoc` trả về bản cũ; các lượt findUnique sau đó chạy thật. */
+  /**
+   * Ép đúng lượt đọc `truoc` trả về bản cũ; các lượt findUnique sau đó chạy thật. Bản cũ mang `kind`
+   * cũ (dòng trơn) vì action đọc thêm `kind` để chặn dòng loại nợ phải trả trước mọi nhánh.
+   */
   const epDocCu = (cu: { loanId: string | null; savingsId: string | null }) =>
     vi
       .spyOn(prisma.cashMovement, "findUnique")
-      .mockImplementationOnce((async () => cu) as never);
+      .mockImplementationOnce((async () => ({ kind: "CAPITAL_IN", ...cu })) as never);
 
   it("SỬA — dòng vừa bị lượt khác GẮN vào khoản vay ⇒ từ chối, không gỡ lén khỏi khoản đó", async () => {
     // DB: dòng đang thuộc khoản vay. Bản đọc của ta: còn thấy dòng trơn ⇒ nhánh "không cha",

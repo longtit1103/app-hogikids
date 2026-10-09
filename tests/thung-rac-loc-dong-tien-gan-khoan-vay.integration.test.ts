@@ -46,6 +46,10 @@ async function dongTienDaXoa(
     description: `dòng ${dem}`,
     loanId: lienKet.loanId ?? null,
     savingsId: lienKet.savingsId ?? null,
+    cardId: null,
+    phieuNhapId: null,
+    viAdsId: null,
+    yeuCauId: null,
     createdAt: new Date(2026, 8, 1),
   };
   const { nhan, soTien, ngay, anh } = dungAnhBanGhi({ bang: "CashMovement", banGhi });

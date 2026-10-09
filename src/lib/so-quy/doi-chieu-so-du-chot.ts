@@ -4,6 +4,13 @@ import type { DateRange } from "@/lib/date-range";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import type { SoQuyThang } from "@/lib/so-quy/cong-thuc-so-quy";
+import {
+  CAU_VI_ADS_TRA_TRUOC,
+  NGU_CANH_CHOT_CU,
+  type NguCanhChot,
+} from "@/lib/so-quy/ngu-canh-chot-no-phai-tra";
+
+export { CAU_VI_ADS_TRA_TRUOC, NGU_CANH_CHOT_CU, type NguCanhChot };
 
 /**
  * Đối chiếu số dư THẬT cuối tháng (chủ shop chốt tay) với số CUỐI KỲ của sổ quỹ.
@@ -88,7 +95,11 @@ export type CauChenhLech = {
 export const CAU_NO_THE_TIN_DUNG =
   "Kiểm trước: quảng cáo trả bằng thẻ tín dụng đã trừ vào sổ ngay ngày chạy — dư nợ thẻ CHƯA thanh toán phải trừ khỏi số dư ngân hàng khi chốt.";
 
-export function cauChenhLech(chenhLech: number, cauTruc: KhoanCauTruc = CAU_TRUC_RONG): CauChenhLech {
+export function cauChenhLech(
+  chenhLech: number,
+  cauTruc: KhoanCauTruc = CAU_TRUC_RONG,
+  nguCanh: NguCanhChot = NGU_CANH_CHOT_CU
+): CauChenhLech {
   const { duNoThauChi, tienDangGui } = cauTruc;
   if (chenhLech === 0) {
     return {
@@ -115,7 +126,8 @@ export function cauChenhLech(chenhLech: number, cauTruc: KhoanCauTruc = CAU_TRUC
         "Có khoản thu chưa ghi vào sổ, hoặc khoản chi ghi thừa / ghi trùng." +
         // Quảng cáo trả bằng THẺ TÍN DỤNG (chủ shop chốt 24/09): sổ trừ chi phí ads ngay ngày chạy, còn tiền
         // chỉ rời ngân hàng lúc thanh toán sao kê ⇒ chưa trả thẻ thì tiền thật "thừa" đúng bằng dư nợ thẻ.
-        ` ${CAU_NO_THE_TIN_DUNG}` +
+        // SAU mốc bật nợ phải trả thì không còn đúng: nợ thẻ nằm ngoài quỹ, sổ chỉ trừ khi trả thẻ thật.
+        (nguCanh.sauBatNoPhaiTra ? "" : ` ${CAU_NO_THE_TIN_DUNG}`) +
         (tienDangGui > 0
           ? ` Kiểm trước: số dư bạn gõ có cộng nhầm ${formatVnd(tienDangGui)} đang gửi tiết kiệm / tiền gửi bắt buộc không.`
           : ""),
@@ -124,7 +136,9 @@ export function cauChenhLech(chenhLech: number, cauTruc: KhoanCauTruc = CAU_TRUC
   }
   return {
     nhan: `Sổ NHIỀU HƠN tiền thật ${formatVnd(-chenhLech)}`,
-    giaiThich: "Có khoản chi chưa ghi vào sổ, hoặc khoản thu ghi thừa / ghi trùng.",
+    giaiThich:
+      "Có khoản chi chưa ghi vào sổ, hoặc khoản thu ghi thừa / ghi trùng." +
+      (nguCanh.coHoSoViAds ? ` ${CAU_VI_ADS_TRA_TRUOC}` : ""),
     tone: "am",
   };
 }

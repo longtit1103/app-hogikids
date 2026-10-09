@@ -54,6 +54,11 @@ export type ExpenseFormModalProps = {
    * giữ nguyên mọi hành vi cho các nơi gọi cũ (`/chi-phi`) không truyền prop này.
    */
   createSuccessMessage?: string;
+  /**
+   * Thẻ tín dụng cho ô "Trừ vào thẻ" — chỉ truyền ở nơi ghi chi phí chung (Sổ chi phí). `mocM` (`yyyy-MM-dd`)
+   * null = chưa bật theo dõi nợ phải trả ⇒ KHÔNG hiện ô, form y như cũ. Không truyền ⇒ cũng không hiện.
+   */
+  theTinDung?: { mocM: string | null; the: { id: string; ten: string }[] };
 };
 
 type FormState = {
@@ -64,6 +69,7 @@ type FormState = {
   channelId: string | null;
   description: string;
   recurringMonthly: boolean;
+  cardId: string;
 };
 
 function buildInitialState(expense: ExpenseRow | undefined, preset: ExpenseFormModalProps["preset"]): FormState {
@@ -76,6 +82,7 @@ function buildInitialState(expense: ExpenseRow | undefined, preset: ExpenseFormM
       channelId: expense.channelId,
       description: expense.description,
       recurringMonthly: false, // n/a ở chế độ sửa — toggle bị ẩn
+      cardId: expense.cardId ?? "",
     };
   }
   return {
@@ -86,6 +93,7 @@ function buildInitialState(expense: ExpenseRow | undefined, preset: ExpenseFormM
     channelId: preset?.channelId ?? null,
     description: "",
     recurringMonthly: false,
+    cardId: "",
   };
 }
 
@@ -130,6 +138,7 @@ export function ExpenseFormModal({
   expense,
   preset,
   createSuccessMessage,
+  theTinDung,
 }: ExpenseFormModalProps) {
   const router = useRouter();
   const isEdit = Boolean(expense);
@@ -142,6 +151,7 @@ export function ExpenseFormModal({
   const [channelId, setChannelId] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [recurringMonthly, setRecurringMonthly] = useState(false);
+  const [cardId, setCardId] = useState("");
   const [channelTouched, setChannelTouched] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -163,6 +173,7 @@ export function ExpenseFormModal({
     setChannelId(initial.channelId);
     setDescription(initial.description);
     setRecurringMonthly(initial.recurringMonthly);
+    setCardId(initial.cardId);
     setChannelTouched(Boolean(preset?.lockChannel));
     setFieldErrors({});
     setCanhBaoDaNhan(null);
@@ -181,11 +192,12 @@ export function ExpenseFormModal({
     channelId,
     description,
     recurringMonthly,
+    cardId,
   });
   const canhBaoTrung = canhBaoDaNhan?.anhChup === anhChupHienTai ? canhBaoDaNhan.cau : null;
 
   function isDirty(): boolean {
-    const current: FormState = { date, categoryId, adsSource, amount, channelId, description, recurringMonthly };
+    const current: FormState = { date, categoryId, adsSource, amount, channelId, description, recurringMonthly, cardId };
     return JSON.stringify(current) !== initialSnapshotRef.current;
   }
 
@@ -250,6 +262,19 @@ export function ExpenseFormModal({
   // kênh vừa chọn vẫn còn. Lúc gửi thì ép null — dòng lỡ mang kênh từ trước tự gỡ ở lượt Lưu này.
   const khoaKenhLaiVay = categoryId === DANH_MUC_LAI_VAY;
 
+  // Ô "Trừ vào thẻ": sau khi bật theo dõi nợ, khoản chi tay (không phải ads, ngày ≥ M) có thể ghi nợ vào một
+  // thẻ thay vì trừ quỹ ngay — quỹ chỉ giảm khi trả thẻ. Dòng ads thẻ suy từ nền tảng đã gắn; dòng tự động
+  // (định kỳ / import / API) không chọn thẻ ở đây.
+  const mocM = theTinDung?.mocM ?? null;
+  const hienTheTru =
+    mocM !== null &&
+    (theTinDung?.the.length ?? 0) > 0 &&
+    categoryId !== "" &&
+    categoryId !== "ads" &&
+    (!isEdit || expense?.source === "MANUAL") &&
+    date !== "" &&
+    date >= mocM;
+
   async function handleSubmit() {
     // Ô Ngày trống ⇒ Invalid Date ⇒ server nhận null. Nút Lưu đã khoá (canSave) nên bình thường không tới
     // đây; nếu ai đó nới canSave sau này thì vẫn chặn và NÓI RÕ thay vì im lặng.
@@ -267,6 +292,7 @@ export function ExpenseFormModal({
       amount,
       channelId: khoaKenhLaiVay ? null : channelId,
       description,
+      ...(hienTheTru ? { cardId: cardId === "" ? null : cardId } : {}),
       ...(isEdit ? {} : { recurringMonthly, xacNhanTrung: canhBaoTrung !== null }),
     };
     try {
@@ -363,7 +389,14 @@ export function ExpenseFormModal({
             </Field>
           )}
 
-          {categoryId === "ads" && (
+          {categoryId === "ads" && mocM !== null && (
+            <p className="text-xs text-warning" data-testid="expense-canh-bao-tra-sao-ke">
+              Trả sao kê thẻ ghi ở Sổ quỹ → Trả thẻ; KHÔNG ghi ở đây — chi phí quảng cáo đã được ghi theo từng
+              ngày chạy, ghi thêm là tính hai lần.
+            </p>
+          )}
+
+          {categoryId === "ads" && mocM === null && (
             // Ads trả bằng thẻ tín dụng đã vào sổ theo từng ngày chạy (tự về mỗi đêm / import) — ghi thêm
             // khoản THANH TOÁN SAO KÊ thẻ ở đây là chi phí quảng cáo bị tính HAI LẦN (lãi hụt, quỹ tụt đôi).
             <p className="text-xs text-warning" data-testid="expense-canh-bao-the-tin-dung">
@@ -392,6 +425,28 @@ export function ExpenseFormModal({
               </span>
             </div>
           </Field>
+
+          {hienTheTru && (
+            <Field label="Trừ vào thẻ" error={fieldErrors.cardId}>
+              <Select value={cardId === "" ? NONE : cardId} onValueChange={(v) => setCardId(!v || v === NONE ? "" : v)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Không — trừ quỹ ngay" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Không — trừ quỹ ngay</SelectItem>
+                  {theTinDung?.the.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.ten}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Chọn thẻ nếu khoản này (phí/lãi thẻ…) được tính vào dư nợ thẻ: vẫn vào Lãi/Lỗ ngay, nhưng quỹ chỉ
+                giảm khi bạn trả thẻ.
+              </p>
+            </Field>
+          )}
 
           <Field label="Kênh" error={fieldErrors.channelId}>
             <Select

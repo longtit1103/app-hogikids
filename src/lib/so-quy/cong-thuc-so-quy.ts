@@ -1,20 +1,23 @@
 /**
  * Công thức Sổ quỹ — THUẦN, không Prisma. Quỹ = tiền THẬT: ghi tay + TikTok về bank −
  * Shopee rút ví (có dấu) − Sổ chi phí + cộng lại ads TikTok sàn đã trừ từ ví (có dấu, lưu âm) + thu
- * nhập tài chính + tiền khách trả tại shop cho đơn bán trực tiếp.
+ * nhập tài chính + tiền khách trả tại shop cho đơn bán trực tiếp − nạp ví ads trả trước từ ngân hàng.
  * KHÔNG dùng số thu DỰ KIẾN theo đơn đã giao, cũng KHÔNG dùng net sàn chốt còn nằm trong ví — cộng
  * chúng cùng tiền đã về là đếm 2 lần (lưới tests/unit/so-quy/khong-dung-tien-du-kien.test.ts).
  */
 export type TongNguon = {
   /** Σ CashMovement chiều VÀO (dương). */
   ghiTayVao: number;
-  /** Σ CashMovement chiều RA (dương). */
+  /** Σ CashMovement chiều RA (dương) — KHÔNG gồm `ADS_TOPUP` (nguồn riêng `napViTuBank`). */
   ghiTayRa: number;
   /** Σ TiktokPayment.settlementValue trạng thái PAID (dương). */
   tiktokVeBank: number;
   /** Σ ShopeeSettlement.amount type=WITHDRAWAL, CÓ DẤU (rút = âm). */
   shopeeRutViCoDau: number;
-  /** Σ Expense.amount MỌI danh mục, MỌI nguồn (dương) — gồm cả Nhập hàng. */
+  /**
+   * Σ Expense.amount MỌI danh mục (dương, gồm cả Nhập hàng) TRỪ phần đã có thẻ/ví gánh (sau mốc M): chi
+   * trừ vào thẻ, ads nền tảng đã gắn thẻ, ads ví trả trước — tiền đó rời quỹ lúc trả thẻ / nạp ví.
+   */
   chiPhi: number;
   /** Σ TiktokAdsSettlement.settlementAmount, CÓ DẤU (sàn trừ ví ⇒ lưu ÂM). */
   adsTiktokViCoDau: number;
@@ -25,6 +28,12 @@ export type TongNguon = {
    * THẬT, không phải tiền dự kiến như đơn sàn. Đơn đã vào đây thì KHÔNG ghi tay `DIRECT_SALE`.
    */
   banTrucTiep: number;
+  /**
+   * Σ `CashMovement` kind `ADS_TOPUP` KHÔNG `cardId` (dương) — nạp ví ads trả trước từ ngân hàng: tiền
+   * thật rời quỹ ngày nạp, vế CHI. TÁCH khỏi `ghiTayRa` vì cùng kind đó nạp BẰNG THẺ thì không chạm
+   * quỹ (nợ thẻ tăng) — chiều không suy được từ `kind` một mình. Dòng có `cardId` không vào nguồn nào.
+   */
+  napViTuBank: number;
 };
 
 export const TONG_RONG: TongNguon = {
@@ -36,6 +45,7 @@ export const TONG_RONG: TongNguon = {
   adsTiktokViCoDau: 0,
   thuNhap: 0,
   banTrucTiep: 0,
+  napViTuBank: 0,
 };
 
 /**
@@ -58,6 +68,7 @@ export function dongGopTheoNguon(t: TongNguon): number[] {
     -t.adsTiktokViCoDau, // lưu âm ⇒ −âm = cộng lại phần ví đã trả ads
     t.thuNhap, // tiền lãi ĐÃ VỀ tài khoản — dương, nên `thuChiTuTong` tự xếp vào vế THU
     t.banTrucTiep, // khách trả tại shop — dương, vế THU
+    -t.napViTuBank, // nạp ví ads từ ngân hàng — tiền rời quỹ, vế CHI
   ];
 }
 

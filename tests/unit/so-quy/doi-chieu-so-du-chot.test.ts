@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { SoQuyThang } from "@/lib/so-quy/cong-thuc-so-quy";
 import {
+  CAU_NO_THE_TIN_DUNG,
   CAU_TRUC_RONG,
+  CAU_VI_ADS_TRA_TRUOC,
   cauChenhLech,
   ghepDoiChieuSoDuChot,
   thangChot,
@@ -77,6 +79,25 @@ describe("cauChenhLech — chữ chỉ ĐÚNG hướng đi tìm", () => {
       giaiThich: "Có khoản chi chưa ghi vào sổ, hoặc khoản thu ghi thừa / ghi trùng.",
       tone: "am",
     });
+  });
+
+  it("SAU mốc bật nợ phải trả ⇒ bỏ câu 'trừ dư nợ thẻ' (nợ thẻ nằm ngoài quỹ, ô ngân hàng luôn số thật)", () => {
+    const c = cauChenhLech(3_000_000, CAU_TRUC_RONG, { sauBatNoPhaiTra: true, coHoSoViAds: false });
+    expect(c.giaiThich).toBe("Có khoản thu chưa ghi vào sổ, hoặc khoản chi ghi thừa / ghi trùng.");
+    expect(c.giaiThich).not.toContain(CAU_NO_THE_TIN_DUNG);
+  });
+
+  it("ÂM + có hồ sơ ví quảng cáo trả trước ⇒ gợi ý lần nạp ví chưa ghi; không có ví ⇒ không gợi ý", () => {
+    expect(cauChenhLech(-2_000_000, CAU_TRUC_RONG, { sauBatNoPhaiTra: true, coHoSoViAds: true }).giaiThich).toContain(
+      CAU_VI_ADS_TRA_TRUOC
+    );
+    expect(cauChenhLech(-2_000_000, CAU_TRUC_RONG, { sauBatNoPhaiTra: true, coHoSoViAds: false }).giaiThich).not.toContain(
+      "ví quảng cáo"
+    );
+    // Dương thì không gợi ý ví (ví làm sổ NHIỀU hơn, không phải ít hơn).
+    expect(cauChenhLech(2_000_000, CAU_TRUC_RONG, { sauBatNoPhaiTra: true, coHoSoViAds: true }).giaiThich).not.toContain(
+      "ví quảng cáo"
+    );
   });
 
   it("DƯƠNG đúng bằng tiền đang gửi ⇒ 'bạn cộng nhầm', KHÔNG phải sai sổ", () => {

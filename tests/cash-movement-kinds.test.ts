@@ -3,8 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   CASH_MOVEMENT_KIND_META,
   CASH_MOVEMENT_KINDS,
+  CASH_MOVEMENT_KINDS_TAT_CA,
+  chieuTien,
   isCashMovementKind,
+  isCashMovementKindTatCa,
   isInflow,
+  KIND_CAN_PHIEU,
+  KIND_CAN_THE,
+  KIND_CUTOVER,
+  KIND_VI_ADS,
+  kindGanSoQuy,
   signedAmount,
 } from "@/lib/cash-movements/cash-movement-kinds";
 
@@ -79,5 +87,82 @@ describe("cash-movement-kinds", () => {
     expect(isCashMovementKind("")).toBe(false);
     expect(isCashMovementKind(42)).toBe(false);
     expect(isCashMovementKind(null)).toBe(false);
+  });
+});
+
+/**
+ * Sáu kind "Nợ phải trả" (thẻ / NCC / điều chỉnh mở sổ / nạp ví ads) sống ở danh sách TẤT CẢ cho META,
+ * chiều tiền, dòng chạy, thùng rác — nhưng KHÔNG lọt vào danh sách 10 kind của form + action thường
+ * (P1 chưa mở đường ghi nào cho chúng). `ADS_TOPUP` là kind DUY NHẤT có chiều tiền phụ thuộc dòng
+ * (nạp từ thẻ ⇒ không chạm quỹ), nên `isInflow` cấm nó ở mức kiểu lẫn lúc chạy.
+ */
+describe("cash-movement-kinds — 6 kind nợ phải trả", () => {
+  const MOI = ["CARD_PAY", "SUPPLIER_PAY", "SUPPLIER_REFUND", "CUTOVER_ADJ_IN", "CUTOVER_ADJ_OUT", "ADS_TOPUP"] as const;
+
+  it("CASH_MOVEMENT_KINDS (form + action thường) vẫn đúng 10 kind cũ, không chứa kind mới nào", () => {
+    expect(CASH_MOVEMENT_KINDS).toHaveLength(10);
+    for (const k of MOI) expect((CASH_MOVEMENT_KINDS as readonly string[]).includes(k)).toBe(false);
+  });
+
+  it("TẤT CẢ = 16 kind = 10 cũ + 6 mới, không trùng; mỗi kind có nhãn + gợi ý", () => {
+    expect(CASH_MOVEMENT_KINDS_TAT_CA).toHaveLength(16);
+    expect(new Set(CASH_MOVEMENT_KINDS_TAT_CA).size).toBe(16);
+    expect([...CASH_MOVEMENT_KINDS_TAT_CA].sort()).toEqual([...CASH_MOVEMENT_KINDS, ...MOI].sort());
+    for (const k of CASH_MOVEMENT_KINDS_TAT_CA) {
+      expect(CASH_MOVEMENT_KIND_META[k].label.length).toBeGreaterThan(0);
+      expect(CASH_MOVEMENT_KIND_META[k].hint.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("chiều tiền từng kind mới", () => {
+    expect(isInflow("SUPPLIER_REFUND")).toBe(true);
+    expect(isInflow("CUTOVER_ADJ_IN")).toBe(true);
+    expect(isInflow("CARD_PAY")).toBe(false);
+    expect(isInflow("SUPPLIER_PAY")).toBe(false);
+    expect(isInflow("CUTOVER_ADJ_OUT")).toBe(false);
+    expect(signedAmount("CARD_PAY", 7_000_000)).toBe(-7_000_000);
+    expect(signedAmount("SUPPLIER_REFUND", 2_000_000)).toBe(2_000_000);
+  });
+
+  it("chieuTien: ADS_TOPUP có thẻ ⇒ KHONG_QUY, không thẻ ⇒ OUT; kind khác theo META bất kể cờ thẻ", () => {
+    expect(chieuTien("ADS_TOPUP", { coCard: true })).toBe("KHONG_QUY");
+    expect(chieuTien("ADS_TOPUP", { coCard: false })).toBe("OUT");
+    expect(chieuTien("CARD_PAY", { coCard: true })).toBe("OUT");
+    expect(chieuTien("SUPPLIER_REFUND", { coCard: false })).toBe("IN");
+    expect(chieuTien("LOAN_IN", { coCard: false })).toBe("IN");
+    expect(chieuTien("CAPITAL_OUT", { coCard: false })).toBe("OUT");
+    // 15 kind có chiều cố định: chieuTien luôn khớp isInflow — một định nghĩa dấu, không hai.
+    for (const k of CASH_MOVEMENT_KINDS_TAT_CA) {
+      if (k === "ADS_TOPUP") continue;
+      for (const coCard of [true, false]) expect(chieuTien(k, { coCard })).toBe(isInflow(k) ? "IN" : "OUT");
+    }
+  });
+
+  it("isInflow / signedAmount TỪ CHỐI ADS_TOPUP (chiều phụ thuộc nguồn nạp) — cả kiểu lẫn lúc chạy", () => {
+    // @ts-expect-error — ADS_TOPUP không có chiều cố định; phải gọi chieuTien với cờ thẻ.
+    expect(() => isInflow("ADS_TOPUP")).toThrow(/ADS_TOPUP/);
+    // @ts-expect-error — cùng lý do.
+    expect(() => signedAmount("ADS_TOPUP", 1)).toThrow(/ADS_TOPUP/);
+  });
+
+  it("hằng nhóm kind đúng hợp đồng khoá", () => {
+    expect(KIND_CAN_THE).toEqual(["CARD_PAY"]);
+    expect(KIND_CAN_PHIEU).toEqual(["SUPPLIER_PAY", "SUPPLIER_REFUND"]);
+    expect(KIND_CUTOVER).toEqual(["CUTOVER_ADJ_IN", "CUTOVER_ADJ_OUT"]);
+    expect(KIND_VI_ADS).toEqual(["ADS_TOPUP"]);
+  });
+
+  it("kind mới không phải 'kind gắn Sổ quỹ' (khoản vay / sổ tiết kiệm)", () => {
+    for (const k of MOI) expect(kindGanSoQuy(k)).toBe(false);
+  });
+
+  it("isCashMovementKind CHỈ nhận 10 kind form; isCashMovementKindTatCa nhận đủ 16", () => {
+    for (const k of MOI) {
+      expect(isCashMovementKind(k)).toBe(false);
+      expect(isCashMovementKindTatCa(k)).toBe(true);
+    }
+    expect(isCashMovementKindTatCa("LOAN_IN")).toBe(true);
+    expect(isCashMovementKindTatCa("card_pay")).toBe(false);
+    expect(isCashMovementKindTatCa(undefined)).toBe(false);
   });
 });

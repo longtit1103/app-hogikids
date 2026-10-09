@@ -2,8 +2,9 @@ import { endOfDay } from "date-fns";
 
 import {
   CASH_MOVEMENT_KIND_META,
+  chieuTien,
   type CashDirection,
-  type CashMovementKind,
+  type CashMovementKindTatCa,
 } from "@/lib/cash-movements/cash-movement-kinds";
 import { type DateRange } from "@/lib/date-range";
 import { prisma } from "@/lib/prisma";
@@ -17,10 +18,11 @@ import type { CashMovementKind as PrismaCashMovementKind } from "@/generated/pri
  * `tests/unit/cash-movements/khong-ro-ri-vao-pnl.test.ts`).
  */
 
-// Đồng bộ HAI CHIỀU giữa tuple thuần (cash-movement-kinds.ts) và enum Prisma: thêm/bớt một giá trị ở
-// một bên mà quên bên kia là `tsc --noEmit` đỏ NGAY TẠI ĐÂY, không đợi tới lúc chạy.
-type KhopEnumPrisma = [CashMovementKind] extends [PrismaCashMovementKind]
-  ? [PrismaCashMovementKind] extends [CashMovementKind]
+// Đồng bộ HAI CHIỀU giữa tuple thuần ĐỦ 16 kind (cash-movement-kinds.ts) và enum Prisma: thêm/bớt một
+// giá trị ở một bên mà quên bên kia là `tsc --noEmit` đỏ NGAY TẠI ĐÂY, không đợi tới lúc chạy.
+// (Tuple 10 kind của form/action CỐ Ý nhỏ hơn enum — không so ở đây.)
+type KhopEnumPrisma = [CashMovementKindTatCa] extends [PrismaCashMovementKind]
+  ? [PrismaCashMovementKind] extends [CashMovementKindTatCa]
     ? true
     : never
   : never;
@@ -28,7 +30,7 @@ const khopEnumPrisma: KhopEnumPrisma = true;
 void khopEnumPrisma;
 
 export type CashMovementKindTotal = {
-  kind: CashMovementKind;
+  kind: CashMovementKindTatCa;
   label: string;
   direction: CashDirection;
   amount: number;
@@ -48,19 +50,24 @@ function trongKy(range: DateRange) {
 }
 
 export async function getCashMovementSummary(range: DateRange): Promise<CashMovementSummary> {
+  // Nhóm theo CẢ `cardId`: chiều của `ADS_TOPUP` phụ thuộc dòng (nạp bằng thẻ ⇒ không chạm quỹ, bỏ
+  // khỏi tổng vào/ra). Kind khác gộp lại về một mục theo kind như cũ.
   const grouped = await prisma.cashMovement.groupBy({
-    by: ["kind"],
+    by: ["kind", "cardId"],
     where: trongKy(range),
     _sum: { amount: true },
   });
 
-  const byKind: CashMovementKindTotal[] = grouped
-    .map((g) => ({
-      kind: g.kind,
-      label: CASH_MOVEMENT_KIND_META[g.kind].label,
-      direction: CASH_MOVEMENT_KIND_META[g.kind].direction,
-      amount: g._sum.amount ?? 0,
-    }))
+  const theoKind = new Map<CashMovementKindTatCa, { direction: CashDirection; amount: number }>();
+  for (const g of grouped) {
+    const chieu = chieuTien(g.kind, { coCard: g.cardId !== null });
+    if (chieu === "KHONG_QUY") continue;
+    const cu = theoKind.get(g.kind);
+    theoKind.set(g.kind, { direction: chieu, amount: (cu?.amount ?? 0) + (g._sum.amount ?? 0) });
+  }
+
+  const byKind: CashMovementKindTotal[] = [...theoKind]
+    .map(([kind, v]) => ({ kind, label: CASH_MOVEMENT_KIND_META[kind].label, direction: v.direction, amount: v.amount }))
     .filter((b) => b.amount > 0)
     .sort((a, b) => {
       if (a.direction !== b.direction) return a.direction === "IN" ? -1 : 1;
@@ -81,7 +88,8 @@ export async function getCashMovementSummary(range: DateRange): Promise<CashMove
 export type CashMovementRowCoBan = {
   id: string;
   date: Date;
-  kind: CashMovementKind;
+  /** Đủ 16 kind — dòng nợ phải trả cũng hiện ở bảng, nhưng form/action thường KHÔNG sửa/xoá được nó. */
+  kind: CashMovementKindTatCa;
   amount: number;
   description: string;
 };
@@ -99,6 +107,15 @@ export type CashMovementRow = CashMovementRowCoBan & {
   savingsId: string | null;
   /** Tên sổ để bảng hiện thẳng, cùng lý do với `loanName`. */
   savingsName: string | null;
+  /**
+   * Hồ sơ nợ phải trả (thẻ / phiếu nhập / ví ads) — form SỬA prefill đúng ô chọn từ đây, cùng lý do với
+   * `savingsId`. Chỉ người có quyền Sổ quỹ mới nhận (id hồ sơ là chìa gọi thẳng action ghi nợ).
+   */
+  cardId: string | null;
+  phieuNhapId: string | null;
+  viAdsId: string | null;
+  /** Tên hồ sơ nợ để bảng hiện dưới badge: tên thẻ · mã phiếu · nền tảng ví (null = không gắn). */
+  tenHoSoNo: string | null;
 };
 
 /**
@@ -134,11 +151,22 @@ export async function listCashMovements(
       loan: { select: { name: true } },
       savingsId: true,
       soTietKiem: { select: { name: true } },
+      cardId: true,
+      theTinDung: { select: { ten: true } },
+      phieuNhapId: true,
+      phieuNhap: { select: { maPhieu: true } },
+      viAdsId: true,
+      viAds: { select: { nenTang: true } },
     },
   });
-  return rows.map(({ loan, soTietKiem, ...r }) => ({
+  return rows.map(({ loan, soTietKiem, theTinDung, phieuNhap, viAds, ...r }) => ({
     ...r,
     loanName: loan?.name ?? null,
     savingsName: soTietKiem?.name ?? null,
+    // `ADS_TOPUP` nạp bằng thẻ mang cả ví lẫn thẻ — nối hai tên để bảng nói đủ "ví nào, thẻ nào".
+    tenHoSoNo:
+      [viAds?.nenTang, theTinDung?.ten, phieuNhap ? `phiếu ${phieuNhap.maPhieu}` : undefined]
+        .filter((x): x is string => Boolean(x))
+        .join(" · ") || null,
   }));
 }

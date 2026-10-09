@@ -15,7 +15,8 @@ import type { DongSoQuy, NguonDongQuy } from "@/lib/so-quy/dong-chay-so-quy-type
 /**
  * Một khoản tiền chưa xếp: mang giá trị THÔ đúng như cột DB (có dấu nếu cột có dấu) cùng tên trường
  * `TongNguon` mà `docTongNguon` cộng nó vào. Kiểu hợp buộc mỗi nguồn chỉ đi đúng trường của nó —
- * ghi tay là nguồn duy nhất có hai trường (chiều suy từ `kind`).
+ * ghi tay là nguồn duy nhất có nhiều trường (chiều suy từ `kind`; nạp ví ads từ ngân hàng `ADS_TOPUP`
+ * đi trường riêng `napViTuBank`).
  */
 export type SuKienQuy = {
   key: string;
@@ -24,7 +25,7 @@ export type SuKienQuy = {
   /** Giá trị THÔ theo đúng nghĩa của `truong` (vd `shopeeRutViCoDau` rút = âm). */
   giaTri: number;
 } & (
-  | { nguon: "GHI_TAY"; truong: "ghiTayVao" | "ghiTayRa" }
+  | { nguon: "GHI_TAY"; truong: "ghiTayVao" | "ghiTayRa" | "napViTuBank" }
   | { nguon: "TIKTOK_VE_BANK"; truong: "tiktokVeBank" }
   | { nguon: "SHOPEE_RUT_VI"; truong: "shopeeRutViCoDau" }
   | { nguon: "CHI_PHI" | "CHI_PHI_ADS_GOP"; truong: "chiPhi" }

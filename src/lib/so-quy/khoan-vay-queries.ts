@@ -1,7 +1,7 @@
 import { type LoanKind } from "@/generated/prisma/client";
 import { startOfDay } from "date-fns";
 
-import { type CashMovementKind } from "@/lib/cash-movements/cash-movement-kinds";
+import { type CashMovementKindTatCa } from "@/lib/cash-movements/cash-movement-kinds";
 import { prisma } from "@/lib/prisma";
 import { deXuatTatToan } from "@/lib/so-quy/lai-thau-chi";
 import {
@@ -26,7 +26,7 @@ const KIND_GOC = ["LOAN_IN", "LOAN_REPAY"] as const;
 /** Sổ tiết kiệm bắt buộc — CỐ Ý tách khỏi `KIND_GOC`, xem `tienGuiDangGiu` ở `vi-tu-du-no.ts`. */
 const KIND_TIEN_GUI = ["DEPOSIT_OUT", "DEPOSIT_IN"] as const;
 
-type DongGoc = { kind: CashMovementKind; amount: number; date: Date };
+type DongGoc = { kind: CashMovementKindTatCa; amount: number; date: Date };
 
 /** Gom dòng gốc theo khoản vay: 1 lượt đọc cho MỌI khoản (số khoản vay chỉ vài dòng). */
 async function docDongGoc(): Promise<Map<string, DongGoc[]>> {

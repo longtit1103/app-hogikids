@@ -1,19 +1,28 @@
+import { format } from "date-fns";
+
 import type { Prisma } from "@/generated/prisma/client";
 
 import type { CashMovementKind } from "@/lib/cash-movements/cash-movement-kinds";
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
+import { chanNhapHangSauM, LoiNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
+import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 import { duNoSauKhiGhi, tienGuiDangGiu } from "@/lib/so-quy/vi-tu-du-no";
 import { soDuDangGui } from "@/lib/tiet-kiem/vi-tu-so-tiet-kiem";
 import {
   doiNguocBanGhi,
   type AnhBanGhi,
+  type BangDung,
   type BangThungRac,
 } from "@/lib/thung-rac/chup-anh-ban-ghi";
-import type {
-  ChaDaMat,
-  ChaDaTatToan,
-  TinhTrangKhoiPhuc,
-  TrucSoDuAm,
+import { viPhamNoPhaiTraKhiKhoiPhuc } from "@/lib/thung-rac/cua-so-no-phai-tra-khoi-phuc";
+import {
+  CAU_HO_SO_NO_SAU_BAT,
+  CAU_NHAP_HANG_SAU_M,
+  type ChaDaMat,
+  type ChaDaTatToan,
+  type TinhTrangKhoiPhuc,
+  type TrucSoDuAm,
 } from "@/lib/thung-rac/ly-do-khong-khoi-phuc";
 
 /**
@@ -30,7 +39,7 @@ import type {
  */
 
 /** Một bản ghi cần dựng lại — đã đổi ngược chuỗi ISO về `Date`. */
-export type BanGhiCanDung = { bang: BangThungRac; data: Record<string, unknown> };
+export type BanGhiCanDung = { bang: BangDung; data: Record<string, unknown> };
 
 /**
  * Tách ảnh chụp thành danh sách bản ghi theo ĐÚNG thứ tự ghi (cha → dòng tiền → thu nhập).
@@ -41,6 +50,11 @@ export type BanGhiCanDung = { bang: BangThungRac; data: Record<string, unknown> 
 export function tachAnh(bang: BangThungRac, anh: AnhBanGhi): BanGhiCanDung[] {
   return [
     { bang, data: doiNguocBanGhi(bang, anh.chinh) },
+    // Neo / kỳ sao kê của thẻ — CON của `TheTinDung` (FK Restrict) nên ghi ngay SAU cha.
+    ...(anh.kySaoKe ?? []).map((k) => ({
+      bang: "KySaoKeThe" as const,
+      data: doiNguocBanGhi("KySaoKeThe", k),
+    })),
     ...anh.cashMovements.map((m) => ({
       bang: "CashMovement" as const,
       data: doiNguocBanGhi("CashMovement", m),
@@ -54,7 +68,7 @@ export function tachAnh(bang: BangThungRac, anh: AnhBanGhi): BanGhiCanDung[] {
 
 async function coBanGhi(
   tx: Prisma.TransactionClient,
-  bang: BangThungRac,
+  bang: BangDung,
   id: string
 ): Promise<boolean> {
   switch (bang) {
@@ -68,15 +82,32 @@ async function coBanGhi(
       return (await tx.loan.count({ where: { id } })) > 0;
     case "SoTietKiem":
       return (await tx.soTietKiem.count({ where: { id } })) > 0;
+    case "PhieuNhapNo":
+      return (await tx.phieuNhapNo.count({ where: { id } })) > 0;
+    case "TheTinDung":
+      return (await tx.theTinDung.count({ where: { id } })) > 0;
+    case "KySaoKeThe":
+      return (await tx.kySaoKeThe.count({ where: { id } })) > 0;
+    case "ViAdsTraTruoc":
+      return (await tx.viAdsTraTruoc.count({ where: { id } })) > 0;
   }
 }
 
-/** Id của dòng SỐNG đang giữ `refId` này, hoặc null. Chỉ `Expense` và `ThuNhap` có cột đó. */
+/**
+ * Id của dòng SỐNG đang giữ khoá duy nhất này, hoặc null. `refId` của `Expense`/`ThuNhap`/`PhieuNhapNo`
+ * (một phiếu Pancake = một hồ sơ nợ) và `nenTang` của `ViAdsTraTruoc` (một ví mỗi nền tảng).
+ */
 async function chuCuaRefId(
   tx: Prisma.TransactionClient,
-  bang: BangThungRac,
+  bang: BangDung,
   refId: string
 ): Promise<string | null> {
+  if (bang === "PhieuNhapNo") {
+    return (await tx.phieuNhapNo.findUnique({ where: { refId }, select: { id: true } }))?.id ?? null;
+  }
+  if (bang === "ViAdsTraTruoc") {
+    return (await tx.viAdsTraTruoc.findUnique({ where: { nenTang: refId }, select: { id: true } }))?.id ?? null;
+  }
   if (bang === "Expense") {
     return (await tx.expense.findUnique({ where: { refId }, select: { id: true } }))?.id ?? null;
   }
@@ -101,6 +132,17 @@ function chaCuaBanGhi({ bang, data }: BanGhiCanDung): { loai: ChaDaMat; id: stri
     const channelId = chuoi(data, "channelId");
     if (channelId !== null) ra.push({ loai: "channel", id: channelId });
   }
+  // Nợ phải trả: thẻ (dòng tiền, khoản chi trừ thẻ, neo kỳ sao kê) · phiếu nhập · ví ads.
+  if (bang === "CashMovement" || bang === "Expense" || bang === "KySaoKeThe") {
+    const cardId = chuoi(data, "cardId");
+    if (cardId !== null) ra.push({ loai: "the", id: cardId });
+  }
+  if (bang === "CashMovement") {
+    const phieuNhapId = chuoi(data, "phieuNhapId");
+    if (phieuNhapId !== null) ra.push({ loai: "phieu", id: phieuNhapId });
+    const viAdsId = chuoi(data, "viAdsId");
+    if (viAdsId !== null) ra.push({ loai: "viAds", id: viAdsId });
+  }
   if (bang === "CashMovement" || bang === "SoTietKiem") {
     const loanId = chuoi(data, "loanId");
     if (loanId !== null) ra.push({ loai: "loan", id: loanId });
@@ -122,16 +164,22 @@ function chaCuaBanGhi({ bang, data }: BanGhiCanDung): { loai: ChaDaMat; id: stri
 export function chaCanKhoa(canDung: BanGhiCanDung[]): {
   loanIds: string[];
   savingsIds: string[];
+  cardIds: string[];
+  phieuIds: string[];
+  viAdsIds: string[];
 } {
-  const loanIds = new Set<string>();
-  const savingsIds = new Set<string>();
+  const theoLoai: Partial<Record<ChaDaMat, Set<string>>> = {};
   for (const banGhi of canDung) {
-    for (const cha of chaCuaBanGhi(banGhi)) {
-      if (cha.loai === "loan") loanIds.add(cha.id);
-      if (cha.loai === "savings") savingsIds.add(cha.id);
-    }
+    for (const cha of chaCuaBanGhi(banGhi)) (theoLoai[cha.loai] ??= new Set()).add(cha.id);
   }
-  return { loanIds: [...loanIds], savingsIds: [...savingsIds] };
+  const ds = (l: ChaDaMat) => [...(theoLoai[l] ?? [])];
+  return {
+    loanIds: ds("loan"),
+    savingsIds: ds("savings"),
+    cardIds: ds("the"),
+    phieuIds: ds("phieu"),
+    viAdsIds: ds("viAds"),
+  };
 }
 
 /** Ba trạng thái của một dòng cha. `da_tat_toan` chỉ có ở `Loan`/`SoTietKiem` (cột `closedAt`). */
@@ -164,6 +212,15 @@ async function trangThaiCha(
       if (!so) return "khong_co";
       return so.closedAt !== null ? "da_tat_toan" : "con_hieu_luc";
     }
+    case "the": {
+      const the = await tx.theTinDung.findUnique({ where: { id: cha.id }, select: { closedAt: true } });
+      if (!the) return "khong_co";
+      return the.closedAt !== null ? "da_tat_toan" : "con_hieu_luc";
+    }
+    case "phieu":
+      return (await tx.phieuNhapNo.count({ where: { id: cha.id } })) > 0 ? "con_hieu_luc" : "khong_co";
+    case "viAds":
+      return (await tx.viAdsTraTruoc.count({ where: { id: cha.id } })) > 0 ? "con_hieu_luc" : "khong_co";
   }
 }
 
@@ -299,6 +356,67 @@ async function trungKhoanDinhKy(
 }
 
 /**
+ * Expense "Nhập hàng" ngày ≥ M: đường ghi đó ĐÓNG ở mọi cửa (spec §5.3) — khôi phục là cửa thứ sáu, đi
+ * qua ĐÚNG hàm chung `chanNhapHangSauM` (lưới `khoa-duong-ghi-nhap-hang-sau-m`). Trả câu từ chối hoặc null.
+ */
+async function nhapHangSauM(tx: Prisma.TransactionClient, { bang, data }: BanGhiCanDung): Promise<string | null> {
+  if (bang !== "Expense") return null;
+  const categoryId = chuoi(data, "categoryId");
+  if (categoryId === null || !(data.date instanceof Date)) return null;
+  try {
+    await chanNhapHangSauM(tx, { categoryId, date: data.date });
+    return null;
+  } catch (e) {
+    if (e instanceof LoiNhapHangSauM) return CAU_NHAP_HANG_SAU_M;
+    throw e;
+  }
+}
+
+const MOT_NGAY_MS = 86_400_000;
+const ngayVn = (d: Date) => format(d, "dd/MM/yyyy");
+/** 00:00 giờ VN của ngày chứa `d`. */
+const dauNgayVn = (d: Date) => new Date(`${khoaNgayVn(d)}T00:00:00+07:00`);
+
+/**
+ * Hồ sơ ví ads / thẻ khôi phục SAU khi bật (spec §5.4, §5.9; câu ở `CAU_HO_SO_NO_SAU_BAT`). Chưa bật ⇒ không
+ * luật gì thêm (hồ sơ chuẩn bị, bước bật sẽ ghi đè neo). Đã bật:
+ *  - `ViAdsTraTruoc`: neo phải ≥ M − 1, số dư neo = 0 (luật `taoViAds` sau bật), và KHÔNG có khoản chi
+ *    `adsSource = nenTang`, `cardId` null, `date ≥ max(M, ngayNeo + 1)` — đúng nhánh (c) của
+ *    `dieuKienChiPhiTruQuy`: dựng ví là các dòng đó thôi trừ quỹ hồi tố.
+ *  - `TheTinDung`: neo mở sổ (`laNeoMoSo`) `soDu > 0` chỉ hợp lệ khi đúng ngày M − 1 (neo của bước bật);
+ *    thẻ thêm sau bật neo 0 (luật `taoThe`). Thẻ không neo đã do `viPhamNoPhaiTraKhiKhoiPhuc` chặn.
+ * Chỉ ĐỌC; đường ghi đã giữ khoá SHARED bước bật nên M đọc ở đây không đổi tới lúc commit.
+ */
+async function hoSoNoSauBat(tx: Prisma.TransactionClient, canDung: readonly BanGhiCanDung[]): Promise<string | null> {
+  const chinh = canDung[0];
+  if (chinh === undefined || (chinh.bang !== "ViAdsTraTruoc" && chinh.bang !== "TheTinDung")) return null;
+  const m = await docMocM(tx);
+  if (m === null) return null;
+  const mTru1 = new Date(m.getTime() - MOT_NGAY_MS);
+
+  if (chinh.bang === "ViAdsTraTruoc") {
+    const { data } = chinh;
+    const nenTang = chuoi(data, "nenTang");
+    if (!(data.ngayNeo instanceof Date) || nenTang === null) return null;
+    if (khoaNgayVn(data.ngayNeo) < khoaNgayVn(mTru1)) {
+      return CAU_HO_SO_NO_SAU_BAT.viNeoTruocM(ngayVn(data.ngayNeo), ngayVn(mTru1));
+    }
+    if (data.soDuNeo !== 0) return CAU_HO_SO_NO_SAU_BAT.viSoDuKhac0;
+    const sauNeo = new Date(dauNgayVn(data.ngayNeo).getTime() + MOT_NGAY_MS);
+    const tu = sauNeo > m ? sauNeo : m;
+    const soChi = await tx.expense.count({ where: { adsSource: nenTang, cardId: null, date: { gte: tu } } });
+    return soChi > 0 ? CAU_HO_SO_NO_SAU_BAT.viCoChiSauNeo(soChi, ngayVn(tu)) : null;
+  }
+
+  for (const { bang, data } of canDung) {
+    if (bang !== "KySaoKeThe" || data.laNeoMoSo !== true || !(data.ngayChot instanceof Date)) continue;
+    const soDu = typeof data.soDu === "number" ? data.soDu : 0;
+    if (soDu > 0 && khoaNgayVn(data.ngayChot) !== khoaNgayVn(mTru1)) return CAU_HO_SO_NO_SAU_BAT.theNeoKhac0(ngayVn(mTru1));
+  }
+  return null;
+}
+
+/**
  * Gom đủ dữ kiện cho vị từ thuần `lyDoKhongKhoiPhuc`.
  *
  * Gọi được bằng `prisma` thường (màn liệt kê) hay `tx` transaction (đường ghi) — hàm chỉ đọc.
@@ -313,6 +431,7 @@ export async function doTinhTrang(
   let chaDaMat: ChaDaMat | null = null;
   let chaDaTatToan: ChaDaTatToan | null = null;
   let thangDaCoDinhKy = false;
+  let viPhamNoPhaiTra: string | null = null;
 
   // Cha nằm NGAY TRONG cụm đang dựng lại thì không phải "cha đã mất" — nó sắp được ghi trước con
   // (khoản vay của chính các dòng tiền kèm theo là đúng ca này).
@@ -326,7 +445,7 @@ export async function doTinhTrang(
     const id = String(banGhi.data.id);
     if (!idDaTonTaiLai && (await coBanGhi(tx, banGhi.bang, id))) idDaTonTaiLai = true;
 
-    const refId = chuoi(banGhi.data, "refId");
+    const refId = chuoi(banGhi.data, banGhi.bang === "ViAdsTraTruoc" ? "nenTang" : "refId");
     if (refIdBiChiem === null && refId !== null) {
       const chu = await chuCuaRefId(tx, banGhi.bang, refId);
       if (chu !== null && chu !== id) refIdBiChiem = refId;
@@ -352,9 +471,14 @@ export async function doTinhTrang(
       ) {
         chaDaTatToan ??= cha.loai;
       }
+      // Thẻ đã đóng có dư nợ 0: dựng lại trả thẻ / khoản chi trừ thẻ vào nó là làm dư nợ khác 0.
+      else if (tt === "da_tat_toan" && cha.loai === "the") {
+        chaDaTatToan ??= "the";
+      }
     }
 
     if (!thangDaCoDinhKy && (await trungKhoanDinhKy(tx, banGhi))) thangDaCoDinhKy = true;
+    viPhamNoPhaiTra ??= await nhapHangSauM(tx, banGhi);
   }
 
   return {
@@ -365,5 +489,12 @@ export async function doTinhTrang(
     chaDaTatToan,
     thangDaCoDinhKy,
     seLamAmSoDu: await duDoanSoDuAm(tx, canDung, idTrongCum, trangThai),
+    // Cửa sổ ngày + cổng hồ sơ nợ (spec §5.8) — CHỈ khi mọi cha còn: cổng hồ sơ đọc chính những cha đó.
+    // Rồi luật hồ sơ ví/thẻ sau bật (neo, chống hồi tố) — sau cổng chung để câu "thẻ không neo" thắng.
+    viPhamNoPhaiTra:
+      viPhamNoPhaiTra ??
+      (chaDaMat === null
+        ? ((await viPhamNoPhaiTraKhiKhoiPhuc(tx, canDung)) ?? (await hoSoNoSauBat(tx, canDung)))
+        : null),
   };
 }
