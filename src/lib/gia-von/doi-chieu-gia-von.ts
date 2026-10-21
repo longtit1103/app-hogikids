@@ -12,6 +12,8 @@
  * mới duyệt ghi. Vì thế không vi phạm bất biến #5.
  */
 
+import { createHash } from "node:crypto";
+
 /** Một biến thể đọc từ payload products Bronze (shop KHO). */
 export type BienTheKho = {
   pancakeId: string;
@@ -138,9 +140,14 @@ export function ghepDeXuat(
  * hoặc nút "Đồng bộ ngay") là hai tập khác nhau — chủ shop xem bảng 8 mã rồi bấm, app ghi 74 mã,
  * không câu nào báo. Bảng ΔCOGS theo tháng khi đó cũng nói về một tập không còn tồn tại.
  *
- * Gọn nhưng đủ chặt: số dòng + tổng chênh/đơn vị + tổng bình phương chênh. Đổi tập mà giữ nguyên
- * cả ba là điều gần như không xảy ra với dữ liệu thật, và ta chỉ cần phát hiện "đã đổi" để bắt tải
- * lại trang — không cần chống giả mạo (danh sách do server tự đọc, client không soạn được).
+ * Số dòng + tổng chênh/đơn vị + tổng bình phương chênh + BĂM tập `variantId:giaHienTai:giaDeXuat`.
+ * Chỉ các tổng số học thì chưa đủ: hai tập KHÁC biến thể mà từng dòng cùng mức chênh (lô hàng cùng
+ * giá nhập là chuyện thường) cho cùng mọi tổng ⇒ tráo tập không bị bắt, app ghi giá vào những mã chủ
+ * shop chưa hề xem. Băm trên danh sách đã SẮP theo `variantId` để cùng tập khác thứ tự (sắp theo độ
+ * chênh, hoà nhau thì thứ tự không tất định) không bắt tải lại oan.
+ *
+ * Không cần chống giả mạo (danh sách do server tự đọc, client không soạn được) — chỉ cần phát hiện
+ * "đã đổi" để bắt tải lại trang. sha256 vì có sẵn trong Node, không phải vì cần mật mã.
  */
 export function vanTayDeXuat(deXuat: DeXuatGiaVon[]): string {
   let tongChenh = 0;
@@ -150,5 +157,14 @@ export function vanTayDeXuat(deXuat: DeXuatGiaVon[]): string {
     tongChenh += c;
     tongBinhPhuong += c * c;
   }
-  return `${deXuat.length}:${tongChenh}:${tongBinhPhuong}`;
+  const bam = createHash("sha256")
+    .update(
+      deXuat
+        .map((d) => `${d.variantId}:${d.giaHienTai}:${d.giaDeXuat}`)
+        .sort()
+        .join("\n"),
+    )
+    .digest("hex")
+    .slice(0, 16);
+  return `${deXuat.length}:${tongChenh}:${tongBinhPhuong}:${bam}`;
 }

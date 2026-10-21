@@ -10,14 +10,16 @@ import { ChannelOrdersTab } from "@/components/kenh/channel-orders-tab";
 import { ChannelRevenueAdsChart } from "@/components/kenh/channel-revenue-ads-chart";
 import { SanPhamBanChayKenh } from "@/components/kenh/san-pham-ban-chay-kenh";
 import { Badge } from "@/components/ui/badge";
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import { clampRangeEndToNow, khoangServerThuocTinh, previousComparableRange, resolveRangeFromParams, serializeDateRange } from "@/lib/date-range";
 import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
+import { ensureRecurringExpensesForMonths, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
 import { sangExpenseRow, type ExpenseRow } from "@/lib/expenses/expense-queries";
 import { slugToStatus } from "@/lib/orders/order-status-meta";
-import { docSoTrang } from "@/lib/pagination";
+import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
 import { prisma } from "@/lib/prisma";
 import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
-import { getOrderListPage } from "@/lib/queries/orders";
+import { getOrderListPage, ORDER_PAGE_SIZE } from "@/lib/queries/orders";
 import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
 import { coQuyen } from "@/lib/quyen/nguoi-dung-phien";
 import { computeChannelRevenueAdsSeries } from "@/lib/reports/daily-series";
@@ -56,7 +58,7 @@ export default async function KenhChiTietPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<SearchParams>;
+  searchParams: Promise<SearchParamsTho<SearchParams>>;
 }) {
   const nd = await yeuCauQuyenTrang("/kenh", "kenh:xem");
   const quyen = quyenGiaVonCua(nd);
@@ -69,7 +71,8 @@ export default async function KenhChiTietPage({
     redirect("/kenh?loi=khong_tim_thay");
   }
 
-  const sp = await searchParams;
+  // Tham số lặp (?trang_thai=a&trang_thai=b) Next trả MẢNG — chuẩn hoá trước khi `slugToStatus`.
+  const sp = chuanHoaSearchParams(await searchParams);
   const now = new Date();
   // Giống /kenh: provider chỉ ghi ?tu=&den= khi chọn "Tùy chọn" — preset khác
   // không có trong URL nên mặc định "this_month". Kẹp biên phải về hôm nay; kỳ
@@ -83,10 +86,16 @@ export default async function KenhChiTietPage({
   const page = docSoTrang(sp.trang);
   const statuses = slugToStatus(sp.trang_thai ?? "");
 
+  // Backfill chi phí định kỳ cho MỌI tháng giao với kỳ đang xem VÀ kỳ so sánh TRƯỚC khi tính P&L — cùng
+  // thứ tự ensureRecurring→calcPnl với Dashboard/Báo cáo; thiếu bước này tháng chưa ai mở bị hụt chi phí
+  // định kỳ ⇒ lãi ròng của kênh cao ảo.
+  const kyTruoc = previousComparableRange(range, now);
+  await ensureRecurringExpensesForMonths([...monthStartsInRange(range), ...monthStartsInRange(kyTruoc)]);
+
   const [current, previous, series, topSanPham, orderPage, adsExpenseRecords, categories, activeChannels] =
     await Promise.all([
       calcPnl(range, { channelId: id }),
-      calcPnl(previousComparableRange(range, now), { channelId: id }),
+      calcPnl(kyTruoc, { channelId: id }),
       computeChannelRevenueAdsSeries(range, id),
       computeProductReport(range, { channelId: id }, quyen),
       getOrderListPage({
@@ -109,6 +118,18 @@ export default async function KenhChiTietPage({
       prisma.expenseCategory.findMany({ where: { isHidden: false } }),
       prisma.channel.findMany({ where: { isActive: true }, orderBy: { sortOrder: "asc" } }),
     ]);
+
+  // ?trang= vượt trang cuối (đang ở trang 5 rồi đổi bộ lọc còn 2 trang) ⇒ về trang cuối, không để bảng rỗng
+  // kèm thanh phân trang biến mất. Chỉ tab Đơn hàng dùng `trang`.
+  if (tab === "don-hang") {
+    veTrangCuoiNeuVuot({
+      duongDan: `/kenh/${id}`,
+      sp,
+      trang: page,
+      tong: orderPage.total,
+      soDongMoiTrang: ORDER_PAGE_SIZE,
+    });
+  }
 
   // Bảng ads của kênh — dựng dòng qua CÙNG hàm với Sổ chi phí (trang này là file P&L, không tự đọc
   // hồ sơ thẻ; ads cũng không bao giờ "trừ vào thẻ" ở khoản chi).

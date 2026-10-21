@@ -170,7 +170,7 @@ export async function transformOrders(
       onRejected?.(row.externalId);
       continue;
     }
-    const mo = mapPancakeOrder(parsed.data, ctx);
+    const mo = mapPancakeOrder(parsed.data, ctx, row.externalId);
     // Ngày giờ KHÔNG hợp lệ phải chặn TẠI ĐÂY, trước khi xuống Prisma. `inserted_at` chỉ bị zod
     // ép là chuỗi không rỗng nên mọi khuôn lạ đều lọt, rồi `parseVnDate` trả một Date hỏng và
     // Prisma ném ở tận lượt ghi. Lỗi đó rơi vào nhánh "lỗi ghi" (để dòng ở chưa-xong, thử lại

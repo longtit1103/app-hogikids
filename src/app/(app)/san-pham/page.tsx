@@ -4,6 +4,7 @@ import { CostImportModal } from "@/components/products/cost-import-modal";
 import { ProductGroupTable } from "@/components/products/product-group-table";
 import { ProductKpiCards } from "@/components/products/product-kpi-cards";
 import { ProductToolbar } from "@/components/products/product-toolbar";
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
 import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
 import { getProductListPage, PRODUCT_PAGE_SIZE } from "@/lib/queries/products";
@@ -15,7 +16,7 @@ import { PageTitle } from "@/components/shell/page-title";
 export default async function SanPhamPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; loc?: string; trang?: string }>;
+  searchParams: Promise<SearchParamsTho<{ q?: string; loc?: string; trang?: string }>>;
 }) {
   // Cổng ngay tại trang, không chỉ dựa vào layout — xem ghi chú ở `/don-hang`.
   const nd = await yeuCauQuyenTrang("/san-pham", "san-pham:xem");
@@ -24,7 +25,8 @@ export default async function SanPhamPage({
   // Sửa/nhập/đồng bộ giá vốn cần CẢ quyền sửa module lẫn quyền thấy giá vốn (spec phân quyền §1.1).
   const suaGiaVon = suaNguong && quyen.coQuyenGiaVon;
 
-  const sp = await searchParams;
+  // Tham số lặp (?q=a&q=b) Next trả MẢNG — chuẩn hoá trước khi `q.trim()` ở truy vấn.
+  const sp = chuanHoaSearchParams(await searchParams);
   const page = docSoTrang(sp.trang);
   // Hai bộ lọc theo giá vốn vô nghĩa với người không thấy giá vốn (query cũng tự bỏ qua).
   const missingCost = quyen.coQuyenGiaVon && sp.loc === "thieu_gia_von";

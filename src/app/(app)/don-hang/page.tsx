@@ -3,6 +3,7 @@ import { OrderFilters } from "@/components/orders/order-filters";
 import { OrderTable } from "@/components/orders/order-table";
 import { OrderTotalsStrip } from "@/components/orders/order-totals-strip";
 import { SyncBanner } from "@/components/orders/sync-banner";
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import { parseDateRange } from "@/lib/date-range";
 import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
 import {
@@ -27,14 +28,15 @@ type SearchParams = {
   don?: string;
 };
 
-export default async function DonHangPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function DonHangPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SearchParams>> }) {
   // Cổng NGAY TẠI TRANG, không chỉ dựa vào `(app)/layout.tsx`: một request RSC dựng tay có
   // thể xin riêng segment trang mà không chạy lại layout ⇒ dữ liệu đơn hàng lọt ra ngoài phiên,
   // và mốc thu hồi phiên (đổi mật khẩu) cũng không được soi. 6 trang khác trong nhóm này đã làm vậy.
   const nd = await yeuCauQuyenTrang("/don-hang", "don-hang:xem");
   const quyen = quyenGiaVonCua(nd);
 
-  const sp = await searchParams;
+  // Tham số lặp (?kenh=a&kenh=b) Next trả MẢNG — chuẩn hoá trước khi `.split`/`slugToStatus`.
+  const sp = chuanHoaSearchParams(await searchParams);
   const page = docSoTrang(sp.trang);
   const channels = sp.kenh?.split(",").filter(Boolean);
   const statuses = slugToStatus(sp.trang_thai ?? "");

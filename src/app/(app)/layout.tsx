@@ -30,6 +30,19 @@ import { docCanhBaoSapCan } from "@/lib/so-quy/du-bao-quy-queries";
 import { demKhoanVayCoKyChoDuyet } from "@/lib/so-quy/khoan-vay-queries";
 
 /**
+ * Một nguồn cảnh báo/huy hiệu của khung (banner, chấm đỏ, tên shop) hỏng KHÔNG được kéo sập mọi trang:
+ * layout đọc ở MỌI request, một câu truy vấn lỗi tạm thời trong `Promise.all` chung sẽ biến cả app
+ * thành màn lỗi. Bắt lỗi từng nguồn, ghi log, trả giá trị "không có cảnh báo". CHỈ dùng cho nguồn cảnh báo —
+ * KHÔNG bọc đọc phiên/quyền (`yeuCauQuyenTrang`, `coQuyen`): xác thực phải thất bại theo hướng ĐÓNG.
+ */
+function boQuaLoiCanhBao<T>(ten: string, macDinh: T): (loi: unknown) => T {
+  return (loi) => {
+    console.error(`[layout] không đọc được nguồn cảnh báo "${ten}" — bỏ qua`, loi);
+    return macDinh;
+  };
+}
+
+/**
  * Shared shell for every authenticated screen: guards the route with `yeuCauQuyenTrang("/")` (chỉ
  * đòi đăng nhập — KHÔNG đòi quyền module, vì `/khong-co-quyen` cũng nằm trong shell này và đòi quyền
  * ở đây sẽ thành vòng lặp chuyển hướng), rồi dựng sidebar + top bar. Mọi nguồn cảnh báo chỉ tải khi
@@ -56,45 +69,53 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     canhBaoSapCanQuy,
     dangLuiBanTu,
   ] = await Promise.all([
-    docShopProfile(),
-    coGiaVon ? countMissingCostVariants() : Promise.resolve(0),
-    coQuyen(nd, "ton-kho:xem") ? hasLowStockVariants() : Promise.resolve(false),
+    docShopProfile().catch(boQuaLoiCanhBao("shopProfile", { shopName: "HogiKids", shopPhone: null, shopLogoPath: null })),
+    coGiaVon ? countMissingCostVariants().catch(boQuaLoiCanhBao("thieuGiaVon", 0)) : Promise.resolve(0),
+    coQuyen(nd, "ton-kho:xem") ? hasLowStockVariants().catch(boQuaLoiCanhBao("tonThap", false)) : Promise.resolve(false),
     // CHỈ kind ảnh hưởng số liệu — BACKUP cố ý đứng ngoài nhánh này (nó có nhánh banner RIÊNG
     // ngay dưới, vì backup hỏng không làm thiếu số liệu), xem `NON_DATA_SYNC_KINDS`.
-    coCaiDat ? getRecentDataErrorKinds() : Promise.resolve([]),
-    coCaiDat ? hasBronzeBacklog() : Promise.resolve(false),
+    coCaiDat
+      ? getRecentDataErrorKinds().catch(boQuaLoiCanhBao<Awaited<ReturnType<typeof getRecentDataErrorKinds>>>("loiDongBo", []))
+      : Promise.resolve([]),
+    coCaiDat ? hasBronzeBacklog().catch(boQuaLoiCanhBao("bronzeBacklog", false)) : Promise.resolve(false),
     // Sao lưu có nhánh banner riêng: bỏ BACKUP khỏi cảnh báo số liệu mà không đặt gì thay thế
     // thì một lượt backup hỏng chỉ còn dấu vết ở /cai-dat — chủ shop không vào đó mỗi ngày, mà
     // đây đúng là tín hiệu phải biết TRƯỚC khi cần tới bản phục hồi.
     // Sao lưu/phục hồi là việc riêng của chủ shop ⇒ chỉ OWNER nạp trạng thái.
-    laChuShop(nd) ? docTrangThaiSaoLuu() : Promise.resolve(null),
+    laChuShop(nd) ? docTrangThaiSaoLuu().catch(boQuaLoiCanhBao("saoLuu", null)) : Promise.resolve(null),
     // Giá vốn: layout CHỈ đọc 2 ô `Setting` mà lượt đêm đã chốt. Việc đếm phải quét trọn Bronze
     // products nên TUYỆT ĐỐI không được chạy ở đây — mỗi lần mở bất kỳ trang nào là một lần quét.
+    // Lỗi đọc ⇒ `null` (KHÁC mảng rỗng: rỗng = mức "chua-kiem" và sẽ in banner oan) ⇒ coi như khớp, không banner.
     coGiaVon
-      ? prisma.setting.findMany({
-          where: { key: { in: [KEY_SO_LECH_GIA_VON, KEY_MOC_KIEM_GIA_VON] } },
-          select: { key: true, value: true },
-        })
+      ? prisma.setting
+          .findMany({
+            where: { key: { in: [KEY_SO_LECH_GIA_VON, KEY_MOC_KIEM_GIA_VON] } },
+            select: { key: true, value: true },
+          })
+          .catch(boQuaLoiCanhBao<{ key: string; value: string }[] | null>("lechGiaVon", null))
       : Promise.resolve([]),
     // KHÁC giá vốn ở trên: phép đếm này BOUNDED theo số khoản vay (vài dòng) và không khoản nào
     // có lịch thì trả 0 ngay, khỏi đọc bảng dòng tiền — nên chạy thẳng ở layout được.
-    coSoQuy ? demKhoanVayCoKyChoDuyet() : Promise.resolve(0),
+    coSoQuy ? demKhoanVayCoKyChoDuyet().catch(boQuaLoiCanhBao("kyVayChoDuyet", 0)) : Promise.resolve(0),
     // Phiếu nhập: CÙNG luật với giá vốn — layout CHỈ đọc 3 ô `Setting` mà lượt đêm đã chốt. Phép
     // đếm phải quét trọn Bronze `RawPancakePurchase` (luật lọc nằm trong payload) nên chạy ở đây là
     // mỗi lần mở bất kỳ trang nào một lần quét.
+    // Lỗi đọc ⇒ `null`, cùng lý do với giá vốn ở trên.
     coQuyen(nd, "chi-phi:xem")
-      ? prisma.setting.findMany({
-          where: {
-            key: {
-              in: [
-                KEY_SO_PHIEU_NHAP_CHUA_GHI,
-                KEY_SO_VIEC_HAU_KIEM_PHIEU_NHAP,
-                KEY_MOC_KIEM_PHIEU_NHAP,
-              ],
+      ? prisma.setting
+          .findMany({
+            where: {
+              key: {
+                in: [
+                  KEY_SO_PHIEU_NHAP_CHUA_GHI,
+                  KEY_SO_VIEC_HAU_KIEM_PHIEU_NHAP,
+                  KEY_MOC_KIEM_PHIEU_NHAP,
+                ],
+              },
             },
-          },
-          select: { key: true, value: true },
-        })
+            select: { key: true, value: true },
+          })
+          .catch(boQuaLoiCanhBao<{ key: string; value: string }[] | null>("phieuNhapChuaGhi", null))
       : Promise.resolve([]),
     // Dự báo quỹ sắp cạn: layout đọc ở MỌI trang nên `docCanhBaoSapCan` tự bắt lỗi bên trong và trả
     // null khi hỏng (xem doc-comment của hàm) — layout không cần bọc thêm, chỉ cần biết nó KHÔNG BAO
@@ -102,18 +123,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     coSoQuy ? docCanhBaoSapCan() : Promise.resolve(null),
     // Dấu lùi bản phân quyền: việc của người vận hành máy chủ (chủ shop) ⇒ chỉ OWNER đọc — 1 dòng
     // `Setting` theo khoá chính.
-    laChuShop(nd) ? docDauLuiBan() : Promise.resolve(null),
+    laChuShop(nd) ? docDauLuiBan().catch(boQuaLoiCanhBao("dauLuiBan", null)) : Promise.resolve(null),
   ]);
 
-  // Không có quyền ⇒ không tải ô Setting ⇒ KHÔNG được suy trạng thái từ dữ liệu rỗng (rỗng = mức
+  // Không có quyền (hoặc đọc lỗi ⇒ `null`) ⇒ không có ô Setting nào ⇒ KHÔNG được suy trạng thái từ dữ liệu rỗng (rỗng = mức
   // "chua-kiem" và sẽ in banner "chưa đối chiếu" cho người không được thấy khối này).
-  const lechGiaVon: TrangThaiLechGiaVon = coGiaVon
+  const lechGiaVon: TrangThaiLechGiaVon = coGiaVon && mocGiaVon
     ? trangThaiLechGiaVon(
         mocGiaVon.find((s) => s.key === KEY_SO_LECH_GIA_VON)?.value,
         mocGiaVon.find((s) => s.key === KEY_MOC_KIEM_GIA_VON)?.value,
       )
     : { soLech: 0, mocLuc: null, gioTruoc: null, muc: "khop" };
-  const phieuNhapChuaGhi: TrangThaiPhieuNhap = coQuyen(nd, "chi-phi:xem")
+  const phieuNhapChuaGhi: TrangThaiPhieuNhap = coQuyen(nd, "chi-phi:xem") && mocPhieuNhap
     ? trangThaiPhieuNhapChuaGhi(
         mocPhieuNhap.find((s) => s.key === KEY_SO_PHIEU_NHAP_CHUA_GHI)?.value,
         mocPhieuNhap.find((s) => s.key === KEY_SO_VIEC_HAU_KIEM_PHIEU_NHAP)?.value,

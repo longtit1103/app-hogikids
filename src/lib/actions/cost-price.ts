@@ -38,6 +38,18 @@ function revalidateViews(): void {
   revalidatePath("/don-hang");
 }
 
+/**
+ * P2025 = "record not found" của Prisma — CHỈ mã này mới là "không tìm thấy biến thể". Lỗi khác (mất
+ * kết nối, nhật ký hỏng…) mà đội lốt "không tìm thấy" thì chủ shop tưởng biến thể đã bị gỡ, trong
+ * khi thứ cần làm là thử lại. Log đủ phía server; câu cho client là chữ cố định, không lộ message thô.
+ * Module-private (file "use server" chỉ được export async function).
+ */
+function loiSuaBienThe(e: unknown, tenAction: string, cauLoiHeThong: string): ActionResult {
+  if ((e as { code?: string })?.code === "P2025") return { ok: false, error: "Không tìm thấy biến thể" };
+  console.error(`${tenAction} failed`, e);
+  return { ok: false, error: cauLoiHeThong };
+}
+
 export async function updateVariantCost(variantId: string, costPrice: number): Promise<ActionResult> {
   const cong = await congAction("san-pham:sua");
   if (!cong.ok) return cong;
@@ -57,8 +69,8 @@ export async function updateVariantCost(variantId: string, costPrice: number): P
     });
     revalidateViews();
     return { ok: true, data: undefined };
-  } catch {
-    return { ok: false, error: "Không tìm thấy biến thể" };
+  } catch (e) {
+    return loiSuaBienThe(e, "updateVariantCost", "Không lưu được giá vốn — lỗi hệ thống, thử lại sau.");
   }
 }
 
@@ -81,8 +93,8 @@ export async function updateVariantThreshold(variantId: string, threshold: numbe
     });
     revalidateViews();
     return { ok: true, data: undefined };
-  } catch {
-    return { ok: false, error: "Không tìm thấy biến thể" };
+  } catch (e) {
+    return loiSuaBienThe(e, "updateVariantThreshold", "Không lưu được ngưỡng tồn — lỗi hệ thống, thử lại sau.");
   }
 }
 

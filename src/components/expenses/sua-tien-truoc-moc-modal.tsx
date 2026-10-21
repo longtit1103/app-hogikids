@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { suaSoTienTruocMoc } from "@/lib/actions/sua-tien-truoc-moc";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { formatVnd } from "@/lib/format";
-import { TRAN_SO_TIEN_CHI_PHI, type KetQuaSuaTienTruocMoc } from "@/lib/no-phai-tra/sua-tien-truoc-moc";
+import { parseAmountInput } from "@/lib/format-amount-input";
+import type { KetQuaSuaTienTruocMoc } from "@/lib/no-phai-tra/sua-tien-truoc-moc";
 
 const TRAN_LY_DO = 120; // khớp trần server (`lyDo` trim 1..120)
 
@@ -23,11 +24,6 @@ export type SuaTienTruocMocModalProps = {
   /** Mốc M (ngày bật theo dõi nợ phải trả) — dùng để ghi ngày điều chỉnh trong toast. */
   mocM: Date | null;
 };
-
-function parseAmountInput(raw: string): number {
-  const digits = raw.replace(/\D/g, "");
-  return digits ? Math.min(Number.parseInt(digits, 10), TRAN_SO_TIEN_CHI_PHI) : 0;
-}
 
 /** Câu toast thành công: nêu có/không ghi bù, chiều + số bù. */
 export function cauThanhCongSuaTien(kq: KetQuaSuaTienTruocMoc, mocM: Date | null): string {

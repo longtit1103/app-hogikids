@@ -99,7 +99,8 @@ export async function updateShopInfo(formData: FormData): Promise<ActionResult> 
   let shopLogoPath: string | undefined;
   const logo = formData.get("logo");
   if (logo instanceof File && logo.size > 0) {
-    if (!(logo.type in LOGO_EXT_BY_MIME) || logo.size > MAX_LOGO_BYTES) {
+    // `hasOwn` chứ không `in`: `in` khớp cả khoá kế thừa từ Object.prototype ("constructor", "toString") → ext thành hàm → 500.
+    if (!Object.hasOwn(LOGO_EXT_BY_MIME, logo.type) || logo.size > MAX_LOGO_BYTES) {
       return { ok: false, error: INVALID_LOGO_ERROR, field: "logo" };
     }
     const saved = await saveLogoFile(logo);

@@ -29,8 +29,10 @@ export function buildProductSheetRows(rows: ProductReportRow[]): ExportSheet[] {
     "SL bán": r.soldQty,
     "Doanh thu": r.revenue,
     COGS: r.cogs,
-    "LN gộp": r.grossProfit,
-    "Biên %": r.marginPct === null ? "" : Math.round(r.marginPct * 10) / 10,
+    // Lãi gộp THEO SẢN PHẨM chưa trừ voucher cả đơn + phí sàn (thuộc đơn, không thuộc SP) — KHÁC "LN
+    // gộp" sheet P&L. Nhãn nói rõ để Σ cột này không bị đem so thẳng với LN gộp Lãi/Lỗ.
+    "LN gộp trước phí sàn & voucher": r.grossProfit,
+    "Biên % trước phí sàn & voucher": r.marginPct === null ? "" : Math.round(r.marginPct * 10) / 10,
     Tồn: r.currentStock,
   }));
   const skuRows = rows.flatMap((r) =>
@@ -41,7 +43,7 @@ export function buildProductSheetRows(rows: ProductReportRow[]): ExportSheet[] {
       "SL bán": s.soldQty,
       "Doanh thu": s.revenue,
       COGS: s.cogs,
-      "LN gộp": s.grossProfit,
+      "LN gộp trước phí sàn & voucher": s.grossProfit,
       Tồn: s.currentStock,
     }))
   );

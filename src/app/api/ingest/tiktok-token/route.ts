@@ -38,6 +38,9 @@ const KEY_SAVED_AT = "tiktokShopTokenSavedAt"; // epoch GIÂY — biết token �
  */
 const KEY_REFRESH_EXPIRE_AT = "tiktokShopRefreshTokenExpireAt";
 
+/** Khoá tư vấn tuần tự hoá các lượt ghi kho token TikTok Shop (đọc hạn đang lưu → so → ghi). */
+const KHOA_GHI_TOKEN = "kho-token-tiktok-shop";
+
 const tokenBodySchema = z.object({
   accessToken: z.string().min(1),
   refreshToken: z.string().min(1),
@@ -103,19 +106,48 @@ export async function POST(req: Request): Promise<Response> {
   if (refreshTokenExpireAt !== undefined) canGhi.push([KEY_REFRESH_EXPIRE_AT, String(refreshTokenExpireAt)]);
 
   // Một transaction: không để tình trạng access_token mới đứng cạnh refresh_token cũ (đã chết).
+  //
+  // CHỐNG GHI LÙI: hai lượt n8n refresh chồng nhau (chạy tay đè lịch đêm…) thì lượt POST về SAU có
+  // thể mang token hạn CŨ HƠN — refresh_token của nó đã bị lượt kia đốt (TikTok xoay vòng). Ghi đè
+  // vô điều kiện là kho giữ refresh_token chết ⇒ đứt chuỗi vĩnh viễn. Nên chỉ ghi khi hạn mới ≥ hạn
+  // đang lưu. Đọc-so-ghi nằm sau khoá tư vấn trong CÙNG transaction (ReadCommitted: câu đọc sau khoá
+  // thấy bản lượt trước vừa commit) — khoá dòng `FOR UPDATE` không đủ vì lần đầu chưa có dòng nào.
+  // Hạn đang lưu hỏng (không phải số) ⇒ ghi đè để tự lành.
+  let ghiDe = true;
   try {
-    await prisma.$transaction(
-      canGhi.map(([key, value]) =>
-        prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } })
-      )
-    );
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${KHOA_GHI_TOKEN}, 0))`;
+      const dangLuu = await tx.setting.findUnique({ where: { key: KEY_EXPIRE_AT } });
+      const hanDangLuu = Number(dangLuu?.value);
+      if (Number.isFinite(hanDangLuu) && hanDangLuu > accessTokenExpireAt) {
+        ghiDe = false;
+        return;
+      }
+      for (const [key, value] of canGhi) {
+        await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+      }
+    });
   } catch {
     // KHÔNG đưa err.message vào body: lỗi Prisma có thể chứa giá trị token/refresh_token.
     return noStore(Response.json({ ok: false, error: "Lỗi khi lưu token vào kho" }, { status: 500 }));
   }
 
+  if (!ghiDe) {
+    // KHÔNG in token — chỉ mốc hạn, đủ để đọc log biết có lượt refresh chồng nhau.
+    console.warn(
+      `[tiktok-token] bỏ qua token hạn ${accessTokenExpireAt}: kho đang giữ token hạn mới hơn (lượt refresh chồng nhau)`,
+    );
+  }
+  // 200 cả khi bỏ qua: token đang lưu MỚI hơn và còn sống — không có gì để n8n báo động. Giữ nguyên
+  // các trường cũ (mốc của request) + `ghiDe` cho biết có thật sự ghi hay không.
   return noStore(
-    Response.json({ ok: true, savedAt, accessTokenExpireAt, refreshTokenExpireAt: refreshTokenExpireAt ?? null }),
+    Response.json({
+      ok: true,
+      savedAt,
+      accessTokenExpireAt,
+      refreshTokenExpireAt: refreshTokenExpireAt ?? null,
+      ghiDe,
+    }),
   );
 }
 

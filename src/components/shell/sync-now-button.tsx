@@ -76,7 +76,15 @@ function NutDongBoNgay({ trongTopbar }: { trongTopbar: boolean }) {
 
   const onClick = useCallback(async () => {
     setBusy(true);
-    const res = await triggerSyncNow();
+    let res: Awaited<ReturnType<typeof triggerSyncNow>>;
+    try {
+      res = await triggerSyncNow();
+    } catch {
+      // Không dùng `finally`: nhánh thành công CỐ Ý giữ busy=true cho tới khi poll xong (poll tự hạ cờ).
+      setBusy(false);
+      toast.error("Gọi đồng bộ thất bại — kiểm tra kết nối");
+      return;
+    }
     if (!res.ok) {
       setBusy(false);
       toast.error(res.error);

@@ -8,6 +8,7 @@ import { QuangCaoChienDichSection } from "@/components/marketing/quang-cao-chien
 import { SanPhamNguonSection } from "@/components/marketing/san-pham-nguon-section";
 import { clampRangeEndToNow, khoangServerThuocTinh, resolveRangeFromParams } from "@/lib/date-range";
 import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
+import { ensureRecurringExpensesForMonths, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
 import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
 import { affiliateTheoKy } from "@/lib/reports/marketing/affiliate-pancake";
 import { tinhChuThichDoTuoi } from "@/lib/reports/marketing/cau-do-tuoi-du-lieu";
@@ -138,6 +139,9 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
     // Câu chữ ĐỘ TƯƠI tính XONG ở đây (`tinhChuThichDoTuoi`, ruling P2-R38) — `PheuTiktokSection`
     // ("use client" vì chart recharts) chỉ nhận chuỗi/`null` đã tính sẵn, KHÔNG tự gọi lại
     // `quyetDinhCauDoTuoi`/`cauThieuDuLieu` lúc hydrate (bẫy TZ trình duyệt, xem docblock hàm đó).
+    // Backfill chi phí định kỳ cho các tháng giao với kỳ TRƯỚC khi `calcPnl` — cùng thứ tự
+    // ensureRecurring→tính với Dashboard/Báo cáo, không thì KPI "chi" của kỳ chưa ai mở bị hụt.
+    await ensureRecurringExpensesForMonths(monthStartsInRange(range));
     const [pheu, nguon, pancake, donTheoNgayPancake, affiliate, khach, hoanHuy, lanChayOkTheoStream] =
       await Promise.all([
         pheuTiktok(range),

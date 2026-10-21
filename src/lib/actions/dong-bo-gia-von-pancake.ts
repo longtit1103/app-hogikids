@@ -20,6 +20,7 @@ import { vanTayDeXuat, type CheDoDoiChieu } from "@/lib/gia-von/doi-chieu-gia-vo
 import {
   ghiGiaVonTheoPancake,
   LoiDungGiuaChung,
+  tenFileBackupGiaVon,
   VIEC_GHI_GIA_VON,
 } from "@/lib/gia-von/ghi-gia-von-theo-pancake";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
@@ -213,10 +214,7 @@ function thuMucBackup(): string {
   return process.env.BACKUP_DIR ?? "/backups";
 }
 
+/** Đuôi `-app` phân biệt bản chụp của nút trong app với bản của CLI (cùng luật đặt tên). */
 function duongDanBackup(moc: Date, cheDo: string): string {
-  const hai = (n: number) => String(n).padStart(2, "0");
-  const ten =
-    `backup-gia-von-${String(moc.getFullYear()).slice(2)}${hai(moc.getMonth() + 1)}${hai(moc.getDate())}` +
-    `-${hai(moc.getHours())}${hai(moc.getMinutes())}-${cheDo}-app.json`;
-  return path.join(thuMucBackup(), ten);
+  return path.join(thuMucBackup(), tenFileBackupGiaVon(moc, cheDo, "-app.json"));
 }

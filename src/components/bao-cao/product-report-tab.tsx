@@ -19,8 +19,18 @@ type SubTab = "ban_chay" | "cham_ban" | "lai_gop";
 const SUB_TABS: { key: SubTab; label: string; canGiaVon?: true }[] = [
   { key: "ban_chay", label: "Bán chạy" },
   { key: "cham_ban", label: "Chậm bán" },
-  { key: "lai_gop", label: "Lãi gộp theo SP", canGiaVon: true },
+  { key: "lai_gop", label: "Lãi gộp theo SP (trước phí sàn)", canGiaVon: true },
 ];
+
+/**
+ * Lãi gộp THEO SẢN PHẨM = doanh thu dòng hàng − COGS. Voucher cả đơn và phí sàn thuộc ĐƠN (không chia
+ * được về từng SP nếu không bịa luật phân bổ) nên chưa trừ — khác "LN gộp" bảng Lãi/Lỗ đã trừ cả hai.
+ * Không nói rõ thì Σ cột này vượt LN gộp Lãi/Lỗ (phần lớn là phí sàn + voucher) và biên SP trông cao ảo.
+ */
+const GIAI_THICH_LAI_GOP_SP =
+  "Lãi gộp và biên theo sản phẩm = doanh thu dòng hàng − giá vốn, CHƯA trừ phí sàn và voucher của đơn " +
+  "(hai khoản này tính theo đơn, không chia về từng sản phẩm). Vì vậy tổng cột này cao hơn \"LN gộp\" ở " +
+  "bảng Lãi/Lỗ (đã trừ phí sàn + voucher) — đừng so thẳng hai con số.";
 
 type Dong = { row: ProductReportRowChe; giaVon: GiaVonDongSanPham | null };
 
@@ -38,7 +48,7 @@ function ghepGiaVon(bang: ProductReport): Dong[] {
   }));
 }
 
-/** Thiếu quyền giá vốn: không cột COGS/LN gộp/Biên, không sub-tab "Lãi gộp theo SP" (dữ liệu che từ server). */
+/** Thiếu quyền giá vốn: không cột COGS/LN gộp/Biên, không sub-tab lãi gộp theo SP (dữ liệu che từ server). */
 export function ProductReportTab({
   bang,
   channels,
@@ -186,8 +196,16 @@ export function ProductReportTab({
                 <TableHead className="text-right">SL bán</TableHead>
                 <TableHead className="text-right">Doanh thu</TableHead>
                 {coGiaVon && <TableHead className="text-right">COGS</TableHead>}
-                {coGiaVon && <TableHead className="text-right">LN gộp</TableHead>}
-                {coGiaVon && <TableHead className="text-right">Biên %</TableHead>}
+                {coGiaVon && (
+                  <TableHead className="text-right" title={GIAI_THICH_LAI_GOP_SP}>
+                    LN gộp trước phí sàn &amp; voucher
+                  </TableHead>
+                )}
+                {coGiaVon && (
+                  <TableHead className="text-right" title={GIAI_THICH_LAI_GOP_SP}>
+                    Biên % trước phí sàn &amp; voucher
+                  </TableHead>
+                )}
                 <TableHead className="text-right">Tồn</TableHead>
               </TableRow>
             </TableHeader>
@@ -204,6 +222,11 @@ export function ProductReportTab({
             </TableBody>
           </Table>
 
+          {coGiaVon && (
+            <p className="border-t border-hairline px-4 py-2 text-xs text-muted-foreground">
+              * {GIAI_THICH_LAI_GOP_SP}
+            </p>
+          )}
           <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm text-muted-foreground">
             <span>{sortedRows.length} sản phẩm</span>
             <div className="flex items-center gap-1 print:hidden">

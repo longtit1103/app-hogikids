@@ -161,6 +161,8 @@ describe("route /api/ingest/tiktok-token", () => {
   });
 
   it("POST KHÔNG kèm refreshTokenExpireAt → giữ nguyên mốc cũ, không xoá mất khả năng cảnh báo", async () => {
+    // Kho sạch: ca trước để lại token hạn 7 ngày, mà POST hạn CŨ HƠN bản đang lưu bị bỏ qua (chống ghi lùi).
+    await cleanupTokens();
     const now = Math.floor(Date.now() / 1000);
     const refreshExp = now + 300 * 86_400;
     await tiktokPost(
@@ -185,6 +187,64 @@ describe("route /api/ingest/tiktok-token", () => {
     };
     expect(json.accessToken).toBe("tt-a2");
     expect(json.refreshTokenExpireAt).toBe(refreshExp);
+  });
+
+  /**
+   * Hai lượt n8n refresh chồng nhau: lượt về SAU mang token có hạn CŨ HƠN (refresh_token của nó đã bị
+   * lượt kia đốt) không được đè token mới — đè là kho giữ refresh_token chết ⇒ đứt chuỗi vĩnh viễn.
+   */
+  it("POST hạn CŨ HƠN bản đang lưu → 200 ghiDe=false, token đang lưu GIỮ NGUYÊN", async () => {
+    await cleanupTokens();
+    const now = Math.floor(Date.now() / 1000);
+    await tiktokPost(
+      jsonReq("http://t/api/ingest/tiktok-token", { accessToken: "moi", refreshToken: "r-moi", accessTokenExpireAt: now + 7200 }),
+    );
+    const res = await tiktokPost(
+      jsonReq("http://t/api/ingest/tiktok-token", {
+        accessToken: "cu",
+        refreshToken: "r-cu",
+        accessTokenExpireAt: now + 3600,
+        refreshTokenExpireAt: now + 86_400,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; ghiDe: boolean };
+    expect(body).toMatchObject({ ok: true, ghiDe: false });
+
+    const json = (await (await tiktokGet(getReq("http://t/api/ingest/tiktok-token"))).json()) as {
+      accessToken: string;
+      refreshToken: string;
+      accessTokenExpireAt: number;
+      refreshTokenExpireAt: number;
+    };
+    expect(json).toMatchObject({ accessToken: "moi", refreshToken: "r-moi", accessTokenExpireAt: now + 7200 });
+    expect(json.refreshTokenExpireAt).toBe(0); // bản bị bỏ qua không được ghi lẻ mốc refresh của nó
+  });
+
+  it("POST hạn BẰNG bản đang lưu → vẫn ghi (≥, không phải >)", async () => {
+    await cleanupTokens();
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    await tiktokPost(jsonReq("http://t/api/ingest/tiktok-token", { accessToken: "a1", refreshToken: "r1", accessTokenExpireAt: exp }));
+    const res = await tiktokPost(
+      jsonReq("http://t/api/ingest/tiktok-token", { accessToken: "a2", refreshToken: "r2", accessTokenExpireAt: exp }),
+    );
+    expect(((await res.json()) as { ghiDe: boolean }).ghiDe).toBe(true);
+    const json = (await (await tiktokGet(getReq("http://t/api/ingest/tiktok-token"))).json()) as { refreshToken: string };
+    expect(json.refreshToken).toBe("r2");
+  });
+
+  it("hai POST đồng thời (cũ + mới) → bản hạn MỚI hơn thắng, cặp token không bị trộn", async () => {
+    await cleanupTokens();
+    const now = Math.floor(Date.now() / 1000);
+    await Promise.all([
+      tiktokPost(jsonReq("http://t/api/ingest/tiktok-token", { accessToken: "a-moi", refreshToken: "r-moi", accessTokenExpireAt: now + 7200 })),
+      tiktokPost(jsonReq("http://t/api/ingest/tiktok-token", { accessToken: "a-cu", refreshToken: "r-cu", accessTokenExpireAt: now + 3600 })),
+    ]);
+    const json = (await (await tiktokGet(getReq("http://t/api/ingest/tiktok-token"))).json()) as {
+      accessToken: string;
+      refreshToken: string;
+    };
+    expect(json).toMatchObject({ accessToken: "a-moi", refreshToken: "r-moi" });
   });
 
   it("POST refreshTokenExpireAt là 'còn N giây' (31536000) → 400 (không phải epoch tương lai)", async () => {

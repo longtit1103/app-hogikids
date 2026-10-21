@@ -23,8 +23,9 @@ import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
-import { chanDongTienTruocM } from "@/lib/no-phai-tra/chan-dong-tien-truoc-m";
-import { khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { chanDongTienTruocM, LoiDongTienTruocM } from "@/lib/no-phai-tra/chan-dong-tien-truoc-m";
+import { laNgayTruocMocM } from "@/lib/no-phai-tra/chan-so-chi-phi-da-khoa";
+import { docMocM, khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { congAction } from "@/lib/quyen/cong-action";
 import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
 import { laXungDotGhi } from "@/lib/prisma-loi-adapter";
@@ -94,6 +95,28 @@ const LOI_KY_HAN = "Kỳ hạn 1–600 tháng";
  */
 function coLichTheoLoai(kind: "TERM" | "OVERDRAFT" | "BULLET", coLich: boolean): boolean {
   return kind === "BULLET" || coLich;
+}
+
+/**
+ * ĐÃ BẬT NỢ PHẢI TRẢ: chế độ "mang sang" (dư nợ có sẵn `duNoMoSo`, KHÔNG dòng `LOAN_IN`) chỉ đúng cho khoản có
+ * TRƯỚC mốc M — tiền giải ngân của nó đã nằm trong số dư mở sổ đối chiếu lúc bật. Khoản bắt đầu từ M trở đi là
+ * tiền MỚI vào tài khoản: khai "mang sang" thì dư nợ có mà quỹ không có `LOAN_IN` ⇒ quỹ thấp hơn tiền thật đúng
+ * số giải ngân, chỉ lộ khi chốt số dư tháng. Áp cho MỌI loại (cả thấu chi — phần < M của thấu chi đã có
+ * `cauThauChiTruocM`). Người gọi PHẢI đã giữ `khoaChiaSeBatNoPhaiTra(tx)` (đọc M mới nhất). Chưa bật ⇒ qua.
+ *
+ * Ném `LoiDongTienTruocM` để mang cùng mã `DA_BAT_NO_PHAI_TRA` + ô nhận lỗi như mọi lượt từ chối sau bật của
+ * form khoản vay; chỉ câu báo là riêng.
+ */
+async function chanMangSangTuM(tx: Prisma.TransactionClient, startDate: Date, field: string): Promise<void> {
+  const mocM = await docMocM(tx);
+  if (mocM === null || laNgayTruocMocM(startDate, mocM)) return;
+  throw new LoiDongTienTruocM(mocM, {
+    field,
+    cau: (m) =>
+      `Chế độ "mang sang" chỉ dành cho khoản có từ trước ngày bật theo dõi nợ (${format(m, "dd/MM/yyyy")}) — ` +
+      `chọn ngày bắt đầu trước ngày đó. Khoản giải ngân từ ngày bật trở đi thì khai chế độ "mới" (ghi dòng ` +
+      `giải ngân vào quỹ).`,
+  });
 }
 
 const khoanVaySchema = z
@@ -309,6 +332,8 @@ export async function taoKhoanVay(input: unknown): Promise<ActionResult<{ id: st
       }
       if (d.giaiNgan > 0) {
         await chanDongTienTruocM(tx, { loai: "TAO", ngay: [d.startDate] }, { cau: cauGiaiNganTruocM, field: oNgay });
+      } else {
+        await chanMangSangTuM(tx, d.startDate, oNgay);
       }
       const loan = await tx.loan.create({
         data: {
@@ -437,6 +462,9 @@ export async function suaKhoanVay(id: string, input: unknown): Promise<ActionRes
             { cau: cauThauChiTruocM, field: oNenTang }
           );
         }
+        // Dời ngày bắt đầu khoản "mang sang" sang ≥ M = khai lại nó thành khoản mang sang từ M — cùng lỗ với lúc tạo.
+        // Giữ nguyên ngày (chỉ đổi dư nợ) thì qua: không biến khoản nào thành khoản mới.
+        if (d.cheDo === "mang-sang" && doiNgay) await chanMangSangTuM(tx, d.startDate, oNenTang);
         // Dòng `LOAN_IN` sắp sửa / tạo / xoá — cùng ba nhánh ghi ngay dưới.
         const moiLoanIn = { amount: d.giaiNgan, date: startOfDay(d.startDate) };
         if (d.giaiNgan > 0 && dongGiaiNgan) {
@@ -633,10 +661,17 @@ export async function tatToanKhoanVay(id: string, input?: unknown): Promise<Acti
       await khoaKhoanVay(tx, id);
       const loan = await tx.loan.findUnique({
         where: { id },
-        select: { name: true, closedAt: true, startDate: true },
+        select: { name: true, closedAt: true, startDate: true, kind: true },
       });
       if (!loan) throw new LoiHopDong("Không tìm thấy khoản vay");
       if (loan.closedAt !== null) throw new LoiHopDong("Khoản vay đã tất toán");
+      // Thấu chi có đường tất toán RIÊNG (`tat-toan-thau-chi.ts`): ghi lãi đoạn cuối [con dấu, ngày tất toán] +
+      // trả gốc trong cùng transaction, kèm cổng chống trùng của nó. Đóng ở đây là đóng khoản mà lãi đoạn đó
+      // không bao giờ vào Lãi/Lỗ (khoản đã đóng thì không còn lối duyệt). Giao diện đã rẽ đúng nút — đây là
+      // cổng cho lượt gọi thẳng action.
+      if (loan.kind === "OVERDRAFT") {
+        throw new LoiHopDong("Khoản thấu chi tất toán bằng hộp Tất toán thấu chi (ghi cả lãi đoạn cuối) — tải lại trang rồi bấm Tất toán");
+      }
 
       // CẬN DƯỚI của ngày tất toán — cùng khuôn với `tat-toan-thau-chi.ts`, và cần vì đúng lý do đó:
       // lượt này GHI TIỀN THẬT (dòng hoàn `DEPOSIT_IN` = Σ tiền gửi). Kỳ cuối đến hạn 10/05 mà gõ

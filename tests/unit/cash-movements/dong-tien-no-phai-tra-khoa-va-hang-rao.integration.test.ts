@@ -214,3 +214,138 @@ describe("hàng rào cha khi bản đọc ngoài transaction đã cũ (3 khoá n
     });
   });
 });
+
+/**
+ * Phần TIỀN của bản đọc ngoài transaction đã cũ (cha giữ nguyên): luật "vốn là trả cho phiếu này, không tăng số"
+ * mở cửa trả vào phiếu ĐÃ HUỶ — xét trên bản cũ là để lượt khác vừa giảm số (hay đổi loại) lọt thành trả thêm.
+ * Cổng phải xét trên bản đọc LẠI sau khoá phiếu.
+ */
+describe("phần tiền của bản đọc ngoài transaction đã cũ (phiếu đã huỷ)", () => {
+  async function phieuHuy(ma: string): Promise<string> {
+    const id = await taoPhieu(ma);
+    // Đã trả trước 5tr ⇒ trần hoàn đủ rộng, không để `chanHoanVuotDaTra` che mất cổng phiếu huỷ.
+    await prisma.phieuNhapNo.update({ where: { id }, data: { daHuy: true, daTraTruoc: tr(5) } });
+    return id;
+  }
+
+  it("SUPPLIER_PAY: DB đã giảm còn 1tr, bản đọc cũ còn 10tr ⇒ đưa lại 10tr vào phiếu huỷ bị từ chối, dòng giữ 1tr", async () => {
+    const p = await phieuHuy("PN-GIAM");
+    const dong = await prisma.cashMovement.create({
+      data: { date: vn("2026-11-20"), kind: "SUPPLIER_PAY", amount: tr(1), description: "", phieuNhapId: p },
+    });
+    epDocCu({ kind: "SUPPLIER_PAY", date: dong.date, amount: tr(10), phieuNhapId: p });
+    const res = await updateCashMovement(dong.id, {
+      date: vn("2026-11-20"),
+      kind: "SUPPLIER_PAY",
+      amount: tr(10),
+      description: "",
+      phieuNhapId: p,
+    });
+    expect(res).toMatchObject({ ok: false, code: "PHIEU_DA_HUY" });
+    expect(await prisma.cashMovement.findUniqueOrThrow({ where: { id: dong.id } })).toMatchObject({ amount: tr(1) });
+  });
+
+  it("DB đã đổi sang SUPPLIER_REFUND, bản đọc cũ còn SUPPLIER_PAY ⇒ đổi lại thành trả vào phiếu huỷ bị từ chối", async () => {
+    const p = await phieuHuy("PN-DOI-LOAI");
+    const dong = await prisma.cashMovement.create({
+      data: { date: vn("2026-11-20"), kind: "SUPPLIER_REFUND", amount: tr(1), description: "", phieuNhapId: p },
+    });
+    epDocCu({ kind: "SUPPLIER_PAY", date: dong.date, amount: tr(1), phieuNhapId: p });
+    const res = await updateCashMovement(dong.id, {
+      date: vn("2026-11-20"),
+      kind: "SUPPLIER_PAY",
+      amount: tr(1),
+      description: "",
+      phieuNhapId: p,
+    });
+    expect(res).toMatchObject({ ok: false, code: "PHIEU_DA_HUY" });
+    expect(await prisma.cashMovement.findUniqueOrThrow({ where: { id: dong.id } })).toMatchObject({
+      kind: "SUPPLIER_REFUND",
+      amount: tr(1),
+    });
+  });
+
+  it("bản đọc khớp DB: giảm số SUPPLIER_PAY của phiếu huỷ vẫn qua (sửa nhầm số)", async () => {
+    const p = await phieuHuy("PN-SUA-NHAM");
+    const dong = await prisma.cashMovement.create({
+      data: { date: vn("2026-11-20"), kind: "SUPPLIER_PAY", amount: tr(3), description: "", phieuNhapId: p },
+    });
+    const res = await updateCashMovement(dong.id, {
+      date: vn("2026-11-20"),
+      kind: "SUPPLIER_PAY",
+      amount: tr(2),
+      description: "gõ nhầm",
+      phieuNhapId: p,
+    });
+    expect(res).toEqual({ ok: true, data: undefined });
+    expect(await prisma.cashMovement.findUniqueOrThrow({ where: { id: dong.id } })).toMatchObject({ amount: tr(2) });
+  });
+});
+
+/**
+ * Khe SAU lần đọc lại trong transaction: dòng nợ phải trả không bị khoá (chỉ khoá hồ sơ cha), nên một lượt
+ * khác vẫn đổi được ngày / số tiền của nó giữa lúc `docLaiTrongTx` đọc lại và lúc câu ghi chạy. Câu ghi phải
+ * rào đúng phần tiền của bản vừa xét (ngày, số tiền, loại) — không thì ta ghi đè lên một bản cổng chưa từng thấy.
+ *
+ * Dựng xác định không cần móc vào code production: bọc `prisma.$transaction` để ngay SAU lần `findUnique` dòng
+ * tiền đầu tiên trong transaction, một kết nối KHÁC đổi dòng (commit ngay vì transaction ta chưa khoá dòng này).
+ */
+describe("hàng rào phần tiền SAU lần đọc lại trong transaction (nợ phải trả)", () => {
+  function doiDongSauLanDocLai(id: string, doi: { amount?: number; date?: Date }) {
+    const goc = prisma.$transaction.bind(prisma) as (fn: (tx: Prisma.TransactionClient) => Promise<unknown>, opts?: unknown) => Promise<unknown>;
+    let daDoi = false;
+    return vi.spyOn(prisma, "$transaction").mockImplementation(((fn: (tx: Prisma.TransactionClient) => Promise<unknown>, opts?: unknown) =>
+      goc(async (tx) => {
+        const cm = tx.cashMovement;
+        const tamThoi = new Proxy(cm, {
+          get(dich, ten) {
+            const v = Reflect.get(dich, ten) as unknown;
+            if (typeof v !== "function") return v;
+            if (ten !== "findUnique") return v.bind(dich);
+            return async (...args: unknown[]) => {
+              const ketQua = await (v as (...a: unknown[]) => Promise<unknown>).apply(dich, args);
+              if (!daDoi) {
+                daDoi = true;
+                await prisma.cashMovement.update({ where: { id }, data: doi });
+              }
+              return ketQua;
+            };
+          },
+        });
+        const boc = new Proxy(tx, {
+          get(dich, ten) {
+            if (ten === "cashMovement") return tamThoi;
+            const v = Reflect.get(dich, ten) as unknown;
+            return typeof v === "function" ? v.bind(dich) : v;
+          },
+        });
+        return fn(boc);
+      }, opts)) as never);
+  }
+
+  it.each<[string, { amount?: number; date?: Date }]>([
+    ["số tiền", { amount: tr(2) }],
+    ["ngày", { date: vn("2026-11-21") }],
+  ])("%s đổi sau lần đọc lại ⇒ câu ghi bị rào từ chối, dòng giữ giá trị của lượt kia", async (_ten, doi) => {
+    const p = await taoPhieu("PN-DOI-SAU-DOC");
+    const dong = await prisma.cashMovement.create({
+      data: { date: vn("2026-11-20"), kind: "SUPPLIER_PAY", amount: tr(1), description: "", phieuNhapId: p },
+    });
+    const spy = doiDongSauLanDocLai(dong.id, doi);
+
+    const res = await updateCashMovement(dong.id, {
+      date: vn("2026-11-20"),
+      kind: "SUPPLIER_PAY",
+      amount: tr(3),
+      description: "ghi đè lên bản chưa xét",
+      phieuNhapId: p,
+    });
+    spy.mockRestore();
+
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining("vừa được sửa sang mục khác") });
+    const sau = await prisma.cashMovement.findUniqueOrThrow({ where: { id: dong.id } });
+    expect(sau.description).toBe("");
+    expect(sau.amount).toBe(doi.amount ?? tr(1));
+    expect(sau.date).toEqual(doi.date ?? vn("2026-11-20"));
+  });
+});

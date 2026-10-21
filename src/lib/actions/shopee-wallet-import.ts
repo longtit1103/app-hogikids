@@ -9,7 +9,7 @@ import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
 import { thongDiepGaySoDu, timGaySoDuVi } from "@/lib/import/shopee-wallet-lien-tuc-so-du";
 import { parseShopeeWalletFile, type WalletSummary } from "@/lib/import/shopee-wallet-xlsx";
-import { LoiFileQuaNhieuDong } from "@/lib/import/xlsx-shared";
+import { LoiFileTuChoi } from "@/lib/import/xlsx-shared";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { congAction } from "@/lib/quyen/cong-action";
@@ -91,7 +91,8 @@ function safeParse(
   } catch (err) {
     // Vượt trần số dòng là ca KHÁC HẲN "file hỏng" — nói đúng lý do, kẻo chủ shop đi tải lại file
     // lành lặn mãi không hiểu vì sao.
-    if (err instanceof LoiFileQuaNhieuDong) return { ok: false, error: err.message };
+    // Cùng lớp: zip-bomb / ZIP lạ (`LoiFileTuChoi` gom mọi lý do từ chối có câu riêng).
+    if (err instanceof LoiFileTuChoi) return { ok: false, error: err.message };
     return { ok: false, error: "Không đọc được file ví — file .xlsx hỏng hoặc sai định dạng (cần Transaction Report từ Shopee)" };
   }
 }

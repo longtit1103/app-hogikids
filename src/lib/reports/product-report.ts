@@ -45,7 +45,13 @@ export type ProductReportRowChe = {
 
 export type ProductReportRow = Omit<ProductReportRowChe, "skus"> & {
   cogs: number;
+  /**
+   * Lãi gộp THEO SẢN PHẨM = Σ(unitPrice × qty − lineDiscount) − COGS — CHƯA trừ voucher cả đơn và phí
+   * sàn (thuộc đơn, không thuộc SP). KHÁC `PnlBreakdown.grossProfit` (đã trừ cả hai): mọi nhãn hiển
+   * thị / Excel phải ghi "trước phí sàn & voucher", không dùng nhãn trần "LN gộp" của bảng Lãi/Lỗ.
+   */
   grossProfit: number;
+  /** Biên trên `grossProfit` ở trên — cùng nghĩa "trước phí sàn & voucher". */
   marginPct: number | null;
   skus: Array<ProductReportSkuChe & { cogs: number; grossProfit: number }>;
 };

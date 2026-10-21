@@ -57,6 +57,7 @@
  *    phục hồi trong app là tự chặn. Vá thật cần `restore.sh` giành cùng lease trước bước drop —
  *    việc riêng, đụng DR.
  */
+import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 
 import type { Prisma } from "@/generated/prisma/client";
@@ -135,15 +136,37 @@ export class LoiDungGiuaChung extends Error {
 }
 
 /**
+ * Tên file backup: `backup-gia-von-<yymmdd>-<hhmmss>-<mmm>-<6 hex ngẫu nhiên>-<chế độ><đuôi>`.
+ *
+ * MỘT nguồn cho cả nút trong app lẫn CLI. Tên chỉ tới PHÚT từng làm hai lượt áp trong cùng một phút
+ * (bấm hai lần, hoặc nút + CLI) trùng tên và lượt sau ĐÈ bản chụp của lượt trước — giá gốc chủ shop
+ * nhập tay mất, chỉ còn giá đã áp, không hoàn nguyên được. Giây + mili giây làm trùng gần như không
+ * thể; hậu tố ngẫu nhiên phủ nốt ca cùng mili giây. Lưới cuối vẫn là cờ `wx` ở `ghiBackupVaXacMinh`:
+ * tên có trùng thì lượt sau bị TỪ CHỐI, không bao giờ đè.
+ *
+ * Giờ theo `TZ` tiến trình (container + test đều neo `Asia/Ho_Chi_Minh`).
+ */
+export function tenFileBackupGiaVon(moc: Date, cheDo: string, duoi: string): string {
+  const hai = (n: number) => String(n).padStart(2, "0");
+  const ngay = `${String(moc.getFullYear()).slice(2)}${hai(moc.getMonth() + 1)}${hai(moc.getDate())}`;
+  const gio = `${hai(moc.getHours())}${hai(moc.getMinutes())}${hai(moc.getSeconds())}`;
+  const mili = String(moc.getMilliseconds()).padStart(3, "0");
+  return `backup-gia-von-${ngay}-${gio}-${mili}-${randomBytes(3).toString("hex")}-${cheDo}${duoi}`;
+}
+
+/**
  * Ghi backup rồi ĐỌC LẠI để xác minh nguyên vẹn.
  *
  * Đọc lại chứ không tin `writeFileSync` trả về êm: ca đắt nhất không phải "ném lỗi" mà là ghi
  * được một phần (đĩa đầy, tiến trình bị cắt giữa chừng) — file vẫn tồn tại, mở ra mới biết cụt.
  * So cả số dòng lẫn từng cặp giá để bản chụp dùng được thật khi cần hoàn nguyên.
+ *
+ * Cờ `wx`: file đã tồn tại ⇒ ném `EEXIST` ⇒ TỪ CHỐI ghi DB. Một bản backup đã có là đường lùi của
+ * MỘT lượt khác — đè lên nó là xoá đường lùi đó, dù tên trùng vì lý do gì.
  */
 export function ghiBackupVaXacMinh(duongDan: string, noiDung: NoiDungBackup): void {
   try {
-    writeFileSync(duongDan, JSON.stringify(noiDung, null, 2), "utf8");
+    writeFileSync(duongDan, JSON.stringify(noiDung, null, 2), { encoding: "utf8", flag: "wx" });
   } catch (e) {
     throw new Error(
       `Không ghi được backup giá vốn vào "${duongDan}" — TỪ CHỐI ghi DB. ` +

@@ -80,4 +80,20 @@ describe("updateShopInfo — logo phải khớp magic bytes, không chỉ MIME",
     expect(r.ok).toBe(false);
     expect(prisma.shopProfile.upsert).not.toHaveBeenCalled();
   });
+
+  // MIME trùng tên khoá kế thừa từ Object.prototype: `in` khớp cả "constructor" → ext là hàm → 500.
+  // (File.type tự hạ chữ thường nên chỉ "constructor"/"__proto__" mới khớp thật; các tên còn lại là lưới phụ.)
+  it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
+    "MIME '%s' (khoá của Object.prototype) → từ chối bình thường, không ném lỗi",
+    async (mime) => {
+      const gia = new File([new Uint8Array(PNG_MAGIC)], "logo.png", { type: mime });
+
+      const r = await updateShopInfo(form(gia));
+
+      expect(r.ok).toBe(false);
+      if (r.ok) return;
+      expect(r.field).toBe("logo");
+      expect(prisma.shopProfile.upsert).not.toHaveBeenCalled();
+    },
+  );
 });

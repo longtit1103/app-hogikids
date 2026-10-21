@@ -109,6 +109,14 @@ export type PnlStatusLensBreakdown = Omit<
 
 const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
 
+/**
+ * Danh mục KHÔNG BAO GIỜ phân bổ về kênh dưới lăng kính kênh: "purchase" (Nhập hàng — dòng tiền, ngoài
+ * P&L hẳn), "fixed" + "interest" (chi phí chung của cả shop). MỘT danh sách cho cả bộ lọc chi phí
+ * của `calcPnlCore` lẫn câu dò "kênh nào có phát sinh" của `computeChannelPnl` — hai chỗ lệch nhau là
+ * trang /kenh hiện thẻ kênh toàn số 0 (có chi phí trong DB nhưng P&L kênh không đếm).
+ */
+const DANH_MUC_KHONG_PHAN_BO_KENH: readonly string[] = ["purchase", "fixed", "interest"];
+
 // CHỐT (plan.md Global Constraints — BẤT BIẾN):
 // - Đơn hợp lệ = status ∉ {RETURNED, CANCELLED}, tính theo orderedAt trong kỳ.
 // - Phí sàn = Σ platformFeeEst CHỈ của đơn hợp lệ (đơn hoàn/hủy coi như sàn hoàn phí — quyết định grill).
@@ -166,7 +174,7 @@ export function calcPnlCore(
       : ord.filter((o) => laDonHopLe(o.status));
   const exp = expenses
     .filter((e) => e.categoryId !== "purchase")
-    .filter((e) => !opts?.channelId || (e.channelId === opts.channelId && e.categoryId !== "fixed" && e.categoryId !== "interest"));
+    .filter((e) => !opts?.channelId || (e.channelId === opts.channelId && !DANH_MUC_KHONG_PHAN_BO_KENH.includes(e.categoryId)));
   const revenue = sum(valid.map((o) => o.itemsTotal));
   const platformFee = sum(valid.map((o) => o.platformFeeEst));
   // Phí sàn THỰC sàn giữ trên đơn HOÀN/HỦY (returnedFee). Tính trên `ord` (mọi status
@@ -379,7 +387,7 @@ export interface ChannelPnl {
 
 /**
  * P&L từng kênh trong kỳ. Trả về MỌI kênh có phát sinh (đơn HOẶC chi phí gắn
- * kênh), KỂ CẢ kênh đã tắt (`isActive=false`) — trang /kenh vẫn cần thấy chúng.
+ * kênh thuộc danh mục CÓ phân bổ kênh), KỂ CẢ kênh đã tắt (`isActive=false`) — trang /kenh vẫn cần thấy chúng.
  * Mỗi kênh = `calcPnl(range, { channelId })` + các tỉ số dẫn xuất.
  *
  * LƯU Ý: Σ netProfit kênh ≠ netProfit toàn shop (fixed + interest + chi phí không gắn kênh
@@ -393,8 +401,14 @@ export async function computeChannelPnl(range: DateRange): Promise<ChannelPnl[]>
       select: { channelId: true },
       distinct: ["channelId"],
     }),
+    // Cùng luật lọc chi phí của lăng kính kênh trong `calcPnlCore`: chi phí danh mục không phân bổ
+    // kênh KHÔNG làm một kênh "có phát sinh". `categoryId` NOT NULL nên `notIn` không nuốt dòng NULL.
     prisma.expense.findMany({
-      where: { date: { gte: range.from, lte: to }, channelId: { not: null } },
+      where: {
+        date: { gte: range.from, lte: to },
+        channelId: { not: null },
+        categoryId: { notIn: [...DANH_MUC_KHONG_PHAN_BO_KENH] },
+      },
       select: { channelId: true },
       distinct: ["channelId"],
     }),

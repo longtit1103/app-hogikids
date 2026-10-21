@@ -3,7 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { AnhBanGhi, BangThungRac } from "@/lib/thung-rac/chup-anh-ban-ghi";
 import { doTinhTrang, tachAnh } from "@/lib/thung-rac/do-tinh-trang-khoi-phuc";
-import { lyDoKhongKhoiPhuc } from "@/lib/thung-rac/ly-do-khong-khoi-phuc";
+import { lyDoKhongKhoiPhuc, type TinhTrangKhoiPhuc } from "@/lib/thung-rac/ly-do-khong-khoi-phuc";
 import type { PhamViThungRac } from "@/lib/thung-rac/quyen-thung-rac";
 
 // Quyền theo loại bản ghi — định nghĩa ở `quyen-thung-rac.ts` (dùng chung với helper ghi), mở lại
@@ -73,6 +73,34 @@ type DongThungRacTho = {
 };
 
 /**
+ * Cột "Trạng thái" của MỘT dòng. Dòng đã khôi phục (`daKhoiPhuc`) luôn mang đúng một câu "đã được
+ * khôi phục" — `lyDoKhongKhoiPhuc` xét cờ đó TRƯỚC mọi dữ kiện khác — nên bỏ hẳn lượt dò (`doTinhTrang`
+ * chạy cả chục câu truy vấn mỗi dòng: id tồn tại lại, khoá chống trùng, cha, định kỳ, số dư, nợ phải trả).
+ * Thùng rác tích tụ dòng đã khôi phục theo thời gian, dò cho chúng là N+1 thuần tuý.
+ *
+ * `doTinh` là thunk để dòng đã khôi phục không tốn cả việc tách ảnh chụp.
+ */
+export async function lyDoCuaDong(
+  daKhoiPhuc: boolean,
+  doTinh: () => Promise<TinhTrangKhoiPhuc>
+): Promise<string | null> {
+  if (daKhoiPhuc) return lyDoKhongKhoiPhuc(TINH_TRANG_DA_KHOI_PHUC);
+  return lyDoKhongKhoiPhuc(await doTinh());
+}
+
+/** Chỉ `daKhoiPhuc` có nghĩa: các dữ kiện khác không được đọc khi cờ này bật (xem `lyDoKhongKhoiPhuc`). */
+const TINH_TRANG_DA_KHOI_PHUC: TinhTrangKhoiPhuc = {
+  daKhoiPhuc: true,
+  idDaTonTaiLai: false,
+  refIdBiChiem: null,
+  chaDaMat: null,
+  chaDaTatToan: null,
+  thangDaCoDinhKy: false,
+  seLamAmSoDu: null,
+  viPhamNoPhaiTra: null,
+};
+
+/**
  * Liệt kê thùng rác, mới xoá lên trước.
  *
  * Tính "khôi phục được không" cho MỖI dòng bằng đúng `doTinhTrang` mà `khoiPhucBanGhiDaXoa` dùng
@@ -115,8 +143,9 @@ export async function listThungRac(
     dong.map(async (d): Promise<ThungRacRow> => {
       const bang = d.bang as BangThungRac;
       const anh = d.anh as AnhBanGhi;
-      const canDung = tachAnh(bang, anh);
-      const tinhTrang = await doTinhTrang(prisma, d.khoiPhucLuc !== null, canDung);
+      const lyDo = await lyDoCuaDong(d.khoiPhucLuc !== null, () =>
+        doTinhTrang(prisma, false, tachAnh(bang, anh))
+      );
       return {
         id: d.id,
         bang,
@@ -125,7 +154,7 @@ export async function listThungRac(
         ngay: d.ngay,
         xoaLuc: d.xoaLuc,
         khoiPhucLuc: d.khoiPhucLuc,
-        lyDo: lyDoKhongKhoiPhuc(tinhTrang),
+        lyDo,
       };
     })
   );

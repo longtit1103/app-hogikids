@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Filter } from "lucide-react";
 
+import { useOTimKiemUrl } from "@/components/shell/use-o-tim-kiem-url";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -37,7 +38,7 @@ export function ExpenseTableToolbar({ categories, channels }: ExpenseTableToolba
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [q, setQ] = useState(searchParams.get("q") ?? "");
+  const { q, setQ } = useOTimKiemUrl();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const selectedCategoryIds = (searchParams.get("danh_muc") ?? "").split(",").filter(Boolean);
@@ -47,14 +48,6 @@ export function ExpenseTableToolbar({ categories, channels }: ExpenseTableToolba
   const activeFilterCount = [selectedCategoryIds.length > 0, Boolean(selectedChannel), selectedSources.length > 0].filter(
     Boolean,
   ).length;
-
-  useEffect(() => {
-    const initial = searchParams.get("q") ?? "";
-    if (q === initial) return;
-    const handle = setTimeout(() => setParams({ q: q || undefined }), 300);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
 
   function setParams(updates: Record<string, string | undefined>) {
     const params = new URLSearchParams(searchParams);

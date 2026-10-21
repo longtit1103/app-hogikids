@@ -81,6 +81,7 @@ export function DataSection({
   donMoCoi,
   chiPhi,
   adsMoCoi,
+  noPhaiTraDangBat,
 }: {
   trangThaiSaoLuu: TrangThaiSaoLuu;
   hasData: boolean;
@@ -88,6 +89,7 @@ export function DataSection({
   donMoCoi: DonMoCoi;
   chiPhi: ChiPhiKhongDungLai;
   adsMoCoi: AdsMoCoi;
+  noPhaiTraDangBat: boolean;
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -148,8 +150,8 @@ export function DataSection({
       <div className="flex flex-col gap-3 border-t border-hairline pt-6">
         <h3 className="text-sm font-medium text-error">Xóa dữ liệu giao dịch</h3>
         <p className="text-sm text-muted-foreground">
-          Xóa vĩnh viễn toàn bộ đơn hàng, chi phí, số liệu Tiền đã về và log đồng bộ (giữ lại nhật
-          ký sao lưu). Giữ nguyên kho thô, sản phẩm / tồn kho và giá vốn nhập tay, tài khoản, cấu
+          Xóa vĩnh viễn toàn bộ đơn hàng, chi phí, sổ quỹ / khoản vay / tiết kiệm, nợ phải trả (thẻ, phiếu
+          nhập, ví ads), thùng rác, số liệu Tiền đã về và log đồng bộ (giữ lại nhật ký sao lưu). Giữ nguyên kho thô, sản phẩm / tồn kho và giá vốn nhập tay, tài khoản, cấu
           hình kênh, danh mục và cài đặt. Không hoàn tác được. Chi phí nhập tay không dựng lại được từ kho thô — sao lưu
           trước khi xóa.
         </p>
@@ -160,6 +162,7 @@ export function DataSection({
             donMoCoi={donMoCoi}
             chiPhi={chiPhi}
             adsMoCoi={adsMoCoi}
+            noPhaiTraDangBat={noPhaiTraDangBat}
           />
         </div>
       </div>

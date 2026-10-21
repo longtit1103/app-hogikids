@@ -1,4 +1,9 @@
-import { laNgayChiTieuAdsHopLy, NGAY_CHI_TIEU_ADS_SOM_NHAT } from "@/lib/ingest/ngay-chi-tieu-ads-hop-ly";
+import {
+  khoaNgayVnHomNay,
+  khoaNgayVnHomQua,
+  laNgayChiTieuAdsHopLy,
+  NGAY_CHI_TIEU_ADS_SOM_NHAT,
+} from "@/lib/ingest/ngay-chi-tieu-ads-hop-ly";
 
 import { normHeader, parseVnInt, readSheetRows } from "./xlsx-shared";
 
@@ -13,11 +18,27 @@ import { normHeader, parseVnInt, readSheetRows } from "./xlsx-shared";
 
 export type AdsPreset = "META" | "TIKTOK"; // adsSource tương ứng: "META" | "TIKTOK_ADS"
 export type ParsedAdsRow = { date: Date; campaignName: string; amount: number };
+/** `skippedZero` = số dòng số tiền đúng 0đ bị bỏ lặng lẽ (không phải lỗi). */
+export type KetQuaParseAds = {
+  rows: ParsedAdsRow[];
+  errors: { line: number; reason: string }[];
+  skippedZero: number;
+};
 
-/** Alias cột theo nguồn — file Ads Manager đổi tên cột theo thời gian nên để dạng danh sách. */
+/**
+ * Alias cột theo nguồn — file Ads Manager đổi tên cột theo thời gian nên để dạng danh sách, xếp theo
+ * THỨ TỰ ƯU TIÊN (`findColumn` lấy alias đứng trước). "Reporting starts" đứng CUỐI: bản xuất Meta có
+ * breakdown theo ngày vẫn kèm 2 cột kỳ báo cáo `Reporting starts/ends` (thường đứng trước cột "Day"),
+ * nên phải ưu tiên "Day"; chỉ khi không có cột ngày nào khác mới dùng "Reporting starts" — và khi đó
+ * bắt buộc `Reporting ends` = `Reporting starts` từng dòng (xem `COT_KET_THUC_KY_META`).
+ */
+/** Alias ngày "kỳ báo cáo" của Meta — chỉ đúng 1 ngày khi file xuất có breakdown theo ngày. */
+const COT_BAT_DAU_KY_META = "Reporting starts";
+const COT_KET_THUC_KY_META = "Reporting ends";
+
 const COLUMN_ALIASES: Record<AdsPreset, { date: string[]; name: string[]; amount: string[] }> = {
   META: {
-    date: ["Ngày", "Day", "Reporting starts"],
+    date: ["Ngày", "Day", COT_BAT_DAU_KY_META],
     name: ["Tên chiến dịch", "Campaign name"],
     amount: ["Số tiền đã chi tiêu (VND)", "Amount spent (VND)"],
   },
@@ -50,12 +71,16 @@ function laNgayCoThat(y: number, m: number, d: number): boolean {
   return d <= new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
-/** Tìm chỉ số cột đầu tiên khớp một trong các alias (đã chuẩn hoá). -1 nếu không có. */
+/**
+ * Chỉ số cột khớp alias THEO THỨ TỰ ƯU TIÊN của `aliases` (alias đứng trước thắng, dù cột của nó nằm
+ * sau trong file). -1 nếu không có. Trước đây lấy cột ĐẦU TIÊN khớp bất kỳ alias ⇒ file Meta có cả
+ * "Reporting starts" (đứng trước) lẫn "Day" bị đọc theo ngày đầu kỳ: cả kỳ dồn về 1 ngày.
+ */
 function findColumn(header: (string | number | Date)[], aliases: string[]): number {
   const normalized = header.map((h) => normHeader(String(h)));
-  const wanted = aliases.map(normHeader);
-  for (let i = 0; i < normalized.length; i++) {
-    if (wanted.includes(normalized[i])) return i;
+  for (const alias of aliases) {
+    const i = normalized.indexOf(normHeader(alias));
+    if (i !== -1) return i;
   }
   return -1;
 }
@@ -93,13 +118,16 @@ function docKhoaNgay(value: unknown): string | null {
 }
 
 /**
- * Chuẩn hoá ô ngày → "yyyy-MM-dd" (VN) trong khoảng [2000-01-01, hôm nay giờ VN], ngoài khoảng → null.
+ * Chuẩn hoá ô ngày → "yyyy-MM-dd" (VN) trong khoảng [2000-01-01, HÔM QUA giờ VN], ngoài khoảng → null.
+ *
+ * Biên trên là HÔM QUA (chặt hơn cửa máy): số chi tiêu của hôm nay còn chạy, và một dòng IMPORT của
+ * hôm nay chặn vĩnh viễn mọi dòng ADS_API của ngày đó (`ngayGhiDeBangFile`) ⇒ chi phí kẹt ở số dở.
  *
  * Vì sao phải kẹp CẢ HAI biên: `docKhoaNgay` chỉ hỏi "ngày có thật trên lịch", không hỏi năm có hợp lý.
  * Một ô ngày lẫn số nhỏ (serial Excel 1 → 31/12/1899, serial 45 → 1900) hay năm gõ sai (serial 300000 →
  * năm 2721) vẫn ra ngày "có thật" ⇒ `createMany` ghi thẳng `Expense` source IMPORT ở một năm mà KHÔNG
  * range báo cáo nào phủ: tiền vào sổ mà không ai thấy, cũng không có dòng lỗi nào để chủ shop sửa file.
- * Biên trên khớp đường nhập tay (`ngay-ghi-tay-schema.ts` cũng chặn tương lai).
+ * Đường nhập tay (`ngay-ghi-tay-schema.ts`) cũng chặn tương lai.
  *
  * Biên + phép kiểm khuôn nằm ở `laNgayChiTieuAdsHopLy` — DÙNG CHUNG với cửa máy (`prepareAdsExpenseRow`).
  *
@@ -125,7 +153,7 @@ type KetQuaParseNgay =
 function parseDateCell(value: unknown): KetQuaParseNgay {
   const khoa = docKhoaNgay(value);
   if (khoa === null) return { hopLe: false, ngoaiKhoang: false };
-  if (laNgayChiTieuAdsHopLy(khoa)) return { hopLe: true, khoa };
+  if (laNgayChiTieuAdsHopLy(khoa, khoaNgayVnHomQua())) return { hopLe: true, khoa };
   // Đọc được (docKhoaNgay đã xác nhận ngày có thật trên lịch) nhưng bị `laNgayChiTieuAdsHopLy` từ
   // chối — phân biệt NGOÀI KHOẢNG (khuôn 4-2-2 chữ số đúng, chỉ lệch biên ngày) với SAI KHUÔN (năm
   // không đúng 4 chữ số, xem chú thích phía trên).
@@ -134,20 +162,51 @@ function parseDateCell(value: unknown): KetQuaParseNgay {
 }
 
 /**
+ * Dòng đầu tiên mà `Reporting starts` ≠ `Reporting ends` (hoặc ô kết thúc không đọc được) ⇒ lỗi CẢ
+ * file, null nếu mọi dòng đúng 1 ngày. File Meta xuất KHÔNG breakdown theo ngày chỉ có kỳ báo cáo:
+ * nhận vào là dồn cả kỳ (vd 01–20/10) về ngày đầu, chế độ ghi đè còn xoá ADS_API mỗi ngày đầu kỳ ⇒
+ * các ngày còn lại đếm đôi. Từ chối cả file (không bỏ từng dòng) vì cả file cùng một kiểu xuất sai.
+ */
+function timDongKhongTheoNgay(
+  aoa: (string | number | Date)[][],
+  batDauCol: number,
+  ketThucCol: number,
+): { line: number; reason: string } | null {
+  for (let i = 1; i < aoa.length; i++) {
+    const raw = aoa[i];
+    if (raw.every((c) => c === "" || c == null)) continue;
+    const batDau = docKhoaNgay(raw[batDauCol]);
+    if (batDau === null) continue; // ô ngày hỏng ⇒ để vòng parse báo lỗi dòng như thường
+    const ketThuc = docKhoaNgay(raw[ketThucCol]);
+    if (ketThuc === batDau) continue;
+    const ky = `${isoParaDmy(batDau)} → ${ketThuc === null ? "?" : isoParaDmy(ketThuc)}`;
+    return {
+      line: i + 1,
+      reason:
+        `File Meta không chia theo ngày (kỳ báo cáo ${ky}) — xuất lại từ Ads Manager với Phân tích ` +
+        `theo Thời gian → Ngày (Breakdown: Day) rồi import lại`,
+    };
+  }
+  return null;
+}
+
+/**
  * Parse file ads → dòng chuẩn hoá + danh sách lỗi (KHÔNG dedupe).
  * `line` = số dòng trong file (header = 1, dòng dữ liệu đầu = 2).
- * Dòng thiếu ngày/số tiền hoặc không parse được → đẩy vào `errors`, không chặn file.
+ * Dòng thiếu ngày/số tiền, ngày ≥ hôm nay, số tiền < 0 hoặc không parse được → đẩy vào `errors`,
+ * không chặn file. Số tiền đúng 0đ → bỏ lặng lẽ, chỉ đếm vào `skippedZero`. Riêng file Meta không chia theo ngày ⇒ từ chối CẢ file (`timDongKhongTheoNgay`).
  */
 export function parseAdsFile(
   buf: ArrayBuffer,
   preset: AdsPreset
-): { rows: ParsedAdsRow[]; errors: { line: number; reason: string }[] } {
+): KetQuaParseAds {
   const rows: ParsedAdsRow[] = [];
   const errors: { line: number; reason: string }[] = [];
+  let skippedZero = 0;
 
   const aoa = readSheetRows(buf);
   if (aoa.length === 0) {
-    return { rows, errors: [{ line: 1, reason: "File rỗng hoặc không đọc được" }] };
+    return { rows, errors: [{ line: 1, reason: "File rỗng hoặc không đọc được" }], skippedZero };
   }
 
   const header = aoa[0];
@@ -160,8 +219,20 @@ export function parseAdsFile(
     return {
       rows,
       errors: [{ line: 1, reason: "Không nhận ra cột ngày hoặc cột số tiền — cần file xuất từ Ads Manager" }],
+      skippedZero,
     };
   }
+
+  // Cột ngày là "Reporting starts" (không có cột ngày nào khác) ⇒ mỗi dòng phải đúng MỘT ngày.
+  const ketThucKyCol =
+    preset === "META" && dateCol === findColumn(header, [COT_BAT_DAU_KY_META])
+      ? findColumn(header, [COT_KET_THUC_KY_META])
+      : -1;
+  if (ketThucKyCol !== -1) {
+    const loiKy = timDongKhongTheoNgay(aoa, dateCol, ketThucKyCol);
+    if (loiKy) return { rows: [], errors: [loiKy], skippedZero };
+  }
+  const homNay = khoaNgayVnHomNay();
 
   for (let i = 1; i < aoa.length; i++) {
     const line = i + 1; // dòng 1 = header
@@ -172,13 +243,15 @@ export function parseAdsFile(
 
     const ngay = parseDateCell(raw[dateCol]);
     if (!ngay.hopLe) {
-      errors.push({
-        line,
-        reason: ngay.ngoaiKhoang
-          ? `Ngày ngoài khoảng ${isoParaDmy(NGAY_CHI_TIEU_ADS_SOM_NHAT)} → hôm nay — ô có thể đang là ` +
-            `số serial Excel hoặc ngày tương lai (đọc được: ${isoParaDmy(ngay.khoa)})`
-          : "Thiếu hoặc sai định dạng ngày",
-      });
+      let reason = "Thiếu hoặc sai định dạng ngày";
+      if (ngay.ngoaiKhoang && ngay.khoa === homNay) {
+        reason = `Ngày hôm nay (${isoParaDmy(homNay)}) — chi tiêu trong ngày chưa chốt, chỉ nhập được tới hôm qua`;
+      } else if (ngay.ngoaiKhoang) {
+        reason =
+          `Ngày ngoài khoảng ${isoParaDmy(NGAY_CHI_TIEU_ADS_SOM_NHAT)} → hôm qua — ô có thể đang là ` +
+          `số serial Excel hoặc ngày tương lai (đọc được: ${isoParaDmy(ngay.khoa)})`;
+      }
+      errors.push({ line, reason });
       continue;
     }
     const dateStr = ngay.khoa;
@@ -187,9 +260,21 @@ export function parseAdsFile(
       errors.push({ line, reason: "Thiếu hoặc sai số tiền" });
       continue;
     }
+    // Dòng 0đ lọt vào sổ thì ngày đó thành "đã ghi bằng file" ⇒ chặn mọi dòng ADS_API thật của ngày đó.
+    // Nhưng 0đ là chuyện BÌNH THƯỜNG của file xuất (chiến dịch tạm dừng / chưa tiêu) — bỏ lặng lẽ và chỉ
+    // ĐẾM, không báo lỗi để khỏi làm cả file Meta/TikTok nào cũng đầy dòng "lỗi" oan.
+    if (amount === 0) {
+      skippedZero++;
+      continue;
+    }
+    // Số âm còn giảm chi phí ads (khớp nhập tay `positive()`) ⇒ vẫn là dòng lỗi.
+    if (amount < 0) {
+      errors.push({ line, reason: `Số tiền phải lớn hơn 0 (đọc được: ${amount})` });
+      continue;
+    }
     const campaignName = nameCol === -1 ? "" : String(raw[nameCol] ?? "").trim();
     rows.push({ date: new Date(`${dateStr}T00:00:00+07:00`), campaignName, amount });
   }
 
-  return { rows, errors };
+  return { rows, errors, skippedZero };
 }

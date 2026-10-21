@@ -22,6 +22,7 @@ import {
   parseCostWorkbook,
   type CostImportRow,
 } from "@/lib/import/cost-excel";
+import { LoiFileTuChoi } from "@/lib/import/xlsx-shared";
 import { formatVnd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -62,6 +63,9 @@ export function CostImportModal({ choPhepTaiMau }: { choPhepTaiMau: boolean }) {
     setCostCol(undefined);
     setThresholdCol(undefined);
     setDiffs(null);
+    // Cờ chờ cũng phải về false: đóng modal giữa lúc đang xem trước/áp dụng mà không reset thì lần mở sau nút kẹt "Đang…".
+    setLoadingPreview(false);
+    setApplying(false);
   }
 
   function setOpen(next: boolean) {
@@ -82,28 +86,38 @@ export function CostImportModal({ choPhepTaiMau }: { choPhepTaiMau: boolean }) {
       return;
     }
     setFileError(null);
-    const buf = await file.arrayBuffer();
-    const parsed = parseCostWorkbook(buf);
-    const detected = autoDetectCostColumns(parsed.headers);
-    setHeaders(parsed.headers);
-    setRawRows(parsed.rows);
-    setSkuCol(detected.sku);
-    setCostCol(detected.costPrice);
-    setThresholdCol(detected.lowStockThreshold ?? undefined);
-    setStep(2);
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = parseCostWorkbook(buf);
+      const detected = autoDetectCostColumns(parsed.headers);
+      setHeaders(parsed.headers);
+      setRawRows(parsed.rows);
+      setSkuCol(detected.sku);
+      setCostCol(detected.costPrice);
+      setThresholdCol(detected.lowStockThreshold ?? undefined);
+      setStep(2);
+    } catch (err) {
+      // Bị từ chối có lý do (vượt trần dòng, zip-bomb, ZIP lạ) ⇒ hiện đúng câu; còn lại = file hỏng.
+      setFileError(err instanceof LoiFileTuChoi ? err.message : "Không đọc được file — file hỏng hoặc sai định dạng");
+    }
   }
 
   async function goToPreview() {
     if (!normalized || normalized.valid.length === 0) return;
     setLoadingPreview(true);
-    const res = await previewCostImport(normalized.valid);
-    setLoadingPreview(false);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
+    try {
+      const res = await previewCostImport(normalized.valid);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      setDiffs(res.data.diffs);
+      setStep(3);
+    } catch {
+      toast.error("Xem trước thất bại — kiểm tra kết nối");
+    } finally {
+      setLoadingPreview(false);
     }
-    setDiffs(res.data.diffs);
-    setStep(3);
   }
 
   async function applyImport() {
@@ -113,19 +127,24 @@ export function CostImportModal({ choPhepTaiMau }: { choPhepTaiMau: boolean }) {
     if (applicable.length === 0) return;
 
     setApplying(true);
-    const res = await importCostPrices(applicable);
-    setApplying(false);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
+    try {
+      const res = await importCostPrices(applicable);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Đã cập nhật giá vốn ${res.data.updatedVariants} biến thể`, {
+        description: res.data.multiSkus.length
+          ? `${res.data.multiSkus.length} SKU trùng nhiều biến thể đã áp cho tất cả`
+          : undefined,
+      });
+      setOpen(false);
+      router.refresh();
+    } catch {
+      toast.error("Import thất bại — kiểm tra kết nối");
+    } finally {
+      setApplying(false);
     }
-    toast.success(`Đã cập nhật giá vốn ${res.data.updatedVariants} biến thể`, {
-      description: res.data.multiSkus.length
-        ? `${res.data.multiSkus.length} SKU trùng nhiều biến thể đã áp cho tất cả`
-        : undefined,
-    });
-    setOpen(false);
-    router.refresh();
   }
 
   const updatedCount = diffs?.filter((d) => d.status !== "NOT_FOUND").reduce((s, d) => s + d.matchedVariants, 0) ?? 0;

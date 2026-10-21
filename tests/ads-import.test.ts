@@ -269,9 +269,12 @@ describe("importAdsExpenses — xung đột ADS_API", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
 
-    // 5 dòng duy nhất, bỏ 07-01 (đã có API) → import 4.
+    // 5 dòng duy nhất, bỏ 07-01 (đã có API) → import 4, và lượt bỏ đó PHẢI được đếm để báo lại
+    // (trước đây rơi im lặng: toast chỉ nói "bỏ qua 0 dòng trùng").
     expect(res.data.imported).toBe(4);
     expect(res.data.overwrittenApiRows).toBe(0);
+    expect(res.data.skippedApiConflict).toBe(1);
+    expect(res.data.skippedDuplicates).toBe(0);
 
     // Ngày 07-01 chỉ còn đúng 1 dòng ADS_API 999.000 (không thêm dòng IMPORT).
     const day01 = await prisma.expense.findMany({ where: { date: vnDate("2026-07-01") } });
@@ -291,6 +294,7 @@ describe("importAdsExpenses — xung đột ADS_API", () => {
 
     expect(res.data.imported).toBe(5);
     expect(res.data.overwrittenApiRows).toBe(1);
+    expect(res.data.skippedApiConflict).toBe(0); // ghi đè thì không bỏ dòng nào
 
     // Ngày 07-01 giờ chỉ có đúng 1 dòng IMPORT 150.000, KHÔNG còn ADS_API.
     const day01 = await prisma.expense.findMany({ where: { date: vnDate("2026-07-01") } });

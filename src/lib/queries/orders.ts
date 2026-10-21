@@ -105,6 +105,9 @@ export type OrderDetailTheoQuyen = KetQuaChe<OrderDetail, OrderDetailChe>;
 
 const PAGE_SIZE = 20;
 
+/** Mới nhất trước; `id` cùng chiều làm khoá phân xử cuối để phân trang bằng `OFFSET` ổn định. */
+export const ORDER_LIST_ORDER_BY: Prisma.OrderOrderByWithRelationInput[] = [{ orderedAt: "desc" }, { id: "desc" }];
+
 /**
  * Mã đơn hàng BÊN SÀN — chính là `Order.pancakeId`: với đơn marketplace, Pancake dùng luôn
  * mã đơn của sàn làm `id` (Shopee dạng "MAU-DON-0001", TikTok 18 chữ số), khác `code`
@@ -148,7 +151,8 @@ export async function getOrderListPage(
   const [orders, total, sumsByStatus] = await Promise.all([
     prisma.order.findMany({
       where,
-      orderBy: { orderedAt: "desc" },
+      // `id` phân xử các đơn trùng giờ đặt (import lô) — thiếu nó `OFFSET` lặp/sót dòng giữa hai trang.
+      orderBy: ORDER_LIST_ORDER_BY,
       skip: Math.max(0, (p.page - 1) * PAGE_SIZE),
       take: PAGE_SIZE,
       select: {

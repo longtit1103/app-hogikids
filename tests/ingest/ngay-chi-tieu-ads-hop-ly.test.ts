@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   khoaNgayVnHomNay,
+  khoaNgayVnHomQua,
   laNgayChiTieuAdsHopLy,
   NGAY_CHI_TIEU_ADS_SOM_NHAT,
 } from "@/lib/ingest/ngay-chi-tieu-ads-hop-ly";
@@ -107,5 +108,36 @@ describe("khoaNgayVnHomNay + laNgayChiTieuAdsHopLy", () => {
     it("29/02 năm NHUẬN (2024-02-29) → hợp lệ (không chặn oan)", () => {
       expect(laNgayChiTieuAdsHopLy("2024-02-29")).toBe(true);
     });
+  });
+});
+
+/**
+ * Cửa FILE tay chỉ nhận tới HÔM QUA (truyền biên trên `khoaNgayVnHomQua()`); cửa MÁY giữ mặc định
+ * HÔM NAY. Lý do: dòng IMPORT của hôm nay (số chi tiêu còn dở) chặn vĩnh viễn mọi dòng ADS_API của
+ * ngày đó ⇒ chi phí thật kẹt ở số dở dang.
+ */
+describe("biên trên tuỳ chọn — cửa file dừng ở hôm qua, cửa máy giữ hôm nay", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("khoaNgayVnHomQua theo giờ VN: 00:30 VN 24/09 (17:30Z 23/09) → hôm qua = 2026-09-23", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T17:30:00.000Z"));
+    expect(khoaNgayVnHomQua()).toBe("2026-09-23");
+  });
+
+  it("23:59 VN 23/09 (16:59Z) → hôm qua = 2026-09-22 (không lấy theo ngày UTC)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T16:59:59.999Z"));
+    expect(khoaNgayVnHomQua()).toBe("2026-09-22");
+  });
+
+  it("biên trên = hôm qua ⇒ hôm nay bị từ chối, hôm qua hợp lệ; mặc định (cửa máy) vẫn nhận hôm nay", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-23T05:00:00.000Z")); // 12:00 VN 23/09
+    expect(laNgayChiTieuAdsHopLy("2026-09-23", khoaNgayVnHomQua())).toBe(false);
+    expect(laNgayChiTieuAdsHopLy("2026-09-22", khoaNgayVnHomQua())).toBe(true);
+    expect(laNgayChiTieuAdsHopLy("2026-09-23")).toBe(true);
   });
 });

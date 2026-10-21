@@ -315,13 +315,21 @@ const SELECT_CHA = { loanId: true, savingsId: true, cardId: true, phieuNhapId: t
  * Còn kiểm cha không đổi: khoá `FOR UPDATE` ở trên giành theo `loanId`/`savingsId` của bản đọc NGOÀI
  * transaction. Nếu dòng vừa được chuyển sang khoản vay / sổ khác thì ta đang khoá nhầm cha, và mọi
  * hậu kiểm sau đó cộng nhầm sổ. Bảo chủ shop mở lại trang rẻ hơn nhiều so với đoán.
+ *
+ * Đường SỬA dòng nợ phải trả dùng chung (`viec = "sửa"`): cổng hồ sơ nợ phải xét trên bản này chứ không trên
+ * bản ngoài transaction — xem `updateCashMovement`.
  */
-async function docLaiTrongTx(tx: Prisma.TransactionClient, id: string, cha: KhoaCha) {
+async function docLaiTrongTx(
+  tx: Prisma.TransactionClient,
+  id: string,
+  cha: KhoaCha,
+  viec: "xoá" | "sửa" = "xoá"
+) {
   const row = await tx.cashMovement.findUnique({ where: { id } });
   if (!row) throw new LoiKhoanVay("Không tìm thấy khoản tiền", "id");
   if (KHOA_CHA.some((k) => row[k] !== cha[k])) {
     throw new LoiKhoanVay(
-      "Khoản tiền này vừa được sửa sang mục khác — mở lại trang rồi xoá lại",
+      `Khoản tiền này vừa được sửa sang mục khác — mở lại trang rồi ${viec} lại`,
       "id"
     );
   }
@@ -348,7 +356,7 @@ async function docLaiTrongTx(tx: Prisma.TransactionClient, id: string, cha: Khoa
  * lại `loanId`/`savingsId` theo `kind`, nên `data.*` là giá trị MỚI muốn ghi — lấy nó làm điều kiện
  * thì hàng rào tự khớp chính mình và mất tác dụng.
  *
- * `raoTien` (tuỳ chọn): rào thêm phần TIỀN của bản cũ mà cổng dòng tiền trước M vừa xét (ngày, số tiền, loại) —
+ * `raoTien` (tuỳ chọn): rào thêm phần TIỀN của bản cũ mà cổng dòng tiền trước M (hay cổng hồ sơ nợ) vừa xét (ngày, số tiền, loại) —
  * phép xét đó đúng chỉ khi câu ghi đè lên ĐÚNG bản ấy. Nhánh dòng trơn không khoá dòng cha nào, nên thiếu rào này
  * là khe đọc-rồi-ghi: lượt khác đổi dòng giữa lúc đọc lại và lúc ghi thì ta ghi đè lên một bản cổng chưa từng xét.
  */
@@ -651,10 +659,16 @@ export async function updateCashMovement(id: string, input: unknown): Promise<Ac
       await prisma.$transaction(async (tx) => {
         // Đổi thẻ A → B (hay phiếu, ví) đổi nợ của CẢ HAI ⇒ khoá cả cha cũ lẫn cha mới, thứ tự cố định.
         await khoaHoSoNo(tx, [truoc, data]);
-        await kiemHoSoNo(tx, { truoc: phiaNo(truoc), sau: phiaNo(data) });
-        await ghiCoHangRaoCha(tx, id, truoc, data);
+        // Cổng hồ sơ xét trên bản đọc LẠI sau khoá, không trên `truoc`: luật "vốn là trả cho phiếu này, không
+        // tăng số" (`kiemHoSoNo`) mở cửa trả vào phiếu ĐÃ HUỶ theo số tiền / loại của bản cũ — bản ngoài
+        // transaction đã cũ (lượt khác vừa giảm 10tr → 1tr, hay đổi trả ↔ hoàn) thì ghi đè thành trả THÊM vào
+        // phiếu huỷ. Cha đổi ⇒ ta đang khoá nhầm cha ⇒ từ chối (`docLaiTrongTx`).
+        const cu = await docLaiTrongTx(tx, id, truoc, "sửa");
+        await kiemHoSoNo(tx, { truoc: phiaNo(cu), sau: phiaNo(data) });
+        // Rào cả phần tiền của bản vừa xét: câu ghi chỉ đè đúng bản cổng đã thấy.
+        await ghiCoHangRaoCha(tx, id, cu, data, cu);
         // Cả phiếu cũ (bớt một dòng trả) lẫn phiếu mới (thêm một dòng hoàn) đều có thể vượt trần.
-        await chanHoanVuotDaTra(tx, [truoc.phieuNhapId, data.phieuNhapId]);
+        await chanHoanVuotDaTra(tx, [cu.phieuNhapId, data.phieuNhapId]);
         await ghiNhatKyDongTien(tx, nguoiDung, "DONG_TIEN_SUA", id);
       }, OPT_TX_DONG_TIEN);
       lamMoiTrang();

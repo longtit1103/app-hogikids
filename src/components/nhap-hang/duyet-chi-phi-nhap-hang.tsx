@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ghiChiPhiNhapHang } from "@/lib/actions/chi-phi-nhap-hang";
 import { formatVnd } from "@/lib/format";
+import { parseAmountInput } from "@/lib/format-amount-input";
 import type { PhieuNhapDeXuat, PhieuNhapDeXuatChe } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
 
 /** Trần giống hệt form chi phí: Prisma `Int` (int32) chết ở 2.147.483.647. */
@@ -287,15 +288,13 @@ export function DuyetChiPhiNhapHang({
 }
 
 /**
- * Lọc input gõ tay về chuỗi số sạch, giống hệt `parseAmountInput` của form chi phí
- * (`expense-form-modal.tsx`): bỏ mọi ký tự không phải chữ số (kể cả dấu chấm người dùng tự gõ hay
- * dấu chấm hiển thị bị chọn-dán lại), rồi kẹp trần ngay lúc gõ để không có cửa vượt `TRAN_TIEN`
- * giữa chừng. Trả về "" khi không còn chữ số nào (ô trống hợp lệ để gõ lại).
+ * Lọc input gõ tay về chuỗi số sạch bằng `parseAmountInput` dùng chung (bỏ mọi ký tự không phải chữ số,
+ * kẹp trần 2 tỷ ngay lúc gõ để không có cửa vượt `TRAN_TIEN` giữa chừng). Khác parser chung đúng một
+ * điểm: trả về "" khi không còn chữ số nào (ô trống hợp lệ để gõ lại) thay vì 0.
  */
 function locSoTuChuoiNhap(raw: string): string {
-  const digits = raw.replace(/\D/g, "");
-  if (!digits) return "";
-  return String(Math.min(Number.parseInt(digits, 10), TRAN_TIEN));
+  if (!/\d/.test(raw)) return "";
+  return String(parseAmountInput(raw));
 }
 
 /** `NaN` = ô trống hoặc không phải số nguyên — `soTienHopLe` bên dưới là cổng duy nhất quyết hợp lệ. */

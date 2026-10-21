@@ -32,7 +32,8 @@ export function DeltaLine({
     return <span className={cn("text-[11px]", mutedClass)}>Mới</span>;
   }
 
-  const pct = ((current - previous) / previous) * 100;
+  // Mẫu số lấy trị tuyệt đối: kỳ trước ÂM (lỗ) mà chia thẳng sẽ đảo dấu — từ lỗ 1tr lên lãi 0,5tr phải là ▲.
+  const pct = ((current - previous) / Math.abs(previous)) * 100;
   if (Math.round(Math.abs(pct)) === 0) {
     return <span className={cn("text-[11px]", mutedClass)}>0%</span>;
   }

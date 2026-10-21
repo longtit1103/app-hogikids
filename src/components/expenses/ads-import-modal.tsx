@@ -21,6 +21,8 @@ type PreviewData = {
   /** Số dòng ngày < M (đã bật nợ phải trả) sẽ bị bỏ — KHÔNG nằm trong `rows`. */
   soDongTruocM: number;
   mocM: string | null;
+  /** Số dòng 0đ bị bỏ lặng lẽ (chiến dịch tạm dừng / chưa tiêu) — không phải lỗi. */
+  skippedZero: number;
 };
 
 /** "yyyy-MM-dd" → "dd/MM/yyyy" (khoá ngày VN do server trả, không qua `Date` để khỏi lệch múi giờ). */
@@ -164,8 +166,13 @@ export function AdsImportModal({ open, onOpenChange, channels }: AdsImportModalP
     }
     const boTruocM =
       res.data.skippedTruocM > 0 ? `; ${cauTruocM(res.data.skippedTruocM, res.data.mocM)} đã bỏ qua` : "";
+    const boTrungApi =
+      res.data.skippedApiConflict > 0
+        ? `; ${res.data.skippedApiConflict} dòng thuộc ngày đã có số tự đồng bộ đã bỏ qua`
+        : "";
+    const boSoKhong = res.data.skippedZero > 0 ? `; ${res.data.skippedZero} dòng 0đ đã bỏ qua` : "";
     toast.success(
-      `Đã import ${res.data.imported} khoản chi phí ads, bỏ qua ${res.data.skippedDuplicates} dòng trùng${boTruocM}`,
+      `Đã import ${res.data.imported} khoản chi phí ads, bỏ qua ${res.data.skippedDuplicates} dòng trùng${boTrungApi}${boTruocM}${boSoKhong}`,
     );
     handleOpenChange(false);
     router.refresh();
@@ -285,6 +292,12 @@ export function AdsImportModal({ open, onOpenChange, channels }: AdsImportModalP
               {preview.rows.length} dòng hợp lệ
               {preview.rows.length > 10 ? " (hiện 10 dòng đầu)" : ""}
             </p>
+
+            {preview.skippedZero > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {preview.skippedZero} dòng số tiền 0đ sẽ bị bỏ qua (không phải lỗi).
+              </p>
+            )}
 
             {preview.soDongTruocM > 0 && (
               <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm text-ink">

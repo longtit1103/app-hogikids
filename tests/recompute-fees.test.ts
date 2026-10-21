@@ -110,6 +110,38 @@ describe("recomputeFeesInRange — hàng rào phí thật + idempotent", () => {
   });
 });
 
+describe("recomputeFeesInRange — kiểm kỳ nhận từ client", () => {
+  async function loi(range: unknown): Promise<string> {
+    const res = await recomputeFeesInRange(range as never);
+    expect(res.ok).toBe(false);
+    return res.ok ? "" : res.error;
+  }
+
+  it("từ chối kỳ 1970→2100 (quá 366 ngày) và không đụng đơn nào", async () => {
+    await seedOrders();
+    const err = await loi({ from: new Date(1970, 0, 1), to: new Date(2100, 0, 1) });
+    expect(err).toContain("366");
+    expect(await feeOf("RC-FB")).not.toBe(8000);
+  });
+
+  it("từ chối from > to", async () => {
+    expect(await loi({ from: new Date(2026, 6, 31), to: new Date(2026, 6, 1) })).toContain("trước hoặc bằng");
+  });
+
+  it("từ chối ngày không hợp lệ hoặc thiếu", async () => {
+    expect(await loi({ from: new Date("khong-phai-ngay"), to: new Date(2026, 6, 1) })).toContain("bắt đầu");
+    expect(await loi({ from: new Date(2026, 6, 1), to: undefined })).toContain("kết thúc");
+    await loi(null);
+  });
+
+  it("đúng 366 ngày (cả hai đầu) vẫn chạy; 367 ngày thì bị từ chối", async () => {
+    const tu = new Date(2026, 0, 1);
+    const ok = await recomputeFeesInRange({ from: tu, to: new Date(2026, 0, 1 + 365) });
+    expect(ok.ok).toBe(true);
+    expect(await loi({ from: tu, to: new Date(2026, 0, 1 + 366) })).toContain("366");
+  });
+});
+
 describe("countRecomputableOrders — chỉ đếm đơn không phí thật trong kỳ", () => {
   it("đếm 1 (đơn Facebook trong kỳ); bỏ Shopee và đơn ngoài kỳ", async () => {
     await seedOrders();

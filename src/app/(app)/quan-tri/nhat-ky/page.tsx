@@ -7,6 +7,7 @@ import { nhanHanhDong, nhanKhoaGhiChu, nhanLyDo } from "@/components/quan-tri/nh
 import { PhanTrangNhatKy } from "@/components/quan-tri/phan-trang-nhat-ky";
 import { Badge } from "@/components/ui/badge";
 import { PageTitle } from "@/components/shell/page-title";
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import { listNhatKy, listHanhDongDaCo, type LocNhatKy } from "@/lib/quan-tri/nhat-ky-queries";
 import { listTaiKhoan } from "@/lib/quan-tri/tai-khoan-queries";
 import { yeuCauChuShopTrang } from "@/lib/quyen/cong-trang";
@@ -73,9 +74,10 @@ function KetQua({ ketQua }: { ketQua: AuditLog["ketQua"] }) {
   return ketQua === "OK" ? <Badge variant="secondary">OK</Badge> : <Badge variant="destructive">Lỗi</Badge>;
 }
 
-export default async function NhatKyPage({ searchParams }: { searchParams: Promise<SP> }) {
+export default async function NhatKyPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SP>> }) {
   await yeuCauChuShopTrang("/quan-tri/nhat-ky");
-  const sp = await searchParams;
+  // Tham số lặp (?actor=a&actor=b) Next trả MẢNG — lấy phần tử đầu thay vì để Prisma/`defaultValue` nhận mảng.
+  const sp = chuanHoaSearchParams(await searchParams);
 
   const loc: LocNhatKy = {
     actorId: sp.actor || undefined,

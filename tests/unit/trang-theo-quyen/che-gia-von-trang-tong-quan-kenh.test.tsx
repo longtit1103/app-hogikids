@@ -68,7 +68,10 @@ vi.mock("@/lib/reports/daily-series", () => ({
   computeChannelRevenueAdsSeries: m.computeChannelRevenueAdsSeries,
 }));
 vi.mock("@/lib/reports/product-report", () => ({ computeProductReport: m.computeProductReport }));
-vi.mock("@/lib/queries/orders", () => ({ getOrderListPage: async () => ({ rows: [], total: 0 }) }));
+vi.mock("@/lib/queries/orders", () => ({
+  getOrderListPage: async () => ({ rows: [], total: 0 }),
+  ORDER_PAGE_SIZE: 20,
+}));
 vi.mock("@/lib/dashboard/khoi-chi-tiet-theo-quyen", () => ({
   SYNC_KINDS_DASHBOARD: [],
   taiKhoiChiTietDashboard: async () => ({ productReport: null, lowStock: null, syncLogs: null }),

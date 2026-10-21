@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { OrderStatus } from "@/generated/prisma/browser";
 import { format } from "date-fns";
 
 import { OrderStatusBadge } from "@/components/orders/order-status-badge";
+import { useOTimKiemUrl } from "@/components/shell/use-o-tim-kiem-url";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -46,17 +46,9 @@ export function ChannelOrdersTab({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [q, setQ] = useState(searchParams.get("q") ?? "");
+  const { q, setQ } = useOTimKiemUrl({ scroll: false });
 
   const selectedSlugs = (searchParams.get("trang_thai") ?? "").split(",").filter(Boolean);
-
-  useEffect(() => {
-    const initial = searchParams.get("q") ?? "";
-    if (q === initial) return;
-    const handle = setTimeout(() => setParams({ q: q || undefined }), 300);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
 
   function setParams(updates: Record<string, string | undefined>) {
     const params = new URLSearchParams(searchParams);

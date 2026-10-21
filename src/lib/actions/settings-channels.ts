@@ -1,6 +1,6 @@
 "use server";
 
-import { endOfDay } from "date-fns";
+import { differenceInCalendarDays, endOfDay } from "date-fns";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
@@ -29,6 +29,20 @@ const channelConfigSchema = z
   )
   .length(5)
   .refine((a) => a.some((c) => c.isActive), "Phải có ít nhất 1 kênh hoạt động");
+
+/** Trần số ngày của kỳ "Tính lại phí": một transaction UPDATE từng đơn có hạn 60s, kỳ vô hạn sẽ vượt. */
+const TRAN_NGAY_TINH_LAI_PHI = 366;
+
+/**
+ * Kỳ nhận từ client: hai ngày phải là Date thật (Invalid Date bị `z.date()` loại), `from ≤ to` và
+ * kỳ không dài quá 366 ngày (đếm cả hai đầu). Tin client thì 1970→2100 sẽ chạy transaction 60s.
+ */
+const rangeTinhLaiPhiSchema = z
+  .object({ from: z.date({ error: "Ngày bắt đầu không hợp lệ" }), to: z.date({ error: "Ngày kết thúc không hợp lệ" }) })
+  .refine((r) => r.from.getTime() <= r.to.getTime(), { message: "Ngày bắt đầu phải trước hoặc bằng ngày kết thúc" })
+  .refine((r) => differenceInCalendarDays(r.to, r.from) + 1 <= TRAN_NGAY_TINH_LAI_PHI, {
+    message: `Kỳ tính lại phí tối đa ${TRAN_NGAY_TINH_LAI_PHI} ngày — chọn kỳ ngắn hơn`,
+  });
 
 /** Làm tròn % về 2 chữ số thập phân (nhập tay có thể ra 3.333…). */
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -117,6 +131,12 @@ export async function recomputeFeesInRange(
   // hồi thì hoặc chết giữa chừng vì bảng bị drop, hoặc commit xong rồi bị bản backup lùi lại —
   // cả hai đều để lại phí sàn không khớp gì cả.
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+
+  const kyHopLe = rangeTinhLaiPhiSchema.safeParse(range);
+  if (!kyHopLe.success) {
+    return { ok: false, error: kyHopLe.error.issues[0]?.message ?? "Kỳ tính lại phí không hợp lệ" };
+  }
+  range = kyHopLe.data;
 
   const updated = await prisma.$transaction(
     async (tx) => {

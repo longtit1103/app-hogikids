@@ -263,9 +263,29 @@ export type MapOrderCtx = {
   channels: Record<string, { platformFeePct: number; paymentFeePct: number }>;
 };
 
+/**
+ * Mã đơn cho `Order.pancakeId`: ưu tiên `externalId` của dòng Bronze — rút bằng `elem->>'id'` trong
+ * SQL nên LOSSLESS — thay vì `String(raw.id)` của payload đã đi qua `JSON.parse` (Prisma Json).
+ *
+ * Hôm nay id đơn Pancake là CHUỖI (đo prod) ⇒ hai giá trị trùng nhau, không `pancakeId` nào đổi. Nếu
+ * Pancake/webhook đổi sang số int64 thì `JSON.parse` làm tròn (vượt 2^53) ⇒ `String(raw.id)` lệch mã
+ * thật ⇒ upsert đẻ đơn Silver THỨ HAI = doanh thu đếm đôi mà cổng đối soát (đếm số lượng) không kêu.
+ * Lệch thì lấy `externalId` + cảnh báo. Không truyền `externalId` (caller chưa có dòng Bronze) ⇒ y cũ.
+ */
+function chonMaDon(raw: PancakeOrder, externalId: string | undefined, warnings: string[]): string {
+  const tuPayload = String(raw.id);
+  if (externalId === undefined || externalId === tuPayload) return tuPayload;
+  warnings.push(
+    `Đơn ${externalId}: id trong payload (${tuPayload}) lệch mã Bronze — nghi id số bị JSON làm tròn, dùng mã Bronze`,
+  );
+  return externalId;
+}
+
 // ---- Order mapping ---------------------------------------------------------
-export function mapPancakeOrder(raw: PancakeOrder, ctx: MapOrderCtx): MappedOrder {
+/** `externalId` = khoá lossless của dòng Bronze (xem `chonMaDon`); bỏ trống thì dùng `raw.id`. */
+export function mapPancakeOrder(raw: PancakeOrder, ctx: MapOrderCtx, externalId?: string): MappedOrder {
   const warnings: string[] = [];
+  const pancakeId = chonMaDon(raw, externalId, warnings);
   const channelId = mapChannel(raw, warnings);
   const status = mapStatus(raw.status, warnings, raw.status_name);
 
@@ -362,8 +382,8 @@ export function mapPancakeOrder(raw: PancakeOrder, ctx: MapOrderCtx): MappedOrde
   });
 
   return {
-    pancakeId: String(raw.id),
-    code: raw.system_id != null ? String(raw.system_id) : String(raw.id),
+    pancakeId,
+    code: raw.system_id != null ? String(raw.system_id) : pancakeId,
     channelId,
     status,
     orderedAt: parseVnDate(raw.inserted_at),

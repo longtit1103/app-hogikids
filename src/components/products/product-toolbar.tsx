@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, X } from "lucide-react";
 
+import { useOTimKiemUrl } from "@/components/shell/use-o-tim-kiem-url";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -26,22 +26,8 @@ export function ProductToolbar({ coQuyenGiaVon }: { coQuyenGiaVon: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [q, setQ] = useState(searchParams.get("q") ?? "");
+  const { q, setQ } = useOTimKiemUrl();
   const loc = (searchParams.get("loc") ?? "") as LocFilter;
-
-  useEffect(() => {
-    const initial = searchParams.get("q") ?? "";
-    if (q === initial) return;
-    const handle = setTimeout(() => {
-      const params = new URLSearchParams(searchParams);
-      if (q) params.set("q", q);
-      else params.delete("q");
-      params.delete("trang");
-      router.replace(`${pathname}?${params.toString()}`);
-    }, 300);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
 
   function selectLoc(next: LocFilter) {
     const params = new URLSearchParams(searchParams);

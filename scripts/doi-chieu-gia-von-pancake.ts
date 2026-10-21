@@ -41,7 +41,11 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 
-import { ghiGiaVonDuoiKhoaViecNang, LoiDungGiuaChung } from "@/lib/gia-von/ghi-gia-von-theo-pancake";
+import {
+  ghiGiaVonDuoiKhoaViecNang,
+  LoiDungGiuaChung,
+  tenFileBackupGiaVon,
+} from "@/lib/gia-von/ghi-gia-von-theo-pancake";
 
 const envPath = path.resolve(process.cwd(), ".env");
 if (existsSync(envPath)) process.loadEnvFile(envPath);
@@ -78,13 +82,13 @@ function vnd(n: number): string {
   return `${n.toLocaleString("vi-VN")} ₫`;
 }
 
-/** `plans/reports/backup-gia-von-<yymmdd-hhmm>-<chế độ>.json` — dấu vết bền, cùng chỗ với báo cáo. */
+/**
+ * `plans/reports/backup-gia-von-<yymmdd-hhmmss-mmm-hex>-<chế độ>.json` — dấu vết bền, cùng chỗ với
+ * báo cáo. Tên dùng CHUNG luật với nút trong app (`tenFileBackupGiaVon`): tên theo phút từng để hai
+ * lượt cùng phút đè bản chụp của nhau.
+ */
 function duongDanBackup(moc: Date, cheDo: string): string {
-  const hai = (n: number) => String(n).padStart(2, "0");
-  const ten =
-    `backup-gia-von-${String(moc.getFullYear()).slice(2)}${hai(moc.getMonth() + 1)}${hai(moc.getDate())}` +
-    `-${hai(moc.getHours())}${hai(moc.getMinutes())}-${cheDo}.json`;
-  return path.resolve(process.cwd(), "plans", "reports", ten);
+  return path.resolve(process.cwd(), "plans", "reports", tenFileBackupGiaVon(moc, cheDo, ".json"));
 }
 
 async function main(): Promise<void> {

@@ -70,7 +70,7 @@ describe("parseAdsFile — ngày không có thật", () => {
  * `laNgayCoThat` cho qua, rồi `createMany` ghi thẳng `Expense` source IMPORT ở năm đó —
  * tiền vào sổ mà KHÔNG range báo cáo nào phủ, và chủ shop không có dòng lỗi nào để sửa file.
  */
-describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => {
+describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm qua VN]", () => {
   function xlsx(oNgay: string | number): ArrayBuffer {
     const ws = XLSX.utils.aoa_to_sheet([
       ["Ngày", "Tên chiến dịch", "Số tiền đã chi tiêu (VND)"],
@@ -93,7 +93,7 @@ describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => 
       {
         line: 2,
         reason:
-          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "Ngày ngoài khoảng 01/01/2000 → hôm qua — ô có thể đang là số serial Excel hoặc ngày " +
           "tương lai (đọc được: 31/12/1899)",
       },
     ]);
@@ -143,7 +143,7 @@ describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => 
       {
         line: 2,
         reason:
-          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "Ngày ngoài khoảng 01/01/2000 → hôm qua — ô có thể đang là số serial Excel hoặc ngày " +
           "tương lai (đọc được: 31/12/1999)",
       },
     ]);
@@ -162,13 +162,13 @@ describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => 
       {
         line: 2,
         reason:
-          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "Ngày ngoài khoảng 01/01/2000 → hôm qua — ô có thể đang là số serial Excel hoặc ngày " +
           "tương lai (đọc được: 29/02/2028)",
       },
     ]);
   });
 
-  it("ngày MAI (giờ VN) → dòng lỗi NGOÀI KHOẢNG; HÔM NAY → hợp lệ", () => {
+  it("ngày MAI (giờ VN) → dòng lỗi NGOÀI KHOẢNG; HÔM QUA → hợp lệ", () => {
     // Ghim 18/09/2026 14:00 giờ VN = 07:00Z. Biên trên phải đọc theo ngày VN, không theo UTC.
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-18T07:00:00.000Z"));
@@ -177,14 +177,33 @@ describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => 
       {
         line: 2,
         reason:
-          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "Ngày ngoài khoảng 01/01/2000 → hôm qua — ô có thể đang là số serial Excel hoặc ngày " +
           "tương lai (đọc được: 19/09/2026)",
       },
     ]);
 
-    const { rows, errors } = parseAdsFile(csv(["2026-09-18,Hôm nay,10000"]), "META");
+    const { rows, errors } = parseAdsFile(csv(["2026-09-17,Hôm qua,10000"]), "META");
     expect(errors).toHaveLength(0);
     expect(rows).toHaveLength(1);
+  });
+
+  it("HÔM NAY (giờ VN) → dòng lỗi riêng: số chi tiêu trong ngày còn chạy, chỉ nhập tới hôm qua", () => {
+    // Dòng IMPORT của hôm nay (số dở dang) sẽ chặn VĨNH VIỄN mọi dòng ADS_API của ngày đó ⇒ chi phí
+    // thật không bao giờ tự lành. Cửa file dừng ở hôm qua; cửa máy (n8n) không đổi.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-18T07:00:00.000Z"));
+
+    const { rows, errors } = parseAdsFile(
+      csv(["2026-09-18,Hôm nay,10000", "2026-09-17,Hôm qua,20000"]),
+      "META",
+    );
+    expect(errors).toEqual([
+      {
+        line: 2,
+        reason: "Ngày hôm nay (18/09/2026) — chi tiêu trong ngày chưa chốt, chỉ nhập được tới hôm qua",
+      },
+    ]);
+    expect(rows.map((r) => r.amount)).toEqual([20000]);
   });
 
   it("serial Excel 46000 (09/12/2025, quá khứ) vẫn hợp lệ — không siết oan", () => {
@@ -205,7 +224,7 @@ describe("parseAdsFile — ngày ngoài biên [2000-01-01, hôm nay VN]", () => 
       {
         line: 2,
         reason:
-          "Ngày ngoài khoảng 01/01/2000 → hôm nay — ô có thể đang là số serial Excel hoặc ngày " +
+          "Ngày ngoài khoảng 01/01/2000 → hôm qua — ô có thể đang là số serial Excel hoặc ngày " +
           "tương lai (đọc được: 05/01/1900)",
       },
     ]);

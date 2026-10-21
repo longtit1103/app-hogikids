@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ghepDeXuat, rutBienTheTuPayload } from "@/lib/gia-von/doi-chieu-gia-von";
+import { ghepDeXuat, rutBienTheTuPayload, vanTayDeXuat, type DeXuatGiaVon } from "@/lib/gia-von/doi-chieu-gia-von";
 
 /**
  * Logic thuần của script đối chiếu giá vốn (`scripts/doi-chieu-gia-von-pancake.ts`).
@@ -125,5 +125,38 @@ describe("ghepDeXuat — chế độ `theo-pancake` (Pancake là chuẩn)", () =
 
     expect(ket.map((d) => d.sku)).toEqual(["SP000463", "SP000464"]);
     expect(ket.every((d) => d.giaHienTai === 0)).toBe(true);
+  });
+});
+
+describe("vanTayDeXuat — duyệt cái gì thì ghi đúng cái đó", () => {
+  const dx = (variantId: string, giaHienTai: number, giaDeXuat: number): DeXuatGiaVon => ({
+    variantId,
+    pancakeId: `P-${variantId}`,
+    sku: `SKU-${variantId}`,
+    ten: `Áo · ${variantId}`,
+    giaHienTai,
+    giaDeXuat,
+    nguon: "trung-binh",
+  });
+
+  it("cùng số dòng + cùng tổng chênh + cùng tổng bình phương nhưng KHÁC biến thể ⇒ vân tay khác", () => {
+    // Tập lúc xem: v1, v2. Tập lúc bấm: v3, v4 — mỗi dòng cùng mức chênh nên mọi tổng số học trùng nhau.
+    const lucXem = [dx("v1", 100_000, 120_000), dx("v2", 50_000, 40_000)];
+    const lucBam = [dx("v3", 100_000, 120_000), dx("v4", 50_000, 40_000)];
+
+    expect(vanTayDeXuat(lucBam)).not.toBe(vanTayDeXuat(lucXem));
+  });
+
+  it("cùng biến thể, cùng chênh nhưng KHÁC mức giá ⇒ vân tay khác", () => {
+    const lucXem = [dx("v1", 100_000, 120_000)];
+    const lucBam = [dx("v1", 200_000, 220_000)];
+
+    expect(vanTayDeXuat(lucBam)).not.toBe(vanTayDeXuat(lucXem));
+  });
+
+  it("cùng tập, khác thứ tự ⇒ vân tay GIỐNG (không bắt tải lại oan)", () => {
+    const a = [dx("v1", 100_000, 120_000), dx("v2", 50_000, 40_000)];
+
+    expect(vanTayDeXuat([a[1], a[0]])).toBe(vanTayDeXuat(a));
   });
 });

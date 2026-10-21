@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { OrderStatus } from "@/generated/prisma/browser";
 
+import { useOTimKiemUrl } from "@/components/shell/use-o-tim-kiem-url";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ export function OrderFilters({ channels }: { channels: ChannelOption[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [q, setQ] = useState(searchParams.get("q") ?? "");
+  const { q, setQ } = useOTimKiemUrl();
 
   const selectedChannels = (searchParams.get("kenh") ?? "").split(",").filter(Boolean);
   const selectedStatuses = slugToStatus(searchParams.get("trang_thai") ?? "");
@@ -31,14 +31,6 @@ export function OrderFilters({ channels }: { channels: ChannelOption[] }) {
   // nút hiện khi có bất kỳ lọc nào, kể cả ngày.
   const hasDateFilter = Boolean(searchParams.get("ngay_tu") && searchParams.get("ngay_den"));
   const hasAnyFilter = Boolean(q || selectedChannels.length || selectedStatuses.length || hasDateFilter);
-
-  useEffect(() => {
-    const initial = searchParams.get("q") ?? "";
-    if (q === initial) return;
-    const handle = setTimeout(() => setParams({ q: q || undefined }), 300);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
 
   function setParams(updates: Record<string, string | undefined>) {
     const params = new URLSearchParams(searchParams);

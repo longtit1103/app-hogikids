@@ -460,6 +460,26 @@ describe("tatToanKhoanVay", () => {
     // đồng action CŨ không đổi một chữ khi mở rộng cho BULLET (xem describe "BULLET" bên dưới).
     expect(await prisma.cashMovement.count({ where: { kind: "DEPOSIT_IN" } })).toBe(0);
   });
+
+  it("thấu chi đã trả hết gốc → từ chối (tất toán thấu chi phải ghi lãi đoạn cuối), khoản còn mở", async () => {
+    const id = await taoKhoan({
+      kind: "OVERDRAFT",
+      coLich: false,
+      termMonths: undefined,
+      firstDueDate: undefined,
+      soTienGiaiNgan: 50_000_000,
+      ngayGiaiNgan: "2026-10-01",
+    });
+    await prisma.cashMovement.create({
+      data: { date: ngayVn("2026-10-20"), kind: "LOAN_REPAY", amount: 50_000_000, loanId: id, description: "Trả hết" },
+    });
+
+    const res = await tatToanKhoanVay(id);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("Tất toán thấu chi");
+    expect((await prisma.loan.findUniqueOrThrow({ where: { id } })).closedAt).toBeNull();
+    expect(await prisma.expense.count()).toBe(0);
+  });
 });
 
 /**

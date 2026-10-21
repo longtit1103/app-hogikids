@@ -18,6 +18,7 @@ import { WebhookEventsSection } from "@/components/settings/webhook-events-secti
 import { layCauHinhShop, tenShopTheoId } from "@/lib/ket-noi/cau-hinh-shop";
 import { docTrangThaiKetNoiN8n } from "@/lib/n8n/provision/kiem-tra-va-trang-thai-n8n";
 import { coDuLieuGiaoDich, demAdsMoCoi, demChiPhiKhongDungLai, demDonMoCoi } from "@/lib/actions/data-admin";
+import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docTrangThaiSaoLuu } from "@/lib/backup/doc-trang-thai-sao-luu";
 import { docQuyenDocN8n } from "@/lib/n8n/quyen-doc-kho-khoa";
 import { KET_CUC_CAN_XEM } from "@/lib/ingest/webhook-processor";
@@ -130,6 +131,7 @@ export default async function CaiDatPage() {
     donMoCoi,
     chiPhiKhongDungLai,
     adsMoCoi,
+    noPhaiTraDangBat,
     demWebhook,
     suKienCanXem,
     doiChieuKho,
@@ -173,6 +175,9 @@ export default async function CaiDatPage() {
     chiChu(demDonMoCoi),
     chiChu(demChiPhiKhongDungLai),
     chiChu(demAdsMoCoi),
+    // Đã bật Nợ phải trả chưa (có mốc M): lượt xoá gỡ mốc này ⇒ dialog phải cảnh báo đỏ. Setting hỏng
+    // (không đọc được ngày) vẫn là "có dòng" ⇒ coi như đã bật, lượt xoá vẫn gỡ dòng đó.
+    chiChu(() => docMocM().then((m) => m !== null, () => true)),
     prisma.rawPancakeWebhookEvent.groupBy({
       by: ["processedAs"],
       where: { source: "webhook", receivedAt: { gte: tuNgay } },
@@ -334,7 +339,7 @@ export default async function CaiDatPage() {
         </div>
       </SettingsSectionCard>
 
-      {laChu && trangThaiSaoLuu && hasData !== null && donMoCoi && chiPhiKhongDungLai && adsMoCoi && (
+      {laChu && trangThaiSaoLuu && hasData !== null && donMoCoi && chiPhiKhongDungLai && adsMoCoi && noPhaiTraDangBat !== null && (
         <SettingsSectionCard
           id="du-lieu"
           title="Dữ liệu"
@@ -347,6 +352,7 @@ export default async function CaiDatPage() {
             donMoCoi={donMoCoi}
             chiPhi={chiPhiKhongDungLai}
             adsMoCoi={adsMoCoi}
+            noPhaiTraDangBat={noPhaiTraDangBat}
           />
         </SettingsSectionCard>
       )}

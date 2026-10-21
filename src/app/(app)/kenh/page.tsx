@@ -5,6 +5,7 @@ import { ChannelNotFoundToast } from "@/components/kenh/channel-not-found-toast"
 import { ChannelTrendChart } from "@/components/kenh/channel-trend-chart";
 import { clampRangeEndToNow, khoangServerThuocTinh, previousComparableRange, resolveRangeFromParams } from "@/lib/date-range";
 import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
+import { ensureRecurringExpensesForMonths, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
 import { prisma } from "@/lib/prisma";
 import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
 import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
@@ -68,9 +69,15 @@ export default async function KenhPage({ searchParams }: { searchParams: Promise
     now,
   );
 
+  // Backfill chi phí định kỳ cho MỌI tháng giao với kỳ đang xem VÀ kỳ so sánh TRƯỚC khi tính P&L — cùng
+  // thứ tự ensureRecurring→tính với Dashboard/Báo cáo; thiếu bước này tháng chưa ai mở bị hụt chi phí
+  // định kỳ ⇒ lãi ròng từng kênh cao ảo.
+  const kyTruoc = previousComparableRange(range, now);
+  await ensureRecurringExpensesForMonths([...monthStartsInRange(range), ...monthStartsInRange(kyTruoc)]);
+
   const [pnlChannels, prevPnlChannels, dailyRevenue, allChannels, thuNhapTaiChinh] = await Promise.all([
     computeChannelPnl(range),
-    computeChannelPnl(previousComparableRange(range, now)),
+    computeChannelPnl(kyTruoc),
     computeChannelDailyRevenue(range),
     prisma.channel.findMany({
       orderBy: { sortOrder: "asc" },

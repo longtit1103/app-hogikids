@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 
+import { kiemZipTruocKhiDoc } from "./kiem-zip-truoc-khi-doc";
 import { kiemTranSoDong, parseVnInt, TRAN_DOC_SHEET } from "./xlsx-shared";
 
 /** 1 dòng giá vốn đã chuẩn hoá để import. `lowStockThreshold=null` → giữ nguyên ngưỡng hiện tại. */
@@ -22,6 +23,8 @@ export function parseCostWorkbook(buf: ArrayBuffer): { headers: string[]; rows: 
   // Cùng trần với `readSheetRows` — file này KHÔNG đi qua đó (nó cần `sheet_to_json` hai dạng khác
   // nhau) nên phải tự áp, kẻo đường nhập giá vốn thành đường duy nhất không có trần. Chạy phía
   // trình duyệt nên bán kính thiệt hại nhỏ hơn, nhưng vẫn treo máy chủ shop.
+  const bytes = new Uint8Array(buf);
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) kiemZipTruocKhiDoc(bytes); // zip-bomb — như `readSheetRows`
   const wb = XLSX.read(buf, { type: "array", sheetRows: TRAN_DOC_SHEET });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   if (!sheet) return { headers: [], rows: [] };

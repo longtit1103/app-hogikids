@@ -139,6 +139,29 @@ describe("đủ cả hai quyền ⇒ sửa + nhật ký đúng mã", () => {
     expect(await nhatKy("GIA_VON_SUA")).toEqual([]);
   });
 
+  it("biến thể không tồn tại (P2025) ⇒ 'Không tìm thấy biến thể' cho cả giá vốn lẫn ngưỡng", async () => {
+    expect(await updateVariantCost("khong-ton-tai", 1_000)).toEqual({ ok: false, error: "Không tìm thấy biến thể" });
+    expect(await updateVariantThreshold("khong-ton-tai", 2)).toEqual({ ok: false, error: "Không tìm thấy biến thể" });
+  });
+
+  it("lỗi KHÁC P2025 ⇒ KHÔNG đội lốt 'không tìm thấy' (chủ shop tưởng mất biến thể), có log server", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(ghiNhatKy).mockRejectedValueOnce(new Error("nhat-ky-hong")).mockRejectedValueOnce(new Error("nhat-ky-hong"));
+    try {
+      const gia = await updateVariantCost(variantId, 70_000);
+      const nguong = await updateVariantThreshold(variantId, 9);
+
+      expect(gia).toEqual({ ok: false, error: "Không lưu được giá vốn — lỗi hệ thống, thử lại sau." });
+      expect(nguong).toEqual({ ok: false, error: "Không lưu được ngưỡng tồn — lỗi hệ thống, thử lại sau." });
+      expect(log).toHaveBeenCalledTimes(2);
+      const b = await bienThe();
+      expect(b.costPrice).toBe(GIA_GOC);
+      expect(b.lowStockThreshold).toBeNull();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("nhật ký ném ⇒ giá vốn không đổi (cùng transaction)", async () => {
     vi.mocked(ghiNhatKy).mockRejectedValueOnce(new Error("nhat-ky-hong")).mockRejectedValueOnce(new Error("nhat-ky-hong"));
 

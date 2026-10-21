@@ -5,9 +5,9 @@ import { Prisma } from "@/generated/prisma/client";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import { dangDungLaiTuKhoTho, dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
-import { parseAdsFile, type AdsPreset, type ParsedAdsRow } from "@/lib/import/ads-csv";
+import { parseAdsFile, type AdsPreset, type KetQuaParseAds, type ParsedAdsRow } from "@/lib/import/ads-csv";
 import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
-import { LoiFileQuaNhieuDong } from "@/lib/import/xlsx-shared";
+import { LoiFileTuChoi } from "@/lib/import/xlsx-shared";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { laNgayTruocMocM } from "@/lib/no-phai-tra/chan-so-chi-phi-da-khoa";
@@ -162,12 +162,13 @@ async function readForm(formData: FormData): Promise<ValidationOk | { ok: false;
 function docFileAds(
   buf: ArrayBuffer,
   preset: AdsPreset
-): { ok: true; rows: ParsedAdsRow[]; errors: { line: number; reason: string }[] } | { ok: false; error: string } {
+): ({ ok: true } & KetQuaParseAds) | { ok: false; error: string } {
   try {
     return { ok: true, ...parseAdsFile(buf, preset) };
   } catch (err) {
-    // Vượt trần số dòng là ca KHÁC HẲN "file hỏng" — nói đúng lý do (xem `LoiFileQuaNhieuDong`).
-    if (err instanceof LoiFileQuaNhieuDong) return { ok: false, error: err.message };
+    // Bị TỪ CHỐI có lý do (vượt trần số dòng, zip-bomb, ZIP lạ) là ca KHÁC HẲN "file hỏng" — nói
+    // đúng lý do (xem `LoiFileTuChoi`).
+    if (err instanceof LoiFileTuChoi) return { ok: false, error: err.message };
     return { ok: false, error: "Không đọc được file — file hỏng hoặc không phải CSV/XLSX xuất từ Ads Manager" };
   }
 }
@@ -233,6 +234,8 @@ export async function previewAdsImport(formData: FormData): Promise<
     apiConflicts: { date: string; adsSource: string; apiAmount: number }[];
     soDongTruocM: number;
     mocM: string | null;
+    /** Số dòng 0đ trong file bị bỏ lặng lẽ (không phải lỗi). */
+    skippedZero: number;
   }>
 > {
   const cong = await congAction("marketing:xem");
@@ -243,7 +246,7 @@ export async function previewAdsImport(formData: FormData): Promise<
 
   const doc = docFileAds(form.buf, form.preset);
   if (!doc.ok) return { ok: false, error: doc.error };
-  const { rows: parsed, errors } = doc;
+  const { rows: parsed, errors, skippedZero } = doc;
   const adsSource = adsSourceForPreset(form.preset);
   const mocM = await docMocM();
   const { conLai, soDongTruocM } = boDongTruocMocM(dedupeInternal(parsed, adsSource), mocM);
@@ -258,6 +261,7 @@ export async function previewAdsImport(formData: FormData): Promise<
       apiConflicts,
       soDongTruocM,
       mocM: mocM === null ? null : vnDateKey(mocM),
+      skippedZero,
     },
   };
 }
@@ -303,7 +307,7 @@ async function findApiConflicts(
  *  2b. đã bật nợ phải trả: bỏ dòng ngày VN < M (đếm skippedTruocM) — mọi bước sau chỉ thấy dòng ≥ M;
  *  3. dedupe DB: đã có Expense ads source IMPORT|MANUAL cùng ngày+mô tả+tiền+nguồn ads
  *     (ô nguồn bỏ trống của dòng cũ khớp mọi nguồn) → skippedDuplicates;
- *  4. xung đột API: ngày đã có ADS_API cùng adsSource — skip → bỏ dòng ngày đó;
+ *  4. xung đột API: ngày đã có ADS_API cùng adsSource — skip → bỏ dòng ngày đó (đếm skippedApiConflict);
  *     overwrite → xoá dòng ADS_API (ngày, adsSource) rồi ghi dòng file (đếm overwrittenApiRows);
  *  5. createMany phần còn lại (source=IMPORT, refId=null).
  * Chạy lại cùng file → imported=0 nhờ bước 3. Cuối `revalidatePath("/chi-phi")`.
@@ -325,10 +329,14 @@ export async function importAdsExpenses(formData: FormData): Promise<
     skippedDuplicates: number;
     skippedInvalid: number;
     overwrittenApiRows: number;
+    /** Chế độ "bỏ qua": số dòng file bị bỏ vì ngày đó đã có số ADS_API cùng nguồn (0 khi ghi đè). */
+    skippedApiConflict: number;
     /** Số dòng file ngày < M bị bỏ qua (0 khi chưa bật). */
     skippedTruocM: number;
     /** Mốc M `yyyy-MM-dd` đọc sau khoá (null = chưa bật) — cho câu báo "trước ngày bật theo dõi nợ". */
     mocM: string | null;
+    /** Số dòng 0đ trong file bị bỏ lặng lẽ (không phải lỗi). */
+    skippedZero: number;
   }>
 > {
   const cong = await congAction("marketing:sua");
@@ -348,7 +356,7 @@ export async function importAdsExpenses(formData: FormData): Promise<
 
   const doc = docFileAds(form.buf, form.preset);
   if (!doc.ok) return { ok: false, error: doc.error };
-  const { rows: parsed, errors } = doc;
+  const { rows: parsed, errors, skippedZero } = doc;
   const skippedInvalid = errors.length;
   const adsSource = adsSourceForPreset(form.preset);
 
@@ -359,7 +367,16 @@ export async function importAdsExpenses(formData: FormData): Promise<
     // Không có dòng hợp lệ nào — không cần vào transaction.
     return {
       ok: true,
-      data: { imported: 0, skippedDuplicates: 0, skippedInvalid, overwrittenApiRows: 0, skippedTruocM: 0, mocM: null },
+      data: {
+        imported: 0,
+        skippedDuplicates: 0,
+        skippedInvalid,
+        overwrittenApiRows: 0,
+        skippedApiConflict: 0,
+        skippedTruocM: 0,
+        mocM: null,
+        skippedZero,
+      },
     };
   }
 
@@ -380,7 +397,7 @@ export async function importAdsExpenses(formData: FormData): Promise<
       if (!bounds) {
         // Mọi dòng đều trước M — không đọc/ghi sổ, nhưng vẫn để lại dấu lượt import đã bị bỏ trọn.
         await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.ADS_IMPORT, ghiChu: { soDong: 0, ...ghiChuBoQua } });
-        return { imported: 0, skippedDuplicates: 0, overwrittenApiRows: 0, skippedTruocM, mocM: mocMKey };
+        return { imported: 0, skippedDuplicates: 0, overwrittenApiRows: 0, skippedApiConflict: 0, skippedTruocM, mocM: mocMKey };
       }
 
       // Bước 3: dedupe DB (IMPORT|MANUAL) trên ngày+mô tả+tiền+nguồn ads.
@@ -453,6 +470,7 @@ export async function importAdsExpenses(formData: FormData): Promise<
       }
 
       let overwrittenApiRows = 0;
+      let skippedApiConflict = 0;
       const toInsert: ParsedAdsRow[] = [];
 
       for (const r of afterDbDedupe) {
@@ -460,6 +478,7 @@ export async function importAdsExpenses(formData: FormData): Promise<
         // skip: bỏ dòng file thuộc ngày đã có số API. overwrite: vẫn chèn (dòng
         // ADS_API của ngày đó bị xoá ngay dưới đây, độc lập với vòng lặp này).
         if (apiDays.has(day) && form.conflictMode === "skip") {
+          skippedApiConflict++;
           continue;
         }
         toInsert.push(r);
@@ -509,7 +528,14 @@ export async function importAdsExpenses(formData: FormData): Promise<
         hanhDong: HANH_DONG.ADS_IMPORT,
         ghiChu: { soDong: toInsert.length, ...ghiChuBoQua },
       });
-      return { imported: toInsert.length, skippedDuplicates, overwrittenApiRows, skippedTruocM, mocM: mocMKey };
+      return {
+        imported: toInsert.length,
+        skippedDuplicates,
+        overwrittenApiRows,
+        skippedApiConflict,
+        skippedTruocM,
+        mocM: mocMKey,
+      };
     },
     // Từ khi transaction phải GIÀNH KHOÁ ở lệnh đầu, thời gian NẰM CHỜ tính vào hạn transaction.
     // Bên kia khoá ads là `/api/ingest/ads` — nó cố ý chạy tới 60s cho lô lớn. Giữ mặc định 5s ở đây
@@ -519,7 +545,7 @@ export async function importAdsExpenses(formData: FormData): Promise<
     );
 
     revalidatePath("/chi-phi");
-    return { ok: true, data: { ...result, skippedInvalid } };
+    return { ok: true, data: { ...result, skippedInvalid, skippedZero } };
   } catch (err) {
     // Chờ khoá chung quá 10s = bước bật nợ phải trả đang chạy — transaction đã lùi, chưa ghi gì.
     if (err instanceof LoiKhoaDongTienBan) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };

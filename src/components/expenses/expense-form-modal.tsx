@@ -14,6 +14,7 @@ import { createExpense, stopRecurring, updateExpense } from "@/lib/actions/expen
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { DINH_KY_TRUNG_MAU_DANG_CHAY as MA_DINH_KY_TRUNG } from "@/lib/expenses/mau-dinh-ky-trung";
 import { formatVnd } from "@/lib/format";
+import { parseAmountInput } from "@/lib/format-amount-input";
 
 const NONE = "__none__"; // sentinel: Select không nhận value="" cho "Không gắn kênh"
 // Danh mục Lãi vay — server (`src/lib/actions/expenses.ts`) chặn MỌI dòng danh mục này mang kênh.
@@ -95,15 +96,6 @@ function buildInitialState(expense: ExpenseRow | undefined, preset: ExpenseFormM
     recurringMonthly: false,
     cardId: "",
   };
-}
-
-// Khớp trần server (createExpense/updateExpense .max 2 tỷ — Prisma Int int32).
-// Clamp ở client chỉ là UX; guard thật nằm ở server action.
-const MAX_AMOUNT = 2_000_000_000;
-
-function parseAmountInput(raw: string): number {
-  const digits = raw.replace(/\D/g, "");
-  return digits ? Math.min(Number.parseInt(digits, 10), MAX_AMOUNT) : 0;
 }
 
 function Field({

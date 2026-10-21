@@ -1,5 +1,5 @@
 /**
- * BIÊN NGÀY DUY NHẤT của một dòng chi tiêu quảng cáo: `[2000-01-01, hôm nay giờ VN]`.
+ * BIÊN NGÀY DUY NHẤT của một dòng chi tiêu quảng cáo: `[2000-01-01, hôm nay giờ VN]` (cửa file: tới hôm qua).
  *
  * Dùng CHUNG cho mọi đường ghi chi tiêu ads vào sổ: cửa FILE (`import/ads-csv.ts`) và cửa MÁY
  * (`prepareAdsExpenseRow` — `/api/ingest/ads` n8n đẩy mỗi đêm + lượt dựng lại từ kho thô). Hai cửa
@@ -7,8 +7,11 @@
  * tính ngày hỏng (`1970-01-01`, `2126-…`) ghi thẳng `Expense` ở một năm mà KHÔNG range báo cáo nào
  * phủ: tiền vào sổ mà không ai thấy.
  *
- * Biên trên = HÔM NAY giờ VN (khớp đường nhập tay `ngay-ghi-tay-schema.ts`). An toàn với cửa máy vì
- * tài khoản quảng cáo Meta + TikTok đều neo `Asia/Ho_Chi_Minh` và workflow n8n chốt `until` ở hôm qua.
+ * Biên trên MẶC ĐỊNH = HÔM NAY giờ VN (khớp đường nhập tay `ngay-ghi-tay-schema.ts`). An toàn với cửa
+ * máy vì tài khoản quảng cáo Meta + TikTok đều neo `Asia/Ho_Chi_Minh` và workflow n8n chốt `until` ở
+ * hôm qua. Cửa FILE tay truyền biên trên chặt hơn = HÔM QUA (`khoaNgayVnHomQua`): dòng IMPORT của hôm
+ * nay mang số chi tiêu còn dở, và từ lúc có nó, `ngayGhiDeBangFile` chặn VĨNH VIỄN mọi dòng ADS_API
+ * của ngày đó ⇒ chi phí thật kẹt ở số dở dang. Cửa máy KHÔNG đổi (giữ mặc định).
  */
 export const NGAY_CHI_TIEU_ADS_SOM_NHAT = "2000-01-01";
 
@@ -22,8 +25,14 @@ export function khoaNgayVnHomNay(): string {
   return new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
+/** Khoá ngày "hôm qua" theo giờ VN — biên trên của cửa FILE ads tay (xem đầu file). */
+export function khoaNgayVnHomQua(): string {
+  return new Date(Date.now() + 7 * 3600 * 1000 - 24 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
 /**
- * Khoá `YYYY-MM-DD` có nằm trong biên hợp lý của chi tiêu ads không.
+ * Khoá `YYYY-MM-DD` có nằm trong biên hợp lý của chi tiêu ads không. `ngayMuonNhat` = biên trên
+ * (lấy cả mốc), mặc định hôm nay VN cho cửa máy; cửa file truyền `khoaNgayVnHomQua()`.
  *
  * ⚠️ PHẢI kiểm KHUÔN trước khi so chuỗi: so chuỗi chỉ tương đương so thứ tự ngày khi năm đúng 4 chữ
  * số. Năm 5-6 chữ số cho kết quả NGƯỢC — `"20107-01-29"` đứng giữa `"2000-01-01"` và `"2026-09-18"`
@@ -34,10 +43,10 @@ export function khoaNgayVnHomNay(): string {
  * theo `dateKey` bỏ lỡ ⇒ chi phí ngày đó đếm 2 lần; còn `2025-13-45` thành Invalid Date và Prisma nổ
  * giữa transaction, kéo đổ cả lô.
  */
-export function laNgayChiTieuAdsHopLy(khoa: string): boolean {
+export function laNgayChiTieuAdsHopLy(khoa: string, ngayMuonNhat: string = khoaNgayVnHomNay()): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(khoa)) return false;
   const [y, m, d] = khoa.split("-").map(Number);
   const utc = new Date(Date.UTC(y, m - 1, d));
   if (utc.getUTCFullYear() !== y || utc.getUTCMonth() !== m - 1 || utc.getUTCDate() !== d) return false;
-  return khoa >= NGAY_CHI_TIEU_ADS_SOM_NHAT && khoa <= khoaNgayVnHomNay();
+  return khoa >= NGAY_CHI_TIEU_ADS_SOM_NHAT && khoa <= ngayMuonNhat;
 }

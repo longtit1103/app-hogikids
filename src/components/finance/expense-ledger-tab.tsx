@@ -7,8 +7,10 @@ import { ExpenseKpiCards } from "@/components/expenses/expense-kpi-cards";
 import { ExpenseStructureChart } from "@/components/expenses/expense-structure-chart";
 import { ExpenseTable } from "@/components/expenses/expense-table";
 import { KhoanChiDinhKySection } from "@/components/finance/khoan-chi-dinh-ky-section";
+import { chuanHoaSearchParams } from "@/lib/chuan-hoa-search-params";
 import { type DateRange } from "@/lib/date-range";
 import { ensureRecurringExpensesForMonthsChiTiet, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
+import { EXPENSE_PAGE_SIZE } from "@/lib/expenses/expense-page-size";
 import {
   getExpenseSummary,
   getExpensesPage,
@@ -23,7 +25,7 @@ import {
   trangThaiPhieuNhapChuaGhi,
 } from "@/lib/nhap-hang/trang-thai-phieu-nhap";
 import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
-import { docSoTrang } from "@/lib/pagination";
+import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
 import { prisma } from "@/lib/prisma";
 
 type ExpenseSourceValue = NonNullable<ExpenseListParams["sources"]>[number];
@@ -50,6 +52,11 @@ export type ExpenseLedgerParams = {
   q?: string;
   sap_xep?: string;
   trang?: string;
+  /** Param toàn trang của hub — không dùng để lọc, chỉ giữ lại khi chuyển hướng về trang cuối. */
+  tab?: string;
+  tu?: string;
+  den?: string;
+  range?: string;
 };
 
 /**
@@ -59,7 +66,7 @@ export type ExpenseLedgerParams = {
  * KPI / donut cơ cấu / bảng. Tách khỏi `tai-chinh/page.tsx` để page mỏng.
  */
 export async function ExpenseLedgerTab({
-  sp,
+  sp: spTho,
   range,
   choPhepSua = false,
   choPhepTruThe = false,
@@ -78,6 +85,8 @@ export async function ExpenseLedgerTab({
   /** Người xem là chủ shop? Chỉ chủ shop thấy lối "Sửa số tiền (trước ngày bật)" ở dòng chi phí ngày < M. */
   laChuShop?: boolean;
 }) {
+  // Tham số lặp trên URL (?q=a&q=b) là MẢNG lúc chạy dù kiểu nói là chuỗi — `.split`/`.trim` bên dưới sẽ ném.
+  const sp = chuanHoaSearchParams(spTho);
   // Backfill chi phí định kỳ cho MỌI tháng giao với range đang xem TRƯỚC khi
   // query sổ chi phí (range "Tùy chọn" có thể là tháng quá khứ/đa tháng).
   // Số lần bộ sinh bỏ qua vì đã bật nợ phải trả (mẫu "Nhập hàng"; lần đến hạn trước mốc) — khối định kỳ nhắc.
@@ -167,6 +176,16 @@ export async function ExpenseLedgerTab({
     // Danh sách mẫu định kỳ (đang chạy lẫn đã dừng) — ĐỘC LẬP range đang lọc, khối chỉ-đọc phía dưới.
     getRecurringExpenseList(),
   ]);
+
+  // ?trang= vượt trang cuối (đang ở trang 5 rồi lọc lại còn 2 trang) ⇒ về trang cuối, không để bảng rỗng
+  // kèm thanh phân trang biến mất. `tab` gắn lại cho chắc: đây là một tab của hub, mất nó là rơi về Lãi/Lỗ.
+  veTrangCuoiNeuVuot({
+    duongDan: "/tai-chinh",
+    sp: { ...sp, tab: "so-chi-phi" },
+    trang: page,
+    tong: expensesPage.count,
+    soDongMoiTrang: EXPENSE_PAGE_SIZE,
+  });
 
   const isEmpty = summary.total === 0;
 

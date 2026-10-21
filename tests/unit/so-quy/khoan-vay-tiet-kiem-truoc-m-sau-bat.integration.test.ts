@@ -221,6 +221,17 @@ describe("tạo / sửa / xoá / tất toán khoản vay khi đã bật", () => 
     idCua(await taoKhoanVay({ ...VAY_MANG_SANG, startDate: "2026-09-20", firstDueDate: "2026-10-20" }));
     expect(await prisma.cashMovement.count()).toBe(0);
 
+    // 'Mang sang' ngày ≥ M: tiền giải ngân đó vào tài khoản SAU mốc, không nằm trong số dư mở sổ ⇒ khai 'mang sang'
+    // (không LOAN_IN) là quỹ thấp hơn tiền thật đúng số giải ngân.
+    await phaiBiChan(
+      () => taoKhoanVay({ ...VAY_MANG_SANG, startDate: "2026-10-05", firstDueDate: "2026-11-05" }),
+      { field: "startDate", cauChua: 'chế độ "mới"' }
+    );
+    await phaiBiChan(
+      () => taoKhoanVay({ ...VAY_MANG_SANG, startDate: M, firstDueDate: "2026-11-01" }),
+      { field: "startDate", cauChua: 'chế độ "mới"' }
+    );
+
     const id = idCua(await taoKhoanVay(vayMoi("2026-10-05")));
     expect(await prisma.cashMovement.findMany({ where: { loanId: id }, select: { kind: true, date: true } })).toEqual([
       { kind: "LOAN_IN", date: vn("2026-10-05") },
@@ -324,14 +335,14 @@ describe("thấu chi khi đã bật", () => {
     });
   });
 
-  it("tạo thấu chi ngày rút < M bị chặn ở CẢ HAI chế độ (mang sang không có dòng tiền vẫn chặn); ≥ M qua", async () => {
+  it("tạo thấu chi ngày rút < M bị chặn ở CẢ HAI chế độ (mang sang không có dòng tiền vẫn chặn); ≥ M chỉ chế độ 'mới' qua", async () => {
     await batM();
     await phaiBiChan(() => taoKhoanVay(thauChiMangSang("2026-09-20")), { field: "startDate", cauChua: "Thấu chi" });
     await phaiBiChan(() => taoKhoanVay(thauChiMoi("2026-09-20")), { field: "ngayGiaiNgan", cauChua: "Thấu chi" });
+    await phaiBiChan(() => taoKhoanVay(thauChiMangSang("2026-10-02")), { field: "startDate", cauChua: 'chế độ "mới"' });
 
-    idCua(await taoKhoanVay(thauChiMangSang("2026-10-02")));
     idCua(await taoKhoanVay(thauChiMoi("2026-10-02")));
-    expect(await prisma.loan.count()).toBe(2);
+    expect(await prisma.loan.count()).toBe(1);
   });
 
   it("thấu chi mang sang rút 01/09 < M: sửa dư nợ / ngày rút bị chặn, xoá bị chặn; sửa tên qua", async () => {
@@ -345,12 +356,29 @@ describe("thấu chi khi đã bật", () => {
     expect(await suaKhoanVay(id, { ...thauChiMangSang("2026-09-01"), name: "Thấu chi MB (đổi tên)" })).toMatchObject({ ok: true });
   });
 
-  it("thấu chi mang sang rút 02/10 ≥ M: dời ngày rút về 20/09 < M bị chặn; đổi dư nợ giữ ngày ≥ M qua", async () => {
-    await batM();
+  it("thấu chi mang sang rút 02/10 ≥ M (khai trước khi bật): dời ngày rút về 20/09 < M hay sang 05/10 bị chặn; đổi dư nợ giữ ngày qua", async () => {
     const id = idCua(await taoKhoanVay(thauChiMangSang("2026-10-02")));
+    await batM();
 
     await phaiBiChan(() => suaKhoanVay(id, thauChiMangSang("2026-09-20")), { field: "startDate" });
+    await phaiBiChan(() => suaKhoanVay(id, thauChiMangSang("2026-10-05")), {
+      field: "startDate",
+      cauChua: 'chế độ "mới"',
+    });
     expect(await suaKhoanVay(id, thauChiMangSang("2026-10-02", 70_000_000))).toMatchObject({ ok: true });
+  });
+
+  it("vay kỳ hạn mang sang 20/09 < M: dời ngày bắt đầu sang 05/10 ≥ M bị chặn; giữ ngày < M đổi dư nợ qua", async () => {
+    const id = idCua(await taoKhoanVay({ ...VAY_MANG_SANG, startDate: "2026-09-20", firstDueDate: "2026-11-20" }));
+    await batM();
+
+    await phaiBiChan(
+      () => suaKhoanVay(id, { ...VAY_MANG_SANG, startDate: "2026-10-05", firstDueDate: "2026-11-20" }),
+      { field: "startDate", cauChua: 'chế độ "mới"' }
+    );
+    expect(
+      await suaKhoanVay(id, { ...VAY_MANG_SANG, duNoMoSo: 110_000_000, startDate: "2026-09-20", firstDueDate: "2026-11-20" })
+    ).toMatchObject({ ok: true });
   });
 });
 

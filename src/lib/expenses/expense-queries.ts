@@ -2,6 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { differenceInCalendarDays, endOfDay, subDays } from "date-fns";
 
 import { type DateRange } from "@/lib/date-range";
+import { EXPENSE_PAGE_SIZE } from "@/lib/expenses/expense-page-size";
 import { dieuKienChiPhiTruQuy } from "@/lib/no-phai-tra/dieu-kien-chi-phi-tru-quy";
 import type { NguCanhLoc } from "@/lib/no-phai-tra/the-cua-dong-chi";
 import { prisma } from "@/lib/prisma";
@@ -14,7 +15,7 @@ import { prisma } from "@/lib/prisma";
  * Biên phải của range luôn `endOfDay(range.to)` (nhất quán calcPnl phase 5).
  */
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = EXPENSE_PAGE_SIZE;
 
 export type CategoryBreakdownItem = { categoryId: string; name: string; amount: number; pct: number };
 
@@ -200,17 +201,23 @@ export type ExpenseRow = {
   tenThe: string | null;
 };
 
-function buildOrderBy(sort: ExpenseListParams["sort"]): Prisma.ExpenseOrderByWithRelationInput {
+/**
+ * Thứ tự sắp xếp của sổ chi phí. `id` là khoá phân xử CUỐI cùng (cùng chiều): nhiều khoản chi trùng
+ * ngày/số tiền là chuyện thường (định kỳ cùng ngày, import ads), mà `OFFSET` trên thứ tự không xác định
+ * cho Postgres quyền trả các dòng bằng nhau theo thứ tự tuỳ ý giữa hai lượt đọc ⇒ chuyển trang bị lặp
+ * hoặc sót dòng.
+ */
+export function buildOrderBy(sort: ExpenseListParams["sort"]): Prisma.ExpenseOrderByWithRelationInput[] {
   switch (sort) {
     case "date_asc":
-      return { date: "asc" };
+      return [{ date: "asc" }, { id: "asc" }];
     case "amount_desc":
-      return { amount: "desc" };
+      return [{ amount: "desc" }, { id: "desc" }];
     case "amount_asc":
-      return { amount: "asc" };
+      return [{ amount: "asc" }, { id: "asc" }];
     case "date_desc":
     default:
-      return { date: "desc" };
+      return [{ date: "desc" }, { id: "desc" }];
   }
 }
 

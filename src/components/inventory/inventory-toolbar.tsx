@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 
+import { useOTimKiemUrl } from "@/components/shell/use-o-tim-kiem-url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -15,22 +15,8 @@ export function InventoryToolbar({ choPhepXuat }: { choPhepXuat: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [q, setQ] = useState(searchParams.get("q") ?? "");
+  const { q, setQ } = useOTimKiemUrl();
   const lowOnly = searchParams.get("loc") === "sap_het";
-
-  useEffect(() => {
-    const initial = searchParams.get("q") ?? "";
-    if (q === initial) return;
-    const handle = setTimeout(() => {
-      const params = new URLSearchParams(searchParams);
-      if (q) params.set("q", q);
-      else params.delete("q");
-      params.delete("trang");
-      router.replace(`${pathname}?${params.toString()}`);
-    }, 300);
-    return () => clearTimeout(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
 
   function toggleLowOnly() {
     const params = new URLSearchParams(searchParams);

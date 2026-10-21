@@ -72,12 +72,15 @@ export function DeleteAllDialog({
   donMoCoi,
   chiPhi,
   adsMoCoi,
+  noPhaiTraDangBat,
 }: {
   hasData: boolean;
   shopName: string;
   donMoCoi: DonMoCoi;
   chiPhi: ChiPhiKhongDungLai;
   adsMoCoi: AdsMoCoi;
+  /** Đã bật theo dõi Nợ phải trả (có mốc M) — lượt xoá gỡ mốc này nên phải cảnh báo đỏ. */
+  noPhaiTraDangBat: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -161,8 +164,22 @@ export function DeleteAllDialog({
                     Toàn bộ số liệu <strong className="text-ink">Tiền đã về</strong> (TikTok và
                     Shopee)
                   </li>
+                  <li>
+                    Toàn bộ <strong className="text-ink">Nợ phải trả</strong>: thẻ tín dụng, kỳ sao kê, gắn
+                    thẻ cho nền tảng quảng cáo, phiếu nhập còn nợ nhà cung cấp, ví quảng cáo trả trước
+                  </li>
+                  <li>Mốc bật Nợ phải trả và các mã yêu cầu ghi tiền đã lưu (theo dõi Nợ phải trả sẽ TẮT)</li>
+                  <li>Toàn bộ thùng rác (các bản ghi đã xóa trước đó, không còn khôi phục được)</li>
+                  <li>Toàn bộ bản chốt số dư cuối tháng</li>
                   <li>Toàn bộ log đồng bộ (GIỮ lại nhật ký sao lưu)</li>
                 </ul>
+                {noPhaiTraDangBat && (
+                  <p role="alert" className="rounded-md border border-error p-3 font-medium text-error">
+                    Nợ phải trả đang BẬT. Xóa dữ liệu giao dịch sẽ TẮT theo dõi Nợ phải trả và mất toàn bộ
+                    thiết lập mở sổ (mốc bật, số dư mở sổ đã đối chiếu, thẻ, phiếu nhập, ví quảng cáo). Muốn dùng
+                    lại phải làm lại từ bước bật và đối chiếu số dư từ đầu.
+                  </p>
+                )}
                 <p className="text-error">
                   Chi phí và khoản tiền khác nhập tay KHÔNG dựng lại được từ kho thô — chỉ phục hồi
                   bản sao lưu mới cứu. {moTaChiPhi}

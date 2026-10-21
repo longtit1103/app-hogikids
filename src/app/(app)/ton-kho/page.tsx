@@ -1,6 +1,7 @@
 import { InventoryKpiCards } from "@/components/inventory/inventory-kpi-cards";
 import { InventoryTable } from "@/components/inventory/inventory-table";
 import { InventoryToolbar } from "@/components/inventory/inventory-toolbar";
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import { docSoTrang, veTrangCuoiNeuVuot } from "@/lib/pagination";
 import { quyenGiaVonCua } from "@/lib/queries/che-gia-von-types";
 import { getVariantListPage, VARIANT_PAGE_SIZE } from "@/lib/queries/variants";
@@ -11,13 +12,16 @@ import { PageTitle } from "@/components/shell/page-title";
 export default async function TonKhoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; loc?: string; sap_xep?: string; chieu?: string; trang?: string }>;
+  searchParams: Promise<
+    SearchParamsTho<{ q?: string; loc?: string; sap_xep?: string; chieu?: string; trang?: string }>
+  >;
 }) {
   // Cổng ngay tại trang, không chỉ dựa vào layout — xem ghi chú ở `/don-hang`.
   const nd = await yeuCauQuyenTrang("/ton-kho", "ton-kho:xem");
   const quyen = quyenGiaVonCua(nd);
 
-  const sp = await searchParams;
+  // Tham số lặp (?q=a&q=b) Next trả MẢNG — chuẩn hoá trước khi `q.trim()` ở truy vấn.
+  const sp = chuanHoaSearchParams(await searchParams);
   const page = docSoTrang(sp.trang);
   const lowOnly = sp.loc === "sap_het";
   // Thiếu quyền giá vốn: không có cột "Giá trị vốn" để sort ⇒ sort theo tồn (query cũng tự ép vậy).
