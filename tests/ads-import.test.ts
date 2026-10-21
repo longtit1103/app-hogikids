@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { importAdsExpenses, previewAdsImport } from "@/lib/actions/ads-import";
 import { parseAdsFile } from "@/lib/import/ads-csv";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { nguoiDungGia } from "./helpers/nguoi-dung-gia";
@@ -439,5 +440,152 @@ describe("importAdsExpenses / previewAdsImport — quyền marketing + nhật k�
     expect((await importAdsExpenses(form())).ok).toBe(false);
 
     expect(await prisma.expense.count({ where: { categoryId: "ads" } })).toBe(0);
+  });
+});
+
+/**
+ * Đã bật nợ phải trả (Setting M = 01/10/2026, bật giả bằng cách ghi thẳng Setting): quỹ cuối M−1 đã chốt theo tiền
+ * thật bằng điều chỉnh mở sổ ⇒ import file ads BỎ QUA dòng ngày < M (đếm `skippedTruocM`), không chèn và không ghi
+ * đè/xoá dòng ADS_API ngày < M; dòng ≥ M xử lý y cũ. Bỏ lọc ⇒ chi phí ads ngày < M đổi ⇒ quỹ từ M lệch tiền thật.
+ */
+describe("importAdsExpenses — đã bật nợ phải trả: bỏ dòng trước M", () => {
+  const M = "2026-10-01";
+  const FILE_TRON = [
+    { date: "2026-09-28", name: "CD 28-09", amount: 100_000 },
+    { date: "2026-09-29", name: "CD 29-09", amount: 110_000 },
+    { date: "2026-09-30", name: "CD 30-09", amount: 120_000 },
+    { date: "2026-10-01", name: "CD 01-10", amount: 130_000 },
+    { date: "2026-10-02", name: "CD 02-10", amount: 140_000 },
+    { date: "2026-10-03", name: "CD 03-10", amount: 150_000 },
+  ];
+  const formTron = (conflictMode: "skip" | "overwrite" = "skip") =>
+    makeForm(makeCsv("META", FILE_TRON), { preset: "META", channelId: "facebook", conflictMode });
+  const batGia = () => prisma.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: M } });
+  const tongTruocM = async () =>
+    (await prisma.expense.aggregate({ _sum: { amount: true }, where: { date: { lt: vnDate(M) } } }))._sum.amount ?? 0;
+  const apiMeta = (ngay: string, amount: number) =>
+    prisma.expense.create({
+      data: {
+        date: vnDate(ngay),
+        categoryId: "ads",
+        adsSource: "META",
+        description: `Auto Meta ${ngay}`,
+        channelId: "facebook",
+        amount,
+        source: "ADS_API",
+        refId: `meta:${ngay}:c1`,
+      },
+    });
+
+  beforeEach(async () => {
+    await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+    await prisma.auditLog.deleteMany();
+  });
+
+  afterEach(async () => {
+    await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+  });
+
+  it("file trộn ngày < M và ≥ M ⇒ chỉ dòng ≥ M vào sổ, đếm đúng; Σ chi phí ngày < M không đổi", async () => {
+    await batGia();
+    // Dòng sổ < M có sẵn (đã chốt vào quỹ cuối M−1) — phải còn nguyên.
+    await prisma.expense.create({
+      data: {
+        date: vnDate("2026-09-29"),
+        categoryId: "ads",
+        adsSource: "META",
+        description: "Tay 29-09",
+        channelId: null,
+        amount: 77_000,
+        source: "MANUAL",
+        refId: null,
+      },
+    });
+    const truoc = await tongTruocM();
+
+    const xemTruoc = await previewAdsImport(formTron());
+    expect(xemTruoc.ok).toBe(true);
+    if (!xemTruoc.ok) return;
+    expect(xemTruoc.data.soDongTruocM).toBe(3);
+    expect(xemTruoc.data.mocM).toBe(M);
+    expect(xemTruoc.data.rows.map((r) => r.date)).toEqual(["2026-10-01", "2026-10-02", "2026-10-03"]);
+
+    const res = await importAdsExpenses(formTron());
+    expect(res).toMatchObject({ ok: true, data: { imported: 3, skippedTruocM: 3, mocM: M, skippedDuplicates: 0 } });
+
+    const imp = await prisma.expense.findMany({ where: { source: "IMPORT" }, orderBy: { date: "asc" } });
+    expect(imp.map((e) => e.description)).toEqual(["CD 01-10", "CD 02-10", "CD 03-10"]);
+    expect(await tongTruocM()).toBe(truoc);
+    expect(await prisma.auditLog.findMany({ where: { hanhDong: "ADS_IMPORT" } })).toEqual([
+      expect.objectContaining({ ketQua: "OK", ghiChu: { soDong: 3, boQuaTruocM: 3 } }),
+    ]);
+  });
+
+  it("ghi đè: chỉ xoá ADS_API ngày ≥ M; ADS_API ngày < M còn nguyên", async () => {
+    await batGia();
+    await apiMeta("2026-09-29", 900_000);
+    await apiMeta("2026-10-02", 800_000);
+
+    const xemTruoc = await previewAdsImport(formTron("overwrite"));
+    expect(xemTruoc.ok).toBe(true);
+    if (!xemTruoc.ok) return;
+    // Ngày < M không còn là "xung đột" — lượt import sẽ không chạm nó.
+    expect(xemTruoc.data.apiConflicts.map((c) => c.date)).toEqual(["2026-10-02"]);
+
+    const res = await importAdsExpenses(formTron("overwrite"));
+    expect(res).toMatchObject({ ok: true, data: { imported: 3, skippedTruocM: 3, overwrittenApiRows: 1 } });
+
+    const api = await prisma.expense.findMany({ where: { source: "ADS_API" } });
+    expect(api.map((e) => [e.date.getTime(), e.amount])).toEqual([[vnDate("2026-09-29").getTime(), 900_000]]);
+    expect(await tongTruocM()).toBe(900_000);
+    expect(await prisma.expense.count({ where: { date: vnDate("2026-10-02") } })).toBe(1);
+  });
+
+  it("mọi dòng đều trước M ⇒ không ghi gì, vẫn báo số dòng bỏ + nhật ký", async () => {
+    await batGia();
+    const res = await importAdsExpenses(
+      makeForm(makeCsv("META", FILE_TRON.slice(0, 3)), { preset: "META", channelId: "facebook" })
+    );
+    expect(res).toMatchObject({ ok: true, data: { imported: 0, skippedTruocM: 3, mocM: M, skippedDuplicates: 0 } });
+    expect(await prisma.expense.count()).toBe(0);
+    expect(await prisma.auditLog.findMany({ where: { hanhDong: "ADS_IMPORT" } })).toEqual([
+      expect.objectContaining({ ghiChu: { soDong: 0, boQuaTruocM: 3 } }),
+    ]);
+  });
+
+  it("chưa bật ⇒ hành vi cũ: mọi dòng vào sổ, skippedTruocM = 0", async () => {
+    const xemTruoc = await previewAdsImport(formTron());
+    expect(xemTruoc).toMatchObject({ ok: true, data: { soDongTruocM: 0, mocM: null } });
+
+    const res = await importAdsExpenses(formTron());
+    expect(res).toMatchObject({ ok: true, data: { imported: 6, skippedTruocM: 0, mocM: null } });
+    expect(await prisma.expense.count({ where: { source: "IMPORT" } })).toBe(6);
+  });
+
+  it("bước bật đang giữ khoá EXCLUSIVE (M chưa commit) ⇒ import CHỜ rồi lọc theo M mới", async () => {
+    let tha!: () => void;
+    const cho = new Promise<void>((res) => (tha = res));
+    let daGiu!: () => void;
+    const giuXong = new Promise<void>((res) => (daGiu = res));
+    const buocBat = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
+        await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: M } });
+        daGiu();
+        await cho;
+      },
+      { timeout: 20_000 }
+    );
+    await giuXong;
+    const t0 = performance.now();
+    const p = importAdsExpenses(formTron()).then((r) => ({ r, ms: performance.now() - t0 }));
+    await new Promise((res) => setTimeout(res, 800));
+    tha();
+    await buocBat;
+    const { r, ms } = await p;
+
+    expect(ms).toBeGreaterThanOrEqual(700);
+    expect(r).toMatchObject({ ok: true, data: { imported: 3, skippedTruocM: 3, mocM: M } });
+    expect(await tongTruocM()).toBe(0);
   });
 });

@@ -1,12 +1,14 @@
-import { type LoanKind } from "@/generated/prisma/client";
-import { startOfDay } from "date-fns";
+import { type LoanKind, type Prisma } from "@/generated/prisma/client";
+import { startOfDay, subDays } from "date-fns";
 
-import { type CashMovementKindTatCa } from "@/lib/cash-movements/cash-movement-kinds";
+import { type CashMovementKindTatCa, KIND_DU_NO_VAY } from "@/lib/cash-movements/cash-movement-kinds";
 import { prisma } from "@/lib/prisma";
+import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 import { deXuatTatToan } from "@/lib/so-quy/lai-thau-chi";
 import {
   duNoTai,
   kyChoDuyet,
+  ngayTraKy,
   type DeXuatKy,
   type KhoanVayLich,
   type TraGoc,
@@ -14,24 +16,25 @@ import {
 
 /**
  * Đọc bảng khoản vay + kỳ trả nợ chờ duyệt. Dư nợ KHÔNG lưu cột riêng: luôn suy lại từ
- * `duNoMoSo + Σ LOAN_IN − Σ LOAN_REPAY` của chính các dòng `CashMovement` gắn `loanId` — không có
- * chỗ nào để số dư nợ lệch với sổ.
+ * `duNoMoSo + Σ LOAN_IN + Σ LAI_NHAP_GOC − Σ LOAN_REPAY` của chính các dòng `CashMovement` gắn `loanId`
+ * (`DAU_DU_NO_VAY`) — không có chỗ nào để số dư nợ lệch với sổ.
  *
  * Trục DÒNG TIỀN thuần: gốc vay/trả gốc và tiền gửi tiết kiệm bắt buộc KHÔNG BAO GIỜ vào Lãi/Lỗ
  * (lãi vay mới là chi phí, đi qua `Expense` danh mục `interest`).
  */
-
-const KIND_GOC = ["LOAN_IN", "LOAN_REPAY"] as const;
 
 /** Sổ tiết kiệm bắt buộc — CỐ Ý tách khỏi `KIND_GOC`, xem `tienGuiDangGiu` ở `vi-tu-du-no.ts`. */
 const KIND_TIEN_GUI = ["DEPOSIT_OUT", "DEPOSIT_IN"] as const;
 
 type DongGoc = { kind: CashMovementKindTatCa; amount: number; date: Date };
 
+/** Client đọc khoản vay + dòng gốc — prisma gốc hoặc `tx` đang chạy (bước bật nợ phải trả). */
+type DbKhoanVay = Pick<Prisma.TransactionClient, "loan" | "cashMovement">;
+
 /** Gom dòng gốc theo khoản vay: 1 lượt đọc cho MỌI khoản (số khoản vay chỉ vài dòng). */
-async function docDongGoc(): Promise<Map<string, DongGoc[]>> {
-  const dong = await prisma.cashMovement.findMany({
-    where: { loanId: { not: null }, kind: { in: [...KIND_GOC] } },
+async function docDongGoc(db: DbKhoanVay = prisma): Promise<Map<string, DongGoc[]>> {
+  const dong = await db.cashMovement.findMany({
+    where: { loanId: { not: null }, kind: { in: [...KIND_DU_NO_VAY] } },
     select: { loanId: true, kind: true, amount: true, date: true },
   });
   const theoKhoan = new Map<string, DongGoc[]>();
@@ -44,18 +47,23 @@ async function docDongGoc(): Promise<Map<string, DongGoc[]>> {
   return theoKhoan;
 }
 
-/**
- * LOAN_IN = giải ngân (tối đa 1 dòng/khoản); LOAN_REPAY = các lần trả gốc. Giữ NGÀY của dòng LOAN_IN:
- * dư nợ đếm theo ngày dòng tiền, không theo `Loan.startDate` (chủ shop sửa được `startDate`).
- */
-function tachDongGoc(dong: DongGoc[]): {
+type DongGocTach = {
   giaiNgan: number;
   giaiNganNgay: Date | null;
   traGoc: TraGoc[];
-} {
+  nhapGoc: TraGoc[];
+};
+
+/**
+ * LOAN_IN = giải ngân (tối đa 1 dòng/khoản); LOAN_REPAY = các lần trả gốc; LAI_NHAP_GOC = lãi kỳ ngân
+ * hàng cộng vào dư nợ (thấu chi "lãi nhập gốc"). Giữ NGÀY của dòng LOAN_IN: dư nợ đếm theo ngày dòng
+ * tiền, không theo `Loan.startDate` (chủ shop sửa được `startDate`).
+ */
+function tachDongGoc(dong: DongGoc[]): DongGocTach {
   let giaiNgan = 0;
   let giaiNganNgay: Date | null = null;
   const traGoc: TraGoc[] = [];
+  const nhapGoc: TraGoc[] = [];
   for (const d of dong) {
     if (d.kind === "LOAN_IN") {
       giaiNgan += d.amount;
@@ -64,9 +72,11 @@ function tachDongGoc(dong: DongGoc[]): {
       if (giaiNganNgay === null || d.date < giaiNganNgay) giaiNganNgay = d.date;
     } else if (d.kind === "LOAN_REPAY") {
       traGoc.push({ ngay: d.date, soTien: d.amount });
+    } else if (d.kind === "LAI_NHAP_GOC") {
+      nhapGoc.push({ ngay: d.date, soTien: d.amount });
     }
   }
-  return { giaiNgan, giaiNganNgay, traGoc };
+  return { giaiNgan, giaiNganNgay, traGoc, nhapGoc };
 }
 
 type TienGuiKhoan = {
@@ -156,12 +166,13 @@ type LoanRecord = {
   laiCoDinhMoiKy: number | null;
   /** Tiền gửi tiết kiệm bắt buộc mỗi kỳ (0 = không có). */
   tienGuiBatBuocMoiKy: number;
+  /** Thấu chi "lãi nhập gốc" — duyệt kỳ lãi cộng lãi vào dư nợ thay vì trừ quỹ (chỉ `OVERDRAFT`). */
+  laiNhapGoc: boolean;
 };
 
 function lichCuaKhoan(
   loan: LoanRecord,
-  giaiNgan: number,
-  giaiNganNgay: Date | null
+  { giaiNgan, giaiNganNgay, nhapGoc }: DongGocTach
 ): KhoanVayLich {
   return {
     kind: loan.kind,
@@ -174,6 +185,8 @@ function lichCuaKhoan(
     giaiNganNgay,
     laiCoDinhMoiKy: loan.laiCoDinhMoiKy,
     tienGuiBatBuocMoiKy: loan.tienGuiBatBuocMoiKy,
+    laiNhapGoc: loan.laiNhapGoc,
+    nhapGoc,
   };
 }
 
@@ -187,6 +200,8 @@ export type KhoanVayRow = LoanRecord & {
   giaiNganNgay: Date | null;
   /** Các lần trả gốc (cùng lý do với `giaiNganNgay`): lãi theo ngày chia đoạn theo chính chúng. */
   traGoc: TraGoc[];
+  /** Các dòng lãi nhập gốc (thấu chi "lãi nhập gốc") — TĂNG dư nợ từ ngày kỳ; lãi theo ngày chia đoạn theo chúng. */
+  nhapGoc: TraGoc[];
   /** Dư nợ gốc TỚI HÔM NAY. */
   duNo: number;
   /**
@@ -226,8 +241,9 @@ export async function listKhoanVay(): Promise<KhoanVayRow[]> {
   const homNay = new Date();
 
   return loans.map((loan) => {
-    const { giaiNgan, giaiNganNgay, traGoc } = tachDongGoc(dongGoc.get(loan.id) ?? []);
-    const lich = lichCuaKhoan(loan, giaiNgan, giaiNganNgay);
+    const tach = tachDongGoc(dongGoc.get(loan.id) ?? []);
+    const { giaiNgan, giaiNganNgay, traGoc, nhapGoc } = tach;
+    const lich = lichCuaKhoan(loan, tach);
     return {
       id: loan.id,
       kind: loan.kind,
@@ -243,9 +259,11 @@ export async function listKhoanVay(): Promise<KhoanVayRow[]> {
       note: loan.note,
       laiCoDinhMoiKy: loan.laiCoDinhMoiKy,
       tienGuiBatBuocMoiKy: loan.tienGuiBatBuocMoiKy,
+      laiNhapGoc: loan.laiNhapGoc,
       giaiNgan,
       giaiNganNgay,
       traGoc,
+      nhapGoc,
       tienGuiDangGiu: tienGui.get(loan.id)?.dangGiu ?? 0,
       coDongTienGui: tienGui.get(loan.id)?.coDong ?? false,
       ngayTatToanSomNhat: mocTatToanSomNhat(
@@ -282,8 +300,94 @@ export async function demKhoanVayCoKyChoDuyet(): Promise<number> {
   const dongGoc = await docDongGoc();
   const homNay = new Date();
   return loans.filter((loan) => {
-    const { giaiNgan, giaiNganNgay, traGoc } = tachDongGoc(dongGoc.get(loan.id) ?? []);
-    const lich = lichCuaKhoan(loan, giaiNgan, giaiNganNgay);
-    return kyChoDuyet(lich, traGoc, loan.lastDueHandled, homNay) !== null;
+    const tach = tachDongGoc(dongGoc.get(loan.id) ?? []);
+    return kyChoDuyet(lichCuaKhoan(loan, tach), tach.traGoc, loan.lastDueHandled, homNay) !== null;
   }).length;
+}
+
+/** Kỳ SỚM NHẤT chưa xử lý của một khoản, đến hạn TRƯỚC ngày bật nợ phải trả. */
+export type KyVayTruocM = { loanId: string; ten: string; khoaNgayKy: string };
+
+/**
+ * Khoản vay còn hiệu lực có kỳ (trả nợ kỳ hạn, lãi + gốc cuối kỳ, lãi tháng thấu chi) đến hạn trước ngày bật
+ * `mocM` mà chưa duyệt / chưa đóng dấu "không thu" (con dấu `lastDueHandled`) — mỗi khoản tối đa một dòng, kỳ
+ * sớm nhất (duyệt tuần tự). Duyệt kỳ ghi tiền ĐÚNG ngày đến hạn, nên sau khi bật kỳ trước ngày bật không ghi
+ * được nữa ⇒ bước bật đòi dọn hết trước. Cùng luật `kyChoDuyet` với bảng Khoản vay, chỉ khác "hôm nay" = ngày
+ * trước ngày bật. `db` = `tx` khi đọc trong transaction bước bật.
+ *
+ * CHỈ kỳ đến hạn trong [ngày mở sổ `d0`, M) — cùng cận dưới với lần chi định kỳ chưa ghi
+ * (`docDinhKyChuaGhiTruocM`). Kỳ trước ngày mở sổ nằm NGOÀI quỹ: tiền kỳ đó đã nằm trong số dư mở sổ, để treo sau
+ * bật vô hại (sau bật chỉ còn đóng dấu "không thu", không ghi tiền). Đòi DUYỆT nó trước bật thì ngược lại có hại:
+ * dòng trả nợ đề ngày đến hạn kéo lùi ngày mở sổ, lôi chi phí cũ vào quỹ và trừ gốc lần hai với khoản mang sang.
+ * `d0` null (chưa mở sổ) ⇒ không kỳ nào thuộc quỹ ⇒ rỗng.
+ */
+export async function dsKyChoTruocM(
+  mocM: Date,
+  d0: Date | null,
+  db: DbKhoanVay = prisma
+): Promise<KyVayTruocM[]> {
+  if (d0 === null) return [];
+  const loans = await db.loan.findMany({
+    where: { closedAt: null, firstDueDate: { not: null } },
+    orderBy: [{ startDate: "asc" }, { id: "asc" }],
+  });
+  if (loans.length === 0) return [];
+
+  const dongGoc = await docDongGoc(db);
+  // Cuối ngày M − 1 (giờ VN): `kyChoDuyet` lấy `endOfDay` của mốc này làm hạn — kỳ đúng ngày M không tính.
+  const truocM = subDays(new Date(`${khoaNgayVn(mocM)}T00:00:00+07:00`), 1);
+  return loans.flatMap((loan) => {
+    const tach = tachDongGoc(dongGoc.get(loan.id) ?? []);
+    const ky = kyChoDuyet(lichCuaKhoan(loan, tach), tach.traGoc, loan.lastDueHandled, truocM, d0);
+    return ky === null ? [] : [{ loanId: loan.id, ten: loan.name, khoaNgayKy: khoaNgayVn(ky.denNgay) }];
+  });
+}
+
+/** Khoản đã trả hết gốc với kỳ cuối trước ngày bật mà ngân hàng còn giữ tiền gửi bắt buộc (chưa tất toán). */
+export type TienGuiChuaTatToanTruocM = { loanId: string; ten: string; khoaNgayKyCuoi: string; tienGui: number };
+
+/**
+ * Khoản vay còn mở (thường là "trả gốc cuối kỳ" có tiền gửi bắt buộc) mà: kỳ CUỐI đến hạn trước ngày bật `mocM`,
+ * dư nợ cuối ngày M − 1 = 0, và tiền gửi đang giữ (Σ DEPOSIT_OUT − Σ DEPOSIT_IN) > 0. Ngoài đời ngân hàng thường
+ * cấn trừ / hoàn tiền gửi ngay kỳ cuối ⇒ tiền đó đã nằm trong số dư ngân hàng cuối M − 1 (chốt vào điều chỉnh ngày
+ * bật). Sau khi bật: tất toán đề ngày < M bị khoá, đề ngày ≥ M là ghi `DEPOSIT_IN` lần hai ⇒ quỹ cao hơn tiền thật
+ * đúng số tiền gửi; không tất toán thì tiền gửi treo mãi ⇒ bước bật đòi tất toán TRƯỚC.
+ * Dư nợ xét tại M − 1 (không phải hôm nay): trả gốc muộn từ M trở đi ⇒ ngân hàng hoàn tiền gửi cũng từ M ⇒ tất
+ * toán sau bật đề đúng ngày đó là đúng, không chặn. `db` = `tx` khi đọc trong transaction bước bật.
+ */
+export async function dsTienGuiChuaTatToanTruocM(
+  mocM: Date,
+  db: DbKhoanVay = prisma
+): Promise<TienGuiChuaTatToanTruocM[]> {
+  const nhomTienGui = await db.cashMovement.groupBy({
+    by: ["loanId", "kind"],
+    where: { loanId: { not: null }, kind: { in: [...KIND_TIEN_GUI] } },
+    _sum: { amount: true },
+  });
+  const tienGui = new Map<string, number>();
+  for (const n of nhomTienGui) {
+    if (n.loanId === null) continue;
+    const dau = n.kind === "DEPOSIT_OUT" ? 1 : -1;
+    tienGui.set(n.loanId, (tienGui.get(n.loanId) ?? 0) + dau * (n._sum.amount ?? 0));
+  }
+  const coTienGui = [...tienGui].filter(([, so]) => so > 0).map(([id]) => id);
+  if (coTienGui.length === 0) return [];
+
+  const loans = await db.loan.findMany({
+    where: { id: { in: coTienGui }, closedAt: null, termMonths: { not: null }, firstDueDate: { not: null } },
+    orderBy: [{ startDate: "asc" }, { id: "asc" }],
+  });
+  if (loans.length === 0) return [];
+
+  const dongGoc = await docDongGoc(db);
+  const dauNgayM = new Date(`${khoaNgayVn(mocM)}T00:00:00+07:00`);
+  const truocM = subDays(dauNgayM, 1);
+  return loans.flatMap((loan) => {
+    if (loan.termMonths === null) return [];
+    const tach = tachDongGoc(dongGoc.get(loan.id) ?? []);
+    const lich = lichCuaKhoan(loan, tach);
+    const kyCuoi = ngayTraKy(lich, loan.termMonths);
+    if (kyCuoi >= dauNgayM || duNoTai(lich, tach.traGoc, truocM) !== 0) return [];
+    return [{ loanId: loan.id, ten: loan.name, khoaNgayKyCuoi: khoaNgayVn(kyCuoi), tienGui: tienGui.get(loan.id) ?? 0 }];
+  });
 }

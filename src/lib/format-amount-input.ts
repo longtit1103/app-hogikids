@@ -18,7 +18,7 @@ export function formatAmountInput(amount: number): string {
 
 /**
  * Ô số dư NGÂN HÀNG của bản chốt cuối tháng: như `parseAmountInput` nhưng GIỮ dấu trừ đầu chuỗi —
- * thấu chi làm số dư bank âm là hợp lệ. Nhận cả "-" ASCII lẫn "−" (U+2212) vì `formatVnd` in dấu
+ * tài khoản thanh toán có thể âm thật nên số dư âm là hợp lệ. Nhận cả "-" ASCII lẫn "−" (U+2212) vì `formatVnd` in dấu
  * trừ dài và chủ shop có thể dán lại từ màn hình. Chỉ ô này dùng; các ô tiền khác vẫn không âm.
  */
 export function parseSignedAmountInput(raw: string): number {

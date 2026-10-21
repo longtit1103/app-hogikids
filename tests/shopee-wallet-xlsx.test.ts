@@ -110,12 +110,13 @@ describe("parseShopeeWalletFile", () => {
     expect(r.computed).toEqual(SUMMARY); // dòng lỗi KHÔNG cộng vào → vẫn khớp summary cũ
   });
 
-  it("2 dòng cùng khoá txnTime|type|đơn|tiền → duplicateKeys phát hiện (Silver sẽ gộp)", () => {
-    // 2 ADJUSTMENT cùng giây, cùng mã đơn, cùng tiền — khác nhau chỉ ở runningBalance
-    // (bị loại khỏi khoá) ⇒ Bronze/Silver gộp 1. Parser phải báo trùng để action chặn.
+  it("2 dòng cùng khoá txnTime|type|đơn|tiền + Chi tiết y hệt → duplicateKeys phát hiện (Silver sẽ gộp)", () => {
+    // 2 ADJUSTMENT cùng giây, cùng mã đơn, cùng tiền, cùng Chi tiết — khác nhau chỉ ở runningBalance
+    // (bị loại khỏi khoá) ⇒ Bronze/Silver gộp 1. Parser phải báo trùng để action chặn. (Chi tiết KHÁC
+    // nhau thì phân biệt được — xem `shopee-wallet-khoa-trung-oan.test.ts`.)
     const dup: (string | number)[][] = [
       ["2026-06-15 08:00:00", "Điều chỉnh", "x", "260601AAA", "Tiền ra", "-50000", "ok", "100000"],
-      ["2026-06-15 08:00:00", "Điều chỉnh", "y", "260601AAA", "Tiền ra", "-50000", "ok", "50000"],
+      ["2026-06-15 08:00:00", "Điều chỉnh", "x", "260601AAA", "Tiền ra", "-50000", "ok", "50000"],
     ];
     const r = parseShopeeWalletFile(buildWallet(dup, { totalIn: 0, totalOut: -100000, countIn: 0, countOut: 2 }));
     expect(r.rows).toHaveLength(2);

@@ -208,6 +208,7 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
         range={range}
         choPhepSua={coQuyen(nd, "chi-phi:sua")}
         choPhepTruThe={coQuyen(nd, "tai-chinh-so-quy:sua")}
+        laChuShop={laChuShop(nd)}
       />
     );
   } else if (tab === "so-quy") {

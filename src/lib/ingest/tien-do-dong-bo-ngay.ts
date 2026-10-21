@@ -56,6 +56,29 @@ export function mocBamHopLe(mocBamMs: number, bayGioMs: number): boolean {
 
 export type TrangThaiLuot = "RUNNING" | "OK" | "ERROR";
 
+/** Số dòng bước cuối (mới nhất trước) server action đọc để chọn đúng dòng của lượt mình. */
+export const SO_DONG_BUOC_CUOI_XET = 10;
+
+/**
+ * Chọn dòng bước cuối CỦA LƯỢT MÌNH trong các dòng bước cuối sau mốc bấm (xếp MỚI NHẤT trước).
+ *
+ * Vì sao cần: hai lượt chạy chồng (hai nút trên cùng trang, hai tài khoản, probe của "Cài / cập nhật
+ * workflows") ⇒ bước cuối của lượt A cũng có `startedAt` sau mốc bấm của lượt B ⇒ B báo "xong" khi
+ * chính nó còn đang kéo. Mã lượt do `triggerSyncNow` cấp, workflow chuyển nguyên văn sang bước cuối.
+ *
+ * - `luotId` của nút `null` (bundle cũ) ⇒ luật cũ: dòng mới nhất.
+ * - Dòng mang mã KHÁC ⇒ của lượt khác, bỏ.
+ * - Dòng KHÔNG mang mã ⇒ vẫn nhận: workflow trên n8n chưa được "Cài / cập nhật" lại sau deploy thì
+ *   không dòng nào có mã — bỏ hết là nút quay tới trần 15' rồi báo lỗi oan.
+ */
+export function chonBuocCuoiCuaLuot<T extends { luotId: string | null }>(
+  dongMoiTruoc: readonly T[],
+  luotId: string | null,
+): T | null {
+  if (!luotId) return dongMoiTruoc[0] ?? null;
+  return dongMoiTruoc.find((d) => d.luotId === null || d.luotId === luotId) ?? null;
+}
+
 /** Số liệu SyncLog PANCAKE tính từ mốc bấm — server action trả về, mọi mốc là ISO giờ server. */
 export type SoLieuTienDoDongBoNgay = {
   /** Dòng bước cuối mới nhất sau mốc bấm; `null` = workflow chưa tới bước cuối. */
@@ -138,7 +161,8 @@ export function thongDiepKetLuan(k: KetLuanTienDo): ThongDiepKetLuan | null {
         muc: "loi",
         noiDung:
           `Đồng bộ dừng giữa chừng (đã nhận ${k.soLuot} lượt, chưa tới bước cuối) — ` +
-          "xem lượt chạy pancake-sync-now trong n8n. Dữ liệu đã về vẫn giữ",
+          "có thể vẫn đang chạy (n8n xếp hàng), tải lại trang sau ít phút trước khi bấm lại; " +
+          "nếu vẫn thiếu, xem lượt chạy pancake-sync-now trong n8n. Dữ liệu đã về vẫn giữ",
       };
     case "qua-tran":
       return {

@@ -1,6 +1,5 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
-import { chanNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
 
 import { adsChannelId, type AdsSource, type PreparedAdsExpense } from "./ads-expense-row";
 import type { UpsertStats } from "./pancake-upsert";
@@ -230,9 +229,10 @@ export async function upsertOneAdsExpense(
     // chỉ là đọc Set trong bộ nhớ nên nằm trong transaction cũng không tốn thêm round-trip nào.
     if (await coDongImportTrongNgay(tx, source, m)) return "ngay-da-ghi-de-bang-file";
     if (so.refIdSoTay.has(m.refId)) return "khoa-thuoc-chi-phi-nhap-tay";
-    // Hàng rào CẤU TRÚC (lưới `khoa-duong-ghi-nhap-hang-sau-m`): cửa máy chỉ ghi quảng cáo nên không chặn
-    // gì hôm nay; đổi danh mục ở đây thì cổng "Nhập hàng sau M" đã đứng sẵn.
-    await chanNhapHangSauM(tx, { categoryId: ADS_CATEGORY_ID, date: m.date });
+    // KHÔNG qua cổng khoá sổ chi phí (`chan-so-chi-phi-da-khoa.ts`) — ngoại lệ CÓ CHỦ ĐÍCH (chủ shop chốt 12/10),
+    // khai ở lưới `khoa-duong-ghi-nhap-hang-da-khoa-so`: số ads là số nền tảng tự báo và nền tảng còn chốt lại số
+    // ngày cũ vài hôm sau — chặn ngày < M là Lãi/Lỗ thiếu chi phí ads thật. Đổi lại quỹ cuối M−1 có thể lệch đúng
+    // phần nền tảng chốt lại sau ngày bật. Chỉ ghi danh mục ads (máy soi mọi `categoryId` của file).
     await tx.expense.create({
       data: {
         date: m.date,

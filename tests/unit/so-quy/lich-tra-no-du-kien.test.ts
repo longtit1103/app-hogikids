@@ -22,6 +22,8 @@ const TERM: KhoanVayLich = {
   giaiNganNgay: new Date(2026, 8, 5),
   laiCoDinhMoiKy: null,
   tienGuiBatBuocMoiKy: 0,
+  laiNhapGoc: false,
+  nhapGoc: [],
 };
 
 /** Đối số mặc định: khoản còn hiệu lực, dư nợ thật = trọn giải ngân, không có tiền gửi. */
@@ -141,7 +143,7 @@ describe("duKienNKy — 🔴 tiền thật chuyển ngân hàng đi qua tongChuy
     expect(ds[3].tongChuyen).toBe(1_121_096 + 200_000_000 + 5_000_000 - 20_000_000);
     // Và phải BẰNG chính công thức dùng chung — không có bản "chưa trừ" thứ hai nào.
     expect(ds[3].tongChuyen).toBe(
-      tongChuyenNganHang({ lai: 1_121_096, goc: 200_000_000, tienGui: 5_000_000, tienGuiSeNhanLai: 20_000_000 })
+      tongChuyenNganHang({ lai: 1_121_096, goc: 200_000_000, tienGui: 5_000_000, tienGuiSeNhanLai: 20_000_000, laiNhapGoc: false })
     );
     // Tự cộng lãi+gốc+tiền gửi sẽ ra số LỆCH 20tr — chính sự cố `tien-ky-tra-no.ts` sinh ra để diệt.
     expect(ds[3].tongChuyen).not.toBe(ds[3].lai + ds[3].gocThuc + ds[3].tienGui);

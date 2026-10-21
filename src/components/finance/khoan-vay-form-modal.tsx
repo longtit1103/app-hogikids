@@ -108,7 +108,9 @@ export function KhoanVayFormModal({
       const nen = dungMoi ? p.ngayGiaiNgan : p.startDate;
       // Rời khỏi gốc-cuối-kỳ: xoá 3 ô riêng của nó — ô đã ẩn khỏi mắt nhưng số gõ dở (vd tiền gửi)
       // vẫn còn trong state, gửi kèm payload của loại vay KHÁC nếu không dọn ở đây.
-      const b = giaTri === "goc-cuoi-ky" ? {} : { laiTheoNam: false, laiCoDinh: 0, tienGuiMoiKy: 0 };
+      const b0 = giaTri === "goc-cuoi-ky" ? {} : { laiTheoNam: false, laiCoDinh: 0, tienGuiMoiKy: 0 };
+      // Rời khỏi thấu chi: cờ lãi nhập gốc cũng về false — server từ chối cờ này ở loại vay khác.
+      const b = giaTri === "thau-chi" ? b0 : { ...b0, laiNhapGoc: false };
       if (isEdit || !nen) return { ...p, ...b, cheDo: giaTri };
       const ngay = new Date(`${nen}T00:00:00`);
       if (Number.isNaN(ngay.getTime())) return { ...p, ...b, cheDo: giaTri };
@@ -165,6 +167,9 @@ export function KhoanVayFormModal({
       // lại (bản ghi cũ ghi thẳng DB) sẽ khoá cứng nút Lưu bằng một lỗi không ô nào sáng lên.
       tienGuiBatBuocMoiKy: laGocCuoiKy ? f.tienGuiMoiKy : 0,
       note: f.note,
+      // Chỉ thấu chi mới có cờ này (server từ chối ở loại khác). SỬA luôn gửi đúng giá trị đang chọn
+      // (đã nạp từ hồ sơ) nên không rơi vào nhánh "vắng ⇒ giữ cờ cũ" một cách vô tình.
+      laiNhapGoc: laThauChi ? f.laiNhapGoc : false,
       // Server chỉ biết "moi"/"mang-sang" — thấu chi ánh xạ theo công tắc "Đã rút trước ngày mở sổ".
       cheDo: dungCheDoMoi ? ("moi" as const) : ("mang-sang" as const),
       ...(dungCheDoMoi

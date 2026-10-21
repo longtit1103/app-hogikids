@@ -11,17 +11,20 @@ import { TheTinDungSection } from "@/components/no-phai-tra/the-tin-dung-section
 import { ViAdsSection } from "@/components/no-phai-tra/vi-ads-section";
 import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { kiemDieuKienBat } from "@/lib/no-phai-tra/dieu-kien-bat-no-phai-tra";
+import { docNhacTruocBat } from "@/lib/no-phai-tra/dieu-kien-bat-truoc-m";
 import { docKhoiNoPhaiTra } from "@/lib/no-phai-tra/doc-khoi-no-phai-tra";
 import { docPhieuChoGhiNo } from "@/lib/no-phai-tra/doc-phieu-cho-ghi-no";
 import {
   chuanHoaNgayM,
   docDieuChinhDaGhi,
+  docTroiQuyTruocM,
   ngayTruoc,
   nhanNgay,
   theChoBat,
   viChoBat,
 } from "@/lib/no-phai-tra/doc-trang-no-phai-tra";
 import { docHoSoViAds } from "@/lib/no-phai-tra/vi-ads-queries";
+import { prisma } from "@/lib/prisma";
 import { yeuCauChuShopTrang } from "@/lib/quyen/cong-trang";
 import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 
@@ -33,7 +36,7 @@ type SearchParams = { tab?: string; m?: string };
  * Chưa bật: tab **Chuẩn bị** (chọn ngày bật, checklist điều kiện, hồ sơ thẻ + gắn nền tảng, ghi nhận phiếu
  * còn nợ, hồ sơ ví quảng cáo trả trước — hồ sơ KHÔNG đổi quỹ) và tab **Xác nhận** (chỉ mở khi hôm nay ≥
  * ngày bật: khai số dư cuối ngày trước đó, đối chiếu tiền thật, chọn điều chỉnh, bật một lần). Đã bật:
- * hiện mốc + các dòng điều chỉnh đã ghi + hồ sơ ví (ví mới vẫn tạo được).
+ * hiện mốc + chỉ báo trôi quỹ trước ngày bật + các dòng điều chỉnh đã ghi + hồ sơ ví (ví mới vẫn tạo được).
  */
 export default async function NoPhaiTraPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await yeuCauChuShopTrang("/tai-chinh/no-phai-tra");
@@ -41,11 +44,15 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
   const daBat = await docMocM();
 
   if (daBat !== null) {
-    const [dieuChinh, vis] = await Promise.all([docDieuChinhDaGhi(), docHoSoViAds()]);
+    const [dieuChinh, vis, troi] = await Promise.all([
+      docDieuChinhDaGhi(),
+      docHoSoViAds(),
+      docTroiQuyTruocM(daBat),
+    ]);
     return (
       <div className="flex flex-col gap-6">
         <TieuDe />
-        <BatDaBatTomTat nhanM={format(daBat, "dd/MM/yyyy")} dieuChinh={dieuChinh} />
+        <BatDaBatTomTat nhanM={format(daBat, "dd/MM/yyyy")} dieuChinh={dieuChinh} troi={troi} />
         <ViAdsSection vis={vis} daBat />
       </div>
     );
@@ -55,10 +62,11 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
   const mocMDate = new Date(`${mocM}T00:00:00+07:00`);
   const daToiM = khoaNgayVn(new Date()) >= mocM;
   const tab = sp.tab === "xac-nhan" && daToiM ? "xac-nhan" : "chuan-bi";
-  const [khoi, vis, loiDieuKien, phieuChoGhi] = await Promise.all([
+  const [khoi, vis, loiDieuKien, nhacTruocBat, phieuChoGhi] = await Promise.all([
     docKhoiNoPhaiTra(),
     docHoSoViAds(),
     kiemDieuKienBat({ mocM: mocMDate }),
+    docNhacTruocBat(mocMDate, prisma),
     tab === "chuan-bi" ? docPhieuChoGhiNo() : Promise.resolve([]),
   ]);
 
@@ -83,7 +91,7 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
 
       {tab === "chuan-bi" ? (
         <>
-          <BatChecklist loi={loiDieuKien} />
+          <BatChecklist loi={loiDieuKien} nhac={nhacTruocBat} />
           <TheTinDungSection the={khoi.the} mocM={null} goiYChot={khoi.goiYChot} choPhepSua laChuShop />
           <ViAdsSection vis={vis} daBat={false} />
           {khoi.phieu.length > 0 && <NoPhieuNhapSection phieu={khoi.phieu} vanTay={khoi.vanTay} mocM={null} choPhepSua />}
@@ -109,6 +117,7 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
             .map((l) => l.message)}
           thieuHoSoVi={loiDieuKien.find((l) => l.code === "THIEU_HO_SO_VI")?.message ?? null}
           nhapHangSauM={loiDieuKien.find((l) => l.code === "CON_NHAP_HANG_SAU_M")?.nhapHangSauM ?? null}
+          nhac={nhacTruocBat.map((n) => n.message)}
         />
       )}
     </div>

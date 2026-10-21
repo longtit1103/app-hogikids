@@ -27,6 +27,7 @@ const ketQua = {
   }),
   ngayTruocM: "2026-10-31",
   tienDangGui: 0,
+  vanTay: { quyApp: tr(150), duNoThauChi: 0, tongPhieuY: 0 },
 };
 
 function mo(loiDieuKien: string[] = [], thieuHoSoVi: string | null = null) {
@@ -64,6 +65,18 @@ afterEach(() => {
 });
 
 describe("XacNhanBatWizard", () => {
+  it("báo trước: sau khi bật mọi chi phí trước mốc (mọi danh mục) + Nhập hàng từ mốc khoá sổ — chỉnh xong TRƯỚC khi bật", () => {
+    mo();
+    const cau = screen.getByTestId("bat-canh-bao-khoa-so-nhap-hang").textContent ?? "";
+    expect(cau).toContain("MỌI chi phí trước 01/11/2026 (mọi danh mục) bị KHOÁ SỔ");
+    expect(cau).toContain("không thêm, xoá, khôi phục, đổi số tiền/ngày hay gỡ/đổi thẻ được nữa");
+    expect(cau).toContain("chỉ còn đổi được danh mục, mô tả, kênh");
+    expect(cau).toContain("không được ghi bù");
+    expect(cau).toContain('Chi phí "Nhập hàng" khoá cả từ 01/11/2026');
+    expect(cau).toContain("duyệt phiếu = tạo chi phí Nhập hàng");
+    expect(cau).toContain("TRƯỚC khi bật");
+  });
+
   it("đủ ba bước ⇒ gửi dư nợ, sao kê, số dư ví và đúng các dòng điều chỉnh đang hiện", async () => {
     mo();
     const nutTinh = screen.getByRole("button", { name: "Tính chênh lệch" });
@@ -97,12 +110,38 @@ describe("XacNhanBatWizard", () => {
         },
       ],
       viAds: [{ viAdsId: "V", soDuNeo: tr(3) }],
+      // Vân tay ĐÚNG bộ bước 2 đã hiện — server so lại trong transaction bước bật.
+      vanTayQuy: { quyApp: tr(150), duNoThauChi: 0, tongPhieuY: 0 },
     });
     expect(gui.dieuChinh.map((d: { chieu: string; soTien: number }) => [d.chieu, d.soTien])).toEqual([
       ["IN", tr(9)],
       ["OUT", tr(3)],
     ]);
     expect(gui.yeuCauId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("server báo số liệu trước ngày bật đã đổi (QUY_DA_DOI) ⇒ bỏ kết quả bước 2, phải tính lại mới bấm được", async () => {
+    hanhDong.xacNhanBatNoPhaiTra.mockResolvedValue({ ok: false, code: "QUY_DA_DOI", error: "Số liệu trước ngày bật vừa thay đổi" });
+    mo();
+    khaiBuoc1();
+    fireEvent.click(screen.getByRole("button", { name: "Tính chênh lệch" }));
+    await screen.findByTestId("bat-bang-chenh-lech");
+    fireEvent.click(screen.getByLabelText("Tôi đã kiểm số và hiểu đây là bước một lần"));
+    fireEvent.click(screen.getByRole("button", { name: "Xác nhận bật theo dõi nợ phải trả" }));
+    await waitFor(() => expect(screen.queryByTestId("bat-bang-chenh-lech")).toBeNull());
+    expect((screen.getByRole("button", { name: "Xác nhận bật theo dõi nợ phải trả" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("lỗi khác khi bật ⇒ giữ nguyên kết quả bước 2 (không bắt tính lại vô cớ)", async () => {
+    hanhDong.xacNhanBatNoPhaiTra.mockResolvedValue({ ok: false, code: "THIEU_THE", error: "Chưa khai dư nợ" });
+    mo();
+    khaiBuoc1();
+    fireEvent.click(screen.getByRole("button", { name: "Tính chênh lệch" }));
+    await screen.findByTestId("bat-bang-chenh-lech");
+    fireEvent.click(screen.getByLabelText("Tôi đã kiểm số và hiểu đây là bước một lần"));
+    fireEvent.click(screen.getByRole("button", { name: "Xác nhận bật theo dõi nợ phải trả" }));
+    await waitFor(() => expect(hanhDong.xacNhanBatNoPhaiTra).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("bat-bang-chenh-lech")).toBeTruthy();
   });
 
   it("đổi số ở bước 1 sau khi đã tính ⇒ bỏ kết quả, phải tính lại mới xác nhận được", async () => {

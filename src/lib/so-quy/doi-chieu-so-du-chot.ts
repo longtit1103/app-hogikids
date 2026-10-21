@@ -3,6 +3,7 @@ import { startOfMonth, subMonths } from "date-fns";
 import type { DateRange } from "@/lib/date-range";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
+import { CAU_TRU_NHAM_THAU_CHI, laTruNhamThauChi } from "@/lib/so-quy/canh-bao-tru-nham-thau-chi";
 import type { SoQuyThang } from "@/lib/so-quy/cong-thuc-so-quy";
 import {
   CAU_VI_ADS_TRA_TRUOC,
@@ -21,23 +22,31 @@ export { CAU_VI_ADS_TRA_TRUOC, NGU_CANH_CHOT_CU, type NguCanhChot };
  * Trục dòng tiền thuần: KHÔNG chạm Lãi/Lỗ (lưới `khong-ro-ri-vao-pnl.test.ts`), KHÔNG sửa công thức
  * sổ quỹ (`cong-thuc-so-quy.ts`) — module này chỉ ĐỌC `cuoiKy` đã tính rồi trừ.
  *
- * HAI KHOẢN CẤU TRÚC làm tiền thật lệch sổ mà KHÔNG phải sai sổ — bỏ qua là hàng rào tự sinh chênh
- * lệch giả rồi chỉ chủ shop sửa sổ ngược chiều:
- *  - THẤU CHI: `LOAN_IN` thấu chi là tiền VÀO quỹ, còn app ngân hàng thì âm ⇒ `quỹ = bank + tiền mặt
- *    + dư nợ thấu chi` (cùng đẳng thức với footnote thẻ Quỹ). Đây là số TẤT ĐỊNH nên tự cộng vào.
+ * THẤU CHI KHÔNG phải khoản lệch: thấu chi của shop là khoản vay GIẢI NGÂN vào tài khoản thanh toán —
+ * tiền thật trên tài khoản đã gồm tiền vay, quỹ cũng đã gồm `LOAN_IN` của nó ⇒ so thẳng `bank + tiền
+ * mặt` với `cuoiKy`. Dư nợ thấu chi theo dõi ở khoản vay; cộng nó vào chênh lệch là thừa đúng bằng dư nợ.
+ * Cùng hợp đồng với bước đối chiếu lúc bật nợ phải trả (`tinh-chenh-lech-tai-m.ts`).
+ *
+ * KHOẢN CẤU TRÚC làm tiền thật lệch sổ mà KHÔNG phải sai sổ — bỏ qua là hàng rào tự sinh chênh lệch
+ * giả rồi chỉ chủ shop sửa sổ ngược chiều:
  *  - TIỀN ĐANG GỬI (sổ tiết kiệm sinh lãi `SAVINGS_OUT` + tiền gửi bắt buộc `DEPOSIT_OUT`): đã TRỪ khỏi
  *    quỹ nhưng vẫn hiện trong app ngân hàng. Không biết chủ shop có cộng nhầm hay không ⇒ chỉ dặn
  *    trước ở form, và khi chênh lệch ĐÚNG BẰNG số đang gửi thì nói thẳng "bạn cộng nhầm rồi".
+ *  - DƯ NỢ THẤU CHI: ngược chiều — trừ nhầm nó khỏi số dư ngân hàng làm chênh rơi đúng −dư nợ (±1.000đ) ⇒ nhắc
+ *    gõ số dư THẬT (`canh-bao-tru-nham-thau-chi.ts`).
  */
 
-/** Hai số chủ shop gõ. `soDuBank` được phép ÂM (thấu chi), `tienMat` thì không (CHECK trong DB). */
+/**
+ * Hai số chủ shop gõ. `soDuBank` = số dư thật trên tài khoản thanh toán — được phép ÂM (tài khoản có thể
+ * âm thật), `tienMat` thì không (CHECK trong DB).
+ */
 export type BanChot = { soDuBank: number; tienMat: number };
 
 /** Dòng đã đọc từ DB (hoặc null) — chỉ các trường thẻ cần, để hàm ghép không phụ thuộc kiểu Prisma. */
 export type DongChot = BanChot & { thang: Date; note: string; updatedAt: Date };
 
 export type KhoanCauTruc = {
-  /** Σ dư nợ thấu chi còn hiệu lực — số dư bank THẤP hơn quỹ đúng bằng số này. */
+  /** Σ dư nợ thấu chi còn hiệu lực — CHỈ để hiển thị / vân tay, KHÔNG vào chênh lệch (xem đầu file). */
   duNoThauChi: number;
   /** Σ tiền đang gửi (sổ tiết kiệm sinh lãi + tiền gửi bắt buộc) — đã trừ khỏi quỹ, KHÔNG được cộng vào số dư. */
   tienDangGui: number;
@@ -63,18 +72,13 @@ export function thangChot(d: Date): Date {
 }
 
 /**
- * `chenhLechTho = (bank + tiền mặt) − cuoiKy` · `chenhLech = chenhLechTho + dư nợ thấu chi` — số ĐỂ
- * KẾT LUẬN. Quy ước dấu: DƯƠNG là tiền thật NHIỀU HƠN sổ (thu chưa ghi / chi ghi thừa); ÂM là sổ nhiều
- * hơn tiền thật (chi chưa ghi / thu ghi thừa). Thẻ phải in CHỮ theo quy ước này, không chỉ in số.
+ * `chenhLech = (bank + tiền mặt) − cuoiKy` — số ĐỂ KẾT LUẬN, KHÔNG cộng dư nợ thấu chi. Quy ước dấu:
+ * DƯƠNG là tiền thật NHIỀU HƠN sổ (thu chưa ghi / chi ghi thừa); ÂM là sổ nhiều hơn tiền thật (chi chưa
+ * ghi / thu ghi thừa). Thẻ phải in CHỮ theo quy ước này, không chỉ in số.
  */
-export function tinhChenhLechChot(
-  chot: BanChot,
-  cuoiKy: number,
-  duNoThauChi = 0
-): { soChot: number; chenhLechTho: number; chenhLech: number } {
+export function tinhChenhLechChot(chot: BanChot, cuoiKy: number): { soChot: number; chenhLech: number } {
   const soChot = chot.soDuBank + chot.tienMat;
-  const chenhLechTho = soChot - cuoiKy;
-  return { soChot, chenhLechTho, chenhLech: chenhLechTho + duNoThauChi };
+  return { soChot, chenhLech: soChot - cuoiKy };
 }
 
 export type CauChenhLech = {
@@ -84,7 +88,7 @@ export type CauChenhLech = {
 };
 
 /**
- * Câu diễn giải chênh lệch (đã tính thấu chi). Mỗi nhánh chỉ ĐÚNG hướng đi tìm; nhánh dương còn phải
+ * Câu diễn giải chênh lệch. Mỗi nhánh chỉ ĐÚNG hướng đi tìm; nhánh dương còn phải
  * loại trừ ca "cộng nhầm tiền đang gửi" trước khi kết luận sai sổ — đây là lỗi thật dễ mắc nhất.
  */
 /**
@@ -100,16 +104,9 @@ export function cauChenhLech(
   cauTruc: KhoanCauTruc = CAU_TRUC_RONG,
   nguCanh: NguCanhChot = NGU_CANH_CHOT_CU
 ): CauChenhLech {
-  const { duNoThauChi, tienDangGui } = cauTruc;
+  const { tienDangGui } = cauTruc;
   if (chenhLech === 0) {
-    return {
-      nhan: "Khớp sổ",
-      giaiThich:
-        duNoThauChi > 0
-          ? `Tiền thật + dư nợ thấu chi ${formatVnd(duNoThauChi)} bằng đúng số cuối kỳ của sổ quỹ.`
-          : "Tiền thật bằng đúng số cuối kỳ của sổ quỹ.",
-      tone: "khop",
-    };
+    return { nhan: "Khớp sổ", giaiThich: "Tiền thật bằng đúng số cuối kỳ của sổ quỹ.", tone: "khop" };
   }
   if (chenhLech > 0) {
     const nhan = `Tiền thật NHIỀU HƠN sổ ${formatVnd(chenhLech)}`;
@@ -134,8 +131,12 @@ export function cauChenhLech(
       tone: "duong",
     };
   }
+  const nhanAm = `Sổ NHIỀU HƠN tiền thật ${formatVnd(-chenhLech)}`;
+  if (laTruNhamThauChi(chenhLech, cauTruc.duNoThauChi)) {
+    return { nhan: nhanAm, giaiThich: CAU_TRU_NHAM_THAU_CHI, tone: "am" };
+  }
   return {
-    nhan: `Sổ NHIỀU HƠN tiền thật ${formatVnd(-chenhLech)}`,
+    nhan: nhanAm,
     giaiThich:
       "Có khoản chi chưa ghi vào sổ, hoặc khoản thu ghi thừa / ghi trùng." +
       (nguCanh.coHoSoViAds ? ` ${CAU_VI_ADS_TRA_TRUOC}` : ""),
@@ -157,7 +158,6 @@ export type DoiChieuSoDuChot = {
   quyHomNay: number;
   cauTruc: KhoanCauTruc;
   soChot: number | null;
-  chenhLechTho: number | null;
   chenhLech: number | null;
   /** Tháng liền trước đã tới lúc chốt mà chưa có bản chốt — null nếu đã chốt hoặc chưa tới lúc. */
   thangTruocChuaChot: Date | null;
@@ -199,7 +199,6 @@ export function ghepDoiChieuSoDuChot(
     quyHomNay: soQuy.quyHomNay,
     cauTruc,
     soChot: null,
-    chenhLechTho: null,
     chenhLech: null,
     thangTruocChuaChot: null,
   } as const;
@@ -212,13 +211,12 @@ export function ghepDoiChieuSoDuChot(
     dong.thangTruoc === null && thangTruoc.getTime() >= thangChot(soQuy.d0).getTime() ? thangTruoc : null;
 
   if (dong.thangNay === null) return { ...khong, khaDung: "ok", thangTruocChuaChot };
-  const { soChot, chenhLechTho, chenhLech } = tinhChenhLechChot(dong.thangNay, soQuy.cuoiKy, cauTruc.duNoThauChi);
+  const { soChot, chenhLech } = tinhChenhLechChot(dong.thangNay, soQuy.cuoiKy);
   return {
     ...khong,
     khaDung: "ok",
     chot: dong.thangNay,
     soChot,
-    chenhLechTho,
     chenhLech,
     thangTruocChuaChot,
   };

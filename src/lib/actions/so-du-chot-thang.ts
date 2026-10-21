@@ -34,7 +34,7 @@ const LOI_QUA_LON = "Số tiền quá lớn (tối đa 2 tỷ)";
 const soDuBankSchema = z.coerce
   .number()
   .int("Số tiền phải là số nguyên")
-  // Thấu chi làm bank ÂM là hợp lệ — chỉ kẹp độ lớn.
+  // Tài khoản âm thật là hợp lệ — chỉ kẹp độ lớn.
   .min(-TRAN, LOI_QUA_LON)
   .max(TRAN, LOI_QUA_LON);
 

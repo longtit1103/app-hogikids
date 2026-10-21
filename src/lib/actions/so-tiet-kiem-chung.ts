@@ -1,7 +1,8 @@
-import { startOfDay } from "date-fns";
+import { format, startOfDay } from "date-fns";
 import { z } from "zod";
 
 import { LoiHopDong } from "@/lib/actions/khoan-vay-chung";
+import { LoiDongTienTruocM } from "@/lib/no-phai-tra/chan-dong-tien-truoc-m";
 import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
 import { laLoiDongTienBan, THONG_BAO_KHOA_DONG_TIEN_BAN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import { LoiSoDuTietKiemAm } from "@/lib/tiet-kiem/vi-tu-so-tiet-kiem";
@@ -78,8 +79,13 @@ export const soTietKiemSchema = z
  * `khoan-vay-chung.ts`). P2002 chỉ có một đường trùng duy nhất: `ThuNhap.refId @unique`. P2003 là
  * khoá ngoại `loanId` trỏ khoản vay không tồn tại — Postgres ném câu thô, dịch tại đây.
  */
-export function loiSoTietKiem(e: unknown, macDinh: string): { error: string; field?: string } {
+export function loiSoTietKiem(
+  e: unknown,
+  macDinh: string
+): { error: string; field?: string; code?: string } {
   if (e instanceof LoiHopDong) return { error: e.message, field: e.field };
+  // Đã bật nợ phải trả mà lượt này ghi/xoá tiền ngày < M — cùng mã `DA_BAT_NO_PHAI_TRA` với sổ chi phí.
+  if (e instanceof LoiDongTienTruocM) return { error: e.message, field: e.field, code: e.code };
   if (e instanceof LoiSoDuTietKiemAm) return { error: e.message };
   // Chờ khoá dòng `SoTietKiem`/`Loan` quá hạn (lượt khác đang giữ) hoặc transaction quá hạn (P2028) — đã
   // lùi, không ghi gì.
@@ -89,4 +95,15 @@ export function loiSoTietKiem(e: unknown, macDinh: string): { error: string; fie
   if (code === "P2002") return { error: "Sổ này đã ghi lãi rồi" };
   if (code === "P2003") return { error: "Không tìm thấy khoản vay nguồn — chọn lại", field: "loanId" };
   return { error: macDinh };
+}
+
+/**
+ * Tạo sổ / dời ngày gửi về trước mốc bật nợ phải trả M: tiền gửi ngày < M đã chốt vào điều chỉnh mở sổ. Sổ
+ * tiết kiệm KHÔNG có chế độ "mang sang" ⇒ sổ gửi trước M phải khai TRƯỚC khi bật (chủ shop chốt 13/10).
+ */
+export function cauGuiTruocM(mocM: Date): string {
+  return (
+    `Ngày gửi phải từ ngày bật theo dõi nợ (${format(mocM, "dd/MM/yyyy")}) trở đi — sổ gửi trước ngày đó phải ` +
+    `khai trước khi bật (tiền đã chốt vào số dư mở sổ).`
+  );
 }

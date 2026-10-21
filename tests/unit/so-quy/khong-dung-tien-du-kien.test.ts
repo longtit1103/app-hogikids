@@ -27,7 +27,7 @@ const THU_MUC = path.resolve(__dirname, "../../../src/lib/so-quy");
  * tiền quỹ, lọt vào số dư / dự báo / Excel Sổ quỹ.
  */
 const CAM =
-  /calcPnl|pnlOrderSelect|prisma\.order\b|expectedIn|prisma\.tiktokSettlement\b|"REVENUE"|vi-san\/|ViTiktokConLai/;
+  /calcPnl|pnlOrderSelect|\b(?:prisma|db|tx)\.order\b|expectedIn|prisma\.tiktokSettlement\b|"REVENUE"|vi-san\/|ViTiktokConLai/;
 
 /** Đệ quy (khuôn `khong-ro-ri-vao-pnl.test.ts`): lưới canh cả `src/lib/so-quy/**`, thư mục con cũng phải soi. */
 function docTatCa(thuMuc: string, tienTo = ""): { file: string; noiDung: string }[] {
@@ -65,7 +65,7 @@ const moiFile = docTatCa(THU_MUC);
  */
 const bo = (noiDung: string, file: string) =>
   file === NGOAI_LE_DON_HANG
-    ? noiDung.replace(/prisma\.order\.(aggregate|findMany)\(/g, "")
+    ? noiDung.replace(/\b(?:prisma|db)\.order\.(aggregate|findMany)\(/g, "")
     : noiDung;
 
 /** Các cột DUY NHẤT lượt liệt kê đơn được lấy: khoá dòng, mã hiển thị, mốc quỹ, tiền khách đã trả. */
@@ -91,8 +91,11 @@ describe("src/lib/so-quy không dùng tiền dự kiến / net sàn chốt", () 
     const f = moiFile.find((x) => x.file === NGOAI_LE_DON_HANG);
     expect(f, "file ngoại lệ phải tồn tại — đổi tên thì sửa lưới").toBeDefined();
     const src = f!.noiDung;
-    expect(src.match(/prisma\.\w+/g)).toEqual(["prisma.order", "prisma.order"]);
-    expect(src.match(/prisma\.order\.aggregate\(/g)).toHaveLength(1);
+    // Lượt tổng nhận `db` (bước bật nợ phải trả đọc trong transaction) — kiểu chỉ mở delegate đơn hàng, mặc định
+    // prisma gốc; lượt liệt kê vẫn prisma gốc.
+    expect(src.match(/\b(?:prisma|db|tx)\.\w+/g)).toEqual(["db.order", "prisma.order"]);
+    expect(src).toMatch(/db: Pick<Prisma\.TransactionClient, "order"> = prisma\b/);
+    expect(src.match(/\bdb\.order\.aggregate\(/g)).toHaveLength(1);
     expect(src.match(/prisma\.order\.findMany\(/g)).toHaveLength(1);
 
     // Lượt tổng: chỉ `_sum` cột tiền khách đã trả.
@@ -142,6 +145,8 @@ describe("src/lib/so-quy không dùng tiền dự kiến / net sàn chốt", () 
     expect('import { calcPnl } from "@/lib/reports/pnl";').toMatch(CAM);
     expect("await prisma.order.aggregate({})").toMatch(CAM);
     expect("await prisma.order.findMany({})").toMatch(CAM);
+    expect("await db.order.aggregate({})").toMatch(CAM);
+    expect("await tx.order.findMany({})").toMatch(CAM);
     expect("const x = cf.expectedIn;").toMatch(CAM);
     expect("await prisma.tiktokSettlement.aggregate({})").toMatch(CAM);
     expect('import { docViTiktokConLaiToiThieu } from "@/lib/vi-san/vi-tiktok-con-lai-toi-thieu-queries";').toMatch(CAM);

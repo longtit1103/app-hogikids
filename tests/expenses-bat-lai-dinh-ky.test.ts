@@ -6,6 +6,7 @@ import { ensureRecurringExpenses, ensureRecurringExpensesForMonths } from "@/lib
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
+import { LoiKhoaDongTienBan, THONG_BAO_KHOA_DONG_TIEN_BAN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
 
 /**
@@ -27,6 +28,20 @@ vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => {
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
+// Khoá chung với bước bật nợ phải trả: mặc định chạy THẬT; `cheKhoaChung.loi` có giá trị ⇒ ném đúng lỗi đó
+// (giả "chờ khoá quá hạn" mà không phải giữ khoá thật 10 giây).
+const cheKhoaChung = vi.hoisted(() => ({ loi: undefined as unknown, soLanGoi: 0 }));
+vi.mock("@/lib/no-phai-tra/cong-bat-no-phai-tra", async (goc) => {
+  const g = await goc<typeof import("@/lib/no-phai-tra/cong-bat-no-phai-tra")>();
+  return {
+    ...g,
+    khoaChiaSeBatNoPhaiTra: async (...a: Parameters<typeof g.khoaChiaSeBatNoPhaiTra>) => {
+      cheKhoaChung.soLanGoi += 1;
+      if (cheKhoaChung.loi !== undefined) throw cheKhoaChung.loi;
+      return g.khoaChiaSeBatNoPhaiTra(...a);
+    },
+  };
+});
 
 const thangNay = startOfMonth(new Date());
 // Bốn tháng liền nhau kết thúc ở tháng hiện tại — dayOfMonth=1 nên tháng nào cũng đã tới hạn.
@@ -66,6 +81,8 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await truncateBusinessTables();
+  cheKhoaChung.loi = undefined;
+  cheKhoaChung.soLanGoi = 0;
 });
 
 afterAll(async () => {
@@ -138,6 +155,21 @@ describe("batLaiDinhKy", () => {
     const sau = await prisma.recurringExpense.findUniqueOrThrow({ where: { id: mau.id } });
     expect(sau.active).toBe(true);
     expect(sau.activeFrom?.getTime()).toBe(thangNay.getTime());
+  });
+
+  it("mẫu Nhập hàng: chờ khoá chung với bước bật quá hạn ⇒ câu 'đang bận', mẫu vẫn dừng; mẫu khác danh mục không lấy khoá", async () => {
+    const nhapHang = await prisma.recurringExpense.create({
+      data: { categoryId: "purchase", amount: TIEN, dayOfMonth: 1, description: "Nhập định kỳ", active: false },
+    });
+    cheKhoaChung.loi = new LoiKhoaDongTienBan();
+    const res = await batLaiDinhKy(nhapHang.id, TU_THANG_NAY);
+    expect(res).toEqual({ ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN });
+    expect(cheKhoaChung.soLanGoi).toBe(1);
+    expect(await prisma.recurringExpense.findUniqueOrThrow({ where: { id: nhapHang.id } })).toMatchObject({ active: false });
+
+    const mau = await seedMauDaDung();
+    expect((await batLaiDinhKy(mau.id, TU_THANG_NAY)).ok).toBe(true);
+    expect(cheKhoaChung.soLanGoi).toBe(1);
   });
 
   it("id không tồn tại ⇒ từ chối, không tạo gì", async () => {

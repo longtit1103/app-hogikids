@@ -4,15 +4,17 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
-import { ArrowDown, ArrowUp, ChevronsUpDown, Pencil, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, Pencil, PencilLine, Trash2 } from "lucide-react";
 
 import { ExpenseDeleteDialog } from "@/components/expenses/expense-delete-dialog";
 import { ExpenseFormModal, type ExpenseFormModalProps } from "@/components/expenses/expense-form-modal";
 import { ExpenseTableToolbar } from "@/components/expenses/expense-table-toolbar";
+import { SuaTienTruocMocModal } from "@/components/expenses/sua-tien-truoc-moc-modal";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ExpenseListParams, ExpenseRow } from "@/lib/expenses/expense-queries";
 import { formatVnd } from "@/lib/format";
+import { lyDoKhongSuaTienTruocMoc } from "@/lib/no-phai-tra/sua-tien-truoc-moc";
 import { docSoTrang } from "@/lib/pagination";
 import { cn } from "@/lib/utils";
 
@@ -80,6 +82,10 @@ type ExpenseTableProps = {
   choPhepSua?: boolean;
   /** Thẻ cho ô "Trừ vào thẻ" của form sửa (chỉ có sau khi bật theo dõi nợ phải trả). */
   theTinDung?: ExpenseFormModalProps["theTinDung"];
+  /** Mốc M (null/thiếu = chưa bật theo dõi nợ phải trả) — chỉ để quyết định hiện lối "Sửa số tiền (trước ngày bật)". */
+  mocM?: Date | null;
+  /** Người xem là CHỦ SHOP — lối sửa số tiền trước mốc chỉ dành cho chủ shop (action vẫn tự chặn vai khác). */
+  laChuShop?: boolean;
 };
 
 export function ExpenseTable({
@@ -90,6 +96,8 @@ export function ExpenseTable({
   channels,
   choPhepSua = false,
   theTinDung,
+  mocM = null,
+  laChuShop = false,
 }: ExpenseTableProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -97,6 +105,7 @@ export function ExpenseTable({
 
   const [editingRow, setEditingRow] = useState<ExpenseRow | null>(null);
   const [deletingRow, setDeletingRow] = useState<ExpenseRow | null>(null);
+  const [suaTienRow, setSuaTienRow] = useState<ExpenseRow | null>(null);
 
   const rawSort = searchParams.get("sap_xep");
   const sort: ExpenseListParams["sort"] = isValidSort(rawSort) ? rawSort : "date_desc";
@@ -195,8 +204,21 @@ export function ExpenseTable({
     }
     // Dòng ads (trên) chỉ có nút xoá đã khoá sẵn — không phải nút ghi. Dòng thường: Sửa/Xóa theo quyền.
     if (!choPhepSua) return null;
+    // Dòng ngày < M đủ tư cách (cùng luật thuần với server): lối DUY NHẤT đổi số tiền, tự ghi điều chỉnh mở sổ.
+    const coTheSuaTienTruocMoc = laChuShop && mocM !== null && lyDoKhongSuaTienTruocMoc(row, mocM) === null;
     return (
       <div className="flex items-center justify-end gap-3">
+        {coTheSuaTienTruocMoc && (
+          <button
+            type="button"
+            aria-label="Sửa số tiền (trước ngày bật)"
+            title="Sửa số tiền (trước ngày bật)"
+            onClick={() => setSuaTienRow(row)}
+            className="text-muted-foreground hover:text-ink"
+          >
+            <PencilLine className="size-4" />
+          </button>
+        )}
         <button
           type="button"
           aria-label="Sửa"
@@ -345,6 +367,12 @@ export function ExpenseTable({
         channels={channels}
         expense={editingRow ?? undefined}
         theTinDung={theTinDung}
+      />
+      <SuaTienTruocMocModal
+        open={Boolean(suaTienRow)}
+        onOpenChange={(o) => !o && setSuaTienRow(null)}
+        expense={suaTienRow}
+        mocM={mocM}
       />
       <ExpenseDeleteDialog
         open={Boolean(deletingRow)}

@@ -18,8 +18,9 @@ import { SoDuChotThangButton } from "./so-du-chot-thang-button";
  *
  * Đây là HÀNG RÀO, không phải số liệu: sổ quỹ chỉ CỘNG DỒN 6 nguồn, không có phép so nào với tiền
  * thật — chủ shop gõ số dư app ngân hàng + tiền mặt đếm được, thẻ trừ với "Cuối kỳ" của sổ.
- * Chênh lệch in bằng CHỮ chỉ đúng hướng đi tìm (`cauChenhLech`), đã CỘNG dư nợ thấu chi và đã loại
- * trừ ca cộng nhầm tiền đang gửi — hai khoản cấu trúc làm tiền thật lệch sổ mà không phải sai sổ.
+ * Chênh lệch in bằng CHỮ chỉ đúng hướng đi tìm (`cauChenhLech`) và đã loại trừ ca cộng nhầm tiền đang
+ * gửi — khoản cấu trúc làm tiền thật lệch sổ mà không phải sai sổ. Thấu chi giải ngân vào tài khoản nên
+ * KHÔNG cộng dư nợ thấu chi khi so (số dư tài khoản và quỹ đều đã gồm tiền vay).
  *
  * Nhãn tháng tính ở ĐÂY (server, TZ VN) rồi truyền chuỗi xuống client — client parse lại ISO là in
  * sai tháng khi trình duyệt ở múi giờ tây hơn UTC+7 (quy ước repo: mọi chỗ khác neo tay `+07:00`).
@@ -86,7 +87,7 @@ export function SoDuChotThangCard({
     );
   }
 
-  const { chot, cuoiKy, quyHomNay, soChot, chenhLech, chenhLechTho } = doiChieu;
+  const { chot, cuoiKy, quyHomNay, soChot, chenhLech } = doiChieu;
   const thangIso = doiChieu.thang.toISOString();
   // Cùng vị từ với thẻ Quỹ: chỉ nhắc "dự kiến" khi hai số THẬT SỰ khác nhau — nhắc trên mọi lượt xem
   // tháng hiện tại là nhiễu, chủ shop học cách phớt lờ đúng lúc câu đó có nghĩa.
@@ -94,12 +95,12 @@ export function SoDuChotThangCard({
   // Dặn dò dùng chung cho cả trạng thái chưa chốt lẫn đã chốt.
   const dongCauTruc = [
     cauTruc.duNoThauChi > 0 &&
-      `đang thấu chi ${formatVnd(cauTruc.duNoThauChi)} — gõ số dư ngân hàng đúng như app (âm cũng gõ âm), thẻ tự cộng dư nợ thấu chi vào khi so`,
+      `dư nợ thấu chi ${formatVnd(cauTruc.duNoThauChi)} theo dõi riêng ở Khoản vay — tiền thấu chi đã giải ngân vào tài khoản, gõ đúng số dư thật trên tài khoản thanh toán, không cộng/trừ dư nợ`,
     cauTruc.tienDangGui > 0 &&
       `đang gửi tiết kiệm / tiền gửi bắt buộc ${formatVnd(cauTruc.tienDangGui)} — KHÔNG cộng vào số dư ngân hàng, số đó đã trừ khỏi quỹ rồi`,
   ].filter((x): x is string => typeof x === "string");
 
-  if (chot === null || soChot === null || chenhLech === null || chenhLechTho === null) {
+  if (chot === null || soChot === null || chenhLech === null) {
     return (
       <div className="rounded-xl border border-hairline p-4" data-testid="so-du-chot-card">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -153,9 +154,7 @@ export function SoDuChotThangCard({
 
       <div className="mt-3 flex flex-col gap-1 border-t border-hairline pt-2 text-xs text-muted-foreground">
         <p>
-          {cauTruc.duNoThauChi > 0
-            ? `chênh lệch = Σ tiền thật + dư nợ thấu chi ${formatVnd(cauTruc.duNoThauChi)} − cuối kỳ sổ (chưa cộng thấu chi: ${formatVnd(chenhLechTho)})`
-            : "chênh lệch = Σ tiền thật − cuối kỳ sổ"}{" "}
+          chênh lệch = Σ tiền thật − cuối kỳ sổ{" "}
           · chốt lúc {format(chot.updatedAt, "HH:mm dd/MM/yyyy")}
           {chot.note ? ` · ${chot.note}` : ""}
         </p>

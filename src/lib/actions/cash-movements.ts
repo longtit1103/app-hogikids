@@ -17,6 +17,7 @@ import {
   KIND_CAN_PHIEU,
   KIND_CAN_THE,
   KIND_CUTOVER,
+  KIND_LAI_NHAP_GOC,
   KIND_GAN_KHOAN_VAY,
   KIND_GAN_SO_TIET_KIEM,
   KIND_VI_ADS,
@@ -25,7 +26,8 @@ import {
   type CashMovementKindGhiTay,
   type CashMovementKindTatCa,
 } from "@/lib/cash-movements/cash-movement-kinds";
-import { daBatNoPhaiTra, LoiChuaBat } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { chanDongTienTruocM, LoiDongTienTruocM } from "@/lib/no-phai-tra/chan-dong-tien-truoc-m";
+import { daBatNoPhaiTra, khoaChiaSeBatNoPhaiTra, LoiChuaBat } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import {
   chanHoanVuotDaTra,
   khoaHoSoNo,
@@ -77,6 +79,12 @@ import {
  *
  * QUYỀN hai tầng: cổng `tai-chinh-dong-tien:sua` cho mọi dòng; dòng thuộc khối Sổ quỹ (loại gắn khoản
  * vay / sổ tiết kiệm, trước HOẶC sau khi sửa) đòi thêm `tai-chinh-so-quy:sua` — `kiemQuyenDongGanSoQuy`.
+ *
+ * KHOÁ DÒNG TIỀN TRƯỚC M (đã bật nợ phải trả): mọi nhánh kind CŨ (dòng trơn + gắn khoản vay / sổ) của tạo/sửa/xoá
+ * mở transaction bằng `khoaChiaSeBatNoPhaiTra(tx)` (câu ĐẦU, VÔ ĐIỀU KIỆN, trước khoá `Loan`/`SoTietKiem`) rồi
+ * qua `chanDongTienTruocM` — sửa/xoá xét bản cũ ĐỌC LẠI sau khoá. Dòng ngày < M đã chốt vào điều chỉnh mở sổ: thêm,
+ * xoá, đổi ngày/tiền/loại/khoản gắn là quỹ từ M lệch tiền thật; chỉ sửa mô tả được qua. 4 kind nợ đi đường riêng
+ * (cửa sổ ngày ≥ M qua `congNoPhaiTra`), `CUTOVER_*` chỉ qua `suaDieuChinhChuyenDoi`.
  */
 
 /**
@@ -212,6 +220,8 @@ function loiGhi(e: unknown): { error: string; field?: string; code?: string } {
   if (e instanceof LoiHoSoNo) {
     return e.field === "id" ? { error: e.message, code: e.code } : { error: e.message, field: e.field, code: e.code };
   }
+  // Dòng tiền ngày < M sau khi bật nợ phải trả — tô ô Ngày của form (đường XOÁ tự bỏ `field` để rơi về toast).
+  if (e instanceof LoiDongTienTruocM) return { error: e.message, field: e.field, code: e.code };
   // Chờ khoá dòng khoản vay / sổ quá hạn, hoặc transaction quá hạn (P2028) — đã lùi, không ghi gì.
   // Không `field` ⇒ rơi về toast.
   if (laLoiDongTienBan(e)) return { error: THONG_BAO_KHOA_DONG_TIEN_BAN };
@@ -337,12 +347,17 @@ async function docLaiTrongTx(tx: Prisma.TransactionClient, id: string, cha: Khoa
  * ⚠️ Kẹp theo `truoc.*`, TUYỆT ĐỐI không theo `data.*`: `transform` của `cashMovementSchema` đã đặt
  * lại `loanId`/`savingsId` theo `kind`, nên `data.*` là giá trị MỚI muốn ghi — lấy nó làm điều kiện
  * thì hàng rào tự khớp chính mình và mất tác dụng.
+ *
+ * `raoTien` (tuỳ chọn): rào thêm phần TIỀN của bản cũ mà cổng dòng tiền trước M vừa xét (ngày, số tiền, loại) —
+ * phép xét đó đúng chỉ khi câu ghi đè lên ĐÚNG bản ấy. Nhánh dòng trơn không khoá dòng cha nào, nên thiếu rào này
+ * là khe đọc-rồi-ghi: lượt khác đổi dòng giữa lúc đọc lại và lúc ghi thì ta ghi đè lên một bản cổng chưa từng xét.
  */
 async function ghiCoHangRaoCha(
   db: Prisma.TransactionClient,
   id: string,
   truoc: KhoaCha,
-  data: CashMovementData
+  data: CashMovementData,
+  raoTien?: { date: Date; amount: number; kind: CashMovementKindTatCa }
 ): Promise<void> {
   const { count } = await db.cashMovement.updateMany({
     where: {
@@ -352,6 +367,7 @@ async function ghiCoHangRaoCha(
       cardId: truoc.cardId,
       phieuNhapId: truoc.phieuNhapId,
       viAdsId: truoc.viAdsId,
+      ...(raoTien === undefined ? {} : { date: raoTien.date, amount: raoTien.amount, kind: raoTien.kind }),
     },
     data,
   });
@@ -361,6 +377,22 @@ async function ghiCoHangRaoCha(
       "id"
     );
   }
+}
+
+/**
+ * Đường SỬA kind cũ: đọc LẠI bản cũ TRONG transaction (sau khoá chung bước bật, và sau khoá dòng cha nếu có) rồi
+ * qua cổng dòng tiền trước M với đúng bản đó. Bản đọc NGOÀI transaction có thể đã cũ: dòng ≥ M bị lượt khác dời
+ * về < M lúc chưa bật, bước bật commit, rồi ta mới giành khoá — xét theo bản ngoài là cho qua một lượt sửa dòng
+ * < M sau khi đã bật. Trả bản cũ để câu ghi rào phần tiền (`ghiCoHangRaoCha` với `raoTien`).
+ */
+async function docLaiVaChanSuaTruocM(tx: Prisma.TransactionClient, id: string, data: CashMovementData) {
+  const cu = await tx.cashMovement.findUnique({
+    where: { id },
+    select: { date: true, amount: true, kind: true, ...SELECT_CHA },
+  });
+  if (!cu) throw new LoiKhoanVay("Không tìm thấy khoản tiền", "id");
+  await chanDongTienTruocM(tx, { loai: "SUA", cu, moi: data });
+  return cu;
 }
 
 /**
@@ -493,17 +525,23 @@ export async function createCashMovement(input: unknown): Promise<ActionResult> 
       }, OPT_TX_DONG_TIEN);
       lamMoiTrang();
     } else if (data.loanId === null && data.savingsId === null) {
-      // Bọc transaction chỉ để dòng nhật ký đi CÙNG câu ghi: nhật ký ném ⇒ dòng tiền không lưu.
+      // Transaction để dòng nhật ký đi CÙNG câu ghi (nhật ký ném ⇒ dòng tiền không lưu) và để giữ khoá chung bước
+      // bật tới lúc commit. `OPT_TX_DONG_TIEN`: ngân sách chờ khoá chung — mặc định 5s cắt ngang giữa chừng.
       await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        await chanDongTienTruocM(tx, { loai: "TAO", ngay: [data.date] });
         const row = await tx.cashMovement.create({ data });
         await ghiNhatKyDongTien(tx, nguoiDung, "DONG_TIEN_TAO", row.id);
-      });
+      }, OPT_TX_DONG_TIEN);
       revalidatePath("/tai-chinh");
     } else {
       const loanId = data.loanId;
       const savingsId = data.savingsId;
       await prisma.$transaction(
         async (tx) => {
+          // Khoá chung bước bật LUÔN đứng đầu (trước `Loan`/`SoTietKiem`) — thứ tự toàn app; đọc M sau khoá.
+          await khoaChiaSeBatNoPhaiTra(tx);
+          await chanDongTienTruocM(tx, { loai: "TAO", ngay: [data.date] });
           // THỨ TỰ KHOÁ CỐ ĐỊNH TOÀN APP: `Loan` trước, `SoTietKiem` sau. Một dòng không thể mang cả
           // hai (CHECK `CashMovement_loan_savings_loai_tru`), nhưng `updateCashMovement` CÓ thể
           // chuyển dòng từ trục này sang trục kia ⇒ hai bảng cùng bị khoá trong một transaction. Đảo
@@ -556,6 +594,18 @@ const TU_CHOI_KIND_NO_PHAI_TRA = {
 } as const satisfies ActionResult;
 
 /**
+ * Dòng LÃI NHẬP GỐC thấu chi chỉ sinh từ duyệt kỳ và đi CẶP với dòng lãi ở Sổ chi phí: sửa/xoá đơn lẻ ở
+ * đây là tách cặp ⇒ quỹ lệch đúng số lãi (dòng lãi vẫn trừ quỹ, dòng cộng lại mất) hoặc dư nợ lệch khỏi
+ * lãi đã vào Lãi/Lỗ. Đường đúng: sửa số / xoá CHÍNH dòng Lãi vay của kỳ — action đó kéo theo cả cặp.
+ */
+const TU_CHOI_LAI_NHAP_GOC = {
+  ok: false,
+  code: "LAI_NHAP_GOC_DI_THEO_KY",
+  error:
+    "Dòng lãi nhập gốc thấu chi do duyệt kỳ sinh ra — sửa số tiền hoặc xoá ở dòng Lãi vay của kỳ đó trong Sổ chi phí (đi cả cặp)",
+} as const satisfies ActionResult;
+
+/**
  * Đổi dòng giữa nhóm loại CŨ (khoản vay / sổ tiết kiệm / dòng trơn) và nhóm NỢ PHẢI TRẢ: hai nhóm có
  * hai bộ cổng + hai bộ khoá cha khác nhau (`Loan`/`SoTietKiem` vs thẻ/phiếu/ví), và nhóm nợ còn cửa sổ
  * ngày ≥ M. Gộp cả hai vào một lượt sửa là bốn bảng cha trong một transaction — rẻ hơn hẳn là bảo xoá
@@ -584,6 +634,7 @@ export async function updateCashMovement(id: string, input: unknown): Promise<Ac
       select: { kind: true, date: true, amount: true, ...SELECT_CHA },
     });
     if (!truoc) return { ok: false, error: "Không tìm thấy khoản tiền" };
+    if (truoc.kind === KIND_LAI_NHAP_GOC) return TU_CHOI_LAI_NHAP_GOC;
     // `CUTOVER_*` (điều chỉnh mở sổ): chỉ sửa số/mô tả qua `suaDieuChinhChuyenDoi` (chủ shop).
     if (!isCashMovementKindGhiTay(truoc.kind)) return TU_CHOI_KIND_NO_PHAI_TRA;
     if (isKindNoPhaiTraGhiTay(truoc.kind) !== isKindNoPhaiTraGhiTay(data.kind)) return TU_CHOI_DOI_NHOM;
@@ -623,16 +674,20 @@ export async function updateCashMovement(id: string, input: unknown): Promise<Ac
       // Vẫn phải có hàng rào: dòng đang trơn có thể vừa được gắn vào một khoản vay / sổ ở lượt khác,
       // mà nhánh này KHÔNG giành khoá cha nào — ghi đè thẳng sẽ gỡ dòng khỏi cha đó không ai hay.
       await prisma.$transaction(async (tx) => {
-        await ghiCoHangRaoCha(tx, id, truoc, data);
+        await khoaChiaSeBatNoPhaiTra(tx);
+        const cu = await docLaiVaChanSuaTruocM(tx, id, data);
+        await ghiCoHangRaoCha(tx, id, truoc, data, cu);
         await ghiNhatKyDongTien(tx, nguoiDung, "DONG_TIEN_SUA", id);
-      });
+      }, OPT_TX_DONG_TIEN);
       revalidatePath("/tai-chinh");
     } else {
       await prisma.$transaction(
         async (tx) => {
-          // Thứ tự khoá cố định: `Loan` trước, `SoTietKiem` sau (xem chú thích ở `createCashMovement`).
+          // Thứ tự khoá cố định: khoá chung bước bật → `Loan` → `SoTietKiem` (xem `createCashMovement`).
+          await khoaChiaSeBatNoPhaiTra(tx);
           await khoaCacKhoanVay(tx, khoanVayCanKiem);
           await khoaCacSoTietKiem(tx, soCanKiem);
+          const cu = await docLaiVaChanSuaTruocM(tx, id, data);
 
           // Gỡ/chuyển dòng RA KHỎI khoản cũ cũng đổi dư nợ khoản đó ⇒ khoản cũ phải còn hiệu lực.
           if (truoc.loanId !== null && truoc.loanId !== data.loanId) {
@@ -648,7 +703,7 @@ export async function updateCashMovement(id: string, input: unknown): Promise<Ac
             await kiemSoTietKiem(tx, { ...data, savingsId: data.savingsId }, id);
           }
 
-          await ghiCoHangRaoCha(tx, id, truoc, data);
+          await ghiCoHangRaoCha(tx, id, truoc, data, cu);
 
           for (const khoan of khoanVayCanKiem) {
             await chanDuNoAm(tx, khoan);
@@ -682,6 +737,7 @@ export async function deleteCashMovement(id: string): Promise<ActionResult> {
       select: { kind: true, date: true, amount: true, ...SELECT_CHA },
     });
     if (!truoc) return { ok: false, error: "Không tìm thấy khoản tiền" };
+    if (truoc.kind === KIND_LAI_NHAP_GOC) return TU_CHOI_LAI_NHAP_GOC;
     // `CUTOVER_*` cố định một lần ở bước bật (spec §5.8) — không có đường xoá thường.
     if (!isCashMovementKindGhiTay(truoc.kind)) return TU_CHOI_KIND_NO_PHAI_TRA;
 
@@ -710,16 +766,20 @@ export async function deleteCashMovement(id: string): Promise<ActionResult> {
       // Dòng trơn vốn xoá thẳng không transaction — nay phải có, vì chụp ảnh và câu xoá bắt buộc
       // đi cùng một lượt: chụp mà không xoá được là để lại dòng rác, xoá mà không chụp là mất hẳn.
       await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        // Xét NGÀY của bản đọc lại sau khoá — bản ngoài transaction có thể đã bị dời ngày.
         const row = await docLaiTrongTx(tx, id, truoc);
+        await chanDongTienTruocM(tx, { loai: "XOA", ngay: [row.date] });
         await chupVaoThungRac(tx, { bang: "CashMovement", banGhi: row });
         await tx.cashMovement.delete({ where: { id } });
         await ghiNhatKyDongTien(tx, nguoiDung, "DONG_TIEN_XOA", id);
-      });
+      }, OPT_TX_DONG_TIEN);
       revalidatePath("/tai-chinh");
     } else {
       await prisma.$transaction(
         async (tx) => {
-          // Thứ tự khoá cố định: `Loan` trước, `SoTietKiem` sau.
+          // Thứ tự khoá cố định: khoá chung bước bật → `Loan` → `SoTietKiem`.
+          await khoaChiaSeBatNoPhaiTra(tx);
           if (loanId !== null) await khoaCacKhoanVay(tx, [loanId]);
           if (savingsId !== null) await khoaCacSoTietKiem(tx, [savingsId]);
 
@@ -729,6 +789,7 @@ export async function deleteCashMovement(id: string): Promise<ActionResult> {
           // Chụp SAU các cổng, TRƯỚC câu xoá: cổng ném là rollback trọn nên không đẻ dòng rác cho
           // một lượt xoá bị từ chối. Bản ghi đọc lại ở đây (đã giữ khoá cha) mới là bản THẬT sắp xoá.
           const row = await docLaiTrongTx(tx, id, truoc);
+          await chanDongTienTruocM(tx, { loai: "XOA", ngay: [row.date] });
           await chupVaoThungRac(tx, { bang: "CashMovement", banGhi: row });
           await tx.cashMovement.delete({ where: { id } });
 
@@ -775,6 +836,8 @@ export async function deleteCashMovement(id: string): Promise<ActionResult> {
         error: "Sổ tiết kiệm này đã nhận lại gốc — xoá dòng gửi sẽ làm số đang gửi âm",
       };
     }
+    // Xoá không có ô Ngày nào để tô ⇒ bỏ `field`, câu rơi về toast.
+    if (e instanceof LoiDongTienTruocM) return { ok: false, code: e.code, error: e.message };
     return { ok: false, ...loiGhi(e) };
   }
 

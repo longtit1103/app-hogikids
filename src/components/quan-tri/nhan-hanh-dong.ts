@@ -56,6 +56,7 @@ export const NHAN_HANH_DONG: Readonly<Record<HanhDong, string>> = {
   [HANH_DONG.CHI_PHI_TAO]: "Ghi chi phí",
   [HANH_DONG.CHI_PHI_SUA]: "Sửa chi phí",
   [HANH_DONG.CHI_PHI_XOA]: "Xoá chi phí",
+  [HANH_DONG.CHI_PHI_SUA_TIEN_TRUOC_MOC]: "Sửa số tiền chi phí trước ngày bật theo dõi nợ",
   [HANH_DONG.CHI_PHI_BAT_DINH_KY]: "Bật lại khoản chi định kỳ",
   [HANH_DONG.CHI_PHI_DUNG_DINH_KY]: "Dừng khoản chi định kỳ",
   [HANH_DONG.NHAP_HANG_GHI_CHI_PHI]: "Ghi chi phí nhập hàng",
@@ -96,6 +97,7 @@ const NHAN_KHOA_GHI_CHU: Readonly<Record<string, string>> = {
   quyenThieu: "Quyền thiếu",
   lyDo: "Lý do",
   email: "Email",
+  boQuaTruocM: "Bỏ qua (trước ngày bật theo dõi nợ)",
 };
 
 export function nhanKhoaGhiChu(khoa: string): string {
@@ -110,6 +112,7 @@ const NHAN_LY_DO: Readonly<Record<string, string>> = {
   CHUA_THU_HOI_PHIEN_LOI: "Đã nạp dữ liệu nhưng KHÔNG thu hồi được phiên (lỗi khi thu hồi)",
   CHUA_THU_HOI_PHIEN_MAT_KHOA: "Đã nạp dữ liệu nhưng KHÔNG thu hồi được phiên (mất khoá phục hồi)",
   BO_QUA_KY: "Bỏ qua kỳ trả nợ",
+  SUA_TIEN_TRUOC_MOC: "Sửa số tiền chi phí trước ngày bật (kèm bù điều chỉnh mở sổ nếu dòng nằm trong quỹ)",
 };
 
 export function nhanLyDo(ma: string): string {

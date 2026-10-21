@@ -3,7 +3,8 @@
  * Shopee, Phase 3 hub Tài chính). CHỈ dòng tiền đối chiếu — ĐỘC LẬP P&L/doanh thu
  * (doanh thu CHỈ từ Pancake, bất biến #2).
  *
- * `externalId` = khoá tổng hợp do Bronze `idExpr` tính (`txnTime|type|orderCode|amount`),
+ * `externalId` = khoá tổng hợp do Bronze `idExpr` tính (`txnTime|type|orderCode|amount`, dòng va chạm
+ * khoá trong file thêm `|khoaPhu` — xem `src/lib/import/shopee-wallet-khoa-phan-biet.ts`),
  * `latestPayloads` trả sẵn ở cột `externalId` → DÙNG THẲNG, KHÔNG dựng lại bằng JS
  * (tránh lệch chuỗi giữa SQL idExpr và JS → 2 khoá khác nhau cho cùng dòng).
  * `amount` đã CÓ DẤU (parser ép theo cột "Dòng tiền"). Money < 2^53 → parse thường an toàn.

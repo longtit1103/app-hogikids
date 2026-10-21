@@ -18,6 +18,7 @@ import type { RecurringExpenseRow } from "@/lib/expenses/expense-queries";
 const MAU: RecurringExpenseRow = {
   id: "r1",
   description: "Nhập hàng NCC A",
+  categoryId: "purchase",
   categoryName: "Nhập hàng",
   channelName: null,
   amount: 20_000_000,
@@ -32,16 +33,26 @@ describe("KhoanChiDinhKySection — nhắc mẫu Nhập hàng bị bỏ sau mố
   it("boQuaNhapHang = 2 ⇒ có câu nhắc kèm số lần, khối mở sẵn", () => {
     const { container } = render(<KhoanChiDinhKySection items={[MAU]} boQuaNhapHang={2} />);
     const nhac = screen.getByTestId("dinh-ky-bo-qua-nhap-hang");
-    expect(nhac.textContent).toContain("Mẫu Nhập hàng không còn sinh sau ngày bật theo dõi nợ (bỏ qua 2 lần)");
+    expect(nhac.textContent).toContain("Đã bật theo dõi nợ nên mẫu Nhập hàng không sinh nữa, mọi ngày (bỏ qua 2 lần)");
     expect(container.querySelector("details")?.open).toBe(true);
   });
 
   it("0 hoặc không truyền ⇒ không câu nhắc, khối gấp như cũ", () => {
     for (const boQua of [0, undefined]) {
-      const { container } = render(<KhoanChiDinhKySection items={[MAU]} boQuaNhapHang={boQua} />);
+      const { container } = render(<KhoanChiDinhKySection items={[MAU]} boQuaNhapHang={boQua} boQuaTruocM={boQua} />);
       expect(screen.queryByTestId("dinh-ky-bo-qua-nhap-hang")).toBeNull();
+      expect(screen.queryByTestId("dinh-ky-bo-qua-truoc-m")).toBeNull();
       expect(container.querySelector("details")?.open).toBe(false);
       cleanup();
     }
+  });
+
+  it("boQuaTruocM = 3 (lần đến hạn trước mốc, mẫu bất kỳ) ⇒ nói rõ không ghi bù vì số dư mở sổ đã chốt, khối mở sẵn", () => {
+    const { container } = render(<KhoanChiDinhKySection items={[{ ...MAU, categoryId: "fixed" }]} boQuaTruocM={3} />);
+    const nhac = screen.getByTestId("dinh-ky-bo-qua-truoc-m");
+    expect(nhac.textContent).toContain("3 lần đến hạn trước ngày bật theo dõi nợ chưa có trong sổ và sẽ không được ghi bù");
+    expect(nhac.textContent).toContain("số dư mở sổ đã chốt theo tiền thật");
+    expect(screen.queryByTestId("dinh-ky-bo-qua-nhap-hang")).toBeNull();
+    expect(container.querySelector("details")?.open).toBe(true);
   });
 });

@@ -69,6 +69,15 @@ export function anhDongTienGanSoQuy(anh: unknown): boolean {
   return coKhoa || (isCashMovementKindTatCa(c.kind) && kindNoPhaiTra(c.kind));
 }
 
+/**
+ * Ảnh `Expense` mang KÈM dòng tiền (dòng lãi kỳ của thấu chi "lãi nhập gốc" kèm dòng `LAI_NHAP_GOC`):
+ * khôi phục là dựng lại dòng làm TĂNG dư nợ khoản vay ⇒ cùng quyền Sổ quỹ với dòng tiền gắn khoản vay.
+ */
+function anhChiPhiKemDongTien(anh: unknown): boolean {
+  const kem = (anh as { cashMovements?: unknown } | null)?.cashMovements;
+  return Array.isArray(kem) && kem.length > 0;
+}
+
 /** Ảnh là dòng điều chỉnh mở sổ nợ (`CUTOVER_*`) — khôi phục/xoá vĩnh viễn CHỈ chủ shop (spec §5.8). */
 function anhLaDieuChinhMoSo(anh: unknown): boolean {
   const chinh = (anh as { chinh?: { kind?: unknown } } | null)?.chinh;
@@ -108,6 +117,9 @@ export function kiemQuyenBang(nd: NguoiDung, bang: string, anh: unknown): void {
   const quyen = QUYEN_THEO_BANG[bang as BangThungRac];
   if (!coQuyen(nd, quyen)) throw new LoiThieuQuyenThungRac(quyen);
   if (bang === "CashMovement" && anhDongTienGanSoQuy(anh) && !coQuyen(nd, QUYEN_DONG_GAN_SO_QUY)) {
+    throw new LoiThieuQuyenThungRac(QUYEN_DONG_GAN_SO_QUY);
+  }
+  if (bang === "Expense" && anhChiPhiKemDongTien(anh) && !coQuyen(nd, QUYEN_DONG_GAN_SO_QUY)) {
     throw new LoiThieuQuyenThungRac(QUYEN_DONG_GAN_SO_QUY);
   }
   if (bang === "CashMovement" && anhLaDieuChinhMoSo(anh) && !laChuShop(nd)) {

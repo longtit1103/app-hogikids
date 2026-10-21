@@ -108,6 +108,7 @@ import { chotSaoKe } from "@/lib/actions/chot-sao-ke";
 import { dongThe, ganNenTang, suaThe, taoThe, xoaGanNenTang, xoaThe } from "@/lib/actions/the-tin-dung";
 import { suaViAds, taoViAds, xoaViAds } from "@/lib/actions/vi-ads";
 import { xacNhanBatNoPhaiTra } from "@/lib/actions/bat-no-phai-tra";
+import { suaSoTienTruocMoc } from "@/lib/actions/sua-tien-truoc-moc";
 import { LOI_DANG_PHUC_HOI, thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
@@ -237,6 +238,9 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["vi-ads.suaViAds", () => suaViAds("id-gia", {})],
   ["vi-ads.xoaViAds", () => xoaViAds("id-gia")],
   ["bat-no-phai-tra.xacNhanBatNoPhaiTra", () => xacNhanBatNoPhaiTra({})],
+  // Sửa số tiền chi phí trước ngày bật: đổi Expense + thêm dòng điều chỉnh mở sổ cùng transaction — lùi mất giữa
+  // lượt phục hồi là Lãi/Lỗ và quỹ từ M lệch nhau đúng phần bù.
+  ["sua-tien-truoc-moc.suaSoTienTruocMoc", () => suaSoTienTruocMoc("id-gia", {})],
 ];
 
 beforeAll(async () => {

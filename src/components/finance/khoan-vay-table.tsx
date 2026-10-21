@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 
+import { DongDuNoGomLaiNhapGoc, NhanLaiNhapGoc } from "./khoan-vay-lai-nhap-goc-nhan";
 import { KhoanVayRowActions } from "./khoan-vay-row-actions";
 
 /**
@@ -103,13 +104,20 @@ export function KhoanVayTable({
         <TableBody>
           {rows.map((loan) => (
             <TableRow key={loan.id}>
-              <TableCell className="text-sm text-ink">{loan.name}</TableCell>
+              <TableCell className="text-sm text-ink">
+                {loan.name}
+                <NhanLaiNhapGoc loan={loan} />
+              </TableCell>
               <TableCell className="text-sm">{loan.lender || "—"}</TableCell>
               <TableCell className="text-sm tabular-nums">{laiSuatText(loan)}</TableCell>
               <TableCell className="text-sm">{kyHanText(loan)}</TableCell>
               <TableCell className="text-sm">{ngayTraText(loan)}</TableCell>
               <TableCell className="text-right font-serif text-ink tabular-nums">
                 {formatVnd(loan.duNo)}
+                <DongDuNoGomLaiNhapGoc
+                  loan={loan}
+                  className="text-right font-sans text-xs font-normal text-muted-foreground"
+                />
                 {loan.laiTamTinh !== null && (
                   <p className="text-right font-sans text-xs font-normal text-muted-foreground">
                     lãi tới nay ≈ {formatVnd(loan.laiTamTinh)}
@@ -143,12 +151,16 @@ export function KhoanVayTable({
           <div key={loan.id} className="flex flex-col gap-1.5 rounded-lg border border-hairline p-3">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-sm font-medium text-ink">{loan.name}</p>
+                <p className="text-sm font-medium text-ink">
+                  {loan.name}
+                  <NhanLaiNhapGoc loan={loan} />
+                </p>
                 <p className="text-xs text-muted-foreground">{loan.lender || "—"}</p>
               </div>
               {choPhepSua && <KhoanVayRowActions loan={loan} d0={d0} />}
             </div>
             <p className="font-serif text-xl text-ink tabular-nums">{formatVnd(loan.duNo)}</p>
+            <DongDuNoGomLaiNhapGoc loan={loan} className="text-xs text-muted-foreground" />
             {loan.laiTamTinh !== null && (
               <p className="text-xs text-muted-foreground">lãi tới nay ≈ {formatVnd(loan.laiTamTinh)}</p>
             )}

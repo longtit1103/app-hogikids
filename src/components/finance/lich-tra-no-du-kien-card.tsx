@@ -59,7 +59,18 @@ function BangKy({ ds, coTienGui }: { ds: KyDuKien[]; coTienGui: boolean }) {
                   </Badge>
                 )}
               </td>
-              <td className="py-1 pr-2 text-right tabular-nums">{formatVnd(k.lai)}</td>
+              <td className="py-1 pr-2 text-right tabular-nums">
+                {formatVnd(k.lai)}
+                {/* Lãi nhập gốc: số này CỘNG vào dư nợ (đã nằm trong "Dư nợ sau kỳ"), không phải tiền chuyển. */}
+                {k.laiVaoGoc > 0 && (
+                  <span
+                    className="block text-[11px] font-normal text-muted-foreground"
+                    data-testid={`lich-du-kien-lai-vao-goc-${k.ky}`}
+                  >
+                    cộng vào dư nợ {formatVnd(k.laiVaoGoc)}
+                  </span>
+                )}
+              </td>
               <td className="py-1 pr-2 text-right tabular-nums">{formatVnd(k.gocThuc)}</td>
               {coTienGui && <td className="py-1 pr-2 text-right tabular-nums">{formatVnd(k.tienGui)}</td>}
               <td className="py-1 pr-2 text-right tabular-nums font-medium">{formatVnd(k.tongChuyen)}</td>
@@ -132,7 +143,11 @@ export function LichTraNoDuKienCard({ loans, homNay }: { loans: KhoanVayRow[]; h
                 {loan.lender ? ` · ${loan.lender}` : ""}
                 <span className="text-muted-foreground">
                   {" · "}
-                  {loan.kind === "OVERDRAFT" ? "thấu chi — kỳ chỉ thu lãi" : null}
+                  {loan.kind === "OVERDRAFT"
+                    ? ds.some((k) => k.laiVaoGoc > 0)
+                      ? "thấu chi — lãi nhập gốc"
+                      : "thấu chi — kỳ chỉ thu lãi"
+                    : null}
                   {loan.kind === "BULLET" ? "trả gốc cuối kỳ" : null}
                   {loan.kind === "TERM" ? "vay kỳ hạn" : null}
                 </span>
@@ -146,10 +161,16 @@ export function LichTraNoDuKienCard({ loans, homNay }: { loans: KhoanVayRow[]; h
             </div>
             <BangKy ds={ds} coTienGui={coTienGui} />
             <div className="mt-1 flex flex-col gap-0.5 text-xs text-muted-foreground">
+              {ds.some((k) => k.laiVaoGoc > 0) && (
+                <p data-testid={`lich-du-kien-giai-thich-nhap-goc-${loan.id}`}>
+                  Lãi nhập gốc: ngân hàng cộng lãi vào dư nợ, không trừ tài khoản nên &quot;Tiền thật
+                  chuyển&quot; không gồm lãi; dư nợ tăng dần (lãi kép — kỳ sau tính trên dư nợ đã cộng).
+                </p>
+              )}
               {loan.kind === "OVERDRAFT" && (
                 <p>
-                  Thấu chi không có lịch trả gốc — bảng chỉ là các kỳ THU LÃI; gốc trả khi tất toán nên
-                  dư nợ giữ nguyên.
+                  Thấu chi không có lịch trả gốc — bảng chỉ là các kỳ THU LÃI; gốc trả khi tất toán
+                  {ds.some((k) => k.laiVaoGoc > 0) ? " (dư nợ chỉ đổi do lãi nhập gốc)." : " nên dư nợ giữ nguyên."}
                 </p>
               )}
               {loan.kind === "BULLET" && (

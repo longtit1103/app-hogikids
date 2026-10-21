@@ -22,6 +22,8 @@ const L: KhoanVayLich = {
   giaiNganNgay: new Date(2026, 8, 5), // dòng LOAN_IN về đúng ngày giải ngân (ca thường)
   laiCoDinhMoiKy: null, // TERM tính lãi từ %/năm như cũ
   tienGuiBatBuocMoiKy: 0,
+  laiNhapGoc: false,
+  nhapGoc: [],
 };
 
 describe("lich-tra-no", () => {
@@ -139,6 +141,8 @@ const TC: KhoanVayLich = {
   giaiNganNgay: new Date(2026, 8, 5),
   laiCoDinhMoiKy: null, // thấu chi luôn tính lãi theo ngày, không dùng cột này
   tienGuiBatBuocMoiKy: 0,
+  laiNhapGoc: false,
+  nhapGoc: [],
 };
 
 /** Trả bớt 40tr ngày 20/09 — mốc chia đoạn giữa kỳ, chỗ thấu chi khác hẳn vay kỳ hạn. */
@@ -262,6 +266,8 @@ const BU: KhoanVayLich = {
   giaiNganNgay: new Date(2026, 4, 12),
   laiCoDinhMoiKy: 1_121_096,
   tienGuiBatBuocMoiKy: 300_000,
+  laiNhapGoc: false,
+  nhapGoc: [],
 };
 
 describe("lich-tra-no — BULLET (trả gốc cuối kỳ, lãi cố định + tiền gửi bắt buộc)", () => {

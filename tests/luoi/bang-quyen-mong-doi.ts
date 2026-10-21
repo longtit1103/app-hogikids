@@ -143,6 +143,8 @@ export const BANG_QUYEN_MONG_DOI: Readonly<Record<string, CongMongDoiCoKieu>> = 
   [`${A}/tra-tien-hang.ts#traTienHangGop`]: "tai-chinh-so-quy:sua",
   // Điều chỉnh mở sổ nợ (CUTOVER_*): chỉ chủ shop sửa số/mô tả.
   [`${A}/cash-movements.ts#suaDieuChinhChuyenDoi`]: "CHU_SHOP",
+  // Sửa số tiền chi phí trước ngày bật (tự bù điều chỉnh mở sổ ±Δ ngày M): chỉ chủ shop.
+  [`${A}/sua-tien-truoc-moc.ts#suaSoTienTruocMoc`]: "CHU_SHOP",
 
   // ── Route có cổng (spec §3.5, §4.3 — quyền ghép còn lại kiểm trong thân) ──
   "src/app/api/backup/route.ts#POST": "CHU_SHOP",

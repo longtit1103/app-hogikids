@@ -1,3 +1,4 @@
+import { dauDuNoVay } from "@/lib/cash-movements/cash-movement-kinds";
 import type { KhoanCauTruc } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 
@@ -38,10 +39,10 @@ export function khoanCauTrucTai(
     if (khoaNgayVn(l.startDate) > khoa) continue;
     if (l.closedAt !== null && khoaNgayVn(l.closedAt) <= khoa) continue;
     let duNo = l.duNoMoSo;
+    // Cùng dấu với vị từ dư nợ (`DAU_DU_NO_VAY`): lãi nhập gốc làm dư nợ thấu chi TĂNG từ ngày kỳ.
     for (const m of dongDenNgay) {
       if (m.loanId !== l.id) continue;
-      if (m.kind === "LOAN_IN") duNo += m.amount;
-      else if (m.kind === "LOAN_REPAY") duNo -= m.amount;
+      duNo += dauDuNoVay(m.kind) * m.amount;
     }
     duNoThauChi += duNo;
   }

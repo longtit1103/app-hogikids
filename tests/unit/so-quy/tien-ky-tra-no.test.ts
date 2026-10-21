@@ -54,7 +54,7 @@ describe("tienGuiSeNhanLai", () => {
 describe("tongChuyenNganHang — tiền THẬT chuyển cho ngân hàng", () => {
   it("kỳ thường: 1.121.096 + 0 + 300.000 − 0 = 1.421.096", () => {
     expect(
-      tongChuyenNganHang({ lai: LAI, goc: 0, tienGui: GUI, tienGuiSeNhanLai: 0 })
+      tongChuyenNganHang({ lai: LAI, goc: 0, tienGui: GUI, tienGuiSeNhanLai: 0, laiNhapGoc: false })
     ).toBe(1_421_096);
   });
 
@@ -71,6 +71,7 @@ describe("tongChuyenNganHang — tiền THẬT chuyển cho ngân hàng", () => 
         goc: 200_000_000,
         tienGui: GUI,
         tienGuiSeNhanLai: hoan,
+        laiNhapGoc: false,
       })
     ).toBe(190_621_096);
   });
@@ -93,6 +94,7 @@ describe("tongChuyenNganHang — tiền THẬT chuyển cho ngân hàng", () => 
         goc: 150_000_000,
         tienGui: GUI,
         tienGuiSeNhanLai: hoan,
+        laiNhapGoc: false,
       })
     ).toBe(140_621_096);
   });
@@ -118,7 +120,7 @@ describe("gocDeXuatKep — ô Gốc điền sẵn kẹp về dư nợ hiện t�
       kyThuMay: SO_KY,
       tienGuiKyNay: GUI,
     });
-    expect(tongChuyenNganHang({ lai: LAI, goc, tienGui: GUI, tienGuiSeNhanLai: hoan })).toBe(
+    expect(tongChuyenNganHang({ lai: LAI, goc, tienGui: GUI, tienGuiSeNhanLai: hoan, laiNhapGoc: false })).toBe(
       140_621_096
     );
   });

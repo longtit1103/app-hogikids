@@ -6,10 +6,11 @@ import { formatVnd } from "@/lib/format";
 import { formatAmountInput, parseAmountInput, parseSignedAmountInput } from "@/lib/format-amount-input";
 import type { KetQuaDocChenhLech } from "@/lib/no-phai-tra/doc-chenh-lech-tai-m";
 import type { DongDieuChinh, LuaChonDieuChinh } from "@/lib/no-phai-tra/tinh-chenh-lech-tai-m";
+import { CAU_TRU_NHAM_THAU_CHI, laTruNhamThauChi } from "@/lib/so-quy/canh-bao-tru-nham-thau-chi";
 
 export type LuaChonManHinh = LuaChonDieuChinh | "tu-go";
 
-/** Giữ dấu trừ đầu chuỗi khi đang gõ (ô ngân hàng cho âm — thấu chi), cùng luật form chốt số dư. */
+/** Giữ dấu trừ đầu chuỗi khi đang gõ (ô ngân hàng cho âm — tài khoản có thể âm thật), cùng luật form chốt số dư. */
 export function hienSoCoDau(raw: string): string {
   const dau = /^\s*[-−]/.test(raw) ? "-" : "";
   return dau + formatAmountInput(Math.abs(parseSignedAmountInput(raw)));
@@ -44,7 +45,7 @@ const LUA_CHON: { value: LuaChonManHinh; nhan: string; giaiThich: string }[] = [
 
 /**
  * Bước 2 — đối chiếu tiền thật cuối ngày trước ngày bật với quỹ của app (cùng hợp đồng chốt số dư): gõ số
- * dư ngân hàng (cho âm) + tiền mặt ⇒ app tách phần giải thích được (nợ thẻ, phiếu duyệt khác số đã trả,
+ * dư thật trên tài khoản thanh toán (cho âm) + tiền mặt ⇒ app tách phần giải thích được (nợ thẻ, phiếu duyệt khác số đã trả,
  * ví ads đã nạp) và phần CHƯA giải thích (đỏ — nên chốt số dư tháng đó để tìm). Chủ shop chọn cách điều
  * chỉnh; mỗi dòng thành một khoản điều chỉnh quỹ đúng ngày bật, mô tả bắt buộc.
  */
@@ -86,8 +87,9 @@ export function BuocDoiChieu({
         Bước 2 · Đối chiếu tiền thật cuối ngày {nhanTruocM}
       </h2>
       <p className="text-xs text-muted-foreground">
-        Gõ đúng số trên app ngân hàng (tổng tài khoản THANH TOÁN, đang thấu chi thì gõ số âm) và tiền mặt đếm
-        được. KHÔNG cộng sổ tiết kiệm / tiền gửi vào số dư.
+        Gõ đúng số dư thật trên tài khoản THANH TOÁN (tổng các tài khoản, đúng như app ngân hàng — tiền thấu
+        chi đã giải ngân vào tài khoản thì đã nằm trong số đó) và tiền mặt đếm được. KHÔNG cộng sổ tiết kiệm /
+        tiền gửi vào số dư.
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="bat-so-du-bank">
@@ -124,8 +126,14 @@ export function BuocDoiChieu({
         <div className="flex flex-col gap-1.5 rounded-lg bg-surface-soft p-3 text-sm" data-testid="bat-bang-chenh-lech">
           <DongBang nhan={`Tiền thật (ngân hàng + tiền mặt)`} tien={ketQua.soThat} />
           <DongBang nhan={`Quỹ của app cuối ngày ${nhanTruocM}`} tien={ketQua.quyApp} testId="bat-quy-app" />
-          {ketQua.duNoThauChi > 0 && <DongBang nhan="Cộng dư nợ thấu chi (ngân hàng âm phần này)" tien={ketQua.duNoThauChi} />}
           <DongBang nhan="Chênh lệch (dương = tiền thật nhiều hơn sổ)" tien={ketQua.chenh} dam />
+          {ketQua.duNoThauChi > 0 && (
+            <DongBang
+              nhan="Dư nợ thấu chi (theo dõi riêng, không cộng vào đối chiếu)"
+              tien={ketQua.duNoThauChi}
+              testId="bat-du-no-thau-chi-tham-khao"
+            />
+          )}
           <p className="mt-1 text-xs text-muted-foreground">Giải thích được:</p>
           {ketQua.muc.length === 0 && <p className="text-xs text-muted-foreground">— không có khoản nào</p>}
           {ketQua.muc.map((m) => (
@@ -142,6 +150,11 @@ export function BuocDoiChieu({
             <p className="text-xs text-error" data-testid="bat-chua-giai-thich">
               Còn {formatVnd(Math.abs(ketQua.chuaGiaiThich))} chưa rõ nguyên nhân — nên chốt số dư tháng có ngày{" "}
               {nhanTruocM} ở Sổ quỹ để tìm khoản thu/chi ghi thiếu hoặc thừa trước khi bật.
+            </p>
+          )}
+          {laTruNhamThauChi(ketQua.chuaGiaiThich, ketQua.duNoThauChi) && (
+            <p className="text-xs text-warning" data-testid="bat-canh-bao-tru-nham-thau-chi">
+              {CAU_TRU_NHAM_THAU_CHI}
             </p>
           )}
           {ketQua.tienDangGui > 0 && (

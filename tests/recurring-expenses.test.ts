@@ -176,19 +176,24 @@ describe("ràng buộc 1 dòng/mẫu/tháng dưới DB", () => {
     );
     // Rào: cả hai lượt phải qua lượt kiểm chỉ-đọc (cùng thấy thiếu 3 dòng) rồi mới được chèn — không
     // có rào thì lượt sau có thể tới khi lượt đầu đã chèn xong và thử nghiệm không đua thật.
-    const goc = prisma.$executeRaw.bind(prisma);
+    // Chỉ rào CÂU CHÈN `Expense`; câu khác (khoá chung với bước bật ở đầu transaction của bộ sinh) đi thẳng. Gọi
+    // bản gốc với ĐÚNG `this` — `tx.$executeRaw` cũng đi qua spy, `this` là client của transaction đó.
+    const goc = prisma.$executeRaw;
     let soLuotToi = 0;
     let moRao!: () => void;
     const rao = new Promise<void>((r) => (moRao = r));
-    const spy = vi.spyOn(prisma, "$executeRaw").mockImplementation((async (
+    const spy = vi.spyOn(prisma, "$executeRaw").mockImplementation(async function (
+      this: unknown,
       mau: TemplateStringsArray,
       ...giaTri: unknown[]
-    ) => {
+    ) {
+      const chay = () => (goc as unknown as (...a: unknown[]) => Promise<number>).call(this, mau, ...giaTri);
+      if (!mau.join("").includes('INSERT INTO "Expense"')) return chay();
       soLuotToi++;
       if (soLuotToi === 2) moRao();
       await rao;
-      return goc(mau, ...giaTri);
-    }) as never);
+      return chay();
+    } as never);
     let ketQua: number[];
     try {
       ketQua = await Promise.all([ensureRecurringExpenses(pastMonth), ensureRecurringExpenses(pastMonth)]);

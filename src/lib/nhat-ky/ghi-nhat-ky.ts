@@ -18,7 +18,7 @@ import type { HanhDong } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
 import type { ClientPhien } from "@/lib/session";
 
-const KHOA_GHI_CHU = ["soDong", "ky", "thang", "loaiBanGhi", "quyenThieu", "lyDo", "email"] as const;
+const KHOA_GHI_CHU = ["soDong", "ky", "thang", "loaiBanGhi", "quyenThieu", "lyDo", "email", "boQuaTruocM"] as const;
 type KhoaGhiChu = (typeof KHOA_GHI_CHU)[number];
 
 export type GhiChuNhatKy = Partial<Record<KhoaGhiChu, string | number>>;

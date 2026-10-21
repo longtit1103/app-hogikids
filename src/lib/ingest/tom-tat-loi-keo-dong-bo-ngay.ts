@@ -29,6 +29,9 @@ const DongLoiKeo = z.object({
 const BodyLoiKeo = z.object({
   soLoiKeo: z.number().int().min(0).max(1_000_000).optional(),
   loiKeo: z.array(DongLoiKeo).max(TRAN_DONG_LOI_KEO).optional(),
+  // Mã lượt do `triggerSyncNow` cấp, workflow chuyển nguyên văn từ body webhook sang đây. Sai hình ⇒
+  // coi như không có (`.catch`), KHÔNG được kéo cả tóm tắt lỗi kéo đổ theo.
+  luotId: z.string().uuid().optional().catch(undefined),
 });
 
 export type DongLoiKeo = z.infer<typeof DongLoiKeo>;
@@ -39,9 +42,14 @@ export type TomTatLoiKeo = {
   loiKeo: DongLoiKeo[];
   /** Có giá trị khi body bị BỎ QUA (sai hình/quá lớn) — để route đẩy vào cảnh báo SyncLog. */
   canhBao: string | null;
+  /**
+   * Mã lượt "Đồng bộ ngay" (UUID) — route gắn vào `stats.luotId` của dòng bước cuối để nút bấm chỉ
+   * nhận bước cuối CỦA LƯỢT MÌNH khi hai lượt chạy chồng. `null` = workflow bản cũ / probe cũ.
+   */
+  luotId: string | null;
 };
 
-const KHONG_LOI: TomTatLoiKeo = { soLoiKeo: 0, loiKeo: [], canhBao: null };
+const KHONG_LOI: TomTatLoiKeo = { soLoiKeo: 0, loiKeo: [], canhBao: null, luotId: null };
 
 /** Đọc body THÔ. Không bao giờ ném. */
 export function docTomTatLoiKeo(bodyTho: string): TomTatLoiKeo {
@@ -61,7 +69,12 @@ export function docTomTatLoiKeo(bodyTho: string): TomTatLoiKeo {
   }
   const loiKeo = kq.data.loiKeo ?? [];
   // `soLoiKeo` thiếu hoặc NHỎ hơn số dòng gửi kèm ⇒ lấy số dòng (không để tổng nói ít hơn chi tiết).
-  return { soLoiKeo: Math.max(kq.data.soLoiKeo ?? 0, loiKeo.length), loiKeo, canhBao: null };
+  return {
+    soLoiKeo: Math.max(kq.data.soLoiKeo ?? 0, loiKeo.length),
+    loiKeo,
+    canhBao: null,
+    luotId: kq.data.luotId ?? null,
+  };
 }
 
 /**

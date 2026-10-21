@@ -122,6 +122,8 @@ export async function sumPlatformFeeEst({ from, to }: DateRange, channelId?: str
 export type RecurringExpenseRow = {
   id: string;
   description: string;
+  /** Id danh mục (vd `purchase`) — để giao diện nhận ra mẫu Nhập hàng; hiển thị dùng `categoryName`. */
+  categoryId: string;
   categoryName: string;
   channelName: string | null;
   amount: number;
@@ -152,6 +154,7 @@ export async function getRecurringExpenseList(): Promise<RecurringExpenseRow[]> 
     .map((r) => ({
       id: r.id,
       description: r.description,
+      categoryId: r.categoryId,
       categoryName: categoryNameById.get(r.categoryId) ?? r.categoryId,
       channelName: r.channelId ? (channelNameById.get(r.channelId) ?? r.channelId) : null,
       amount: r.amount,

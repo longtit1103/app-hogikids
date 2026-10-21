@@ -9,8 +9,9 @@ import {
 } from "@/lib/no-phai-tra/tinh-chenh-lech-tai-m";
 
 /**
- * Chênh lệch tại mốc bật (spec §5.4 bước 2, ví dụ tiền §6; đơn vị triệu): quỹ 31/10 = 150, ngân hàng 158 +
- * tiền mặt 7, thấu chi 0, thẻ A 9 + thẻ B 6 ⇒ chênh +15, giải thích được 15, chưa giải thích 0.
+ * Chênh lệch tại mốc bật (đơn vị triệu): quỹ 31/10 = 150, ngân hàng 158 + tiền mặt 7, thẻ A 9 + thẻ B 6
+ * ⇒ chênh +15, giải thích được 15, chưa giải thích 0. Dư nợ thấu chi KHÔNG vào chênh — thấu chi giải ngân
+ * vào tài khoản nên tiền thật lẫn quỹ app đều đã gồm tiền vay.
  */
 const tr = (n: number) => Math.round(n * 1_000_000);
 const vn = (ngay: string) => new Date(`${ngay}T00:00:00+07:00`);
@@ -48,18 +49,43 @@ describe("tinhChenhLechTaiM", () => {
     expect(tacDongDieuChinh(ds)).toBe(tr(15));
   });
 
-  it("thấu chi 10 còn tại 31/10, trả hết 02/11, xác nhận 03/11 ⇒ dùng dư nợ CUỐI 31/10 = 10, không phải 0", () => {
+  it("thấu chi 10 giải ngân vào tài khoản ⇒ dư nợ CUỐI 31/10 = 10 chỉ để hiển thị, KHÔNG cộng vào chênh", () => {
     const thauChi = { id: "od", kind: "OVERDRAFT", startDate: vn("2026-10-01"), closedAt: null, duNoMoSo: 0 };
     const dong = [
       { loanId: "od", savingsId: null, kind: "LOAN_IN", amount: tr(10), date: vn("2026-10-15") },
       { loanId: "od", savingsId: null, kind: "LOAN_REPAY", amount: tr(10), date: vn("2026-11-02") },
     ];
+    // Dư nợ cuối 31/10 (trả hết 02/11 vẫn là 10 tại M − 1) — dòng tham khảo trên màn bật.
     const cauTruc = khoanCauTrucTai(vn("2026-10-31"), [thauChi], dong);
     expect(cauTruc.duNoThauChi).toBe(tr(10));
-    // Thấu chi làm ngân hàng thấp hơn quỹ 10: bank 148 + 7 − 150 + 10 = 15.
-    const kq = tinhChenhLechTaiM({ ...coBan, soDuBank: tr(148), duNoThauChi: cauTruc.duNoThauChi });
+    // Tiền vay đã nằm trên tài khoản (bank 158) lẫn trong quỹ (`LOAN_IN` 10 ⇒ quỹ 150 đã gồm) ⇒ so thẳng:
+    // 158 + 7 − 150 = 15, đúng bằng nợ thẻ. Cộng thêm dư nợ là ra 25 — thừa đúng 10.
+    const kq = tinhChenhLechTaiM({ ...coBan, duNoThauChi: cauTruc.duNoThauChi });
+    expect(kq.duNoThauChi).toBe(tr(10));
     expect(kq.chenh).toBe(tr(15));
     expect(kq.chuaGiaiThich).toBe(0);
+    expect(tacDongDieuChinh(goiYDieuChinh(kq, "toan-bo", "01/11/2026"))).toBe(tr(15));
+  });
+
+  it("số thật 14/10: quỹ 260.908.494 (gồm thấu chi 100tr), tiền thật 45.547.696, thẻ 24.540.609", () => {
+    const kq = tinhChenhLechTaiM({
+      quyApp: 260_908_494,
+      soDuBank: 45_547_696,
+      tienMat: 0,
+      duNoThauChi: 100_000_000,
+      the: [{ khoa: "the:4826", nhan: "nợ thẻ 4826", soTien: 24_540_609 }],
+      phieuY: [],
+      viAds: [],
+    });
+    expect(kq.chenh).toBe(-215_360_798);
+    expect(kq.chuaGiaiThich).toBe(-239_901_407);
+    // "Toàn bộ chênh lệch" ⇒ quỹ sau điều chỉnh = đúng tiền thật trên tài khoản, không lệch 100tr dư nợ.
+    const toanBo = goiYDieuChinh(kq, "toan-bo", "15/10/2026");
+    expect(toanBo.map((d) => [d.chieu, d.soTien])).toEqual([
+      ["IN", 24_540_609],
+      ["OUT", 239_901_407],
+    ]);
+    expect(260_908_494 + tacDongDieuChinh(toanBo)).toBe(45_547_696);
   });
 
   it("ví ads trả trước neo 3 (đã nạp, chưa chạy, sổ chưa trừ) ⇒ giải thích thêm −3", () => {

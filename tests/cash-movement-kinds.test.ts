@@ -3,16 +3,22 @@ import { describe, expect, it } from "vitest";
 import {
   CASH_MOVEMENT_KIND_META,
   CASH_MOVEMENT_KINDS,
+  CASH_MOVEMENT_KINDS_GHI_TAY,
   CASH_MOVEMENT_KINDS_TAT_CA,
   chieuTien,
+  DAU_DU_NO_VAY,
+  dauDuNoVay,
   isCashMovementKind,
+  isCashMovementKindGhiTay,
   isCashMovementKindTatCa,
   isInflow,
   KIND_CAN_PHIEU,
   KIND_CAN_THE,
   KIND_CUTOVER,
+  KIND_DU_NO_VAY,
   KIND_VI_ADS,
   kindGanSoQuy,
+  kindNoPhaiTra,
   signedAmount,
 } from "@/lib/cash-movements/cash-movement-kinds";
 
@@ -104,10 +110,10 @@ describe("cash-movement-kinds — 6 kind nợ phải trả", () => {
     for (const k of MOI) expect((CASH_MOVEMENT_KINDS as readonly string[]).includes(k)).toBe(false);
   });
 
-  it("TẤT CẢ = 16 kind = 10 cũ + 6 mới, không trùng; mỗi kind có nhãn + gợi ý", () => {
-    expect(CASH_MOVEMENT_KINDS_TAT_CA).toHaveLength(16);
-    expect(new Set(CASH_MOVEMENT_KINDS_TAT_CA).size).toBe(16);
-    expect([...CASH_MOVEMENT_KINDS_TAT_CA].sort()).toEqual([...CASH_MOVEMENT_KINDS, ...MOI].sort());
+  it("TẤT CẢ = 17 kind = 10 cũ + 6 nợ phải trả + lãi nhập gốc, không trùng; mỗi kind có nhãn + gợi ý", () => {
+    expect(CASH_MOVEMENT_KINDS_TAT_CA).toHaveLength(17);
+    expect(new Set(CASH_MOVEMENT_KINDS_TAT_CA).size).toBe(17);
+    expect([...CASH_MOVEMENT_KINDS_TAT_CA].sort()).toEqual([...CASH_MOVEMENT_KINDS, ...MOI, "LAI_NHAP_GOC"].sort());
     for (const k of CASH_MOVEMENT_KINDS_TAT_CA) {
       expect(CASH_MOVEMENT_KIND_META[k].label.length).toBeGreaterThan(0);
       expect(CASH_MOVEMENT_KIND_META[k].hint.length).toBeGreaterThan(0);
@@ -131,7 +137,7 @@ describe("cash-movement-kinds — 6 kind nợ phải trả", () => {
     expect(chieuTien("SUPPLIER_REFUND", { coCard: false })).toBe("IN");
     expect(chieuTien("LOAN_IN", { coCard: false })).toBe("IN");
     expect(chieuTien("CAPITAL_OUT", { coCard: false })).toBe("OUT");
-    // 15 kind có chiều cố định: chieuTien luôn khớp isInflow — một định nghĩa dấu, không hai.
+    // 16 kind có chiều cố định: chieuTien luôn khớp isInflow — một định nghĩa dấu, không hai.
     for (const k of CASH_MOVEMENT_KINDS_TAT_CA) {
       if (k === "ADS_TOPUP") continue;
       for (const coCard of [true, false]) expect(chieuTien(k, { coCard })).toBe(isInflow(k) ? "IN" : "OUT");
@@ -156,7 +162,7 @@ describe("cash-movement-kinds — 6 kind nợ phải trả", () => {
     for (const k of MOI) expect(kindGanSoQuy(k)).toBe(false);
   });
 
-  it("isCashMovementKind CHỈ nhận 10 kind form; isCashMovementKindTatCa nhận đủ 16", () => {
+  it("isCashMovementKind CHỈ nhận 10 kind form; isCashMovementKindTatCa nhận đủ 17", () => {
     for (const k of MOI) {
       expect(isCashMovementKind(k)).toBe(false);
       expect(isCashMovementKindTatCa(k)).toBe(true);
@@ -164,5 +170,36 @@ describe("cash-movement-kinds — 6 kind nợ phải trả", () => {
     expect(isCashMovementKindTatCa("LOAN_IN")).toBe(true);
     expect(isCashMovementKindTatCa("card_pay")).toBe(false);
     expect(isCashMovementKindTatCa(undefined)).toBe(false);
+  });
+});
+
+describe("lãi nhập gốc thấu chi (LAI_NHAP_GOC)", () => {
+  it("chiều VÀO quỹ (cặp với Expense lãi trừ quỹ ⇒ net 0), nhãn hiển thị cố định", () => {
+    expect(isInflow("LAI_NHAP_GOC")).toBe(true);
+    expect(chieuTien("LAI_NHAP_GOC", { coCard: false })).toBe("IN");
+    expect(signedAmount("LAI_NHAP_GOC", 643_836)).toBe(643_836);
+    expect(CASH_MOVEMENT_KIND_META.LAI_NHAP_GOC.label).toBe("Lãi nhập gốc thấu chi");
+  });
+
+  it("KHÔNG ghi tay được: vắng khỏi form 10 kind lẫn 14 kind action thường", () => {
+    expect(isCashMovementKind("LAI_NHAP_GOC")).toBe(false);
+    expect(isCashMovementKindGhiTay("LAI_NHAP_GOC")).toBe(false);
+    expect((CASH_MOVEMENT_KINDS_GHI_TAY as readonly string[]).includes("LAI_NHAP_GOC")).toBe(false);
+    expect(isCashMovementKindTatCa("LAI_NHAP_GOC")).toBe(true);
+  });
+
+  it("thuộc khối Sổ quỹ (đổi dư nợ khoản vay) ⇒ đòi quyền Sổ quỹ", () => {
+    expect(kindGanSoQuy("LAI_NHAP_GOC")).toBe(true);
+    expect(kindNoPhaiTra("LAI_NHAP_GOC")).toBe(false);
+  });
+
+  it("dấu dư nợ: LOAN_IN +, LAI_NHAP_GOC +, LOAN_REPAY −, kind khác 0; danh sách lọc khớp bảng dấu", () => {
+    expect(dauDuNoVay("LOAN_IN")).toBe(1);
+    expect(dauDuNoVay("LAI_NHAP_GOC")).toBe(1);
+    expect(dauDuNoVay("LOAN_REPAY")).toBe(-1);
+    for (const k of ["DEPOSIT_OUT", "DEPOSIT_IN", "CAPITAL_IN", "SAVINGS_OUT", "CARD_PAY", "kind-la"]) {
+      expect(dauDuNoVay(k)).toBe(0);
+    }
+    expect([...KIND_DU_NO_VAY].sort()).toEqual(Object.keys(DAU_DU_NO_VAY).sort());
   });
 });

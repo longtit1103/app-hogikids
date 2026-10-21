@@ -266,13 +266,17 @@ export const BRONZE_STREAMS: Record<BronzeStream, BronzeStreamDef> = {
    * dịch số dư mọi dòng sau nó ⇒ khoá đổi ⇒ land lại ⇒ đếm 2 lần.
    * `coalesce(orderCode,'-')`: dòng Rút Tiền không có mã đơn (NULL) — NULL-concat làm cả biểu thức
    * NULL ⇒ dòng bị bỏ + đếm skippedNoId. Ép '-' để giữ dòng.
+   * `coalesce('|'||khoaPhu,'')`: hậu tố CHỈ dòng va chạm khoá trong cùng file mang (parser gán từ cột
+   * "Chi tiết" — `src/lib/import/shopee-wallet-khoa-phan-biet.ts`, gương JS `khoaViShopee`). Dòng
+   * không có field ⇒ `'|'||NULL` = NULL ⇒ '' ⇒ khoá y hệt bản 4 thành phần, không đổi một byte.
    */
   "shopee/wallet": {
     table: "RawShopeeWalletTxn",
     shops: ["shopee"],
     arrayPath: ["data"],
     idExpr:
-      `(elem->>'txnTime')||'|'||(elem->>'type')||'|'||coalesce(elem->>'orderCode','-')||'|'||(elem->>'amount')`,
+      `(elem->>'txnTime')||'|'||(elem->>'type')||'|'||coalesce(elem->>'orderCode','-')||'|'||(elem->>'amount')` +
+      `||coalesce('|'||(elem->>'khoaPhu'),'')`,
   },
 };
 

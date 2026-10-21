@@ -69,6 +69,8 @@ export type KhoanVayFormState = {
   /** Tiền gửi tiết kiệm bắt buộc mỗi kỳ — DÒNG TIỀN thuần, không phải chi phí; mọi loại vay dùng
    *  chung field này (`Loan.tienGuiBatBuocMoiKy`), nhưng hiện chỉ có form gốc-cuối-kỳ cho khai. */
   tienGuiMoiKy: number;
+  /** `cheDo === "thau-chi"`: ngân hàng CỘNG lãi kỳ vào dư nợ thay vì trừ tài khoản (`Loan.laiNhapGoc`). Chỉ gửi khi là thấu chi. */
+  laiNhapGoc: boolean;
 };
 
 /** Nhãn BỌC lấy ô nhập (không phải nhãn rời): bấm chữ là vào ô, e2e neo được bằng `getByLabel`. */

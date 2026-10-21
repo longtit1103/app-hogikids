@@ -14,9 +14,13 @@ export const DINH_KY_TRUNG_MAU_DANG_CHAY = "DINH_KY_TRUNG_MAU_DANG_CHAY";
 
 export type MauDinhKyDangChay = { description: string; amount: number };
 
-/** Mô tả so khớp: bỏ khoảng trắng đầu/cuối + không phân biệt hoa/thường. Rỗng ⇒ không tính. */
-function chuanHoaMoTa(moTa: string): string {
-  return moTa.trim().toLowerCase();
+/**
+ * Mô tả so khớp: dạng Unicode NFC (một số bộ gõ tiếng Việt gửi chuỗi NFD — "ề" thành "e" + 2 dấu
+ * rời, nhìn y hệt mà so chuỗi lệch), gộp mọi khoảng trắng liên tiếp thành 1, bỏ đầu/cuối, không
+ * phân biệt hoa/thường. Rỗng ⇒ không tính.
+ */
+export function chuanHoaMoTa(moTa: string): string {
+  return moTa.normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function laTrung(mau: MauDinhKyDangChay, moi: MauDinhKyDangChay): boolean {

@@ -4,7 +4,10 @@ import { formatVnd } from "@/lib/format";
  * Chênh lệch quỹ app ↔ tiền thật TẠI MỐC BẬT nợ phải trả (spec §5.4 bước 2) — THUẦN, không DB.
  *
  * Cùng hợp đồng với đối chiếu số dư chốt (`doi-chieu-so-du-chot.ts`), chỉ khác thời điểm (cuối ngày M − 1):
- *   chenh = (bank + tiền mặt) − quỹ app(M − 1) + dư nợ thấu chi(M − 1)
+ *   chenh = (bank + tiền mặt) − quỹ app(M − 1)
+ * THẤU CHI KHÔNG vào phép so: thấu chi của shop là khoản vay GIẢI NGÂN vào tài khoản thanh toán — tiền thật
+ * trên tài khoản đã gồm tiền vay, quỹ app cũng đã gồm `LOAN_IN` của nó ⇒ hai vế so thẳng. Dư nợ thấu chi
+ * theo dõi ở khoản vay (nằm ngoài quỹ như mọi khoản vay); cộng nó vào chênh là thừa đúng bằng dư nợ.
  * Dương = tiền thật NHIỀU hơn sổ. Trước khi bật, sổ trừ ngay mọi thứ cà thẻ và mọi phiếu nhập đã duyệt,
  * nên tiền thật thường nhiều hơn sổ đúng bằng phần CHƯA trả. Phần giải thích được:
  *  - thẻ: dư nợ cuối M − 1 của từng thẻ (chủ shop gõ) — chi đã trừ sổ mà tiền chưa rời ngân hàng;
@@ -27,6 +30,7 @@ export type DauVaoChenhLechTaiM = {
   quyApp: number;
   soDuBank: number;
   tienMat: number;
+  /** Chỉ để HIỂN THỊ dòng tham khảo — KHÔNG vào `chenh` (xem đầu file). */
   duNoThauChi: number;
   the: readonly MucGiaiThich[];
   phieuY: readonly MucGiaiThich[];
@@ -36,6 +40,7 @@ export type DauVaoChenhLechTaiM = {
 export type ChenhLechTaiM = {
   quyApp: number;
   soThat: number;
+  /** Dư nợ thấu chi cuối M − 1 — tham khảo, KHÔNG cộng vào `chenh`. */
   duNoThauChi: number;
   chenh: number;
   giaiThichDuoc: { the: number; phieuY: number; viAds: number };
@@ -48,7 +53,7 @@ const tong = (ds: readonly MucGiaiThich[]) => ds.reduce((s, m) => s + m.soTien, 
 
 export function tinhChenhLechTaiM(d: DauVaoChenhLechTaiM): ChenhLechTaiM {
   const soThat = d.soDuBank + d.tienMat;
-  const chenh = soThat - d.quyApp + d.duNoThauChi;
+  const chenh = soThat - d.quyApp;
   const giaiThichDuoc = { the: tong(d.the), phieuY: tong(d.phieuY), viAds: tong(d.viAds) };
   const tongGiaiThich = giaiThichDuoc.the + giaiThichDuoc.phieuY + giaiThichDuoc.viAds;
   return {

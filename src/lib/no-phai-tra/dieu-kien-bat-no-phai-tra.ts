@@ -2,10 +2,12 @@ import { format, startOfDay, startOfMonth, subDays } from "date-fns";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { formatVnd } from "@/lib/format";
+import { type DbDieuKienTruocM, kiemDieuKienTruocM } from "@/lib/no-phai-tra/dieu-kien-bat-truoc-m";
 import { type DongNhapHangSauM, huongDanNhapHangSauM } from "@/lib/no-phai-tra/huong-dan-nhap-hang-sau-m";
 import { NEN_TANG_VI_TRA_TRUOC, NHAN_NEN_TANG_VI } from "@/lib/no-phai-tra/vi-ads-queries";
 import { prisma } from "@/lib/prisma";
 import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
+import type { KyVayTruocM } from "@/lib/so-quy/khoan-vay-queries";
 
 /**
  * Điều kiện TIÊN QUYẾT của bước xác nhận bật nợ phải trả (spec §5.4, §5.7) — một danh sách, hai nơi dùng:
@@ -32,6 +34,10 @@ import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
  *    sổ nợ kèm "Đã trả ngay" đúng ngày trả (quỹ trừ đúng một lần, tại ngày trả); chưa trả ⇒ xoá dòng, sau khi
  *    bật ghi nhận phiếu không kèm trả. KHÔNG đổi ngày chỉ để vượt cổng: dòng về trước M là đổi quỹ tháng
  *    trước và chênh lệch bước bật. Lỗi mang kèm danh sách dòng có cấu trúc (`nhapHangSauM`) cho màn hình.
+ *  - `CON_KY_VAY_TRUOC_M` · `CON_TIEN_GUI_CHUA_TAT_TOAN_TRUOC_M` · `CON_DINH_KY_CHUA_GHI_TRUOC_M` ·
+ *    `CON_SO_TIET_KIEM_DAO_HAN_TRUOC_M` · `CON_LAI_NHAP_GOC_CHUA_CAP_TRUOC_M`: tiền trước M còn treo — xem
+ *    `dieu-kien-bat-truoc-m.ts`.
+ * Dữ liệu ví Shopee chưa phủ tới M KHÔNG nằm trong danh sách này: đó là NHẮC không chặn (`docNhacTruocBat`).
  * "Mọi thẻ đang có nợ đã khai" KHÔNG kiểm được bằng máy (app không biết thẻ ngoài hồ sơ) — màn hình dặn.
  */
 
@@ -43,20 +49,26 @@ export type MaDieuKienBat =
   | "M_KHONG_SAU_THANG_DA_CHOT"
   | "THIEU_HO_SO_VI"
   | "CON_MAU_DINH_KY_NHAP_HANG"
-  | "CON_NHAP_HANG_SAU_M";
+  | "CON_NHAP_HANG_SAU_M"
+  | "CON_KY_VAY_TRUOC_M"
+  | "CON_TIEN_GUI_CHUA_TAT_TOAN_TRUOC_M"
+  | "CON_DINH_KY_CHUA_GHI_TRUOC_M"
+  | "CON_SO_TIET_KIEM_DAO_HAN_TRUOC_M"
+  | "CON_LAI_NHAP_GOC_CHUA_CAP_TRUOC_M";
 
 export type LoiDieuKienBat = {
   code: MaDieuKienBat;
   message: string;
   /** Chỉ có ở `CON_NHAP_HANG_SAU_M`: các dòng (tối đa `SO_DONG_NHAP_HANG_LIET_KE`) + số dòng còn lại. */
   nhapHangSauM?: { khoaM: string; khoaHomNay: string; dong: DongNhapHangSauM[]; soDongKhac: number };
+  /** Chỉ có ở `CON_KY_VAY_TRUOC_M`: kỳ sớm nhất chưa xử lý của từng khoản. */
+  kyVayTruocM?: KyVayTruocM[];
+  /** Chỉ có ở `CON_DINH_KY_CHUA_GHI_TRUOC_M`: khoảng tháng (khoá ngày VN) để mở Sổ chi phí ghi bù. */
+  dinhKyTruocM?: { soKhoan: number; thang: string[]; khoaTu: string; khoaDen: string };
 };
 
-
-type DbDieuKien = Pick<
-  Prisma.TransactionClient,
-  "cashMovement" | "soDuChotThang" | "expense" | "viAdsTraTruoc" | "recurringExpense"
->;
+type DbDieuKien = DbDieuKienTruocM &
+  Pick<Prisma.TransactionClient, "cashMovement" | "soDuChotThang" | "expense" | "viAdsTraTruoc" | "recurringExpense">;
 
 /** Cửa sổ "đang có chi phí" của nền tảng ads trả trước. */
 export const SO_NGAY_XET_CHI_ADS_TRA_TRUOC = 90;
@@ -105,6 +117,7 @@ export async function kiemDieuKienBat(
     }),
     db.expense.count({ where: { categoryId: "purchase", date: { gte: dauNgayM } } }),
   ]);
+  const loiTruocM = await kiemDieuKienTruocM({ mocM: p.mocM, d0: d0Agg._min.date }, db);
 
   const loi: LoiDieuKienBat[] = [];
   if (khoaM > khoaNgayVn(homNay)) {
@@ -182,5 +195,6 @@ export async function kiemDieuKienBat(
       },
     });
   }
+  loi.push(...loiTruocM);
   return loi;
 }

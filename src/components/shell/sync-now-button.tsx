@@ -82,7 +82,7 @@ function NutDongBoNgay({ trongTopbar }: { trongTopbar: boolean }) {
       toast.error(res.error);
       return;
     }
-    const { mocBam } = res.data;
+    const { mocBam, luotId } = res.data;
     toast.success("Đã gọi đồng bộ — đang chờ n8n…");
 
     clearTimers();
@@ -92,7 +92,7 @@ function NutDongBoNgay({ trongTopbar }: { trongTopbar: boolean }) {
       if (dangHoi) return;
       dangHoi = true;
       try {
-        const r = await getTienDoDongBoNgay(mocBam).catch(() => null);
+        const r = await getTienDoDongBoNgay(mocBam, luotId).catch(() => null);
         if (r && !r.ok && r.code === MA_MOC_NGOAI_DAI) {
           // Server từ chối mốc (ngoài dải theo dõi) ⇒ hỏi lại cũng vô ích: dừng, báo rõ.
           clearTimers();

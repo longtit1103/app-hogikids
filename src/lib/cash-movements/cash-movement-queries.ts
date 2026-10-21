@@ -18,7 +18,7 @@ import type { CashMovementKind as PrismaCashMovementKind } from "@/generated/pri
  * `tests/unit/cash-movements/khong-ro-ri-vao-pnl.test.ts`).
  */
 
-// Đồng bộ HAI CHIỀU giữa tuple thuần ĐỦ 16 kind (cash-movement-kinds.ts) và enum Prisma: thêm/bớt một
+// Đồng bộ HAI CHIỀU giữa tuple thuần ĐỦ 17 kind (cash-movement-kinds.ts) và enum Prisma: thêm/bớt một
 // giá trị ở một bên mà quên bên kia là `tsc --noEmit` đỏ NGAY TẠI ĐÂY, không đợi tới lúc chạy.
 // (Tuple 10 kind của form/action CỐ Ý nhỏ hơn enum — không so ở đây.)
 type KhopEnumPrisma = [CashMovementKindTatCa] extends [PrismaCashMovementKind]
@@ -88,7 +88,7 @@ export async function getCashMovementSummary(range: DateRange): Promise<CashMove
 export type CashMovementRowCoBan = {
   id: string;
   date: Date;
-  /** Đủ 16 kind — dòng nợ phải trả cũng hiện ở bảng, nhưng form/action thường KHÔNG sửa/xoá được nó. */
+  /** Đủ 17 kind — dòng nợ phải trả, lãi nhập gốc cũng hiện ở bảng, nhưng form/action thường KHÔNG sửa/xoá được chúng. */
   kind: CashMovementKindTatCa;
   amount: number;
   description: string;

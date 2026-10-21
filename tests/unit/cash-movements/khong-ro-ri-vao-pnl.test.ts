@@ -51,7 +51,10 @@ const CAM =
   // Delegate KHÔNG kèm tiền tố `prisma.` (review P1): `tx.theTinDung` trong transaction cũng là đường
   // rò. `cardId` trần (§5.7/§7.11 "pnl.ts không đọc cardId"): P&L tự lọc `{ cardId: null }` là bỏ
   // chi phí trả bằng thẻ khỏi Lãi/Lỗ — chi phí vẫn là chi phí dù trả bằng gì.
-  /cash-movements|cashMovement|so-quy|khoan-vay|prisma\.loan\b|DEPOSIT_OUT|DEPOSIT_IN|SAVINGS_OUT|SAVINGS_IN|lib\/tiet-kiem|prisma\.soTietKiem\b|soDuChot|prisma\.soDuChotThang\b|paidAtShop|\.(theTinDung|kySaoKeThe|ganNenTangThe|phieuNhapNo|yeuCauGhi|viAdsTraTruoc)\b|\bcardId\b|CARD_PAY|SUPPLIER_|CUTOVER_|ADS_TOPUP|lib\/no-phai-tra/i;
+  //
+  // `LAI_NHAP_GOC` (10/2026): lãi thấu chi ngân hàng cộng vào dư nợ — vế DÒNG TIỀN của cặp lãi kỳ. Lãi vào
+  // P&L ĐÚNG MỘT LẦN qua `Expense` danh mục `interest`; đọc thêm dòng này ở P&L là lãi tính 2 lần.
+  /LAI_NHAP_GOC|cash-movements|cashMovement|so-quy|khoan-vay|prisma\.loan\b|DEPOSIT_OUT|DEPOSIT_IN|SAVINGS_OUT|SAVINGS_IN|lib\/tiet-kiem|prisma\.soTietKiem\b|soDuChot|prisma\.soDuChotThang\b|paidAtShop|\.(theTinDung|kySaoKeThe|ganNenTangThe|phieuNhapNo|yeuCauGhi|viAdsTraTruoc)\b|\bcardId\b|CARD_PAY|SUPPLIER_|CUTOVER_|ADS_TOPUP|lib\/no-phai-tra/i;
 
 const FILE_CAM = [
   "src/lib/reports/pnl.ts",
@@ -133,6 +136,13 @@ describe("khoản tiền khác (CashMovement) không rò rỉ vào P&L", () => {
     expect('if (kind === "DEPOSIT_OUT") tongChi += amount;').toMatch(CAM);
     expect('const daNhanLai = row.kind === "DEPOSIT_IN";').toMatch(CAM);
     expect("const cashOut = 1; // tiền chi thật").not.toMatch(CAM);
+  });
+
+  // Lãi nhập gốc thấu chi: vế dòng tiền của cặp lãi kỳ — lãi đã vào P&L qua `Expense` `interest`, đọc thêm
+  // dòng này là tính lãi 2 lần. Cờ hồ sơ `laiNhapGoc` (không gạch dưới) không bị bắt oan.
+  it("regex CAM bắt literal LAI_NHAP_GOC, không bắt oan cờ laiNhapGoc", () => {
+    expect('if (kind === "LAI_NHAP_GOC") chiPhiLai += amount;').toMatch(CAM);
+    expect("const coNhap = loan.laiNhapGoc;").not.toMatch(CAM);
   });
 
   // Sổ tiết kiệm SINH LÃI (thêm 09/2026) nằm cùng trục cấm: P&L chỉ được biết bảng `ThuNhap`, không

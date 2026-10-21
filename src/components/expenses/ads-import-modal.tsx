@@ -18,7 +18,21 @@ type PreviewData = {
   rows: { date: string; campaignName: string; amount: number }[];
   invalid: { line: number; reason: string }[];
   apiConflicts: { date: string; adsSource: string; apiAmount: number }[];
+  /** Số dòng ngày < M (đã bật nợ phải trả) sẽ bị bỏ — KHÔNG nằm trong `rows`. */
+  soDongTruocM: number;
+  mocM: string | null;
 };
+
+/** "yyyy-MM-dd" → "dd/MM/yyyy" (khoá ngày VN do server trả, không qua `Date` để khỏi lệch múi giờ). */
+function ngayVn(khoa: string): string {
+  const [y, m, d] = khoa.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+/** Câu báo dòng bị bỏ vì trước ngày bật theo dõi nợ phải trả. */
+function cauTruocM(soDong: number, mocM: string | null): string {
+  return `${soDong} dòng trước ngày bật theo dõi nợ${mocM ? ` (${ngayVn(mocM)})` : ""}`;
+}
 
 const PRESET_META: { value: Preset; label: string; desc: string; channel: string }[] = [
   { value: "META", label: "Meta Ads", desc: "Facebook / Instagram", channel: "facebook" },
@@ -39,6 +53,7 @@ export type AdsImportModalProps = {
  *  2. preview 10 dòng đầu + Kênh (mặc định theo nguồn) + dòng lỗi + KHỐI CẢNH
  *     BÁO AMBER khi có ngày đã có số ADS_API (radio bỏ qua / ghi đè);
  *  3. xác nhận "Import N dòng" → `importAdsExpenses` → toast.
+ * Đã bật nợ phải trả: dòng ngày < M bị server bỏ qua (quỹ trước M đã chốt) — báo ở bước 2/3 và trong toast.
  */
 export function AdsImportModal({ open, onOpenChange, channels }: AdsImportModalProps) {
   const router = useRouter();
@@ -114,7 +129,11 @@ export function AdsImportModal({ open, onOpenChange, channels }: AdsImportModalP
       return;
     }
     if (res.data.rows.length === 0) {
-      setFileError("File không có dòng ads hợp lệ nào");
+      setFileError(
+        res.data.soDongTruocM > 0
+          ? `File chỉ có ${cauTruocM(res.data.soDongTruocM, res.data.mocM)} — không còn dòng nào để import`
+          : "File không có dòng ads hợp lệ nào",
+      );
       return;
     }
     setPreview(res.data);
@@ -143,8 +162,10 @@ export function AdsImportModal({ open, onOpenChange, channels }: AdsImportModalP
       toast.error(res.error);
       return;
     }
+    const boTruocM =
+      res.data.skippedTruocM > 0 ? `; ${cauTruocM(res.data.skippedTruocM, res.data.mocM)} đã bỏ qua` : "";
     toast.success(
-      `Đã import ${res.data.imported} khoản chi phí ads, bỏ qua ${res.data.skippedDuplicates} dòng trùng`,
+      `Đã import ${res.data.imported} khoản chi phí ads, bỏ qua ${res.data.skippedDuplicates} dòng trùng${boTruocM}`,
     );
     handleOpenChange(false);
     router.refresh();
@@ -265,6 +286,12 @@ export function AdsImportModal({ open, onOpenChange, channels }: AdsImportModalP
               {preview.rows.length > 10 ? " (hiện 10 dòng đầu)" : ""}
             </p>
 
+            {preview.soDongTruocM > 0 && (
+              <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm text-ink">
+                {cauTruocM(preview.soDongTruocM, preview.mocM)} sẽ bị bỏ qua — số đó đã chốt vào số dư mở sổ.
+              </div>
+            )}
+
             {preview.invalid.length > 0 && (
               <div className="rounded-lg border border-error/40 bg-error/5 p-3 text-sm text-error">
                 <p className="font-medium">{preview.invalid.length} dòng lỗi (bỏ qua):</p>
@@ -326,6 +353,9 @@ export function AdsImportModal({ open, onOpenChange, channels }: AdsImportModalP
               Sẽ import <span className="font-medium">{estimatedImport}</span> dòng chi phí ads vào kênh{" "}
               <span className="font-medium">{channels.find((c) => c.id === channelId)?.name ?? channelId}</span>.
             </p>
+            {preview.soDongTruocM > 0 && (
+              <p className="text-xs text-muted-foreground">Bỏ qua {cauTruocM(preview.soDongTruocM, preview.mocM)}.</p>
+            )}
             {conflictMode === "skip" && preview.apiConflicts.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 Bỏ qua {preview.apiConflicts.length} ngày đã có số API.

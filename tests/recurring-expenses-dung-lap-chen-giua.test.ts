@@ -1,6 +1,7 @@
 import { addMonths, startOfMonth, subMonths } from "date-fns";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Prisma } from "@/generated/prisma/client";
 import { deleteExpense } from "@/lib/actions/expenses";
 import { ensureRecurringExpenses, ngayDenHanDinhKy } from "@/lib/expenses/ensure-recurring-expenses";
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
@@ -72,6 +73,27 @@ async function taoDongThang(mau: { id: string; amount: number; description: stri
   });
 }
 
+/**
+ * Spy `$executeRaw` chặn ĐÚNG câu chèn `Expense` của bộ sinh (lần đầu), chạy `xuLy(chay)` thay nó. Câu khác — khoá
+ * chung với bước bật nợ phải trả mà bộ sinh lấy đầu transaction — đi thẳng. `chay` gọi bản gốc với ĐÚNG `this`
+ * (client của transaction bộ sinh: `tx.$executeRaw` cũng đi qua spy này) ⇒ câu chèn vẫn chạy trong transaction đó.
+ */
+function chanCauChen(xuLy: (chay: () => Promise<number>) => Promise<number>) {
+  const goc = prisma.$executeRaw;
+  let daChan = false;
+  return vi.spyOn(prisma, "$executeRaw").mockImplementation(function (
+    this: unknown,
+    sql: TemplateStringsArray,
+    ...giaTri: unknown[]
+  ) {
+    // PrismaPromise lười — chỉ gửi câu khi được `then`; bọc async để `chay()` gửi câu NGAY.
+    const chay = async () => (goc as unknown as (...a: unknown[]) => Promise<number>).call(this, sql, ...giaTri);
+    if (daChan || !sql.join("").includes('INSERT INTO "Expense"')) return chay();
+    daChan = true;
+    return xuLy(chay);
+  } as never);
+}
+
 /** Chờ tới khi một kết nối khác đang ĐỨNG CHỜ khoá ở câu chèn `Expense` của bộ sinh. */
 async function choCauChenDungChoKhoa(): Promise<void> {
   const hetHan = performance.now() + 10_000;
@@ -116,14 +138,10 @@ describe("bộ sinh định kỳ gặp lượt dừng lặp lại chen giữa", 
 
     // Tình huống: bộ sinh A thấy tháng trống; ngay sau đó lượt sinh B chèn dòng E, chủ shop bấm "Xoá và
     // dừng" dòng E — transaction xoá đang mở (khoá mẫu, xoá E, tắt `active`) đúng lúc câu chèn của A chạy.
-    const goc = prisma.$executeRaw.bind(prisma);
     const daGiu = hen();
     const choTha = hen();
     let luotXoa: Promise<unknown> | undefined;
-    const spy = vi.spyOn(prisma, "$executeRaw").mockImplementationOnce((async (
-      sql: TemplateStringsArray,
-      ...giaTri: unknown[]
-    ) => {
+    const spy = chanCauChen(async (chay) => {
       const e = await taoDongThang(mau);
       luotXoa = prisma.$transaction(
         async (tx) => {
@@ -136,8 +154,7 @@ describe("bộ sinh định kỳ gặp lượt dừng lặp lại chen giữa", 
         { timeout: 20_000 }
       );
       await daGiu.p;
-      // PrismaPromise lười — chỉ gửi câu khi được `then`; bọc async để câu chèn chạy NGAY.
-      const chen = (async () => goc(sql, ...giaTri))();
+      const chen = chay();
       try {
         await choCauChenDungChoKhoa();
       } finally {
@@ -145,7 +162,7 @@ describe("bộ sinh định kỳ gặp lượt dừng lặp lại chen giữa", 
       }
       await luotXoa;
       return chen;
-    }) as never);
+    });
     let taoMoi: number;
     try {
       taoMoi = await ensureRecurringExpenses(pastMonth);
@@ -166,14 +183,10 @@ describe("bộ sinh định kỳ gặp lượt dừng lặp lại chen giữa", 
     // bản `active=true` cũ và làm dòng vừa xoá sống lại — test này đỏ (bộ 3 test kia dùng FOR UPDATE
     // nên chặn MỌI mức khoá, không phân biệt được).
     const mau = await taoMau();
-    const goc = prisma.$executeRaw.bind(prisma);
     const daGiu = hen();
     const choTha = hen();
     let luotGhi: Promise<unknown> | undefined;
-    const spy = vi.spyOn(prisma, "$executeRaw").mockImplementationOnce((async (
-      sql: TemplateStringsArray,
-      ...giaTri: unknown[]
-    ) => {
+    const spy = chanCauChen(async (chay) => {
       const e = await taoDongThang(mau);
       luotGhi = prisma.$transaction(
         async (tx) => {
@@ -185,7 +198,7 @@ describe("bộ sinh định kỳ gặp lượt dừng lặp lại chen giữa", 
         { timeout: 20_000 }
       );
       await daGiu.p;
-      const chen = (async () => goc(sql, ...giaTri))();
+      const chen = chay();
       try {
         await choCauChenDungChoKhoa();
       } finally {
@@ -193,7 +206,7 @@ describe("bộ sinh định kỳ gặp lượt dừng lặp lại chen giữa", 
       }
       await luotGhi;
       return chen;
-    }) as never);
+    });
     let taoMoi: number;
     try {
       taoMoi = await ensureRecurringExpenses(pastMonth);
@@ -210,18 +223,14 @@ describe("bộ sinh định kỳ gặp lượt dừng lặp lại chen giữa", 
   it("mẫu bị dừng rồi bật lại với mốc SAU tháng đang sinh, xen trước câu chèn ⇒ không ghi lùi tháng đó", async () => {
     const mau = await taoMau();
 
-    const goc = prisma.$executeRaw.bind(prisma);
-    const spy = vi.spyOn(prisma, "$executeRaw").mockImplementationOnce((async (
-      sql: TemplateStringsArray,
-      ...giaTri: unknown[]
-    ) => {
+    const spy = chanCauChen(async (chay) => {
       await prisma.recurringExpense.update({ where: { id: mau.id }, data: { active: false } });
       await prisma.recurringExpense.update({
         where: { id: mau.id },
         data: { active: true, activeFrom: startOfMonth(addMonths(pastMonth, 1)) },
       });
-      return goc(sql, ...giaTri);
-    }) as never);
+      return chay();
+    });
     let taoMoi: number;
     try {
       taoMoi = await ensureRecurringExpenses(pastMonth);
@@ -233,5 +242,34 @@ describe("bộ sinh định kỳ gặp lượt dừng lặp lại chen giữa", 
     expect(await prisma.expense.count({ where: { recurringId: mau.id } })).toBe(0);
     // Tháng của mốc vẫn sinh bình thường — cổng mốc trong câu chèn trùng luật `mauDinhKySinhChoThang`.
     expect(await ensureRecurringExpenses(addMonths(pastMonth, 1))).toBe(1);
+  });
+});
+
+describe("lỗi trong transaction của bộ sinh: chỉ lỗi 'bận' (hết hạn khoá / P2028) mới bị nuốt", () => {
+  it("lỗi thật (không phải hết hạn khoá/P2028) ở câu chèn ⇒ hàm NÉM ra, không chèn dòng nào", async () => {
+    const mau = await taoMau();
+    const spy = chanCauChen(async () => {
+      throw new Error("boom");
+    });
+    try {
+      await expect(ensureRecurringExpenses(pastMonth)).rejects.toThrow("boom");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await prisma.expense.count({ where: { recurringId: mau.id } })).toBe(0);
+  });
+
+  it("P2028 (transaction hết hạn/bị cắt) ở câu chèn ⇒ trả 0 êm, không chèn; lượt sau sinh bù", async () => {
+    const mau = await taoMau();
+    const spy = chanCauChen(async () => {
+      throw new Prisma.PrismaClientKnownRequestError("Transaction already closed", { code: "P2028", clientVersion: "test" });
+    });
+    try {
+      expect(await ensureRecurringExpenses(pastMonth)).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await prisma.expense.count({ where: { recurringId: mau.id } })).toBe(0);
+    expect(await ensureRecurringExpenses(pastMonth)).toBe(1);
   });
 });

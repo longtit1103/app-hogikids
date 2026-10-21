@@ -30,8 +30,15 @@ function dieuKienDonBanTrucTiep(khoang: KhoangNgay) {
   } satisfies Prisma.OrderWhereInput;
 }
 
-export async function tongTienBanTrucTiep(khoang: KhoangNgay): Promise<number> {
-  const r = await prisma.order.aggregate({
+/**
+ * `db` = `tx` khi bước bật nợ phải trả đọc lại quỹ trước M TRONG transaction; mặc định prisma gốc. Kiểu chỉ mở
+ * đúng delegate đơn hàng — cùng hình dạng một lượt tổng như trước.
+ */
+export async function tongTienBanTrucTiep(
+  khoang: KhoangNgay,
+  db: Pick<Prisma.TransactionClient, "order"> = prisma
+): Promise<number> {
+  const r = await db.order.aggregate({
     where: dieuKienDonBanTrucTiep(khoang),
     _sum: { paidAtShop: true },
   });

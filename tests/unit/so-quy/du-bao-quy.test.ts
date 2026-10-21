@@ -127,6 +127,8 @@ describe("khoanKyTraNo — từ duKienNKy", () => {
     giaiNganNgay: null,
     laiCoDinhMoiKy: 1_000_000,
     tienGuiBatBuocMoiKy: 0,
+    laiNhapGoc: false,
+    nhapGoc: [],
   };
   const HOM_NAY = vn("2026-09-24T09:00:00");
 

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { laChuyenHuong } from "@/lib/n8n/kiem-dich-den-n8n";
 import { N8N_RO_ROLE } from "@/lib/n8n/role-doc-kho-khoa";
@@ -204,7 +204,10 @@ async function probeEndToEnd(client: N8nClient, syncNowSecret: string): Promise<
   try {
     const res = await fetch(`${client.base}/webhook/${SYNC_NOW_WEBHOOK_PATH}`, {
       method: "POST",
-      headers: { [SYNC_NOW_AUTH_HEADER]: syncNowSecret },
+      headers: { [SYNC_NOW_AUTH_HEADER]: syncNowSecret, "Content-Type": "application/json" },
+      // Mã lượt RIÊNG của probe: lượt thử này chạy trọn workflow, bước cuối của nó mang mã này ⇒ nút
+      // "Đồng bộ ngay" bấm cùng lúc không nhận nhầm kết cục probe là của mình (`chonBuocCuoiCuaLuot`).
+      body: JSON.stringify({ luotId: randomUUID() }),
       // Request này mang SECRET ở header ⇒ tuyệt đối không đi theo chuyển hướng: chặng sau redirect
       // là đích mà phép kiểm địa chỉ lúc gọi không với tới được.
       redirect: "manual",

@@ -285,13 +285,18 @@ enum CashMovementKind {
   /// Nạp ví ads trả trước (Shopee Ads), gắn `viAdsId`. Chiều tiền THEO NGUỒN NẠP: không `cardId` = nạp
   /// từ ngân hàng ⇒ RA khỏi quỹ; có `cardId` = nạp bằng thẻ ⇒ KHÔNG chạm quỹ (cộng vào nợ thẻ).
   ADS_TOPUP
+  /// Lãi kỳ của khoản THẤU CHI "lãi nhập gốc" (`Loan.laiNhapGoc`) — VÀO, `loanId` BẮT BUỘC (CHECK
+  /// `CashMovement_loan_bat_buoc`). Ngân hàng KHÔNG trừ tài khoản mà cộng lãi vào dư nợ: coi như cho vay
+  /// thêm đúng số lãi để trả lãi ⇒ đi CẶP với `Expense` danh mục `interest` cùng số, cùng ngày kỳ (vào
+  /// P&L, trừ quỹ) ⇒ quỹ net 0, dư nợ + lãi. CHỈ duyệt kỳ sinh ra — không bao giờ ghi tay/sửa/xoá đơn lẻ.
+  LAI_NHAP_GOC
 }
 
 /// Khoản tiền ghi tay NGOÀI sàn và NGOÀI Sổ chi phí (vay/góp/rút vốn, trả nợ gốc, bán trực tiếp, thu
 /// khác). Trục DÒNG TIỀN thuần — KHÔNG BAO GIỜ vào P&L (bất biến #1). `amount` luôn DƯƠNG (CHECK
 /// `CashMovement_amount_duong` ở migration + zod ở action), chiều suy từ `kind`. Nhập tay 100% ⇒ không
 /// `source`/`refId`; xoá theo hợp đồng "Xóa dữ liệu giao dịch" (data-admin.ts); rebuild-from-raw KHÔNG đụng.
-/// `kind` LOAN_IN/LOAN_REPAY BẮT BUỘC `loanId` (CHECK `CashMovement_loan_bat_buoc` ở migration + zod ở
+/// `kind` LOAN_IN/LOAN_REPAY/DEPOSIT_*/LAI_NHAP_GOC BẮT BUỘC `loanId` (CHECK `CashMovement_loan_bat_buoc` ở migration + zod ở
 /// action): dòng vay/trả gốc không gắn khoản vay là dư nợ "mồ côi", không bao giờ đối chiếu lại được.
 /// Một dòng thuộc TỐI ĐA MỘT hồ sơ trong 5 khoá `loanId`/`savingsId`/`cardId`/`phieuNhapId`/`viAdsId`
 /// (CHECK `CashMovement_toi_da_mot_ho_so`); ngoại lệ DUY NHẤT `ADS_TOPUP` được `viAdsId` + `cardId`.
@@ -329,8 +334,8 @@ model CashMovement {
 }
 
 /// Hồ sơ khoản vay — CHỈ mô tả (spec §5.1). TUYỆT ĐỐI không tự sinh dòng tiền: gốc đi qua CashMovement
-/// (LOAN_IN/LOAN_REPAY gắn loanId), lãi đi qua Expense danh mục interest. Dư nợ = duNoMoSo + Σ LOAN_IN −
-/// Σ LOAN_REPAY — không có cột dư nợ để lệch với sổ. 1 khoản vay = tối đa 1 LOAN_IN (giải ngân) hoặc 0
+/// (LOAN_IN/LOAN_REPAY gắn loanId), lãi đi qua Expense danh mục interest. Dư nợ = duNoMoSo + Σ LOAN_IN +
+/// Σ LAI_NHAP_GOC − Σ LOAN_REPAY — không có cột dư nợ để lệch với sổ. 1 khoản vay = tối đa 1 LOAN_IN (giải ngân) hoặc 0
 /// (khoản mang sang từ trước ngày mở sổ — tiền đã nằm trong số dư mở sổ nên KHÔNG được ghi là tiền vào).
 /// rebuild-from-raw và deploy/restore.sh KHÔNG đụng bảng này (nhập tay 100%, không có bản gốc Bronze).
 model Loan {
@@ -352,6 +357,11 @@ model Loan {
   laiCoDinhMoiKy      Int?
   /// Tiền gửi tiết kiệm bắt buộc mỗi kỳ — dòng tiền RA (`DEPOSIT_OUT`), KHÔNG BAO GIỜ là chi phí.
   tienGuiBatBuocMoiKy Int            @default(0)
+  /// Thấu chi "lãi nhập gốc": ngân hàng CỘNG lãi kỳ vào dư nợ thay vì trừ tài khoản ⇒ duyệt kỳ ghi
+  /// `Expense` lãi + `CashMovement` `LAI_NHAP_GOC` cùng số (quỹ net 0, dư nợ + lãi, lãi kép các kỳ sau).
+  /// CHỈ `OVERDRAFT` được bật (CHECK `Loan_lai_nhap_goc_chi_thau_chi`). Đổi cờ chỉ đổi kỳ duyệt SAU đó —
+  /// kỳ đã duyệt là dòng có thật, cặp hay không cặp tự mô tả chính nó.
+  laiNhapGoc          Boolean        @default(false)
   movements           CashMovement[]
   /// Sổ tiết kiệm SINH LÃI khai "vay khoản này rồi mang gửi" — chỉ để SO lãi suất, KHÔNG mang tiền.
   /// Xoá khoản vay ⇒ `SoTietKiem.loanId` về NULL (onDelete: SetNull), sổ và tiền còn nguyên.
@@ -413,7 +423,7 @@ model SoDuChotThang {
   id        String   @id @default(cuid())
   /// Ngày ĐẦU tháng 00:00 giờ VN (`startOfMonth`). @unique ⇒ lưu lại cùng tháng là SỬA ĐÈ, không đẻ dòng mới.
   thang     DateTime @unique
-  /// Số dư tài khoản ngân hàng cuối tháng (VND). CHO PHÉP ÂM: thấu chi làm bank âm là hợp lệ.
+  /// Số dư tài khoản ngân hàng cuối tháng (VND). CHO PHÉP ÂM: tài khoản thanh toán có thể âm thật.
   soDuBank  Int
   /// Tiền mặt trong két (VND). CHECK `SoDuChotThang_tienMat_khong_am` >= 0 (ngoài Prisma, trong migration).
   tienMat   Int

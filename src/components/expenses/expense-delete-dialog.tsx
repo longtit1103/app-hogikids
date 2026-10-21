@@ -81,6 +81,14 @@ export function ExpenseDeleteDialog({ open, onOpenChange, expense }: ExpenseDele
             Dòng này do duyệt kỳ trả nợ sinh ra — xoá không mở lại kỳ; muốn ghi lại thì nhập tay.
           </p>
         )}
+        {doDuyetKySinh && (
+          // Dòng lãi của khoản thấu chi "lãi nhập gốc" đi CẶP với một dòng cộng dư nợ: server xoá cả hai trong
+          // một lượt. Hộp này chỉ có `refId` của dòng chi phí (không biết cờ của khoản vay) nên nói có điều kiện.
+          <p className="text-sm text-muted-foreground" data-testid="expense-xoa-lai-nhap-goc">
+            Nếu đây là kỳ lãi của khoản thấu chi lãi nhập gốc: xoá luôn dòng lãi nhập gốc đi kèm — dư
+            nợ thấu chi giảm đúng số lãi này (cần quyền sửa Sổ quỹ; khoản đã tất toán thì không xoá được).
+          </p>
+        )}
 
         {isRecurring && (
           <div className="flex flex-col gap-2">

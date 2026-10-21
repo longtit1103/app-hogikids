@@ -78,16 +78,22 @@ export type TinhTrangKhoiPhuc = {
   /** Trục số dư mà lượt khôi phục sẽ đẩy xuống âm (dò TRƯỚC khi ghi), hoặc null. */
   seLamAmSoDu: TrucSoDuAm | null;
   /**
-   * Câu từ chối của luật NỢ PHẢI TRẢ (spec §5.3, §5.8): Nhập hàng sau M, dòng tiền nợ ngoài cửa sổ ngày /
+   * Câu từ chối của luật NỢ PHẢI TRẢ (spec §5.3, §5.8): Nhập hàng đã khoá sổ, dòng tiền nợ ngoài cửa sổ ngày /
    * chưa bật / thẻ đã đóng… Câu do CHÍNH cổng của đường ghi sinh ra (một luật, một câu). `doTinhTrang` luôn
    * điền; tuỳ chọn chỉ để các fixture dựng tay trước khi có trường này vẫn hợp lệ.
    */
   viPhamNoPhaiTra?: string | null;
 };
 
-/** Câu cho Expense "Nhập hàng" ngày ≥ M — đường ghi đó đã đóng (spec §5.3). */
-export const CAU_NHAP_HANG_SAU_M =
-  "Không khôi phục được: Nhập hàng sau ngày bật theo dõi nợ — tiền hàng từ mốc đó theo dõi ở sổ nợ phiếu nhập";
+/** Câu cho Expense "Nhập hàng" ngày ≥ M khi đã bật theo dõi nợ (`chan-so-chi-phi-da-khoa.ts`, luật Nhập hàng). */
+export const CAU_NHAP_HANG_DA_KHOA_SO =
+  "Không khôi phục được: chi phí Nhập hàng đã khoá sổ từ ngày bật theo dõi nợ — từ mốc đó tiền hàng theo dõi ở " +
+  "sổ nợ phiếu nhập";
+
+/** Câu cho Expense ngày < M (mọi danh mục) khi đã bật theo dõi nợ (`chan-so-chi-phi-da-khoa.ts`, luật trước M). */
+export const CAU_CHI_PHI_TRUOC_M_DA_KHOA_SO =
+  "Không khôi phục được: chi phí trước ngày bật theo dõi nợ đã chốt vào số dư mở sổ — thêm lại là quỹ lệch khỏi " +
+  "tiền thật";
 
 /**
  * Câu cho hồ sơ ví/thẻ khôi phục SAU khi bật theo dõi nợ (spec §5.4, §5.8, §5.9). Ví/thẻ trong thùng rác lúc đã

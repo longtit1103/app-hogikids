@@ -18,8 +18,8 @@ import {
 } from "@/components/ui/dialog";
 import { ghiKyTraNo } from "@/lib/actions/khoan-vay";
 import { formatVnd } from "@/lib/format";
-import type { DeXuatKy } from "@/lib/so-quy/lich-tra-no";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
+import { laLaiNhapGoc, type DeXuatKy } from "@/lib/so-quy/lich-tra-no";
 import { gocDeXuatKep, tienGuiSeNhanLai } from "@/lib/so-quy/tien-ky-tra-no";
 
 import { KyTraNoInputs } from "./ky-tra-no-inputs";
@@ -60,7 +60,10 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
   const tre = differenceInCalendarDays(new Date(), ky.denNgay) > NGAY_COI_LA_TRE;
   // Trừ trên dư nợ HIỆN TẠI, không phải dư nợ đầu kỳ: giữa kỳ có thể đã trả bớt gốc bằng tay, lúc
   // đó hai số lệch nhau và hộp xác nhận sẽ hứa một con số dư nợ không bao giờ xảy ra.
-  const duNoSau = loan.duNo - goc;
+  // Khoản thấu chi LÃI NHẬP GỐC: lãi kỳ này CỘNG vào dư nợ (ngân hàng không trừ tài khoản) nên dư nợ
+  // sau kỳ = dư nợ − gốc + lãi — cùng công thức `duNoSauKy` của `duKienNKy` và dư nợ server trả về.
+  const laiNhapGoc = laLaiNhapGoc(loan);
+  const duNoSau = loan.duNo - goc + (laiNhapGoc ? lai : 0);
   // Kỳ CUỐI của khoản có sổ tiết kiệm: sau khi ghi kỳ này, Σ tiền gửi đang giữ sẽ là số dưới đây —
   // nói trước để chủ shop biết bấm Tất toán ngay sau đó là nhận lại đúng số nào. Cùng con số này là
   // phần ngân hàng CẤN vào số phải nộp kỳ cuối, nên nó đi thẳng xuống dòng tổng ở `KyTraNoInputs`.
@@ -99,7 +102,9 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
       toast.success(
         boQua
           ? `Đã đánh dấu kỳ ${format(ky.denNgay, "dd/MM/yyyy")} không thu`
-          : `Đã ghi lãi ${formatVnd(lai)} + gốc ${formatVnd(goc)}${veTienGui} — dư nợ còn ${formatVnd(res.data.duNoConLai)}`
+          : laiNhapGoc
+            ? `Đã ghi lãi ${formatVnd(lai)} cộng vào dư nợ${goc > 0 ? ` + trả gốc ${formatVnd(goc)}` : ""} — dư nợ còn ${formatVnd(res.data.duNoConLai)}`
+            : `Đã ghi lãi ${formatVnd(lai)} + gốc ${formatVnd(goc)}${veTienGui} — dư nợ còn ${formatVnd(res.data.duNoConLai)}`
       );
       router.refresh();
     } catch {
@@ -129,6 +134,7 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
         thauChi={thauChi}
         coTienGui={coTienGui}
         tienGuiSeNhanLai={hoanTienGui}
+        laiNhapGoc={laiNhapGoc}
       />
 
       <p className="mt-2 text-xs text-muted-foreground">
@@ -153,16 +159,33 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Dialog open={moGhi} onOpenChange={setMoGhi}>
-          <DialogTrigger render={<Button type="button">Đã chuyển tiền — ghi vào sổ</Button>} />
+          <DialogTrigger
+            render={
+              <Button type="button">
+                {laiNhapGoc ? "Ngân hàng đã cộng lãi — ghi vào sổ" : "Đã chuyển tiền — ghi vào sổ"}
+              </Button>
+            }
+          />
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle>Xác nhận ghi kỳ trả nợ</DialogTitle>
             </DialogHeader>
-            <p className="text-sm text-ink">
-              Ghi lãi {formatVnd(lai)} vào Sổ chi phí và trả gốc {formatVnd(goc)}
-              {tienGui > 0 && <> + gửi tiết kiệm {formatVnd(tienGui)}</>} — dư nợ còn{" "}
-              {formatVnd(duNoSau)}. Chỉ bấm khi đã chuyển tiền cho ngân hàng.
-            </p>
+            {laiNhapGoc ? (
+              <p className="text-sm text-ink" data-testid="ky-xac-nhan-lai-nhap-goc">
+                Ghi lãi {formatVnd(lai)} vào Sổ chi phí — lãi cộng vào dư nợ thấu chi, tài khoản không
+                bị trừ
+                {goc > 0 && <> — và trả gốc {formatVnd(goc)}</>}. Dư nợ sau kỳ {formatVnd(duNoSau)}.{" "}
+                {goc > 0
+                  ? "Chỉ bấm khi đã chuyển tiền trả gốc cho ngân hàng."
+                  : "Chỉ bấm khi ngân hàng đã cộng lãi vào dư nợ."}
+              </p>
+            ) : (
+              <p className="text-sm text-ink">
+                Ghi lãi {formatVnd(lai)} vào Sổ chi phí và trả gốc {formatVnd(goc)}
+                {tienGui > 0 && <> + gửi tiết kiệm {formatVnd(tienGui)}</>} — dư nợ còn{" "}
+                {formatVnd(duNoSau)}. Chỉ bấm khi đã chuyển tiền cho ngân hàng.
+              </p>
+            )}
             <DialogFooter>
               <DialogClose render={<Button variant="outline">Huỷ</Button>} />
               <Button type="button" disabled={dangGhi} onClick={() => ghi(false)}>
@@ -200,7 +223,11 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
 
       {/* Câu này phải ở NGAY DƯỚI nút (design §5.5), không chỉ nằm trong hộp xác nhận: app không
           chuyển tiền hộ, bấm nút chỉ là GHI LẠI việc chủ shop đã chuyển. */}
-      <p className="mt-2 text-xs text-muted-foreground">Chỉ bấm khi đã chuyển tiền cho ngân hàng.</p>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {laiNhapGoc && goc === 0
+          ? "Chỉ bấm khi ngân hàng đã cộng lãi vào dư nợ thấu chi."
+          : "Chỉ bấm khi đã chuyển tiền cho ngân hàng."}
+      </p>
     </div>
   );
 }

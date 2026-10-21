@@ -14,7 +14,8 @@ import type { BanChot, KhoanCauTruc } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import { CAU_VI_ADS_TRA_TRUOC, NGU_CANH_CHOT_CU, type NguCanhChot } from "@/lib/so-quy/ngu-canh-chot-no-phai-tra";
 
 /**
- * Modal "Chốt số dư cuối tháng" — 3 ô: số dư ngân hàng (CHO ÂM — thấu chi), tiền mặt, ghi chú.
+ * Modal "Chốt số dư cuối tháng" — 3 ô: số dư thật trên tài khoản thanh toán (CHO ÂM — tài khoản có thể âm
+ * thật), tiền mặt, ghi chú.
  * Tháng là ẩn (tháng đang xem), không có ô để tô.
  *
  * Xử lý lỗi từ action: `field` thuộc đúng 3 ô trên form ⇒ tô ô; MỌI trường hợp khác (không field,
@@ -77,7 +78,7 @@ export function SoDuChotThangFormModal({
   thangNhan: string;
   /** Có = chế độ sửa (prefill). */
   chot: (BanChot & { note: string }) | null;
-  /** Để dặn đúng số: đang thấu chi bao nhiêu, đang gửi bao nhiêu. */
+  /** Để dặn đúng số: dư nợ thấu chi (chỉ nhắc, không vào phép so), đang gửi bao nhiêu. */
   cauTruc: KhoanCauTruc;
   /** Đã bật nợ phải trả trong/trước tháng này ⇒ bỏ câu "trừ nợ thẻ"; có ví trả trước ⇒ thêm gợi ý chênh âm. */
   nguCanhChot?: NguCanhChot;
@@ -144,8 +145,8 @@ export function SoDuChotThangFormModal({
           )}
           {cauTruc.duNoThauChi > 0 && (
             <p className="text-xs text-muted-foreground">
-              Đang thấu chi {formatVnd(cauTruc.duNoThauChi)}: gõ số dư đúng như app (âm thì gõ âm), thẻ tự cộng
-              dư nợ thấu chi vào khi so.
+              Dư nợ thấu chi {formatVnd(cauTruc.duNoThauChi)} theo dõi riêng ở Khoản vay — tiền thấu chi đã
+              giải ngân vào tài khoản, nên gõ đúng số dư thật trên tài khoản, không cộng/trừ dư nợ.
             </p>
           )}
           <Field id="chot-so-du-bank" label="Số dư ngân hàng" error={fieldErrors.soDuBank}>
@@ -156,7 +157,9 @@ export function SoDuChotThangFormModal({
               value={bankRaw}
               onChange={(e) => setBankRaw(hienBank(e.target.value))}
             />
-            <p className="text-xs text-muted-foreground">đang thấu chi thì gõ số âm, ví dụ -20.000.000</p>
+            <p className="text-xs text-muted-foreground">
+              số dư thật trên tài khoản thanh toán — tài khoản đang âm thì gõ số âm, ví dụ -20.000.000
+            </p>
             {/* Trước khi bật nợ phải trả: ads trả bằng thẻ tín dụng đã trừ sổ ngay ngày chạy, tiền chỉ rời ngân
                 hàng lúc trả sao kê. SAU khi bật thì nợ thẻ nằm ngoài quỹ — ô ngân hàng gõ đúng số thật, không trừ gì. */}
             {nguCanhChot.sauBatNoPhaiTra ? (

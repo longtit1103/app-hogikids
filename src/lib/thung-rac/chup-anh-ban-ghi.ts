@@ -72,6 +72,8 @@ export const TRUONG_CHUP: Record<BangDung, readonly string[]> = {
     "id", "name", "lender", "duNoMoSo", "startDate", "annualRateBp", "termMonths",
     "firstDueDate", "lastDueHandled", "closedAt", "note", "createdAt", "kind",
     "laiCoDinhMoiKy", "tienGuiBatBuocMoiKy",
+    // Ảnh chụp trước khi có cột không mang khoá ⇒ khôi phục ra default false (đúng: khi đó chưa có khái niệm).
+    "laiNhapGoc",
   ],
   SoTietKiem: [
     "id", "name", "bank", "principal", "startDate", "termMonths", "maturityDate",
@@ -121,7 +123,10 @@ export type GhiChuKhoiPhuc = {
 export type AnhBanGhi = {
   ban: 1;
   chinh: Record<string, unknown>;
-  /** Dòng tiền bị xoá KÈM bản ghi cha (khoản vay / sổ tiết kiệm). Rỗng với 3 bảng còn lại. */
+  /**
+   * Dòng tiền bị xoá KÈM bản ghi chính: khoản vay / sổ tiết kiệm (dòng con), hoặc dòng lãi kỳ `Expense`
+   * kèm dòng `LAI_NHAP_GOC` đi cặp (`cap-lai-nhap-goc.ts`). Rỗng ở các bảng còn lại.
+   */
   cashMovements: Record<string, unknown>[];
   /** Thu nhập (lãi tiết kiệm) bị xoá kèm sổ. */
   thuNhap: Record<string, unknown>[];
@@ -134,7 +139,14 @@ export type ThongTinAnh = { nhan: string; soTien: number; ngay: Date; anh: AnhBa
 
 /** Nguồn dựng ảnh — mỗi bảng đòi đúng phần ngữ cảnh mà nhãn của nó cần. */
 export type NguonAnh =
-  | { bang: "Expense"; banGhi: Expense; tenDanhMuc: string; ghiChu?: GhiChuKhoiPhuc }
+  | {
+      bang: "Expense";
+      banGhi: Expense;
+      tenDanhMuc: string;
+      ghiChu?: GhiChuKhoiPhuc;
+      /** Dòng `LAI_NHAP_GOC` đi cặp với dòng lãi kỳ — xoá cùng lượt, khôi phục cùng lượt. */
+      cashMovements?: CashMovement[];
+    }
   | { bang: "CashMovement"; banGhi: CashMovement }
   | { bang: "ThuNhap"; banGhi: ThuNhap }
   | { bang: "Loan"; banGhi: Loan; cashMovements: CashMovement[]; ghiChu?: GhiChuKhoiPhuc }
@@ -203,7 +215,7 @@ function tienKhoanVay(banGhi: Loan, cashMovements: CashMovement[]): number {
 
 /** Dựng nhãn + số tiền + ngày + payload cho một bản ghi sắp xoá. Hàm thuần, không chạm DB. */
 export function dungAnhBanGhi(nguon: NguonAnh): ThongTinAnh {
-  const cashMovements = "cashMovements" in nguon ? nguon.cashMovements : [];
+  const cashMovements = "cashMovements" in nguon ? (nguon.cashMovements ?? []) : [];
   const thuNhap = "thuNhap" in nguon && Array.isArray(nguon.thuNhap) ? nguon.thuNhap : [];
   const ghiChu = "ghiChu" in nguon && nguon.ghiChu ? nguon.ghiChu : {};
   const kySaoKe = nguon.bang === "TheTinDung" ? nguon.kySaoKe : [];
@@ -229,6 +241,7 @@ export function dungAnhBanGhi(nguon: NguonAnh): ThongTinAnh {
       const duoi = [
         e.description,
         ghiChu.recurringDaTat ? "đã tắt lặp hàng tháng (khôi phục KHÔNG bật lại)" : "",
+        cashMovements.length > 0 ? "kèm dòng lãi nhập gốc thấu chi" : "",
       ];
       return {
         nhan: ghepNhan(nguon.tenDanhMuc, e.amount, e.date, duoi),

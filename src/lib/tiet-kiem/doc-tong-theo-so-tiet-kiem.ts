@@ -1,3 +1,4 @@
+import { dauDuNoVay, KIND_DU_NO_VAY } from "@/lib/cash-movements/cash-movement-kinds";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -5,8 +6,6 @@ import { prisma } from "@/lib/prisma";
  * (file kia dựng dòng bảng; file này chỉ đọc và cộng). Tất cả đều gom 1 LƯỢT ĐỌC cho MỌI sổ: gọi vị
  * từ trong vòng lặp là N+1 truy vấn.
  */
-
-const KIND_GOC_VAY = ["LOAN_IN", "LOAN_REPAY"] as const;
 
 export type DongSo = { tongDong: number; soGui: number; dangGui: number };
 
@@ -55,7 +54,7 @@ export async function docThuNhapTheoSo(): Promise<Map<string, number>> {
 }
 
 /**
- * Dư nợ GỐC của các khoản vay được gắn làm nguồn = `duNoMoSo + Σ LOAN_IN − Σ LOAN_REPAY`, đúng công
+ * Dư nợ GỐC của các khoản vay được gắn làm nguồn = `duNoMoSo + Σ LOAN_IN + Σ LAI_NHAP_GOC − Σ LOAN_REPAY`, đúng công
  * thức của `khoan-vay-queries.ts`. Cần cho phép quy đổi lãi cố định ra %/năm (spec §6.3) — lấy
  * `duNoMoSo` không thôi là sai với khoản giải ngân qua dòng `LOAN_IN`.
  */
@@ -65,15 +64,14 @@ export async function docDuNoGoc(loanIds: string[]): Promise<Map<string, number>
     prisma.loan.findMany({ where: { id: { in: loanIds } }, select: { id: true, duNoMoSo: true } }),
     prisma.cashMovement.groupBy({
       by: ["loanId", "kind"],
-      where: { loanId: { in: loanIds }, kind: { in: [...KIND_GOC_VAY] } },
+      where: { loanId: { in: loanIds }, kind: { in: [...KIND_DU_NO_VAY] } },
       _sum: { amount: true },
     }),
   ]);
   const theoKhoan = new Map(loans.map((l) => [l.id, l.duNoMoSo]));
   for (const n of nhom) {
     if (n.loanId === null) continue;
-    const dau = n.kind === "LOAN_IN" ? 1 : -1;
-    theoKhoan.set(n.loanId, (theoKhoan.get(n.loanId) ?? 0) + dau * (n._sum.amount ?? 0));
+    theoKhoan.set(n.loanId, (theoKhoan.get(n.loanId) ?? 0) + dauDuNoVay(n.kind) * (n._sum.amount ?? 0));
   }
   return theoKhoan;
 }

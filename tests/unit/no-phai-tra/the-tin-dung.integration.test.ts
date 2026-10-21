@@ -254,17 +254,38 @@ describe("ganNenTang / xoaGanNenTang", () => {
     });
   });
 
-  it("xoá mốc đã hiệu lực (≤ hôm nay) ⇒ từ chối; mốc tương lai ⇒ xoá được", async () => {
+  it("CHƯA bật: xoá được MỌI mốc (đã hiệu lực / hôm nay / tương lai) và mỗi lượt có nhật ký", async () => {
     const A = await taoTheOk();
-    const daHieuLuc = await ganNenTang({ cardId: A, nenTang: "META", tuNgay: "2026-12-01" });
+    const quaKhu = await ganNenTang({ cardId: A, nenTang: "META", tuNgay: "2026-10-01" });
+    const homNay = await ganNenTang({ cardId: A, nenTang: "META", tuNgay: "2026-12-01" });
     const tuongLai = await ganNenTang({ cardId: A, nenTang: "TIKTOK_ADS", tuNgay: "2026-12-02" });
-    if (!daHieuLuc.ok || !tuongLai.ok) throw new Error("seed gắn hỏng");
+    if (!quaKhu.ok || !homNay.ok || !tuongLai.ok) throw new Error("seed gắn hỏng");
 
-    expect(await xoaGanNenTang(daHieuLuc.data.id)).toMatchObject({ ok: false, error: expect.stringContaining("đã có hiệu lực") });
+    for (const m of [quaKhu, homNay, tuongLai]) {
+      expect(await xoaGanNenTang(m.data.id)).toEqual({ ok: true, data: undefined });
+      expect(await prisma.auditLog.count({ where: { hanhDong: "THE_XOA_GAN_NEN_TANG", doiTuongId: m.data.id } })).toBe(1);
+    }
+    expect(await prisma.ganNenTangThe.count()).toBe(0);
+  });
+
+  it("ĐÃ bật: mốc đã hiệu lực (≤ hôm nay) ⇒ từ chối, còn nguyên; mốc tương lai ⇒ xoá được + nhật ký", async () => {
+    await batNoPhaiTra();
+    const A = await taoTheOk({ neoBanDau: { ngayChot: "2026-11-30", soDu: 0 } });
+    // Mốc quá khứ ghi THẲNG DB: sau khi bật, `ganNenTang` cấm lùi ngày nên không dựng được bằng action.
+    const daHieuLuc = await prisma.ganNenTangThe.create({ data: { cardId: A, nenTang: "META", tuNgay: vn("2026-11-05") } });
+    const homNay = await ganNenTang({ cardId: A, nenTang: "META", tuNgay: "2026-12-01" });
+    const tuongLai = await ganNenTang({ cardId: A, nenTang: "TIKTOK_ADS", tuNgay: "2026-12-02" });
+    if (!homNay.ok || !tuongLai.ok) throw new Error("seed gắn hỏng");
+
+    for (const id of [daHieuLuc.id, homNay.data.id]) {
+      expect(await xoaGanNenTang(id)).toMatchObject({ ok: false, error: expect.stringContaining("đã có hiệu lực") });
+    }
     expect(await xoaGanNenTang(tuongLai.data.id)).toEqual({ ok: true, data: undefined });
-    expect(await prisma.ganNenTangThe.findMany({ select: { id: true } })).toEqual([{ id: daHieuLuc.data.id }]);
-    const nk = await prisma.auditLog.count({ where: { hanhDong: "THE_XOA_GAN_NEN_TANG", doiTuongId: tuongLai.data.id } });
-    expect(nk).toBe(1);
+    expect((await prisma.ganNenTangThe.findMany({ select: { id: true } })).map((g) => g.id).sort()).toEqual(
+      [daHieuLuc.id, homNay.data.id].sort()
+    );
+    expect(await prisma.auditLog.count({ where: { hanhDong: "THE_XOA_GAN_NEN_TANG", doiTuongId: tuongLai.data.id } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { hanhDong: "THE_XOA_GAN_NEN_TANG", doiTuongId: daHieuLuc.id } })).toBe(0);
   });
 });
 
@@ -287,6 +308,43 @@ describe("docTheKemTrangThai", () => {
     });
     expect(ds[0].lyDoKhongXoa).toContain("chỉ đóng");
     expect(ds[0].lyDoKhongDong).toContain("dư nợ");
+  });
+
+  it("khoảng hiệu lực mốc tính trên mốc của MỌI thẻ: 3 mốc cùng thẻ liền nhau; đổi thẻ ghi tên thẻ kế tiếp", async () => {
+    const A = await taoTheOk({ ten: "Thẻ A" });
+    const B = await taoTheOk({ ten: "Thẻ B" });
+    await prisma.ganNenTangThe.createMany({
+      data: [
+        { cardId: A, nenTang: "TIKTOK_ADS", tuNgay: vn("2026-08-01") },
+        { cardId: A, nenTang: "TIKTOK_ADS", tuNgay: vn("2026-09-13") },
+        { cardId: B, nenTang: "TIKTOK_ADS", tuNgay: vn("2026-10-09") },
+        { cardId: A, nenTang: "META", tuNgay: vn("2026-09-01") },
+      ],
+    });
+    const ds = await docTheKemTrangThai(prisma, new Date());
+    const cua = (id: string) => ds.find((t) => t.id === id)!.gan.map((g) => [g.nenTang, g.tuNgay, g.denNgay, g.theKeTiep]);
+    expect(cua(A)).toEqual([
+      ["TIKTOK_ADS", vn("2026-08-01"), vn("2026-09-12"), null], // mốc kế cùng thẻ A ⇒ không ghi tên
+      ["META", vn("2026-09-01"), null, null],
+      ["TIKTOK_ADS", vn("2026-09-13"), vn("2026-10-08"), "Thẻ B"], // mốc kế ở thẻ B
+    ]);
+    expect(cua(B)).toEqual([["TIKTOK_ADS", vn("2026-10-09"), null, null]]);
+  });
+
+  it("xoaDuoc: CHƯA bật ⇒ mọi mốc; ĐÃ bật ⇒ chỉ mốc tương lai", async () => {
+    const A = await taoTheOk();
+    await prisma.ganNenTangThe.createMany({
+      data: [
+        { cardId: A, nenTang: "META", tuNgay: vn("2026-11-05") },
+        { cardId: A, nenTang: "META", tuNgay: vn("2026-12-01") },
+        { cardId: A, nenTang: "TIKTOK_ADS", tuNgay: vn("2026-12-10") },
+      ],
+    });
+    const xoaDuoc = async () => (await docTheKemTrangThai(prisma, new Date()))[0].gan.map((g) => g.xoaDuoc);
+
+    expect(await xoaDuoc()).toEqual([true, true, true]);
+    await batNoPhaiTra();
+    expect(await xoaDuoc()).toEqual([false, false, true]);
   });
 });
 
@@ -331,5 +389,14 @@ describe("khoá SHARED với bước bật (đua taoThe / ganNenTang ↔ bước
     expect(ms).toBeGreaterThanOrEqual(700);
     expect(r).toMatchObject({ ok: false, code: "GAN_LUI_NGAY" });
     expect(await prisma.ganNenTangThe.count()).toBe(0);
+  });
+
+  it("xoaGanNenTang CHỜ bước bật rồi từ chối xoá mốc đã hiệu lực (không đọc M = null giữa chừng)", async () => {
+    const A = await taoTheOk();
+    const moc = await prisma.ganNenTangThe.create({ data: { cardId: A, nenTang: "META", tuNgay: vn("2026-11-05") } });
+    const { r, ms } = await trongLucBuocBat(() => xoaGanNenTang(moc.id));
+    expect(ms).toBeGreaterThanOrEqual(700);
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining("đã có hiệu lực") });
+    expect(await prisma.ganNenTangThe.count()).toBe(1);
   });
 });

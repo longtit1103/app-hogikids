@@ -35,7 +35,8 @@ import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
  * bật (câu đầu) → giữ mã (gửi lại cùng mã + cùng nội dung ⇒ kết quả cũ `DA_GHI_ROI`, không ghi gì) →
  * `ghiKhoiTaoNoPhaiTra` (đọc lại M ⇒ `DA_BAT_ROI`, kiểm điều kiện, neo thẻ/ví, `CUTOVER_*`, Setting M) →
  * nhật ký `NO_PHAI_TRA_BAT` → ghi kết quả. Danh sách điều chỉnh do màn hình gửi (đã qua bước 2) — server
- * KHÔNG tính lại: số điều chỉnh là quyết định của chủ shop, cố định từ đây.
+ * KHÔNG tính lại: số điều chỉnh là quyết định của chủ shop, cố định từ đây. Nhưng số liệu DB mà danh sách đó
+ * dựa vào (vân tay quỹ trước M) thì server tính lại trong transaction và so: lệch ⇒ `QUY_DA_DOI`.
  */
 
 const TRAN_TIEN = 2_000_000_000;
@@ -48,6 +49,9 @@ const ngayIsoSchema = z
     return !Number.isNaN(d.getTime()) && khoaNgayVn(d) === s && d.getFullYear() >= 2000;
   }, "Ngày không hợp lệ")
   .transform((s) => new Date(`${s}T00:00:00+07:00`));
+
+/** Số CÓ DẤU của vân tay quỹ (quỹ app có thể âm) — zod 4 `int()` đã chặn ngoài khoảng số nguyên an toàn. */
+const tienCoDau = z.number().int("Số tiền phải là số nguyên");
 
 const tienKhongAm = (thongBao: string) =>
   z.coerce.number().int("Số tiền phải là số nguyên").min(0, thongBao).max(TRAN_TIEN, "Số tiền quá lớn (tối đa 2 tỷ)");
@@ -74,6 +78,11 @@ const xacNhanSchema = z.object({
   viAds: z.array(z.object({ viAdsId: z.string().min(1), soDuNeo: tienKhongAm("Số dư ví không âm") })).max(10),
   // Shopee Ads nạp từ ví bán hàng / chưa muốn theo dõi ví ⇒ thiếu hồ sơ ví không chặn bật (spec §5.4, §5.9).
   xacNhanViShopeeChuaTheoDoi: z.boolean().default(false),
+  // Bộ số bước 2 đã hiện — BẮT BUỘC: thiếu thì bước bật không biết điều chỉnh gửi lên tính trên số liệu nào.
+  vanTayQuy: z.object(
+    { quyApp: tienCoDau, duNoThauChi: tienCoDau, tongPhieuY: tienCoDau },
+    { error: "Thiếu số liệu đối chiếu — tính chênh lệch ở bước 2 rồi bấm lại" }
+  ),
   dieuChinh: z
     .array(
       z.object({
@@ -119,6 +128,7 @@ export async function xacNhanBatNoPhaiTra(input: unknown): Promise<KetQuaActionB
     })),
     viAds: d.viAds,
     xacNhanViShopeeChuaTheoDoi: d.xacNhanViShopeeChuaTheoDoi,
+    vanTayQuy: d.vanTayQuy,
     dieuChinh: d.dieuChinh.filter((x) => x.soTien > 0),
   });
 
@@ -139,6 +149,7 @@ export async function xacNhanBatNoPhaiTra(input: unknown): Promise<KetQuaActionB
         viAds: d.viAds,
         dieuChinh: d.dieuChinh,
         xacNhanViShopeeChuaTheoDoi: d.xacNhanViShopeeChuaTheoDoi,
+        vanTayQuyDaThay: d.vanTayQuy,
       });
       await ghiNhatKy(tx, {
         actor: nguoiDung,
@@ -166,7 +177,7 @@ export async function xacNhanBatNoPhaiTra(input: unknown): Promise<KetQuaActionB
 
 const docChenhLechSchema = z.object({
   mocM: ngayIsoSchema,
-  // Ô ngân hàng CHO ÂM (thấu chi) — cùng luật form chốt số dư; tiền mặt không âm.
+  // Ô ngân hàng CHO ÂM (tài khoản có thể âm thật) — cùng luật form chốt số dư; tiền mặt không âm.
   soDuBank: z.coerce
     .number()
     .int("Số tiền phải là số nguyên")

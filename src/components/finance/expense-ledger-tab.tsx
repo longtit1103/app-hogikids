@@ -63,22 +63,25 @@ export async function ExpenseLedgerTab({
   range,
   choPhepSua = false,
   choPhepTruThe = false,
+  laChuShop = false,
 }: {
   sp: ExpenseLedgerParams;
   range: DateRange;
   /** Có `chi-phi:sua`? `false` ⇒ ẩn nút thêm/nhập ads/thùng rác (server vẫn chặn ở cổng action). */
   choPhepSua?: boolean;
   /**
-   * Có `tai-chinh-so-quy:xem`? Thẻ tín dụng là hồ sơ của Sổ quỹ — thiếu ⇒ KHÔNG đọc danh sách thẻ, form chi
+   * Có `tai-chinh-so-quy:sua`? Thẻ tín dụng là hồ sơ của Sổ quỹ — thiếu ⇒ KHÔNG đọc danh sách thẻ, form chi
    * phí không có ô "Trừ vào thẻ" (tên thẻ không lộ ra người chỉ có quyền chi phí). Action gắn/đổi thẻ còn
    * đòi `tai-chinh-so-quy:sua`.
    */
   choPhepTruThe?: boolean;
+  /** Người xem là chủ shop? Chỉ chủ shop thấy lối "Sửa số tiền (trước ngày bật)" ở dòng chi phí ngày < M. */
+  laChuShop?: boolean;
 }) {
   // Backfill chi phí định kỳ cho MỌI tháng giao với range đang xem TRƯỚC khi
   // query sổ chi phí (range "Tùy chọn" có thể là tháng quá khứ/đa tháng).
-  // `boQuaNhapHang` > 0 ⇒ mẫu "Nhập hàng" còn chạy nhưng bị bỏ sau mốc bật nợ phải trả — khối định kỳ nhắc.
-  const { boQuaNhapHang } = await ensureRecurringExpensesForMonthsChiTiet(monthStartsInRange(range));
+  // Số lần bộ sinh bỏ qua vì đã bật nợ phải trả (mẫu "Nhập hàng"; lần đến hạn trước mốc) — khối định kỳ nhắc.
+  const { boQuaNhapHang, boQuaTruocM } = await ensureRecurringExpensesForMonthsChiTiet(monthStartsInRange(range));
 
   const [categoriesAll, channels, mocPhieuNhap, mocNoPhaiTra] = await Promise.all([
     prisma.expenseCategory.findMany(),
@@ -92,13 +95,14 @@ export async function ExpenseLedgerTab({
       },
       select: { key: true, value: true },
     }),
-    // Ô "Trừ vào thẻ" của form chi phí: chỉ có nghĩa SAU khi bật theo dõi nợ phải trả, chỉ cho người ghi
-    // có quyền xem Sổ quỹ (thẻ thuộc Sổ quỹ).
-    choPhepSua && choPhepTruThe ? docMocM() : Promise.resolve(null),
+    // Mốc M (một câu đọc `Setting`): ô "Trừ vào thẻ" của form chi phí (chỉ khi có thêm `tai-chinh-so-quy:sua` —
+    // thẻ thuộc Sổ quỹ, kiểm ở `theTinDung` dưới) và việc ẩn nút "Bật lại" mẫu Nhập hàng ở khối định kỳ (chỉ
+    // người có quyền sửa chi phí thấy nút).
+    choPhepSua ? docMocM() : Promise.resolve(null),
   ]);
   // Chỉ tên + id thẻ đang mở (không số dư): đủ cho ô chọn; số dư là dữ liệu của quyền Sổ quỹ.
   const theTinDung =
-    mocNoPhaiTra === null
+    mocNoPhaiTra === null || !choPhepTruThe
       ? undefined
       : {
           mocM: format(mocNoPhaiTra, "yyyy-MM-dd"),
@@ -252,12 +256,20 @@ export async function ExpenseLedgerTab({
             channels={channels}
             choPhepSua={choPhepSua}
             theTinDung={theTinDung}
+            mocM={mocNoPhaiTra}
+            laChuShop={laChuShop}
           />
         </>
       )}
 
       {/* Độc lập kỳ đang lọc ở trên — mẫu định kỳ là dữ liệu toàn cục, không theo range. */}
-      <KhoanChiDinhKySection items={recurringList} choPhepSua={choPhepSua} boQuaNhapHang={boQuaNhapHang} />
+      <KhoanChiDinhKySection
+        items={recurringList}
+        choPhepSua={choPhepSua}
+        boQuaNhapHang={boQuaNhapHang}
+        boQuaTruocM={boQuaTruocM}
+        mocNoPhaiTra={mocNoPhaiTra}
+      />
     </div>
   );
 }

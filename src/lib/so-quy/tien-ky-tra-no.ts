@@ -41,8 +41,15 @@ export function tongChuyenNganHang(args: {
   goc: number;
   tienGui: number;
   tienGuiSeNhanLai: number;
+  /**
+   * Khoản thấu chi "lãi nhập gốc" (`laLaiNhapGoc`): ngân hàng CỘNG lãi vào dư nợ, không trừ tài khoản
+   * ⇒ lãi KHÔNG nằm trong tiền chuyển. BẮT BUỘC truyền — một chỗ quên là in ra số chuyển thừa đúng
+   * bằng tiền lãi trong khi tài khoản thật không bị trừ đồng nào.
+   */
+  laiNhapGoc: boolean;
 }): number {
-  return args.lai + args.goc + args.tienGui - args.tienGuiSeNhanLai;
+  const laiTraTien = args.laiNhapGoc ? 0 : args.lai;
+  return laiTraTien + args.goc + args.tienGui - args.tienGuiSeNhanLai;
 }
 
 /**

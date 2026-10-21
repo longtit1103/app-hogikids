@@ -8,11 +8,14 @@ import { LoiHopDong, maLoiNhatKy, soTienKySchema } from "@/lib/actions/khoan-vay
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
+import { cauTatToanTruocM } from "@/lib/actions/khoan-vay-chung";
 import { loiSoTietKiem, REF_LAI_PREFIX } from "@/lib/actions/so-tiet-kiem-chung";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { chanDongTienTruocM } from "@/lib/no-phai-tra/chan-dong-tien-truoc-m";
+import { khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { congAction } from "@/lib/quyen/cong-action";
 import { laXungDotGhi } from "@/lib/prisma-loi-adapter";
 import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
@@ -31,6 +34,10 @@ import {
  * ba cận ngày, hai vị từ số dư), gộp chung là một file không ai giữ nổi trong đầu.
  *
  * Hai action ở đây là ĐƯỜNG DUY NHẤT `closedAt` được đặt hoặc gỡ.
+ *
+ * ĐÃ BẬT NỢ PHẢI TRẢ (mốc M): tất toán đề ngày < M, hay mở lại sổ có dòng nhận gốc / lãi ngày < M, bị từ chối
+ * qua cổng `chanDongTienTruocM` (tiền ngày < M đã chốt vào điều chỉnh mở sổ). Thứ tự khoá:
+ * `khoaChiaSeBatNoPhaiTra(tx)` câu ĐẦU → `khoaSoTietKiem` → đọc M + bản ghi cũ.
  *
  * Mọi action PHẢI nằm trong `DUONG_GHI` của `tests/khoa-bao-tri-duong-ghi.test.ts` — phép quét AST
  * chỉ đọc THÂN HÀM export nên `dangPhucHoi()` gọi trực tiếp tại đây, KHÔNG uỷ quyền.
@@ -101,6 +108,8 @@ export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ 
   try {
     await chayCoRetry(() =>
       prisma.$transaction(async (tx) => {
+        // BƯỚC 0 — khoá chung với bước bật nợ phải trả (câu ĐẦU): cổng ngày < M bên dưới cần M mới nhất.
+        await khoaChiaSeBatNoPhaiTra(tx);
         // BƯỚC 1 — khoá dòng `SoTietKiem` TRƯỚC KHI ĐỌC. Không có nó, một dòng ghi tay commit ngay
         // sau phép kiểm sẽ để lại sổ "đã tất toán" mà số đang gửi khác 0.
         await khoaSoTietKiem(tx, id);
@@ -137,6 +146,13 @@ export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ 
           );
         }
         // CẬN TRÊN — hôm nay: `ngayGhiTaySchema` đã chặn ngày tương lai ở tầng zod.
+
+        // CẬN DƯỚI 3 — mốc bật nợ phải trả M: `SAVINGS_IN` + `ThuNhap` lãi đều đề `ngay` ⇒ `ngay` < M bị từ chối.
+        await chanDongTienTruocM(
+          tx,
+          { loai: "TAO", ngay: [ngay] },
+          { cau: cauTatToanTruocM, field: "ngayTatToan" }
+        );
 
         // BƯỚC 3 — GỐC về quỹ = phần CÒN ĐANG GỬI, không phải `principal` khai trên sổ.
         //
@@ -263,6 +279,7 @@ export async function moLaiSoTietKiem(input: unknown): Promise<ActionResult<{ id
   try {
     await chayCoRetry(() =>
       prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
         await khoaSoTietKiem(tx, id);
         const so = await tx.soTietKiem.findUnique({ where: { id }, select: { closedAt: true } });
         if (!so) throw new LoiHopDong("Không tìm thấy sổ tiết kiệm");
@@ -277,6 +294,17 @@ export async function moLaiSoTietKiem(input: unknown): Promise<ActionResult<{ id
               "(tab Dòng tiền) trước, rồi mở lại sổ"
           );
         }
+
+        // Đã bật nợ phải trả: mở lại = xoá dòng nhận gốc + lãi của lượt tất toán ⇒ dòng nào ngày < M thì từ chối.
+        // Đọc ĐÚNG các dòng sắp xoá (cùng điều kiện hai câu `deleteMany` bên dưới), sau khoá.
+        const [dongNhan, dongLai] = await Promise.all([
+          tx.cashMovement.findMany({ where: { savingsId: id, kind: "SAVINGS_IN" }, select: { date: true } }),
+          tx.thuNhap.findMany({ where: { refId: `${REF_LAI_PREFIX}${id}` }, select: { date: true } }),
+        ]);
+        await chanDongTienTruocM(tx, {
+          loai: "XOA",
+          ngay: [...dongNhan.map((m) => m.date), ...dongLai.map((t) => t.date)],
+        });
 
         // FENCING: điều kiện `closedAt` khác null nằm TRONG câu UPDATE. Hai tab cùng bấm Mở lại thì
         // chỉ MỘT câu đổi được dòng; câu thua ném và rollback trước khi kịp xoá gì.

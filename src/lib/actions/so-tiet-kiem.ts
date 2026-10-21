@@ -7,10 +7,12 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { LoiHopDong, maLoiNhatKy } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { loiSoTietKiem, soTietKiemSchema } from "@/lib/actions/so-tiet-kiem-chung";
+import { cauGuiTruocM, loiSoTietKiem, soTietKiemSchema } from "@/lib/actions/so-tiet-kiem-chung";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { chanDongTienTruocM } from "@/lib/no-phai-tra/chan-dong-tien-truoc-m";
+import { khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { congAction } from "@/lib/quyen/cong-action";
 import { laXungDotGhi } from "@/lib/prisma-loi-adapter";
 import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
@@ -37,6 +39,11 @@ import { chanSoDuTietKiemAm, khoaSoTietKiem } from "@/lib/tiet-kiem/vi-tu-so-tie
  *
  * Mọi action ở đây PHẢI nằm trong `DUONG_GHI` của `tests/khoa-bao-tri-duong-ghi.test.ts` — phép quét
  * AST chỉ đọc THÂN HÀM export nên `dangPhucHoi()` phải gọi trực tiếp ở đây, KHÔNG uỷ quyền.
+ *
+ * ĐÃ BẬT NỢ PHẢI TRẢ (mốc M): dòng gửi/nhận ngày < M đã chốt vào điều chỉnh mở sổ ⇒ tạo / dời / đổi số tiền /
+ * xoá dòng tiền ngày < M bị từ chối qua MỘT cổng `chanDongTienTruocM`. Thứ tự khoá mọi transaction:
+ * `khoaChiaSeBatNoPhaiTra(tx)` câu ĐẦU → `khoaSoTietKiem` → đọc M + bản ghi cũ. Bước bật không khoá dòng
+ * `SoTietKiem` nên không có chu trình chờ.
  *
  * Isolation để MẶC ĐỊNH (ReadCommitted). TUYỆT ĐỐI KHÔNG Serializable — đo thật 08/09 ở đường khoản
  * vay: Serializable đóng băng snapshot tại câu đầu nên sau khi giành được khoá dòng, vị từ số dư VẪN
@@ -72,7 +79,9 @@ const idSchema = z.object({ id: z.string().min(1, "Chọn sổ tiết kiệm") }
  * vào sổ đang có (spec §2) nên dòng gửi là duy nhất và bằng đúng `principal`.
  *
  * KHÔNG gọi `khoaSoTietKiem` ở đây, khác 4 action còn lại: dòng `SoTietKiem` chưa tồn tại lúc vào
- * transaction nên không có gì để khoá, và `create` tự giữ khoá dòng nó vừa sinh tới lúc commit.
+ * transaction nên không có gì để khoá, và `create` tự giữ khoá dòng nó vừa sinh tới lúc commit. Khoá chung
+ * với bước bật thì VẪN phải có: không có nó, lượt tạo đọc M = null giữa lúc bước bật chưa commit rồi ghi dòng
+ * gửi < M sau lưng nó.
  */
 export async function taoSoTietKiem(input: unknown): Promise<ActionResult<{ id: string }>> {
   const c = await congAction("tai-chinh-so-quy:sua");
@@ -87,6 +96,12 @@ export async function taoSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
   try {
     const id = await chayCoRetry(() =>
       prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        await chanDongTienTruocM(
+          tx,
+          { loai: "TAO", ngay: [d.startDate] },
+          { cau: cauGuiTruocM, field: "startDate" }
+        );
         const so = await tx.soTietKiem.create({
           data: {
             name: d.name,
@@ -152,6 +167,7 @@ export async function suaSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
   try {
     await chayCoRetry(() =>
       prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
         await khoaSoTietKiem(tx, id);
         const so = await tx.soTietKiem.findUnique({
           where: { id },
@@ -160,6 +176,55 @@ export async function suaSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
         if (!so) throw new LoiHopDong("Không tìm thấy sổ tiết kiệm");
         if (so.closedAt !== null) {
           throw new LoiHopDong("Sổ đã tất toán — mở lại trước khi sửa");
+        }
+
+        const doiNenTang =
+          d.principal !== so.principal ||
+          d.startDate.getTime() !== startOfDay(so.startDate).getTime();
+
+        // Dòng gửi đọc SAU khoá (cả phần tiền lẫn khoá cha) — cổng trước mốc xét đúng bản sắp bị sửa.
+        const dongGui = doiNenTang
+          ? await tx.cashMovement.findMany({
+              where: { savingsId: id, kind: "SAVINGS_OUT" },
+              select: {
+                id: true,
+                date: true,
+                amount: true,
+                kind: true,
+                loanId: true,
+                savingsId: true,
+                cardId: true,
+                phieuNhapId: true,
+                viAdsId: true,
+              },
+              orderBy: { date: "asc" },
+            })
+          : [];
+        // Bất biến "1 sổ = 1 dòng gửi" (§7.1). Sổ lỡ có nhiều dòng thì app KHÔNG đoán sửa dòng
+        // nào — ném ⇒ rollback trọn.
+        if (dongGui.length > 1) {
+          throw new LoiHopDong(
+            "Sổ này có nhiều hơn một dòng gửi — xoá dòng ghi tay ở bảng Khoản tiền khác " +
+              "(tab Dòng tiền) trước, rồi sửa số tiền / ngày gửi"
+          );
+        }
+        const moiGui = { amount: d.principal, date: d.startDate };
+        if (doiNenTang) {
+          // Đã bật nợ phải trả: không đổi số tiền / ngày của dòng gửi < M, không dời dòng gửi về trước M. Sửa
+          // dòng có sẵn dùng câu chung (nói rõ "chỉ sửa được mô tả"); dựng lại dòng đã mất dùng câu của lượt tạo.
+          if (dongGui.length === 1) {
+            await chanDongTienTruocM(
+              tx,
+              { loai: "SUA", cu: dongGui[0], moi: { ...dongGui[0], ...moiGui } },
+              { field: "startDate" }
+            );
+          } else {
+            await chanDongTienTruocM(
+              tx,
+              { loai: "TAO", ngay: [moiGui.date] },
+              { cau: cauGuiTruocM, field: "startDate" }
+            );
+          }
         }
 
         await tx.soTietKiem.update({
@@ -177,25 +242,8 @@ export async function suaSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
           },
         });
 
-        const doiNenTang =
-          d.principal !== so.principal ||
-          d.startDate.getTime() !== startOfDay(so.startDate).getTime();
-
         if (doiNenTang) {
-          const dongGui = await tx.cashMovement.findMany({
-            where: { savingsId: id, kind: "SAVINGS_OUT" },
-            select: { id: true },
-            orderBy: { date: "asc" },
-          });
-          // Bất biến "1 sổ = 1 dòng gửi" (§7.1). Sổ lỡ có nhiều dòng thì app KHÔNG đoán sửa dòng
-          // nào — ném ⇒ rollback trọn, kể cả câu update hồ sơ ở trên.
-          if (dongGui.length > 1) {
-            throw new LoiHopDong(
-              "Sổ này có nhiều hơn một dòng gửi — xoá dòng ghi tay ở bảng Khoản tiền khác " +
-                "(tab Dòng tiền) trước, rồi sửa số tiền / ngày gửi"
-            );
-          }
-          const data = { amount: d.principal, date: d.startDate };
+          const data = moiGui;
           if (dongGui.length === 1) {
             await tx.cashMovement.update({ where: { id: dongGui[0].id }, data });
           } else {
@@ -250,6 +298,7 @@ export async function xoaSoTietKiem(input: unknown): Promise<ActionResult<null>>
   try {
     await chayCoRetry(() =>
       prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
         await khoaSoTietKiem(tx, id);
         const so = await tx.soTietKiem.findUnique({ where: { id }, select: { closedAt: true } });
         if (!so) throw new LoiHopDong("Không tìm thấy sổ tiết kiệm");
@@ -273,6 +322,11 @@ export async function xoaSoTietKiem(input: unknown): Promise<ActionResult<null>>
         const banGhi = await tx.soTietKiem.findUniqueOrThrow({ where: { id } });
         const dongTien = await tx.cashMovement.findMany({ where: { savingsId: id } });
         const dongLai = await tx.thuNhap.findMany({ where: { savingsId: id } });
+        // Đã bật nợ phải trả: không xoá dòng tiền nào ngày < M. Kiểm TRƯỚC câu chụp thùng rác.
+        await chanDongTienTruocM(tx, {
+          loai: "XOA",
+          ngay: [...dongTien.map((m) => m.date), ...dongLai.map((t) => t.date)],
+        });
         await chupVaoThungRac(tx, {
           bang: "SoTietKiem",
           banGhi,

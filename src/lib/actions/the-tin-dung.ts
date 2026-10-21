@@ -328,8 +328,16 @@ export async function ganNenTang(input: unknown): Promise<ActionResult<{ id: str
 }
 
 /**
- * Xoá MỘT mốc gắn — chỉ khi chưa có hiệu lực (`tuNgay` > hôm nay, khoá ngày VN). Mốc đã hiệu lực là lịch
- * sử gánh ads: xoá là dư nợ các ngày đã qua đổi thẻ. Muốn đổi thẻ thì thêm mốc mới.
+ * Xoá MỘT mốc gắn.
+ * - CHƯA bật theo dõi nợ (`docMocM` = null): xoá được MỌI mốc. Trước bật, mốc chỉ là hồ sơ chuẩn bị — mọi
+ *   nơi dùng mốc để tính số (`theCuaNenTang`, `mocCatNenTang`, bộ lọc quỹ `dieuKienChiPhiTruQuy`, dư nợ thẻ)
+ *   trả null / không lọc khi M null, nên xoá không đổi quỹ, dư nợ hay P&L đồng nào.
+ * - ĐÃ bật: chỉ xoá mốc chưa có hiệu lực (`tuNgay` > hôm nay, khoá ngày VN). Mốc đã tới ngày là lịch sử gánh
+ *   ads: xoá là dư nợ các ngày đã qua đổi thẻ. Muốn đổi thẻ thì thêm mốc mới.
+ *
+ * Khoá SHARED với bước bật đi ĐẦU transaction (như `ganNenTang`): không có nó, lượt xoá có thể đọc M = null
+ * đúng lúc bước bật đang chạy (chưa commit) rồi xoá một mốc mà bước bật vừa dùng — sau khi bật mốc đã tới ngày
+ * mà vẫn bị xoá hồi tố. Có khoá thì lượt xoá chờ bước bật commit rồi đọc M mới.
  */
 export async function xoaGanNenTang(id: string): Promise<ActionResult> {
   const c = await congAction("tai-chinh-so-quy:sua");
@@ -339,13 +347,16 @@ export async function xoaGanNenTang(id: string): Promise<ActionResult> {
 
   try {
     await prisma.$transaction(async (tx) => {
+      await khoaChiaSeBatNoPhaiTra(tx);
       const truoc = await tx.ganNenTangThe.findUnique({ where: { id }, select: { cardId: true } });
       if (!truoc) throw new LoiHopDong("Không tìm thấy mốc gắn");
       await khoaThe(tx, truoc.cardId);
       // Đọc lại SAU khoá — đọc trước khoá chỉ để biết khoá thẻ nào.
       const g = await tx.ganNenTangThe.findUnique({ where: { id } });
       if (!g) throw new LoiHopDong("Không tìm thấy mốc gắn");
-      if (khoaNgayVn(g.tuNgay) <= homNayKhoa()) {
+      // Đọc M SAU khoá (khoá SHARED ở đầu tx đã loại ca đọc giữa chừng bước bật).
+      const daBat = (await docMocM(tx)) !== null;
+      if (daBat && khoaNgayVn(g.tuNgay) <= homNayKhoa()) {
         throw new LoiHopDong("Mốc gắn đã có hiệu lực — không xoá được; đổi thẻ bằng cách thêm mốc mới");
       }
       await tx.ganNenTangThe.delete({ where: { id } });

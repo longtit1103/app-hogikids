@@ -16,10 +16,8 @@ import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
  * Bước ① (issue #247, 28/09): KHÔNG còn giả định `cuoiKy > 0` — DB e2e tích luỹ chi phí từ spec khác
  * có thể làm `cuoiKy` âm dù đã seed 100tr. Nhãn chênh lệch kỳ vọng suy TRỰC TIẾP từ chính `cuoiKy` vừa
  * đọc, gọi ĐÚNG hàm thuần `cauChenhLech` mà thẻ dùng để render (không đoán chữ tay) — đúng cho MỌI
- * dấu của `cuoiKy`. Bỏ qua `duNoThauChi` (mặc định 0 của `cauChenhLech`) là AN TOÀN cho `nhan`: tham
- * số đó chỉ đổi `giaiThich`, không đổi câu `nhan` đang so ở đây; còn khoản thấu chi DUY NHẤT trong bộ
- * e2e (`so-quy-khoan-vay.spec.ts`) tự tất toán trong cùng test VÀ chạy SAU file này theo thứ tự chữ
- * cái nên chưa từng tồn tại lúc spec này chạy.
+ * dấu của `cuoiKy`. Dư nợ thấu chi KHÔNG vào phép so (thấu chi giải ngân vào tài khoản — số dư tài
+ * khoản lẫn quỹ đều đã gồm tiền vay) nên bỏ qua khoản cấu trúc ở đây là AN TOÀN cho `nhan`.
  */
 const MO_TA = "E2E chot so du — mo so";
 
@@ -80,7 +78,7 @@ test.describe("Chốt số dư cuối tháng — tab Dòng tiền", () => {
     await expect(page.getByText(/Đã chốt số dư tháng/)).toBeVisible();
 
     const cuoiKy = docTien((await card.getByTestId("so-du-chot-cuoi-ky").innerText()).trim());
-    // soChot = 0 (đã gõ 0/0) ⇒ chenhLechTho = 0 − cuoiKy = −cuoiKy. Suy nhãn kỳ vọng từ CHÍNH số vừa
+    // soChot = 0 (đã gõ 0/0) ⇒ chenhLech = 0 − cuoiKy = −cuoiKy. Suy nhãn kỳ vọng từ CHÍNH số vừa
     // đọc thay vì giả định dấu — xem docblock đầu file (issue #247).
     const nhanKyVong = cauChenhLech(-cuoiKy).nhan;
     await expect(card.getByTestId("so-du-chot-chenh-lech")).toHaveText(nhanKyVong);

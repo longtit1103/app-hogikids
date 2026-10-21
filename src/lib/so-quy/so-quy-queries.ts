@@ -1,16 +1,20 @@
 import { cache } from "react";
 
 import type { Prisma } from "@/generated/prisma/client";
-import { addMonths, endOfDay, endOfMonth, format, startOfDay, startOfMonth, subDays } from "date-fns";
+import { endOfDay, startOfDay, startOfMonth, subDays } from "date-fns";
 
 import { chieuTien } from "@/lib/cash-movements/cash-movement-kinds";
 import { type DateRange } from "@/lib/date-range";
-import { mauDinhKySinhChoThang, ngayDenHanDinhKy } from "@/lib/expenses/ensure-recurring-expenses";
+import {
+  DINH_KY_RONG,
+  demDinhKyChuaGhi,
+  khoaDaSinh,
+  type DinhKyChuaGhi,
+} from "@/lib/expenses/dinh-ky-chua-ghi";
 import {
   dieuKienChiPhiTruQuy,
   dieuKienViTiktokCongLai,
 } from "@/lib/no-phai-tra/dieu-kien-chi-phi-tru-quy";
-import { laNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
 import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docNguCanhLoc, docNguCanhLocTrongRequest } from "@/lib/no-phai-tra/doc-ngu-canh-loc";
 import type { NguCanhLoc } from "@/lib/no-phai-tra/the-cua-dong-chi";
@@ -21,6 +25,7 @@ import {
   type SoQuyThang,
   type TongNguon,
 } from "@/lib/so-quy/cong-thuc-so-quy";
+import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 import { tongTienBanTrucTiep } from "@/lib/so-quy/tien-ban-truc-tiep";
 
 /**
@@ -74,30 +79,53 @@ export function boLocNguonQuy(khoang: KhoangNgayQuy, ctx: NguCanhLoc) {
 }
 
 /**
+ * Client đọc đủ 7 nguồn quỹ + ngữ cảnh lọc — prisma gốc hoặc `tx` đang chạy (bước bật nợ phải trả đọc lại quỹ
+ * cuối ngày trước M TRONG transaction, sau khoá EXCLUSIVE — không mượn thêm kết nối pool trong lúc giữ khoá).
+ */
+export type DbQuy = Pick<
+  Prisma.TransactionClient,
+  | "cashMovement"
+  | "tiktokPayment"
+  | "shopeeSettlement"
+  | "expense"
+  | "tiktokAdsSettlement"
+  | "thuNhap"
+  | "order"
+  | "setting"
+  | "ganNenTangThe"
+  | "viAdsTraTruoc"
+>;
+
+/**
  * 7 lượt đọc song song → 9 con số của `TongNguon`. Kỳ rỗng (tu > den) là hợp lệ: mọi số 0.
  * Thiếu `ctx` ⇒ tự đọc tươi (`docNguCanhLoc()` trần) — caller đọc nhiều kỳ cùng lượt nên truyền một ctx.
  */
-export async function docTongNguon(tu: Date | null, den: Date, ctx?: NguCanhLoc): Promise<TongNguon> {
+export async function docTongNguon(
+  tu: Date | null,
+  den: Date,
+  ctx?: NguCanhLoc,
+  db: DbQuy = prisma
+): Promise<TongNguon> {
   if (tu !== null && startOfDay(tu) > endOfDay(den)) return { ...TONG_RONG };
   const khoang = bien(tu, den);
-  const loc = boLocNguonQuy(khoang, ctx ?? (await docNguCanhLoc()));
+  const loc = boLocNguonQuy(khoang, ctx ?? (await docNguCanhLoc(db)));
 
   const [ghiTay, tiktok, shopee, chiPhi, adsVi, thuNhap, banTrucTiep] = await Promise.all([
     // Nhóm theo CẢ `cardId`: chiều của `ADS_TOPUP` phụ thuộc dòng (nạp bằng thẻ không chạm quỹ).
-    prisma.cashMovement.groupBy({ by: ["kind", "cardId"], where: loc.ghiTay, _sum: { amount: true } }),
-    prisma.tiktokPayment.aggregate({ where: loc.tiktokVeBank, _sum: { settlementValue: true } }),
-    prisma.shopeeSettlement.aggregate({ where: loc.shopeeRutVi, _sum: { amount: true } }),
-    prisma.expense.aggregate({ where: loc.chiPhi, _sum: { amount: true } }),
-    prisma.tiktokAdsSettlement.aggregate({
+    db.cashMovement.groupBy({ by: ["kind", "cardId"], where: loc.ghiTay, _sum: { amount: true } }),
+    db.tiktokPayment.aggregate({ where: loc.tiktokVeBank, _sum: { settlementValue: true } }),
+    db.shopeeSettlement.aggregate({ where: loc.shopeeRutVi, _sum: { amount: true } }),
+    db.expense.aggregate({ where: loc.chiPhi, _sum: { amount: true } }),
+    db.tiktokAdsSettlement.aggregate({
       where: loc.adsTiktokTruVi,
       _sum: { settlementAmount: true },
     }),
     // Thu nhập ngoài bán hàng (hiện chỉ lãi sổ tiết kiệm). Tiền THẬT đã về tài khoản đúng ngày `date`
     // — KHÔNG phải số dự kiến, nên đường đọc này hợp lệ với lưới canh thư mục. Cùng `khoang` với các
     // nguồn trên: sai biên kỳ ở đây là lãi nhảy tháng, ĐẦU KỲ(N+1) lệch CUỐI KỲ(N).
-    prisma.thuNhap.aggregate({ where: loc.thuNhap, _sum: { amount: true } }),
+    db.thuNhap.aggregate({ where: loc.thuNhap, _sum: { amount: true } }),
     // Cùng `khoang` với các nguồn trên — lệch biên là tiền bán nhảy tháng, ĐẦU KỲ(N+1) ≠ CUỐI KỲ(N).
-    tongTienBanTrucTiep(khoang),
+    tongTienBanTrucTiep(khoang, db),
   ]);
 
   // Chiều vào/ra SUY từ `kind` (một định nghĩa duy nhất ở cash-movement-kinds) — không cột riêng.
@@ -128,8 +156,8 @@ export async function docTongNguon(tu: Date | null, den: Date, ctx?: NguCanhLoc)
 }
 
 /** Ngày mở sổ = ngày dòng ghi tay ĐẦU TIÊN toàn bảng; null = chưa mở sổ (thẻ quỹ chỉ mời nhập quỹ). */
-export async function ngayMoSo(): Promise<Date | null> {
-  const r = await prisma.cashMovement.aggregate({ _min: { date: true } });
+export async function ngayMoSo(db: Pick<Prisma.TransactionClient, "cashMovement"> = prisma): Promise<Date | null> {
+  const r = await db.cashMovement.aggregate({ _min: { date: true } });
   return r._min.date ? startOfDay(r._min.date) : null;
 }
 
@@ -143,79 +171,71 @@ export async function ngayMoSo(): Promise<Date | null> {
  * render: 2 lời gọi = 2 lần chạy) — nhưng dựa vào chi tiết đó là mong manh, nên danh sách file được
  * dùng bản nhớ bị khoá ở `tests/unit/so-quy/ngay-mo-so-nho-theo-request.test.ts`.
  */
-export const ngayMoSoTrongRequest = cache(ngayMoSo);
+// Kiểu KHÔNG nhận `db`: bản nhớ chỉ dành cho prisma gốc (một `tx` đi qua đây là đọc nhầm bản cũ).
+export const ngayMoSoTrongRequest: () => Promise<Date | null> = cache(ngayMoSo);
+
+export type { DinhKyChuaGhi } from "@/lib/expenses/dinh-ky-chua-ghi";
+
+type DbDinhKy = Pick<Prisma.TransactionClient, "recurringExpense" | "expense">;
 
 /**
- * `thang` là nhãn "MM/yyyy", sắp tăng dần theo thời gian; rỗng ⇒ không có khoản nào thiếu.
- * `khoang` = từ đầu tháng thiếu SỚM nhất tới cuối tháng thiếu MUỘN nhất — cảnh báo dẫn thẳng Sổ chi phí
- * của đúng khoảng đó, vì tab ấy gọi `ensureRecurringExpensesForMonths` cho MỌI tháng trong range đang xem
- * ⇒ một lần bấm là app ghi bù đủ (link trần chỉ mở tháng hiện tại, tháng cũ vẫn thiếu).
+ * Đếm cặp (mẫu chi định kỳ active, tháng) có ngày đến hạn ∈ [D0, bienTren] mà CHƯA có Expense nào mang đúng
+ * `recurringId` trong tháng đó (lõi thuần `demDinhKyChuaGhi`). CHỈ ĐỌC: không tự sinh Expense, không đổi số
+ * quỹ/P&L nào. Đúng 1 query mẫu active + 1 query Expense rồi ghép trong bộ nhớ; không có mẫu active ⇒ rỗng
+ * ngay, không query thêm.
  */
-export type DinhKyChuaGhi = { soKhoan: number; thang: string[]; khoang: DateRange | null };
-
-const DINH_KY_RONG: DinhKyChuaGhi = { soKhoan: 0, thang: [], khoang: null };
+async function docDinhKyChuaGhiTrong(
+  db: DbDinhKy,
+  d0: Date,
+  bienTren: Date,
+  mocMDaBat: Date | null
+): Promise<DinhKyChuaGhi> {
+  if (bienTren < d0) return DINH_KY_RONG;
+  const mau = await db.recurringExpense.findMany({
+    where: { active: true },
+    select: { id: true, dayOfMonth: true, activeFrom: true, categoryId: true },
+  });
+  if (mau.length === 0) return DINH_KY_RONG;
+  // Mọi Expense định kỳ đã sinh từ tháng của D0 trở đi, của đúng các mẫu active.
+  const daSinh = await db.expense.findMany({
+    where: { recurringId: { in: mau.map((r) => r.id) }, date: { gte: startOfMonth(d0) } },
+    select: { recurringId: true, date: true },
+  });
+  return demDinhKyChuaGhi({
+    mau,
+    daSinh: new Set(daSinh.map((e) => khoaDaSinh(e.recurringId ?? "", e.date))),
+    d0,
+    bienTren,
+    mocMDaBat,
+  });
+}
 
 /**
- * Đếm cặp (mẫu chi định kỳ active, tháng) có ngày đến hạn ∈ [D0, min(den, cuối ngày hôm nay)] mà
- * CHƯA có Expense nào mang đúng `recurringId` trong tháng đó — nghĩa là `ensureRecurringExpenses`
- * chưa chạy cho tháng này (LAZY, chỉ sinh khi tháng được render). CHỈ ĐỌC: không tự sinh Expense,
- * không đổi số quỹ/P&L nào — chỉ báo cho chủ shop biết cần mở tháng đó để app tự ghi.
- *
- * Đúng 1 query mẫu active + 1 query Expense rồi ghép trong bộ nhớ (không query theo từng tháng×mẫu).
- * D0 null hoặc không có mẫu active ⇒ rỗng ngay, không query thêm.
+ * Cảnh báo thẻ Quỹ: đến hạn ∈ [D0, min(den, cuối ngày hôm nay)] — `ensureRecurringExpenses` chưa chạy cho
+ * tháng đó (LAZY). M ĐÃ bật (nếu có) bỏ qua lần đến hạn bộ sinh cố ý không sinh.
  */
 async function docDinhKyChuaGhi(d0: Date | null, den: Date): Promise<DinhKyChuaGhi> {
   if (d0 === null) return DINH_KY_RONG;
-
   const homNay = endOfDay(new Date());
   const bienTren = endOfDay(den) < homNay ? endOfDay(den) : homNay;
   if (bienTren < d0) return DINH_KY_RONG;
+  return docDinhKyChuaGhiTrong(prisma, d0, bienTren, await docMocM());
+}
 
-  const [active, mocM] = await Promise.all([
-    prisma.recurringExpense.findMany({
-      where: { active: true },
-      select: { id: true, dayOfMonth: true, activeFrom: true, categoryId: true },
-    }),
-    docMocM(),
-  ]);
-  if (active.length === 0) return DINH_KY_RONG;
-
-  const tuThang = startOfMonth(d0);
-  // Mọi Expense định kỳ đã sinh từ D0 trở đi, của đúng các mẫu active — ghép trong bộ nhớ bên dưới.
-  const daSinh = await prisma.expense.findMany({
-    where: { recurringId: { in: active.map((r) => r.id) }, date: { gte: tuThang } },
-    select: { recurringId: true, date: true },
-  });
-  const boDaSinh = new Set(daSinh.map((e) => `${e.recurringId}:${format(e.date, "yyyy-MM")}`));
-
-  let soKhoan = 0;
-  const thang: string[] = [];
-  const thangDaThem = new Set<string>();
-  let dauTien: Date | null = null;
-  let cuoiCung: Date | null = null;
-  for (let m = tuThang; m <= bienTren; m = addMonths(m, 1)) {
-    const key = format(m, "yyyy-MM");
-    for (const r of active) {
-      // Tháng trước mốc `activeFrom`: bộ sinh KHÔNG sinh ⇒ không phải "thiếu" (cùng cổng với bộ sinh).
-      if (!mauDinhKySinhChoThang(r.activeFrom, m)) continue;
-      const ngayDenHan = ngayDenHanDinhKy(r.dayOfMonth, m);
-      if (ngayDenHan < d0 || ngayDenHan > bienTren) continue; // chưa tới hạn hoặc trước ngày mở sổ
-      // Mẫu "Nhập hàng" sau mốc bật nợ: bộ sinh CỐ Ý bỏ lần này (cùng vị từ) ⇒ không phải "thiếu" —
-      // không thì cảnh báo đòi mở tháng mà mở ra bộ sinh cũng không sinh, không bao giờ tắt.
-      if (laNhapHangSauM({ categoryId: r.categoryId, date: ngayDenHan }, mocM)) continue;
-      if (boDaSinh.has(`${r.id}:${key}`)) continue; // đã sinh — không thiếu
-
-      soKhoan++;
-      if (!thangDaThem.has(key)) {
-        thangDaThem.add(key);
-        thang.push(format(m, "MM/yyyy"));
-        dauTien ??= m;
-        cuoiCung = m;
-      }
-    }
-  }
-  const khoang = dauTien && cuoiCung ? { from: dauTien, to: endOfMonth(cuoiCung) } : null;
-  return { soKhoan, thang, khoang };
+/**
+ * Điều kiện bật nợ phải trả: lần đến hạn ∈ [D0, cuối ngày M − 1] (và không quá hôm nay — chưa tới hạn thì bộ
+ * sinh cũng chưa sinh) của mẫu active mà chưa có dòng. `mocM` là ngày ĐANG bật: CHỈ làm biên trên, KHÔNG làm
+ * cổng bỏ qua (chưa bật ⇒ `mocMDaBat = null`). `db` = `tx` khi đọc trong transaction bước bật.
+ */
+export async function docDinhKyChuaGhiTruocM(
+  mocM: Date,
+  d0: Date | null,
+  db: DbDinhKy = prisma
+): Promise<DinhKyChuaGhi> {
+  if (d0 === null) return DINH_KY_RONG;
+  const cuoiTruocM = endOfDay(subDays(new Date(`${khoaNgayVn(mocM)}T00:00:00+07:00`), 1));
+  const homNay = endOfDay(new Date());
+  return docDinhKyChuaGhiTrong(db, startOfDay(d0), cuoiTruocM < homNay ? cuoiTruocM : homNay, null);
 }
 
 export type CanhBaoQuy = {

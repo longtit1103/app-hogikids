@@ -36,6 +36,8 @@ type Props = {
   coTienGui: boolean;
   /** Σ sổ tiết kiệm ngân hàng trả lại ngay sau kỳ này — 0 ở mọi kỳ không phải kỳ cuối. */
   tienGuiSeNhanLai: number;
+  /** Thấu chi "lãi nhập gốc" (`laLaiNhapGoc`): lãi cộng vào dư nợ, không nằm trong tiền chuyển. */
+  laiNhapGoc: boolean;
 };
 
 export function KyTraNoInputs({
@@ -48,8 +50,9 @@ export function KyTraNoInputs({
   thauChi,
   coTienGui,
   tienGuiSeNhanLai,
+  laiNhapGoc,
 }: Props) {
-  const tongChuyen = tongChuyenNganHang({ lai, goc, tienGui, tienGuiSeNhanLai });
+  const tongChuyen = tongChuyenNganHang({ lai, goc, tienGui, tienGuiSeNhanLai, laiNhapGoc });
   return (
     <div
       className={`mt-3 grid grid-cols-1 gap-3 ${coTienGui ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
@@ -78,7 +81,9 @@ export function KyTraNoInputs({
           />
         </label>
         <p className="text-xs text-muted-foreground">
-          {thauChi
+          {laiNhapGoc
+            ? "Lãi nhập gốc: ngân hàng không thu tiền lãi — để Gốc = 0 trừ khi tháng này có chuyển tiền trả bớt gốc."
+            : thauChi
             ? "Thấu chi: ngân hàng chỉ thu lãi — để Gốc = 0 trừ khi tháng này có trả bớt gốc."
             : tienGui > 0
               ? "Ngân hàng thu tổng cố định mỗi tháng? Điền Gốc = tổng ngân hàng thu − Lãi − Tiền gửi."
@@ -108,6 +113,12 @@ export function KyTraNoInputs({
           nộp — ca thật 1.121.096 + 0 + 300.000 − 10.800.000 = −9.378.904. In "Tổng chuyển ngân hàng:
           −9.378.904 ₫" thì chủ shop đọc là lỗi; đảo hẳn câu và in trị tuyệt đối mới nói đúng chuyện
           (kỳ đó ngân hàng trả ròng về cho shop). Phép tính KHÔNG đổi — chỉ đổi cách in. */}
+      {laiNhapGoc && (
+        <p className="col-span-full text-xs font-medium text-ink" data-testid="ky-lai-nhap-goc-cau">
+          Lãi cộng vào dư nợ thấu chi — tài khoản không bị trừ. Tổng chuyển ngân hàng kỳ này:{" "}
+          {formatVnd(tongChuyen)}.
+        </p>
+      )}
       {coTienGui &&
         (tongChuyen < 0 ? (
           <p className="col-span-full text-xs font-medium text-ink">

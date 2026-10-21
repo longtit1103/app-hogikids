@@ -49,7 +49,8 @@ import { capNhatSoPhieuNhapChuaGhi } from "@/lib/nhap-hang/cap-nhat-so-phieu-nha
  * kéo ⇒ vẫn đếm + chốt ô như thường, rồi trả `loiSauKhiGhi` ⇒ dòng bước cuối ERROR, HTTP 200 (n8n
  * đã tự đánh đỏ lượt của nó, trả 500 chỉ nhân đôi lỗi) ⇒ nút "Đồng bộ ngay" báo lỗi nêu stream/shop
  * thay vì "Đồng bộ xong". Body cũ `{}`/không body ⇒ như trước; body hỏng ⇒ bỏ qua + cảnh báo, KHÔNG
- * ảnh hưởng phép đếm.
+ * ảnh hưởng phép đếm. Body mang thêm `luotId` (mã lượt do `triggerSyncNow` cấp, thêm 2026-10-12)
+ * ⇒ gắn vào `stats.luotId` của dòng bước cuối.
  */
 export async function POST(req: Request): Promise<Response> {
   const unauthorized = requireIngestSecret(req);
@@ -62,8 +63,10 @@ export async function POST(req: Request): Promise<Response> {
   const bodyTho = await req.text().catch(() => "");
   const tomTat = docTomTatLoiKeo(bodyTho);
 
+  // `luotId` (nếu workflow chuyển kèm) gắn ngay từ dòng RUNNING: nút bấm lọc bước cuối theo mã lượt
+  // của mình ⇒ hai lượt chạy chồng không lấy kết cục của nhau (`getTienDoDongBoNgay`).
   return withSyncLog("PANCAKE", (warnings) => demNhacViec(tomTat, warnings), {
-    dauNhanDien: { mode: MODE_BUOC_CUOI_DONG_BO_NGAY },
+    dauNhanDien: { mode: MODE_BUOC_CUOI_DONG_BO_NGAY, ...(tomTat.luotId ? { luotId: tomTat.luotId } : {}) },
   });
 }
 

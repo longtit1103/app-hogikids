@@ -17,6 +17,7 @@ import { docChenhLechTaiM, xacNhanBatNoPhaiTra } from "@/lib/actions/bat-no-phai
 import { taoViAds } from "@/lib/actions/vi-ads";
 import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { kiemDieuKienBat } from "@/lib/no-phai-tra/dieu-kien-bat-no-phai-tra";
+import { docVanTayQuyTruocM } from "@/lib/no-phai-tra/doc-chenh-lech-tai-m";
 import { ghiKhoiTaoNoPhaiTra } from "@/lib/no-phai-tra/ghi-khoi-tao-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
@@ -83,6 +84,13 @@ const yeuCau = (A: string, B: string, ghiDe: Record<string, unknown> = {}) => ({
   ...ghiDe,
 });
 
+/**
+ * Bấm bật như màn hình: gửi kèm vân tay số liệu trước M bước 2 vừa hiện — ở đây đọc ngay trước khi bấm (không
+ * lượt ghi nào chen giữa). Ca vân tay cũ nằm ở `van-tay-quy-buoc-bat.integration.test.ts`.
+ */
+const xacNhan = async (yc: { mocM: string } & Record<string, unknown>) =>
+  xacNhanBatNoPhaiTra({ vanTayQuy: await docVanTayQuyTruocM(vn(yc.mocM)), ...yc });
+
 const demCutover = () => prisma.cashMovement.count({ where: { kind: { in: ["CUTOVER_ADJ_IN", "CUTOVER_ADJ_OUT"] } } });
 // Nhật ký không nằm trong bộ dọn bảng nghiệp vụ và `thoiDiem` dính đồng hồ giả ⇒ so SỐ DÒNG trước/sau.
 const demNhatKyBat = (chua?: string) =>
@@ -95,7 +103,9 @@ const docM = async () =>
 describe("xacNhanBatNoPhaiTra", () => {
   it("bật lần đầu: sao kê + neo M−1 mỗi thẻ, 2 dòng CUTOVER_ADJ_IN đúng ngày M, Setting M, nhật ký", async () => {
     const { A, B } = await seed();
-    const r = await xacNhanBatNoPhaiTra(yeuCau(A, B));
+    // Nhật ký không bị dọn giữa các file ⇒ đếm đúng dòng của lượt này (file khác có thể đã bật với M khác).
+    const nhatKyTruoc = await demNhatKyBat("Bật từ 2026-11-01 · 2 thẻ");
+    const r = await xacNhan(yeuCau(A, B));
     expect(r).toMatchObject({ ok: true, data: { mocM: "2026-11-01", soThe: 2, tacDong: tr(15) } });
     expect(r).not.toHaveProperty("code");
 
@@ -115,21 +125,20 @@ describe("xacNhanBatNoPhaiTra", () => {
     ]);
     for (const c of cut) expect(c.date).toEqual(vn("2026-11-01"));
 
-    const nk = await prisma.auditLog.findFirstOrThrow({ where: { hanhDong: "NO_PHAI_TRA_BAT" } });
-    expect(nk.doiTuongMoTa).toContain("2026-11-01");
+    expect(await demNhatKyBat("Bật từ 2026-11-01 · 2 thẻ")).toBe(nhatKyTruoc + 1);
   });
 
   it("gửi lại CÙNG mã ⇒ DA_GHI_ROI, không thêm điều chỉnh; mã KHÁC sau khi bật ⇒ DA_BAT_ROI, không ghi", async () => {
     const { A, B } = await seed();
     const yc = yeuCau(A, B);
-    expect(await xacNhanBatNoPhaiTra(yc)).toMatchObject({ ok: true });
+    expect(await xacNhan(yc)).toMatchObject({ ok: true });
     expect(await demCutover()).toBe(2);
 
-    const lai = await xacNhanBatNoPhaiTra(yc);
+    const lai = await xacNhan(yc);
     expect(lai).toMatchObject({ ok: true, code: "DA_GHI_ROI", data: { mocM: "2026-11-01" } });
     expect(await demCutover()).toBe(2);
 
-    const khac = await xacNhanBatNoPhaiTra(yeuCau(A, B));
+    const khac = await xacNhan(yeuCau(A, B));
     expect(khac).toMatchObject({ ok: false, code: "DA_BAT_ROI" });
     expect(await demCutover()).toBe(2);
     expect(await prisma.kySaoKeThe.count()).toBe(4);
@@ -140,15 +149,15 @@ describe("xacNhanBatNoPhaiTra", () => {
   it("cùng mã khác nội dung ⇒ từ chối", async () => {
     const { A, B } = await seed();
     const yc = yeuCau(A, B);
-    expect(await xacNhanBatNoPhaiTra(yc)).toMatchObject({ ok: true });
-    const r = await xacNhanBatNoPhaiTra({ ...yc, dieuChinh: [] });
+    expect(await xacNhan(yc)).toMatchObject({ ok: true });
+    const r = await xacNhan({ ...yc, dieuChinh: [] });
     expect(r).toMatchObject({ ok: false });
     expect(await demCutover()).toBe(2);
   });
 
   it("hai tab bấm đồng thời (hai mã) ⇒ đúng một lượt bật, lượt kia DA_BAT_ROI", async () => {
     const { A, B } = await seed();
-    const [r1, r2] = await Promise.all([xacNhanBatNoPhaiTra(yeuCau(A, B)), xacNhanBatNoPhaiTra(yeuCau(A, B))]);
+    const [r1, r2] = await Promise.all([xacNhan(yeuCau(A, B)), xacNhan(yeuCau(A, B))]);
     const ok = [r1, r2].filter((r) => r.ok);
     const tuChoi = [r1, r2].filter((r) => !r.ok);
     expect(ok).toHaveLength(1);
@@ -159,7 +168,7 @@ describe("xacNhanBatNoPhaiTra", () => {
 
   it("chênh 0 ⇒ không dòng điều chỉnh nào (vẫn bật); chênh âm ⇒ CUTOVER_ADJ_OUT", async () => {
     const { A, B } = await seed();
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B, { dieuChinh: [{ chieu: "IN", soTien: 0, moTa: "" }] }))).toMatchObject({
+    expect(await xacNhan(yeuCau(A, B, { dieuChinh: [{ chieu: "IN", soTien: 0, moTa: "" }] }))).toMatchObject({
       ok: true,
       data: { dieuChinh: [], tacDong: 0 },
     });
@@ -169,7 +178,7 @@ describe("xacNhanBatNoPhaiTra", () => {
     await truncateBusinessTables();
     await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
     const s = await seed();
-    const r = await xacNhanBatNoPhaiTra(
+    const r = await xacNhan(
       yeuCau(s.A, s.B, { dieuChinh: [{ chieu: "OUT", soTien: tr(2), moTa: "chi chưa ghi" }] })
     );
     expect(r).toMatchObject({ ok: true, data: { tacDong: -tr(2) } });
@@ -182,6 +191,7 @@ describe("xacNhanBatNoPhaiTra", () => {
     const vi1 = await prisma.viAdsTraTruoc.create({
       data: { nenTang: "SHOPEE_ADS", soDuNeo: 0, ngayNeo: vn("2026-10-20") },
     });
+    const vanTay = await docVanTayQuyTruocM(vn("2026-11-01"));
     await expect(
       prisma.$transaction((tx) =>
         ghiKhoiTaoNoPhaiTra(tx, {
@@ -192,6 +202,7 @@ describe("xacNhanBatNoPhaiTra", () => {
             saoKeCuoi: { ...t.saoKeCuoi, ngayChot: vn(t.saoKeCuoi.ngayChot), hanTra: vn(t.saoKeCuoi.hanTra) },
           })),
           viAds: [{ viAdsId: vi1.id, soDuNeo: tr(3) }],
+          vanTayQuyDaThay: vanTay,
           // Dòng đầu ghi được, dòng hai mô tả toàn khoảng trắng ⇒ ném SAU khi đã ghi thẻ, ví, một CUTOVER.
           dieuChinh: [
             { chieu: "IN", soTien: tr(9), moTa: "nợ thẻ A" },
@@ -208,7 +219,7 @@ describe("xacNhanBatNoPhaiTra", () => {
 
   it("thiếu một thẻ đang mở ⇒ THIEU_THE (thẻ không neo thì sau bật không có điểm xuất phát dư nợ)", async () => {
     const { A, B } = await seed();
-    const r = await xacNhanBatNoPhaiTra(yeuCau(A, B, { the: theFixture(A, B).slice(0, 1) }));
+    const r = await xacNhan(yeuCau(A, B, { the: theFixture(A, B).slice(0, 1) }));
     expect(r).toMatchObject({ ok: false, code: "THIEU_THE" });
     expect(r.ok === false && r.error).toContain("Thẻ B");
     expect(await docM()).toBeNull();
@@ -216,13 +227,13 @@ describe("xacNhanBatNoPhaiTra", () => {
 
   it("điều kiện tiên quyết: chưa tới M · tháng đã chốt số dư · Shopee Ads thiếu hồ sơ ví · còn mẫu định kỳ Nhập hàng", async () => {
     const { A, B } = await seed();
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B, { mocM: "2026-11-04" }))).toMatchObject({
+    expect(await xacNhan(yeuCau(A, B, { mocM: "2026-11-04" }))).toMatchObject({
       ok: false,
       code: "CHUA_TOI_NGAY_M",
     });
 
     await prisma.soDuChotThang.create({ data: { thang: vn("2026-11-01"), soDuBank: 0, tienMat: 0 } });
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B))).toMatchObject({ ok: false, code: "M_KHONG_SAU_THANG_DA_CHOT" });
+    expect(await xacNhan(yeuCau(A, B))).toMatchObject({ ok: false, code: "M_KHONG_SAU_THANG_DA_CHOT" });
     await prisma.soDuChotThang.deleteMany();
     // Chốt tháng 10 thì M = 01/11 hợp lệ.
     await prisma.soDuChotThang.create({ data: { thang: vn("2026-10-01"), soDuBank: 0, tienMat: 0 } });
@@ -237,7 +248,7 @@ describe("xacNhanBatNoPhaiTra", () => {
         source: "MANUAL",
       },
     });
-    const thieuVi = await xacNhanBatNoPhaiTra(yeuCau(A, B));
+    const thieuVi = await xacNhan(yeuCau(A, B));
     expect(thieuVi).toMatchObject({ ok: false, code: "THIEU_HO_SO_VI" });
 
     const vi1 = await taoViAds({ nenTang: "SHOPEE_ADS", nguonNap: "BANK" });
@@ -245,7 +256,7 @@ describe("xacNhanBatNoPhaiTra", () => {
     await prisma.recurringExpense.create({
       data: { categoryId: "purchase", amount: tr(5), dayOfMonth: 5, description: "Nhập hàng tháng", active: true },
     });
-    const conMau = await xacNhanBatNoPhaiTra(
+    const conMau = await xacNhan(
       yeuCau(A, B, { viAds: [{ viAdsId: vi1.ok ? vi1.data.id : "", soDuNeo: tr(3) }] })
     );
     expect(conMau).toMatchObject({ ok: false, code: "CON_MAU_DINH_KY_NHAP_HANG" });
@@ -253,7 +264,7 @@ describe("xacNhanBatNoPhaiTra", () => {
     expect(await docM()).toBeNull();
 
     await prisma.recurringExpense.updateMany({ data: { active: false } });
-    const ok = await xacNhanBatNoPhaiTra(
+    const ok = await xacNhan(
       yeuCau(A, B, { viAds: [{ viAdsId: vi1.ok ? vi1.data.id : "", soDuNeo: tr(3) }] })
     );
     expect(ok).toMatchObject({ ok: true, data: { soVi: 1 } });
@@ -274,7 +285,7 @@ describe("xacNhanBatNoPhaiTra", () => {
         refId: "PNK:9",
       },
     });
-    const r = await xacNhanBatNoPhaiTra(yeuCau(A, B));
+    const r = await xacNhan(yeuCau(A, B));
     expect(r).toMatchObject({ ok: false, code: "CON_NHAP_HANG_SAU_M" });
     expect(r.ok === false && r.error).toContain("02/11/2026");
     expect(r.ok === false && r.error).toContain("Nhập hàng phiếu #9");
@@ -299,7 +310,7 @@ describe("xacNhanBatNoPhaiTra", () => {
     });
 
     await prisma.expense.update({ where: { id: phieu.id }, data: { date: vn("2026-10-31") } });
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B))).toMatchObject({ ok: true });
+    expect(await xacNhan(yeuCau(A, B))).toMatchObject({ ok: true });
   });
 
   it("Shopee Ads có chi 90 ngày, không hồ sơ ví: không cờ xác nhận ⇒ THIEU_HO_SO_VI; có cờ ⇒ bật, lưu vết nhật ký + kết quả yêu cầu", async () => {
@@ -307,7 +318,7 @@ describe("xacNhanBatNoPhaiTra", () => {
     await prisma.expense.create({
       data: { date: vn("2026-10-20"), categoryId: "ads", adsSource: "SHOPEE_ADS", amount: tr(1), description: "Shopee Ads", source: "MANUAL" },
     });
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B, { xacNhanViShopeeChuaTheoDoi: false }))).toMatchObject({
+    expect(await xacNhan(yeuCau(A, B, { xacNhanViShopeeChuaTheoDoi: false }))).toMatchObject({
       ok: false,
       code: "THIEU_HO_SO_VI",
     });
@@ -315,7 +326,7 @@ describe("xacNhanBatNoPhaiTra", () => {
 
     const truoc = await demNhatKyBat("ví Shopee Ads chưa theo dõi");
     const yc = yeuCau(A, B, { xacNhanViShopeeChuaTheoDoi: true });
-    expect(await xacNhanBatNoPhaiTra(yc)).toMatchObject({ ok: true, data: { viShopeeChuaTheoDoi: true, soVi: 0 } });
+    expect(await xacNhan(yc)).toMatchObject({ ok: true, data: { viShopeeChuaTheoDoi: true, soVi: 0 } });
     expect(await docM()).toBe("2026-11-01");
     expect(await demNhatKyBat("ví Shopee Ads chưa theo dõi")).toBe(truoc + 1);
     const kq = await prisma.yeuCauGhi.findUniqueOrThrow({ where: { id: yc.yeuCauId } });
@@ -325,7 +336,7 @@ describe("xacNhanBatNoPhaiTra", () => {
   it("cờ xác nhận ví khi KHÔNG thiếu hồ sơ ví ⇒ bật bình thường, không lưu vết 'chưa theo dõi'", async () => {
     const { A, B } = await seed();
     const [tong, chuaTheoDoi] = await Promise.all([demNhatKyBat(), demNhatKyBat("chưa theo dõi")]);
-    const r = await xacNhanBatNoPhaiTra(yeuCau(A, B, { xacNhanViShopeeChuaTheoDoi: true }));
+    const r = await xacNhan(yeuCau(A, B, { xacNhanViShopeeChuaTheoDoi: true }));
     expect(r).toMatchObject({ ok: true, data: { viShopeeChuaTheoDoi: false } });
     expect(await demNhatKyBat()).toBe(tong + 1);
     expect(await demNhatKyBat("chưa theo dõi")).toBe(chuaTheoDoi);
@@ -333,18 +344,18 @@ describe("xacNhanBatNoPhaiTra", () => {
 
   it("chốt thứ hai: gỡ Setting rồi bật mã khác ⇒ DA_BAT_ROI (còn CUTOVER); gỡ cả CUTOVER ⇒ vẫn DA_BAT_ROI (yêu cầu bật đã ghi)", async () => {
     const { A, B } = await seed();
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B))).toMatchObject({ ok: true });
+    expect(await xacNhan(yeuCau(A, B))).toMatchObject({ ok: true });
     expect(await demCutover()).toBe(2);
 
     await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-    const lai = await xacNhanBatNoPhaiTra(yeuCau(A, B));
+    const lai = await xacNhan(yeuCau(A, B));
     expect(lai).toMatchObject({ ok: false, code: "DA_BAT_ROI" });
     expect(lai.ok === false && lai.error).toContain("gỡ Setting không phải cách tắt");
     expect(await demCutover()).toBe(2);
     expect(await docM()).toBeNull();
 
     await prisma.cashMovement.deleteMany({ where: { kind: { in: ["CUTOVER_ADJ_IN", "CUTOVER_ADJ_OUT"] } } });
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B))).toMatchObject({ ok: false, code: "DA_BAT_ROI" });
+    expect(await xacNhan(yeuCau(A, B))).toMatchObject({ ok: false, code: "DA_BAT_ROI" });
     expect(await demCutover()).toBe(0);
     expect(await prisma.yeuCauGhi.count({ where: { loai: "XAC_NHAN_BAT" } })).toBe(1);
   });
@@ -353,7 +364,7 @@ describe("xacNhanBatNoPhaiTra", () => {
     const { A, B } = await seed();
     // Mở sổ sớm để M_TRUOC_MO_SO không che mã đang kiểm.
     await prisma.cashMovement.create({ data: { date: vn("2026-08-01"), kind: "CAPITAL_IN", amount: 1, description: "mở sổ sớm" } });
-    const r = await xacNhanBatNoPhaiTra(yeuCau(A, B, { mocM: "2026-09-30" }));
+    const r = await xacNhan(yeuCau(A, B, { mocM: "2026-09-30" }));
     expect(r).toMatchObject({ ok: false, code: "M_LUI_QUA_XA" });
     expect(r.ok === false && r.error).toContain("01/10/2026");
     expect(await docM()).toBeNull();
@@ -362,19 +373,19 @@ describe("xacNhanBatNoPhaiTra", () => {
   it("có hồ sơ ví mà không khai số dư ví ⇒ THIEU_VI", async () => {
     const { A, B } = await seed();
     await prisma.viAdsTraTruoc.create({ data: { nenTang: "SHOPEE_ADS", soDuNeo: 0, ngayNeo: vn("2026-10-20") } });
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B))).toMatchObject({ ok: false, code: "THIEU_VI" });
+    expect(await xacNhan(yeuCau(A, B))).toMatchObject({ ok: false, code: "THIEU_VI" });
   });
 
   it("sao kê chốt ĐÚNG ngày M−1 ⇒ một dòng làm cả sao kê lẫn neo; hai số khác nhau ⇒ từ chối", async () => {
     const { A, B } = await seed();
     const the = theFixture(A, B);
     const lech = [{ ...the[0], saoKeCuoi: { ...the[0].saoKeCuoi, ngayChot: "2026-10-31", soDu: tr(10) } }, the[1]];
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B, { the: lech }))).toMatchObject({
+    expect(await xacNhan(yeuCau(A, B, { the: lech }))).toMatchObject({
       ok: false,
       code: "SAO_KE_CHOT_DUNG_NGAY_TRUOC_M",
     });
     const khop = [{ ...the[0], saoKeCuoi: { ...the[0].saoKeCuoi, ngayChot: "2026-10-31", soDu: tr(9) } }, the[1]];
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B, { the: khop }))).toMatchObject({ ok: true });
+    expect(await xacNhan(yeuCau(A, B, { the: khop }))).toMatchObject({ ok: true });
     const kyA = await prisma.kySaoKeThe.findMany({ where: { cardId: A } });
     expect(kyA).toHaveLength(1);
     expect(kyA[0]).toMatchObject({ soDu: tr(9), laNeoMoSo: false });
@@ -383,7 +394,7 @@ describe("xacNhanBatNoPhaiTra", () => {
 
   it("mô tả toàn TAB/NBSP ⇒ zod từ chối (CHECK btrim trong DB không bắt)", async () => {
     const { A, B } = await seed();
-    const r = await xacNhanBatNoPhaiTra(yeuCau(A, B, { dieuChinh: [{ chieu: "IN", soTien: tr(9), moTa: "\t " }] }));
+    const r = await xacNhan(yeuCau(A, B, { dieuChinh: [{ chieu: "IN", soTien: tr(9), moTa: "\t " }] }));
     expect(r).toMatchObject({ ok: false });
     expect(await docM()).toBeNull();
   });
@@ -393,7 +404,7 @@ describe("xacNhanBatNoPhaiTra", () => {
     vi.mocked(docNguoiDungPhien).mockResolvedValue(
       nguoiDungGia({ role: "STAFF", quyen: new Set(["tai-chinh-so-quy:sua", "tai-chinh-so-quy:xem"]) })
     );
-    expect(await xacNhanBatNoPhaiTra(yeuCau(A, B))).toMatchObject({ ok: false });
+    expect(await xacNhan(yeuCau(A, B))).toMatchObject({ ok: false });
     expect(await docM()).toBeNull();
   });
 });
@@ -508,11 +519,12 @@ describe("docChenhLechTaiM", () => {
       data: { date: vn("2026-11-01", "09:00:00"), categoryId: "other", amount: tr(4), description: "ngày M", source: "MANUAL" },
     });
 
-    // Quỹ 31/10 = 150 + 10 (rút thấu chi) − 53,6 = 106,4. Ngân hàng thật (thấu chi âm phần đó): 106,4 − 10 + 15
-    // (nợ thẻ) + 20 (phiếu Y) − 3 (đã nạp ví) − 7 (tiền mặt nằm ngoài ngân hàng) = 121,4.
+    // Quỹ 31/10 = 150 + 10 (rút thấu chi) − 53,6 = 106,4. Thấu chi giải ngân VÀO tài khoản nên ngân hàng thật
+    // cũng đã gồm 10 tiền vay: 106,4 + 15 (nợ thẻ) + 20 (phiếu Y) − 3 (đã nạp ví) − 7 (tiền mặt nằm ngoài ngân
+    // hàng) = 131,4. Dư nợ 10 chỉ hiển thị — cộng vào chênh là thừa 10, phần chưa giải thích thành +10.
     const r = await docChenhLechTaiM({
       mocM: "2026-11-01",
-      soDuBank: tr(121.4),
+      soDuBank: tr(131.4),
       tienMat: tr(7),
       the: [
         { cardId: A, duNo: tr(9) },

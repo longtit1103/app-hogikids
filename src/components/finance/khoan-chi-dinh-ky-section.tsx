@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatVnd } from "@/lib/format";
 import type { RecurringExpenseRow } from "@/lib/expenses/expense-queries";
 import { thangChoBatLai } from "@/lib/expenses/thang-cho-bat-lai";
+import { laNhapHangDaKhoaSo } from "@/lib/no-phai-tra/chan-so-chi-phi-da-khoa";
 
 /**
  * Khối liệt kê MỌI mẫu chi định kỳ (đang chạy lẫn đã dừng) — tab "Sổ chi phí". Mẫu đã dừng có nút
@@ -20,34 +21,57 @@ export function KhoanChiDinhKySection({
   items,
   choPhepSua = false,
   boQuaNhapHang = 0,
+  boQuaTruocM = 0,
+  mocNoPhaiTra = null,
 }: {
   items: RecurringExpenseRow[];
   /** Có `chi-phi:sua` (server tính). Thiếu/false ⇒ không nút "Bật lại" (action vẫn tự chặn). */
   choPhepSua?: boolean;
   /**
-   * Số lần phát sinh của mẫu "Nhập hàng" bị bộ sinh BỎ QUA vì rơi vào/sau mốc bật theo dõi nợ phải trả
-   * (`ensureRecurringExpensesChiTiet`, các tháng đang xem). > 0 ⇒ nhắc chủ shop: mẫu vẫn "Đang chạy"
-   * nhưng không sinh nữa — tiền hàng đi phiếu nợ + "Trả tiền hàng".
+   * Số lần phát sinh (từ mốc) của mẫu "Nhập hàng" bị bộ sinh BỎ QUA vì đã bật theo dõi nợ phải trả
+   * (`ensureRecurringExpensesChiTiet`, các tháng đang xem). > 0 ⇒ nhắc chủ shop: mẫu vẫn "Đang chạy" nhưng không
+   * sinh nữa — tiền hàng đi phiếu nợ + "Trả tiền hàng".
    */
   boQuaNhapHang?: number;
+  /**
+   * Số lần đến hạn TRƯỚC mốc bật (mẫu bất kỳ) mà bộ sinh không ghi bù vì sổ chi phí trước mốc đã khoá — quỹ trước
+   * mốc đã chốt theo tiền thật. > 0 ⇒ nói rõ để chủ shop không tưởng app "quên" khoản đó.
+   */
+  boQuaTruocM?: number;
+  /**
+   * Mốc M bật theo dõi nợ phải trả (`docMocM`, server đọc) — null/thiếu = chưa bật. Đã bật ⇒ mẫu Nhập hàng
+   * đã dừng KHÔNG hiện "Bật lại" (server từ chối `DA_BAT_NO_PHAI_TRA` bằng đúng vị từ `laNhapHangDaKhoaSo`),
+   * thay bằng chú thích tiền hàng đi sổ nợ.
+   */
+  mocNoPhaiTra?: Date | null;
 }) {
   if (items.length === 0) return null;
 
   const soDangChay = items.filter((i) => i.active).length;
   const soDaDung = items.length - soDangChay;
-  const thang = thangChoBatLai(new Date());
+  const now = new Date();
+  const thang = thangChoBatLai(now);
 
   return (
     // Có lần bị bỏ ⇒ mở sẵn: lời nhắc nằm trong khối gấp thì không ai thấy.
-    <details className="rounded-xl border border-hairline bg-surface-card p-4" open={boQuaNhapHang > 0 || undefined}>
+    <details
+      className="rounded-xl border border-hairline bg-surface-card p-4"
+      open={boQuaNhapHang > 0 || boQuaTruocM > 0 || undefined}
+    >
       <summary className="cursor-pointer text-sm font-medium text-ink">
         Khoản chi định kỳ ({soDangChay} đang chạy · {soDaDung} đã dừng)
       </summary>
 
       {boQuaNhapHang > 0 && (
         <p data-testid="dinh-ky-bo-qua-nhap-hang" className="mt-3 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
-          Mẫu Nhập hàng không còn sinh sau ngày bật theo dõi nợ (bỏ qua {boQuaNhapHang} lần) — tiền hàng giờ ghi
+          Đã bật theo dõi nợ nên mẫu Nhập hàng không sinh nữa, mọi ngày (bỏ qua {boQuaNhapHang} lần) — tiền hàng giờ ghi
           nhận qua phiếu nợ và trả bằng &quot;Trả tiền hàng&quot; ở tab Dòng tiền. Nên dừng mẫu này.
+        </p>
+      )}
+      {boQuaTruocM > 0 && (
+        <p data-testid="dinh-ky-bo-qua-truoc-m" className="mt-3 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+          {boQuaTruocM} lần đến hạn trước ngày bật theo dõi nợ chưa có trong sổ và sẽ không được ghi bù — số dư mở sổ
+          đã chốt theo tiền thật trước ngày đó.
         </p>
       )}
 
@@ -85,15 +109,21 @@ export function KhoanChiDinhKySection({
                   </Badge>
                 </td>
                 <td className="py-1.5 text-right">
-                  {choPhepSua && !item.active && (
-                    <NutBatLaiKhoanChiDinhKy
-                      recurringId={item.id}
-                      description={item.description}
-                      amount={item.amount}
-                      dayOfMonth={item.dayOfMonth}
-                      thang={thang}
-                    />
-                  )}
+                  {choPhepSua &&
+                    !item.active &&
+                    (mocNoPhaiTra !== null && laNhapHangDaKhoaSo(item, mocNoPhaiTra) ? (
+                      <span data-testid="dinh-ky-nhap-hang-di-so-no" className="text-xs text-muted-foreground">
+                        Từ {format(mocNoPhaiTra, "dd/MM/yyyy")} tiền hàng ghi qua sổ nợ phiếu nhập
+                      </span>
+                    ) : (
+                      <NutBatLaiKhoanChiDinhKy
+                        recurringId={item.id}
+                        description={item.description}
+                        amount={item.amount}
+                        dayOfMonth={item.dayOfMonth}
+                        thang={thang}
+                      />
+                    ))}
                 </td>
               </tr>
             ))}

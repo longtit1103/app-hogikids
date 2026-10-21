@@ -16,11 +16,10 @@ import {
  * Công thức thuần của bản chốt số dư. Quy ước dấu và CÂU CHỮ là thứ đáng khoá nhất: chủ shop đọc
  * nhầm dấu / nhầm hướng là sửa sổ NGƯỢC chiều — nên mỗi ca khẳng định literal, cả số lẫn chữ.
  */
-describe("tinhChenhLechChot — (bank + tiền mặt) − cuối kỳ, rồi CỘNG dư nợ thấu chi", () => {
+describe("tinhChenhLechChot — (bank + tiền mặt) − cuối kỳ, KHÔNG cộng dư nợ thấu chi", () => {
   it("khớp sổ ⇒ 0", () => {
     expect(tinhChenhLechChot({ soDuBank: 85_000_000, tienMat: 5_000_000 }, 90_000_000)).toEqual({
       soChot: 90_000_000,
-      chenhLechTho: 0,
       chenhLech: 0,
     });
   });
@@ -33,17 +32,22 @@ describe("tinhChenhLechChot — (bank + tiền mặt) − cuối kỳ, rồi C�
     expect(tinhChenhLechChot({ soDuBank: 85_000_000, tienMat: 3_000_000 }, 90_000_000).chenhLech).toBe(-2_000_000);
   });
 
-  it("thấu chi: quỹ = bank + tiền mặt + dư nợ — ca bẫy: góp 30tr, thấu chi 20tr cầm mặt", () => {
-    // quỹ 50tr · bank tổng 10tr (30 − 20) · tiền mặt 20tr · dư nợ thấu chi 20tr ⇒ thô −20tr, thật 0.
-    const r = tinhChenhLechChot({ soDuBank: 10_000_000, tienMat: 20_000_000 }, 50_000_000, 20_000_000);
-    expect(r).toEqual({ soChot: 30_000_000, chenhLechTho: -20_000_000, chenhLech: 0 });
+  it("thấu chi giải ngân vào tài khoản: góp 30tr + thấu chi 20tr vào TK, rút 20tr cầm mặt ⇒ khớp, không cộng dư nợ", () => {
+    // quỹ 50tr (góp 30 + LOAN_IN 20) · bank 30tr (30 + 20 − 20 rút) · tiền mặt 20tr ⇒ chênh 0.
+    expect(tinhChenhLechChot({ soDuBank: 30_000_000, tienMat: 20_000_000 }, 50_000_000)).toEqual({
+      soChot: 50_000_000,
+      chenhLech: 0,
+    });
   });
 
-  it("bank ÂM (thấu chi rút rồi chi hết) vẫn cộng đúng, không lấy trị tuyệt đối", () => {
-    expect(tinhChenhLechChot({ soDuBank: -20_000_000, tienMat: 0 }, 0, 20_000_000)).toEqual({
+  it("số thật 14/10: tiền thật 45.547.696, quỹ 260.908.494 (gồm thấu chi 100tr) ⇒ −215.360.798", () => {
+    expect(tinhChenhLechChot({ soDuBank: 45_547_696, tienMat: 0 }, 260_908_494).chenhLech).toBe(-215_360_798);
+  });
+
+  it("bank ÂM (tài khoản âm thật) giữ nguyên dấu, không lấy trị tuyệt đối", () => {
+    expect(tinhChenhLechChot({ soDuBank: -20_000_000, tienMat: 0 }, 0)).toEqual({
       soChot: -20_000_000,
-      chenhLechTho: -20_000_000,
-      chenhLech: 0,
+      chenhLech: -20_000_000,
     });
   });
 });
@@ -57,9 +61,9 @@ describe("cauChenhLech — chữ chỉ ĐÚNG hướng đi tìm", () => {
     });
   });
 
-  it("0 có thấu chi ⇒ nói rõ đã cộng dư nợ", () => {
+  it("0 có thấu chi ⇒ câu như không thấu chi (dư nợ không vào phép so)", () => {
     expect(cauChenhLech(0, { duNoThauChi: 20_000_000, tienDangGui: 0 }).giaiThich).toBe(
-      "Tiền thật + dư nợ thấu chi 20.000.000 ₫ bằng đúng số cuối kỳ của sổ quỹ."
+      "Tiền thật bằng đúng số cuối kỳ của sổ quỹ."
     );
   });
 
@@ -178,9 +182,10 @@ describe("ghepDoiChieuSoDuChot — thuần, nói rõ vì sao không có gì đ�
     });
   });
 
-  it("có sổ, có chốt ⇒ số literal đúng dấu; thấu chi được cộng", () => {
+  it("có sổ, có chốt ⇒ số literal đúng dấu; dư nợ thấu chi KHÔNG được cộng", () => {
     const dc = ghepDoiChieuSoDuChot(T8, soQuy({}), { thangNay: T8_ROW, thangTruoc: T7_ROW }, { duNoThauChi: 2_000_000, tienDangGui: 0 });
-    expect(dc).toMatchObject({ khaDung: "ok", soChot: 88_000_000, chenhLechTho: -2_000_000, chenhLech: 0 });
+    expect(dc).toMatchObject({ khaDung: "ok", soChot: 88_000_000, chenhLech: -2_000_000 });
+    expect(dc).not.toHaveProperty("chenhLechTho");
     expect(dc.thang).toEqual(new Date(2026, 7, 1));
   });
 

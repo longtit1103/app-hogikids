@@ -7,8 +7,9 @@
  *  - `CASH_MOVEMENT_KINDS` (10 kind) — enum hợp lệ của form "+ Nhập quỹ" và action ghi tay thường
  *    (`cash-movements.ts`, `cash-movement-form-modal.tsx` lấy THẲNG tuple này). Kind nợ phải trả KHÔNG
  *    BAO GIỜ được thêm vào đây: chúng có đường ghi riêng sau cổng `daBatNoPhaiTra`.
- *  - `CASH_MOVEMENT_KINDS_TAT_CA` (16 kind = enum Prisma) — cho META, chiều tiền, Sổ quỹ, dòng chạy,
- *    thùng rác: mọi chỗ ĐỌC dòng từ DB.
+ *  - `CASH_MOVEMENT_KINDS_TAT_CA` (17 kind = enum Prisma) — cho META, chiều tiền, Sổ quỹ, dòng chạy,
+ *    thùng rác: mọi chỗ ĐỌC dòng từ DB. `LAI_NHAP_GOC` chỉ ở đây: CHỈ duyệt kỳ thấu chi sinh ra, không
+ *    bao giờ có trong form/action ghi tay.
  *
  * Trục DÒNG TIỀN thuần — KHÔNG BAO GIỜ vào P&L (CLAUDE.md bất biến #1; lưới
  * `tests/unit/cash-movements/khong-ro-ri-vao-pnl.test.ts`). Không import Prisma: test thuần chạy không
@@ -39,8 +40,8 @@ export const CASH_MOVEMENT_KINDS = [
 export type CashMovementKind = (typeof CASH_MOVEMENT_KINDS)[number];
 
 /**
- * Đủ 16 kind = enum Prisma `CashMovementKind`. Thứ tự hiển thị: VÀO (6 cũ + NCC hoàn + điều chỉnh vào)
- * rồi RA (4 cũ + trả thẻ + trả NCC + điều chỉnh ra), `ADS_TOPUP` cuối vì chiều theo nguồn nạp.
+ * Đủ 17 kind = enum Prisma `CashMovementKind`. Thứ tự hiển thị: VÀO (6 cũ + NCC hoàn + điều chỉnh vào +
+ * lãi nhập gốc) rồi RA (4 cũ + trả thẻ + trả NCC + điều chỉnh ra), `ADS_TOPUP` cuối vì chiều theo nguồn nạp.
  */
 export const CASH_MOVEMENT_KINDS_TAT_CA = [
   "LOAN_IN",
@@ -51,6 +52,7 @@ export const CASH_MOVEMENT_KINDS_TAT_CA = [
   "SAVINGS_IN",
   "SUPPLIER_REFUND",
   "CUTOVER_ADJ_IN",
+  "LAI_NHAP_GOC",
   "LOAN_REPAY",
   "CAPITAL_OUT",
   "DEPOSIT_OUT",
@@ -154,6 +156,11 @@ export const CASH_MOVEMENT_KIND_META: {
     direction: "OUT",
     hint: "Điều chỉnh MỘT LẦN tại ngày bật theo dõi nợ để quỹ khớp số dư ngân hàng — app tự tạo ở bước xác nhận, không ghi tay.",
   },
+  LAI_NHAP_GOC: {
+    label: "Lãi nhập gốc thấu chi",
+    direction: "IN",
+    hint: "Ngân hàng cộng lãi kỳ vào dư nợ thấu chi thay vì trừ tài khoản — app tự ghi khi duyệt kỳ lãi (đi cặp với dòng Lãi vay ở Sổ chi phí, quỹ không đổi, dư nợ tăng đúng số lãi). Không ghi tay.",
+  },
   ADS_TOPUP: {
     label: "Nạp ví quảng cáo",
     direction: "THEO_NGUON",
@@ -168,6 +175,31 @@ export const KIND_GAN_KHOAN_VAY: readonly CashMovementKind[] = [
   "DEPOSIT_OUT",
   "DEPOSIT_IN",
 ];
+
+/**
+ * Lãi nhập gốc thấu chi — BẮT BUỘC gắn khoản vay (CHECK `CashMovement_loan_bat_buoc`), nhưng CỐ Ý không
+ * nằm trong `KIND_GAN_KHOAN_VAY` (danh sách kind của FORM ghi tay): chỉ `chayGhiKy` sinh ra, đi cặp với
+ * `Expense` lãi kỳ; sửa số / xoá / khôi phục đi theo dòng lãi đó, không bao giờ đơn lẻ.
+ */
+export const KIND_LAI_NHAP_GOC = "LAI_NHAP_GOC" as const;
+
+/**
+ * DẤU của từng kind trên DƯ NỢ khoản vay — MỘT định nghĩa cho MỌI nơi cộng dư nợ (vị từ dư nợ, bảng
+ * khoản vay, lịch kỳ, dư nợ thấu chi tại ngày, khôi phục thùng rác, sổ tiết kiệm nguồn vay):
+ * dư nợ = `duNoMoSo` + Σ LOAN_IN + Σ LAI_NHAP_GOC − Σ LOAN_REPAY. Tiền gửi bắt buộc (`DEPOSIT_*`) CỐ Ý
+ * vắng: nó không trả nợ, chỉ cấn trừ một lần lúc tất toán.
+ */
+export const DAU_DU_NO_VAY = { LOAN_IN: 1, LAI_NHAP_GOC: 1, LOAN_REPAY: -1 } as const satisfies Partial<
+  Record<CashMovementKindTatCa, 1 | -1>
+>;
+
+/** Các kind làm đổi dư nợ khoản vay — để lọc truy vấn (`kind: { in: [...KIND_DU_NO_VAY] }`). */
+export const KIND_DU_NO_VAY = ["LOAN_IN", "LAI_NHAP_GOC", "LOAN_REPAY"] as const satisfies readonly (keyof typeof DAU_DU_NO_VAY)[];
+
+/** Dấu của một dòng trên dư nợ khoản vay: +1 tăng, −1 giảm, 0 không đụng. Nhận kind đọc từ DB (chuỗi). */
+export function dauDuNoVay(kind: string): 1 | -1 | 0 {
+  return (DAU_DU_NO_VAY as Record<string, 1 | -1>)[kind] ?? 0;
+}
 
 /** Hai loại BẮT BUỘC trỏ về một sổ tiết kiệm sinh lãi. */
 export const KIND_GAN_SO_TIET_KIEM: readonly CashMovementKind[] = ["SAVINGS_OUT", "SAVINGS_IN"];
@@ -226,6 +258,7 @@ export function kindNoPhaiTra(kind: CashMovementKindTatCa): boolean {
  */
 export function kindGanSoQuy(kind: CashMovementKindTatCa): boolean {
   return (
+    kind === KIND_LAI_NHAP_GOC ||
     (KIND_GAN_KHOAN_VAY as readonly string[]).includes(kind) ||
     (KIND_GAN_SO_TIET_KIEM as readonly string[]).includes(kind)
   );
@@ -262,7 +295,7 @@ export function isCashMovementKind(value: unknown): value is CashMovementKind {
   return typeof value === "string" && (CASH_MOVEMENT_KINDS as readonly string[]).includes(value);
 }
 
-/** Thuộc đủ 16 kind của enum Prisma. */
+/** Thuộc đủ 17 kind của enum Prisma. */
 export function isCashMovementKindTatCa(value: unknown): value is CashMovementKindTatCa {
   return typeof value === "string" && (CASH_MOVEMENT_KINDS_TAT_CA as readonly string[]).includes(value);
 }

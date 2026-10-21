@@ -28,6 +28,7 @@ export function trangThaiBanDau(loan: KhoanVayRow | undefined): KhoanVayFormStat
       laiTheoNam: false,
       laiCoDinh: 0,
       tienGuiMoiKy: 0,
+      laiNhapGoc: false,
     };
   }
   const ngayNen = format(loan.startDate, NGAY);
@@ -57,5 +58,7 @@ export function trangThaiBanDau(loan: KhoanVayRow | undefined): KhoanVayFormStat
     laiTheoNam: gocCuoiKy ? loan.laiCoDinhMoiKy === null : false,
     laiCoDinh: loan.laiCoDinhMoiKy ?? 0,
     tienGuiMoiKy: loan.tienGuiBatBuocMoiKy,
+    // Nạp cờ ĐANG CÓ của hồ sơ: form Sửa gửi lại đúng giá trị này, không bao giờ âm thầm tắt lãi nhập gốc.
+    laiNhapGoc: thauChi && loan.laiNhapGoc,
   };
 }

@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 
+import { dauDuNoVay, KIND_DU_NO_VAY } from "@/lib/cash-movements/cash-movement-kinds";
 import { formatVnd } from "@/lib/format";
 import { HAN_CHO_KHOA_DONG_TIEN_MS, khoaDongTienCoHan } from "@/lib/so-quy/khoa-dong-tien-co-han";
 
@@ -7,8 +8,8 @@ import { HAN_CHO_KHOA_DONG_TIEN_MS, khoaDongTienCoHan } from "@/lib/so-quy/khoa-
  * VỊ TỪ DƯ NỢ DUY NHẤT, dùng chung cho MỌI đường ghi chạm dòng gốc vay:
  * `ghiKyTraNo` · `createCashMovement` · `updateCashMovement` · `deleteCashMovement`.
  *
- * Luật: sau khi ghi/sửa/xoá, `duNoMoSo + Σ LOAN_IN − Σ LOAN_REPAY` TOÀN THỜI GIAN của khoản đó phải
- * ≥ 0. Cố ý KHÔNG lọc theo ngày: một dòng trả gốc đề ngày cũ vẫn là tiền đã ra, và "dư nợ âm" là
+ * Luật: sau khi ghi/sửa/xoá, `duNoMoSo + Σ LOAN_IN + Σ LAI_NHAP_GOC − Σ LOAN_REPAY` TOÀN THỜI GIAN của
+ * khoản đó phải ≥ 0 (dấu từng kind: `DAU_DU_NO_VAY`). Cố ý KHÔNG lọc theo ngày: một dòng trả gốc đề ngày cũ vẫn là tiền đã ra, và "dư nợ âm" là
  * trạng thái sổ sách không có thật ở BẤT KỲ mốc nào.
  *
  * BẮT BUỘC gọi TRONG transaction và SAU câu ghi: kiểm trước khi ghi là check-then-act — hai lượt
@@ -16,10 +17,8 @@ import { HAN_CHO_KHOA_DONG_TIEN_MS, khoaDongTienCoHan } from "@/lib/so-quy/khoa-
  * ý; caller PHẢI bắt `LoiDuNoAm` và trả câu tiếng Việt thay vì để nó thành 500.
  */
 
-const KIND_GOC = ["LOAN_IN", "LOAN_REPAY"] as const;
-
 /**
- * Hai loại dòng tiền của SỔ TIẾT KIỆM BẮT BUỘC — CỐ Ý tách khỏi `KIND_GOC`. Gộp vào đó là trừ tiền
+ * Hai loại dòng tiền của SỔ TIẾT KIỆM BẮT BUỘC — CỐ Ý tách khỏi `KIND_DU_NO_VAY`. Gộp vào đó là trừ tiền
  * gửi thẳng vào dư nợ vay: dư nợ hiện thiếu đi, kỳ cuối đề xuất trả gốc hụt đúng bằng số ngân hàng
  * đang giữ hộ. Tiền gửi KHÔNG trả nợ — nó chỉ cấn trừ MỘT LẦN lúc tất toán, qua một dòng riêng.
  */
@@ -79,13 +78,11 @@ export async function duNoSauKhiGhi(
     tx.loan.findUniqueOrThrow({ where: { id: loanId }, select: { duNoMoSo: true } }),
     tx.cashMovement.groupBy({
       by: ["kind"],
-      where: { loanId, kind: { in: [...KIND_GOC] } },
+      where: { loanId, kind: { in: [...KIND_DU_NO_VAY] } },
       _sum: { amount: true },
     }),
   ]);
-  const tong = (k: (typeof KIND_GOC)[number]) =>
-    nhom.find((x) => x.kind === k)?._sum.amount ?? 0;
-  return loan.duNoMoSo + tong("LOAN_IN") - tong("LOAN_REPAY");
+  return nhom.reduce((duNo, x) => duNo + dauDuNoVay(x.kind) * (x._sum.amount ?? 0), loan.duNoMoSo);
 }
 
 /** Ném khi phép ghi vừa rồi làm dư nợ âm. `duNo` là số ÂM — phần thiếu là `-duNo`. */
@@ -141,7 +138,7 @@ export class LoiTienGuiAm extends Error {
  * VỊ TỪ TIỀN GỬI — song song `chanDuNoAm`, cùng luật gọi: TRONG transaction đã khoá dòng `Loan`, và
  * SAU câu ghi.
  *
- * Vì sao phải có riêng: `chanDuNoAm` chỉ đếm `KIND_GOC`, còn `kiemKhoanVay` (`cash-movements.ts`)
+ * Vì sao phải có riêng: `chanDuNoAm` chỉ đếm `KIND_DU_NO_VAY`, còn `kiemKhoanVay` (`cash-movements.ts`)
  * thoát sớm với mọi loại khác `LOAN_IN` — nên một dòng ghi tay "Nhận lại tiền gửi" (`DEPOSIT_IN`)
  * lớn hơn Σ ngân hàng đang giữ đi lọt qua CẢ HAI cổng: quỹ phồng lên bằng tiền không có thật, và số
  * âm đó còn bị GIẤU vì mọi chỗ hiển thị đều canh `> 0`. Hai lượt bấm song song cũng đều lọt nếu chỉ

@@ -99,8 +99,9 @@ function safeParse(
 /** Mô tả nhóm dòng trùng khoá (Bronze/Silver sẽ gộp 1 ⇒ thiếu số). */
 function duplicateKeyMessage(duplicateKeys: string[]): string {
   return (
-    `${duplicateKeys.length} nhóm dòng TRÙNG khoá (cùng ngày-giờ | loại | mã đơn | số tiền) — không phân ` +
-    `biệt được nên Silver sẽ gộp làm THIẾU số dù checksum khớp. Kiểm tra lại file. VD: ${duplicateKeys[0]}`
+    `${duplicateKeys.length} nhóm dòng TRÙNG khoá (cùng ngày-giờ | loại | mã đơn | số tiền, và cột "Chi tiết" ` +
+    `cũng giống hệt hoặc không có) — không phân biệt được nên Silver sẽ gộp làm THIẾU số dù checksum khớp. ` +
+    `Kiểm tra lại file. VD: ${duplicateKeys[0]}`
   );
 }
 

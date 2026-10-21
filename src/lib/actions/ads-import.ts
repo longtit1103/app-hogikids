@@ -10,9 +10,11 @@ import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
 import { LoiFileQuaNhieuDong } from "@/lib/import/xlsx-shared";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
+import { laNgayTruocMocM } from "@/lib/no-phai-tra/chan-so-chi-phi-da-khoa";
+import { docMocM, khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
-import { chanNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
 import { congAction } from "@/lib/quyen/cong-action";
+import { LoiKhoaDongTienBan, THONG_BAO_KHOA_DONG_TIEN_BAN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 
 /**
  * Server actions cho luồng Import CSV ads (nút "Import CSV ads" ở `/chi-phi`).
@@ -207,14 +209,30 @@ function dateBounds(rows: ParsedAdsRow[]): { min: Date; denHet: Date } | null {
 }
 
 /**
+ * Đã bật nợ phải trả (M ≠ null) thì dòng file NGÀY VN < M bị BỎ QUA: quỹ cuối M−1 đã chốt theo tiền thật bằng
+ * điều chỉnh mở sổ, thêm/ghi đè chi phí ads ngày < M là quỹ từ M lệch khỏi tiền thật. Chủ shop chốt bỏ qua + báo
+ * số dòng (KHÔNG từ chối cả file như `chanSoChiPhiDaKhoa` — phần ngày ≥ M vẫn nhập). M null ⇒ giữ mọi dòng.
+ */
+function boDongTruocMocM(rows: ParsedAdsRow[], mocM: Date | null): { conLai: ParsedAdsRow[]; soDongTruocM: number } {
+  const conLai = rows.filter((r) => !laNgayTruocMocM(r.date, mocM));
+  return { conLai, soDongTruocM: rows.length - conLai.length };
+}
+
+/**
  * Preview: parse + dedupe nội bộ, liệt kê dòng lỗi + các ngày đã có số ADS_API
  * cùng `adsSource` (để modal cảnh báo amber + cho chọn skip/overwrite).
+ *
+ * Đã bật nợ phải trả: `rows`/`apiConflicts` CHỈ gồm dòng ngày ≥ M (đúng phần lượt import sẽ xét); số dòng < M
+ * sẽ bỏ báo riêng ở `soDongTruocM` + `mocM` (`yyyy-MM-dd`) để modal cảnh báo TRƯỚC khi bấm. M đọc ngoài
+ * transaction — chỉ để báo; lượt import đọc lại M sau khoá chung mới là số quyết định.
  */
 export async function previewAdsImport(formData: FormData): Promise<
   ActionResult<{
     rows: { date: string; campaignName: string; amount: number }[];
     invalid: { line: number; reason: string }[];
     apiConflicts: { date: string; adsSource: string; apiAmount: number }[];
+    soDongTruocM: number;
+    mocM: string | null;
   }>
 > {
   const cong = await congAction("marketing:xem");
@@ -227,16 +245,19 @@ export async function previewAdsImport(formData: FormData): Promise<
   if (!doc.ok) return { ok: false, error: doc.error };
   const { rows: parsed, errors } = doc;
   const adsSource = adsSourceForPreset(form.preset);
-  const unique = dedupeInternal(parsed, adsSource);
+  const mocM = await docMocM();
+  const { conLai, soDongTruocM } = boDongTruocMocM(dedupeInternal(parsed, adsSource), mocM);
 
-  const apiConflicts = await findApiConflicts(unique, adsSource);
+  const apiConflicts = await findApiConflicts(conLai, adsSource);
 
   return {
     ok: true,
     data: {
-      rows: unique.map((r) => ({ date: vnDateKey(r.date), campaignName: r.campaignName, amount: r.amount })),
+      rows: conLai.map((r) => ({ date: vnDateKey(r.date), campaignName: r.campaignName, amount: r.amount })),
       invalid: errors,
       apiConflicts,
+      soDongTruocM,
+      mocM: mocM === null ? null : vnDateKey(mocM),
     },
   };
 }
@@ -279,6 +300,7 @@ async function findApiConflicts(
  * Import ads → Expense. TẤT CẢ trong 1 `prisma.$transaction`, đúng thứ tự:
  *  1. parse (lỗi → skippedInvalid);
  *  2. dedupe nội bộ file (ngày+tên+tiền);
+ *  2b. đã bật nợ phải trả: bỏ dòng ngày VN < M (đếm skippedTruocM) — mọi bước sau chỉ thấy dòng ≥ M;
  *  3. dedupe DB: đã có Expense ads source IMPORT|MANUAL cùng ngày+mô tả+tiền+nguồn ads
  *     (ô nguồn bỏ trống của dòng cũ khớp mọi nguồn) → skippedDuplicates;
  *  4. xung đột API: ngày đã có ADS_API cùng adsSource — skip → bỏ dòng ngày đó;
@@ -286,7 +308,12 @@ async function findApiConflicts(
  *  5. createMany phần còn lại (source=IMPORT, refId=null).
  * Chạy lại cùng file → imported=0 nhờ bước 3. Cuối `revalidatePath("/chi-phi")`.
  *
- * LOẠI TRỪ với đường ghi máy: transaction giữ `giuKhoaGhiChiTieuAds` NGAY TỪ ĐẦU — hai lượt import
+ * KHOÁ CHUNG VỚI BƯỚC BẬT là câu ĐẦU transaction (VÔ ĐIỀU KIỆN), M đọc SAU khoá: bước bật đang giữ EXCLUSIVE
+ * (chốt quỹ cuối M−1 bằng điều chỉnh mở sổ, chưa commit) thì lượt import CHỜ nó commit rồi đọc M mới. Đọc M
+ * trước khoá ⇒ thấy null ⇒ chèn/xoá số ads ngày < M sau lưng bước bật ⇒ quỹ từ M lệch tiền thật. Thứ tự "khoá
+ * bật → khoá ads" không tạo chu trình: bước bật không lấy khoá ads, `/api/ingest/ads` không lấy khoá bật.
+ *
+ * LOẠI TRỪ với đường ghi máy: transaction giữ `giuKhoaGhiChiTieuAds` trước mọi truy vấn đọc sổ — hai lượt import
  * cùng file, hoặc import chen vào giữa lượt `/api/ingest/ads` đêm, đều làm chi phí quảng cáo của
  * ngày đó đếm 2 lần (xem `khoa-ghi-chi-tieu-ads.ts`). Riêng lượt DỰNG LẠI TỪ KHO THÔ không nằm
  * trong transaction nào (nó ghi hàng chục nghìn dòng, giữ khoá suốt là khoá cả app hàng phút) nên
@@ -298,6 +325,10 @@ export async function importAdsExpenses(formData: FormData): Promise<
     skippedDuplicates: number;
     skippedInvalid: number;
     overwrittenApiRows: number;
+    /** Số dòng file ngày < M bị bỏ qua (0 khi chưa bật). */
+    skippedTruocM: number;
+    /** Mốc M `yyyy-MM-dd` đọc sau khoá (null = chưa bật) — cho câu báo "trước ngày bật theo dõi nợ". */
+    mocM: string | null;
   }>
 > {
   const cong = await congAction("marketing:sua");
@@ -322,22 +353,35 @@ export async function importAdsExpenses(formData: FormData): Promise<
   const adsSource = adsSourceForPreset(form.preset);
 
   // Bước 2: dedupe nội bộ.
-  const unique = dedupeInternal(parsed, adsSource);
-  const bounds = dateBounds(unique);
+  const tatCa = dedupeInternal(parsed, adsSource);
 
-  if (!bounds) {
+  if (tatCa.length === 0) {
     // Không có dòng hợp lệ nào — không cần vào transaction.
     return {
       ok: true,
-      data: { imported: 0, skippedDuplicates: 0, skippedInvalid, overwrittenApiRows: 0 },
+      data: { imported: 0, skippedDuplicates: 0, skippedInvalid, overwrittenApiRows: 0, skippedTruocM: 0, mocM: null },
     };
   }
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // Khoá TRƯỚC mọi truy vấn đọc: cả bước 3 (dedupe) lẫn bước 4 (xung đột API) đều là
+      await khoaChiaSeBatNoPhaiTra(tx);
+      // Khoá TRƯỚC mọi truy vấn đọc sổ: cả bước 3 (dedupe) lẫn bước 4 (xung đột API) đều là
       // đọc-để-quyết-định — đọc ngoài khoá thì hai lượt ghi vẫn cùng thấy "chưa có gì".
       await giuKhoaGhiChiTieuAds(tx);
+      const mocM = await docMocM(tx);
+      const mocMKey = mocM === null ? null : vnDateKey(mocM);
+
+      // Bước 2b: bỏ dòng ngày < M TRƯỚC mọi bước sau ⇒ ngày < M không vào dedupe, không vào tập ngày ghi đè
+      // (không bao giờ xoá ADS_API < M), không được chèn.
+      const { conLai: unique, soDongTruocM: skippedTruocM } = boDongTruocMocM(tatCa, mocM);
+      const ghiChuBoQua = skippedTruocM > 0 ? { boQuaTruocM: skippedTruocM } : {};
+      const bounds = dateBounds(unique);
+      if (!bounds) {
+        // Mọi dòng đều trước M — không đọc/ghi sổ, nhưng vẫn để lại dấu lượt import đã bị bỏ trọn.
+        await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.ADS_IMPORT, ghiChu: { soDong: 0, ...ghiChuBoQua } });
+        return { imported: 0, skippedDuplicates: 0, overwrittenApiRows: 0, skippedTruocM, mocM: mocMKey };
+      }
 
       // Bước 3: dedupe DB (IMPORT|MANUAL) trên ngày+mô tả+tiền+nguồn ads.
       //
@@ -442,9 +486,10 @@ export async function importAdsExpenses(formData: FormData): Promise<
 
       // Bước 5: chèn phần còn lại.
       if (toInsert.length > 0) {
-        // Hàng rào CẤU TRÚC (lưới `khoa-duong-ghi-nhap-hang-sau-m`): đường import này hôm nay chỉ ghi danh
-        // mục quảng cáo nên không bao giờ chặn — nhưng ai đổi `categoryId` ở đây thì cổng đã đứng sẵn.
-        for (const r of toInsert) await chanNhapHangSauM(tx, { categoryId: ADS_CATEGORY_ID, date: r.date });
+        // KHÔNG qua cổng khoá sổ chi phí (`chanSoChiPhiDaKhoa` từ chối CẢ lượt; chủ shop chốt bỏ dòng < M, nhập
+        // phần còn lại). Thay vào đó: khoá chung câu đầu + `boDongTruocMocM` ở bước 2b ⇒ `unique` chỉ còn ngày ≥ M
+        // ⇒ không chèn dòng < M, `overwriteDayKeys` (suy từ `unique`) không chứa ngày < M ⇒ không xoá ADS_API < M.
+        // Lưới: `khoa-duong-ghi-nhap-hang-da-khoa-so` (chỉ danh mục ads) + `khoa-chung-bat-cho-duong-ghi-nhap-hang`.
         await tx.expense.createMany({
           data: toInsert.map((r) => ({
             date: r.date,
@@ -462,19 +507,22 @@ export async function importAdsExpenses(formData: FormData): Promise<
       await ghiNhatKy(tx, {
         actor: cong.nguoiDung,
         hanhDong: HANH_DONG.ADS_IMPORT,
-        ghiChu: { soDong: toInsert.length },
+        ghiChu: { soDong: toInsert.length, ...ghiChuBoQua },
       });
-      return { imported: toInsert.length, skippedDuplicates, overwrittenApiRows };
+      return { imported: toInsert.length, skippedDuplicates, overwrittenApiRows, skippedTruocM, mocM: mocMKey };
     },
     // Từ khi transaction phải GIÀNH KHOÁ ở lệnh đầu, thời gian NẰM CHỜ tính vào hạn transaction.
-    // Bên kia khoá là `/api/ingest/ads` — nó cố ý chạy tới 60s cho lô lớn. Giữ mặc định 5s ở đây
-    // nghĩa là: lượt import trùng giờ lượt ingest đêm sẽ chết vì P2028 dù chẳng có gì sai.
+    // Bên kia khoá ads là `/api/ingest/ads` — nó cố ý chạy tới 60s cho lô lớn. Giữ mặc định 5s ở đây
+    // nghĩa là: lượt import trùng giờ lượt ingest đêm sẽ chết vì P2028 dù chẳng có gì sai. KHÔNG dùng
+    // `OPT_TX_DONG_TIEN` (20s): hạn 60s này đã phủ ngân sách 10s chờ khoá chung với bước bật.
     { timeout: 60_000, maxWait: 10_000 },
     );
 
     revalidatePath("/chi-phi");
     return { ok: true, data: { ...result, skippedInvalid } };
   } catch (err) {
+    // Chờ khoá chung quá 10s = bước bật nợ phải trả đang chạy — transaction đã lùi, chưa ghi gì.
+    if (err instanceof LoiKhoaDongTienBan) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
     // P2028 = hết hạn transaction; ở đây gần như luôn là "đang chờ khoá của lượt ghi ads khác".
     // Nói rõ để chủ shop CHỜ chứ không đi sửa file (file vừa qua bước xem trước thì không sai).
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2028") {

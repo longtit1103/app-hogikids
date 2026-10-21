@@ -4,7 +4,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * Thùng rác cho NỢ PHẢI TRẢ trên DB thật (spec §5.7, §5.8; review focus #3): 3 hồ sơ mới (`TheTinDung`
  * kèm neo `KySaoKeThe`, `PhieuNhapNo`, `ViAdsTraTruoc`) chụp + dựng lại đúng id; dòng tiền kind mới khôi
  * phục qua ĐỦ cổng (đã bật, cửa sổ ngày, thẻ đóng); trả tiền hàng khôi phục được SAU khi phiếu huỷ (nợ âm
- * "cần thu hồi"); điều chỉnh mở sổ chỉ chủ shop. M = 01/11/2026, hôm nay ghim 26/11/2026.
+ * "cần thu hồi"); điều chỉnh mở sổ chỉ chủ shop. Dòng tiền kind cũ / thu nhập ngày < M và khoản thấu chi bắt đầu
+ * < M không khôi phục được sau bật (đã chốt vào điều chỉnh mở sổ). M = 01/11/2026, hôm nay ghim 26/11/2026.
  */
 vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => ({
   ...(await goc<typeof import("@/lib/quyen/nguoi-dung-phien")>()),
@@ -12,6 +13,7 @@ vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+import type { CashMovement, ThuNhap } from "@/generated/prisma/client";
 import { createCashMovement, deleteCashMovement } from "@/lib/actions/cash-movements";
 import { deleteExpense } from "@/lib/actions/expenses";
 import { xoaPhieu } from "@/lib/actions/phieu-nhap-no";
@@ -22,7 +24,8 @@ import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { chupVaoThungRac } from "@/lib/thung-rac/ghi-thung-rac";
 import { khoiPhucBanGhiDaXoa } from "@/lib/thung-rac/khoi-phuc-ban-ghi";
-import { anhDongTienGanSoQuy, LoiThieuQuyenThungRac } from "@/lib/thung-rac/quyen-thung-rac";
+import { anhDongTienGanSoQuy, LoiThieuQuyenThungRac, phamViThungRac } from "@/lib/thung-rac/quyen-thung-rac";
+import { listThungRac } from "@/lib/thung-rac/thung-rac-queries";
 
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
@@ -185,9 +188,9 @@ describe("dòng tiền nợ phải trả khôi phục qua ĐỦ cổng", () => {
   });
 
   it("khoản chi trừ thẻ ngày 30/10 (< M) ⇒ khôi phục từ chối 'trước ngày bật' — thẻ có sao kê 25/10 nên cửa sổ neo không che", async () => {
-    await datM("2026-11-01");
     // Thẻ của bước bật: sao kê thật 25/10 (dòng (i)) + neo mở sổ 31/10 ⇒ neo ĐẦU TIÊN là 25/10, ngày 30/10 qua
-    // cửa sổ neo thẻ; chỉ luật "Expense.cardId ≥ M" chặn được nó.
+    // cửa sổ neo thẻ. Hai luật chặn được nó: khoá sổ chi phí trước M (mọi Expense < M — đứng trước) và
+    // "Expense.cardId ≥ M" (lưới thứ hai). Xoá TRƯỚC khi bật: sau bật, xoá dòng < M cũng bị khoá sổ chặn.
     const cardId = (await prisma.theTinDung.create({ data: { ten: "Thẻ M", ngayChotSaoKe: 25, ngayHanTra: 10 } })).id;
     await prisma.kySaoKeThe.create({ data: { cardId, ngayChot: vn("2026-10-25"), soDu: tr(4), hanTra: vn("2026-11-10") } });
     await prisma.kySaoKeThe.create({ data: { cardId, ngayChot: vn("2026-10-31"), soDu: tr(6), laNeoMoSo: true } });
@@ -195,6 +198,7 @@ describe("dòng tiền nợ phải trả khôi phục qua ĐỦ cổng", () => {
       data: { date: vn("2026-10-30"), categoryId: "other", amount: 300_000, description: "", source: "MANUAL", cardId },
     });
     expect(await deleteExpense(e.id, "only")).toEqual({ ok: true, data: undefined });
+    await datM("2026-11-01");
     const r = await khoiPhucBanGhiDaXoa((await mucThungRac("Expense")).id, CHU);
     expect(r).toMatchObject({ ok: false, lyDo: expect.stringMatching(/trước ngày bật theo dõi nợ/) });
     expect(await prisma.expense.count()).toBe(0);
@@ -348,5 +352,183 @@ describe("khôi phục thẻ SAU khi bật — neo phải 0 trừ neo của bư�
     expect(ms).toBeGreaterThanOrEqual(700);
     expect(r).toMatchObject({ ok: false, lyDo: expect.stringMatching(/không có neo dư nợ/) });
     expect(await prisma.theTinDung.count()).toBe(0);
+  });
+});
+
+describe("dòng tiền / thu nhập TRƯỚC M và thấu chi trước M — khôi phục sau bật (M = 01/11)", () => {
+  const CAU_TRUOC_M = /Dòng tiền ngày 20\/10\/2026 trước ngày bật theo dõi nợ \(01\/11\/2026\) đã chốt vào số dư mở sổ/;
+
+  it("góp vốn 05/11 (≥ M) xoá sau bật rồi khôi phục ⇒ được", async () => {
+    await datM("2026-11-01");
+    expect(
+      await createCashMovement({ date: vn("2026-11-05"), kind: "CAPITAL_IN", amount: tr(10), description: "Góp vốn" }),
+    ).toEqual({ ok: true, data: undefined });
+    expect(await deleteCashMovement((await prisma.cashMovement.findFirstOrThrow()).id)).toEqual({ ok: true, data: undefined });
+    expect(await khoiPhucBanGhiDaXoa((await mucThungRac("CashMovement")).id, CHU)).toEqual({ ok: true, canhBao: null });
+    expect(await prisma.cashMovement.count()).toBe(1);
+  });
+
+  it("góp vốn 20/10 xoá TRƯỚC bật ⇒ sau bật khôi phục bị từ chối (con dấu tan), cột trạng thái cùng câu; gỡ M ⇒ khôi phục được", async () => {
+    const dong = await prisma.cashMovement.create({
+      data: { date: vn("2026-10-20"), kind: "CAPITAL_IN", amount: tr(10), description: "Góp vốn" },
+    });
+    expect(await deleteCashMovement(dong.id)).toEqual({ ok: true, data: undefined });
+    const muc = await mucThungRac("CashMovement");
+    await datM("2026-11-01");
+
+    expect(await khoiPhucBanGhiDaXoa(muc.id, CHU)).toMatchObject({ ok: false, lyDo: expect.stringMatching(CAU_TRUOC_M) });
+    expect(await prisma.cashMovement.count()).toBe(0);
+    expect((await prisma.banGhiDaXoa.findUniqueOrThrow({ where: { id: muc.id } })).khoiPhucLuc).toBeNull();
+    const { rows } = await listThungRac(phamViThungRac(CHU));
+    expect(rows.find((r) => r.id === muc.id)?.lyDo).toMatch(CAU_TRUOC_M);
+
+    await datM(null);
+    expect(await khoiPhucBanGhiDaXoa(muc.id, CHU)).toEqual({ ok: true, canhBao: null });
+    expect(await prisma.cashMovement.count()).toBe(1);
+  });
+
+  it("thu nhập (lãi tiết kiệm) 20/10 trong thùng rác ⇒ sau bật khôi phục bị từ chối", async () => {
+    const tn = await prisma.thuNhap.create({
+      data: { date: vn("2026-10-20"), kind: "LAI_TIET_KIEM", amount: 300_000, description: "Lãi" },
+    });
+    await prisma.$transaction(async (tx) => {
+      await chupVaoThungRac(tx, { bang: "ThuNhap", banGhi: tn });
+      await tx.thuNhap.delete({ where: { id: tn.id } });
+    });
+    await datM("2026-11-01");
+    const r = await khoiPhucBanGhiDaXoa((await mucThungRac("ThuNhap")).id, CHU);
+    expect(r).toMatchObject({ ok: false, lyDo: expect.stringMatching(CAU_TRUOC_M) });
+    expect(await prisma.thuNhap.count()).toBe(0);
+  });
+
+  /** Sổ tiết kiệm vào thùng rác cùng các dòng tiền / thu nhập cho trước — đúng THỨ TỰ truyền vào. */
+  async function soVaoThungRac(
+    dong: { date: string; kind: "SAVINGS_OUT" | "SAVINGS_IN"; amount: number }[],
+    thuNhap: string[] = [],
+  ): Promise<string> {
+    const so = await prisma.soTietKiem.create({
+      data: {
+        name: "Sổ R",
+        bank: "VCB",
+        principal: tr(50),
+        startDate: vn("2026-10-20"),
+        termMonths: 6,
+        maturityDate: vn("2027-04-20"),
+        annualRateBp: 520,
+      },
+    });
+    const cms: CashMovement[] = [];
+    for (const d of dong) {
+      cms.push(await prisma.cashMovement.create({ data: { ...d, date: vn(d.date), description: "", savingsId: so.id } }));
+    }
+    const tns: ThuNhap[] = [];
+    for (const ngay of thuNhap) {
+      tns.push(
+        await prisma.thuNhap.create({
+          data: { date: vn(ngay), kind: "LAI_TIET_KIEM", amount: 100_000, description: "", savingsId: so.id },
+        }),
+      );
+    }
+    await prisma.$transaction(async (tx) => {
+      await chupVaoThungRac(tx, { bang: "SoTietKiem", banGhi: so, cashMovements: cms, thuNhap: tns });
+      await tx.thuNhap.deleteMany({ where: { savingsId: so.id } });
+      await tx.cashMovement.deleteMany({ where: { savingsId: so.id } });
+      await tx.soTietKiem.delete({ where: { id: so.id } });
+    });
+    // Theo `banGhiId`: đồng hồ `Date` bị ghim nên hai mục cùng `xoaLuc`, "mới nhất" không phân biệt được.
+    return (await prisma.banGhiDaXoa.findFirstOrThrow({ where: { bang: "SoTietKiem", banGhiId: so.id } })).id;
+  }
+
+  it("cụm sổ tiết kiệm: dòng < M nằm SAU dòng ≥ M trong ảnh vẫn bị bắt ⇒ từ chối cả cụm", async () => {
+    const mucId = await soVaoThungRac([
+      { date: "2026-11-05", kind: "SAVINGS_IN", amount: tr(1) },
+      { date: "2026-10-20", kind: "SAVINGS_OUT", amount: tr(50) },
+    ]);
+    await datM("2026-11-01");
+    expect(await khoiPhucBanGhiDaXoa(mucId, CHU)).toMatchObject({ ok: false, lyDo: expect.stringMatching(CAU_TRUOC_M) });
+    expect(await prisma.soTietKiem.count()).toBe(0);
+    expect(await prisma.cashMovement.count()).toBe(0);
+  });
+
+  it("cụm sổ tiết kiệm: dòng tiền ≥ M nhưng thu nhập kèm theo 20/10 ⇒ từ chối; toàn bộ ≥ M ⇒ được", async () => {
+    const coThuNhapTruocM = await soVaoThungRac([{ date: "2026-11-05", kind: "SAVINGS_OUT", amount: tr(50) }], ["2026-10-20"]);
+    await datM("2026-11-01");
+    expect(await khoiPhucBanGhiDaXoa(coThuNhapTruocM, CHU)).toMatchObject({ ok: false, lyDo: expect.stringMatching(CAU_TRUOC_M) });
+
+    await datM(null);
+    const hopLe = await soVaoThungRac([{ date: "2026-11-05", kind: "SAVINGS_OUT", amount: tr(50) }]);
+    await datM("2026-11-01");
+    expect(await khoiPhucBanGhiDaXoa(hopLe, CHU)).toEqual({ ok: true, canhBao: null });
+    expect(await prisma.cashMovement.count()).toBe(1);
+  });
+
+  /** Khoản vay không dòng tiền (mang sang) vào thùng rác. */
+  async function khoanVayVaoThungRac(data: Record<string, unknown>): Promise<string> {
+    const loan = await prisma.loan.create({
+      data: { name: "Vay R", startDate: vn("2026-10-20"), duNoMoSo: tr(30), ...data },
+    });
+    await prisma.$transaction(async (tx) => {
+      await chupVaoThungRac(tx, { bang: "Loan", banGhi: loan, cashMovements: [] });
+      await tx.loan.delete({ where: { id: loan.id } });
+    });
+    return (await prisma.banGhiDaXoa.findFirstOrThrow({ where: { bang: "Loan", banGhiId: loan.id } })).id;
+  }
+
+  it("khoản vay thường mang sang bắt đầu 20/10 (không dòng tiền) ⇒ khôi phục được sau bật", async () => {
+    const mucId = await khoanVayVaoThungRac({ kind: "TERM", termMonths: 12, firstDueDate: vn("2026-11-20") });
+    await datM("2026-11-01");
+    expect(await khoiPhucBanGhiDaXoa(mucId, CHU)).toEqual({ ok: true, canhBao: null });
+    expect(await prisma.loan.count()).toBe(1);
+  });
+
+  it("thấu chi bắt đầu 20/10 (mang sang, không dòng tiền) ⇒ sau bật từ chối; chưa bật được; thấu chi bắt đầu 05/11 ⇒ được", async () => {
+    const truocM = await khoanVayVaoThungRac({ kind: "OVERDRAFT" });
+    await datM("2026-11-01");
+    expect(await khoiPhucBanGhiDaXoa(truocM, CHU)).toMatchObject({
+      ok: false,
+      lyDo: expect.stringMatching(/Khoản thấu chi bắt đầu 20\/10\/2026 trước ngày bật theo dõi nợ \(01\/11\/2026\)/),
+    });
+    expect(await prisma.loan.count()).toBe(0);
+    const { rows } = await listThungRac(phamViThungRac(CHU));
+    expect(rows.find((r) => r.id === truocM)?.lyDo).toMatch(/Khoản thấu chi bắt đầu 20\/10\/2026/);
+
+    await datM(null);
+    expect(await khoiPhucBanGhiDaXoa(truocM, CHU)).toEqual({ ok: true, canhBao: null });
+
+    const sauM = await khoanVayVaoThungRac({ kind: "OVERDRAFT", startDate: vn("2026-11-05") });
+    await datM("2026-11-01");
+    expect(await khoiPhucBanGhiDaXoa(sauM, CHU)).toEqual({ ok: true, canhBao: null });
+    expect(await prisma.loan.count()).toBe(2);
+  });
+
+  it("khôi phục góp vốn 20/10 giữa lúc bước bật đang giữ khoá ⇒ CHỜ bước bật commit rồi bị từ chối", async () => {
+    const dong = await prisma.cashMovement.create({
+      data: { date: vn("2026-10-20"), kind: "CAPITAL_IN", amount: tr(10), description: "Góp vốn" },
+    });
+    await deleteCashMovement(dong.id);
+    const mucId = (await mucThungRac("CashMovement")).id;
+    let tha!: () => void;
+    const cho = new Promise<void>((res) => (tha = res));
+    let daGiu!: () => void;
+    const giuXong = new Promise<void>((res) => (daGiu = res));
+    const buocBat = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
+        await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: "2026-11-01" } });
+        daGiu();
+        await cho;
+      },
+      { timeout: 20_000 }
+    );
+    await giuXong;
+    const t0 = performance.now();
+    const p = khoiPhucBanGhiDaXoa(mucId, CHU).then((r) => ({ r, ms: performance.now() - t0 }));
+    await new Promise((res) => setTimeout(res, 800));
+    tha();
+    await buocBat;
+    const { r, ms } = await p;
+    expect(ms).toBeGreaterThanOrEqual(700);
+    expect(r).toMatchObject({ ok: false, lyDo: expect.stringMatching(CAU_TRUOC_M) });
+    expect(await prisma.cashMovement.count()).toBe(0);
   });
 });

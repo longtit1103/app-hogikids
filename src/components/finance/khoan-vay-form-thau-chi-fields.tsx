@@ -151,6 +151,25 @@ export function KhoanVayFormThauChiFields({
         {!f.coLich && <p className="text-xs text-muted-foreground">Chỉ thu lãi lúc tất toán</p>}
       </div>
 
+      <div className="flex flex-col gap-1">
+        <label className="flex items-start gap-2 text-sm text-ink">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={f.laiNhapGoc}
+            onChange={(e) => setF((p) => ({ ...p, laiNhapGoc: e.target.checked }))}
+          />
+          Ngân hàng cộng lãi vào dư nợ (lãi nhập gốc) — tài khoản không bị trừ tiền lãi
+        </label>
+        <p className="text-xs text-muted-foreground">
+          {f.laiNhapGoc
+            ? "Lãi mỗi kỳ vẫn vào Lãi/Lỗ nhưng quỹ không đổi, dư nợ tăng đúng số lãi; kỳ sau tính lãi trên dư nợ đã cộng."
+            : "Bỏ chọn nếu ngân hàng thu lãi bằng cách trừ thẳng vào tài khoản."}
+          {daDuyetKy && " Đổi lựa chọn này chỉ áp dụng từ kỳ duyệt sau, kỳ đã duyệt giữ nguyên."}
+        </p>
+        {loi.laiNhapGoc && <p className="text-xs text-error">{loi.laiNhapGoc}</p>}
+      </div>
+
       {f.coLich && (
         <O
           label="Ngày thu lãi kỳ đầu"

@@ -27,7 +27,8 @@ import { NhapHangSauMHuongDan, type NhapHangSauMChoManHinh } from "./nhap-hang-s
  * trang: (1) khai dư nợ thẻ + số dư ví cuối ngày trước ngày bật, (2) đối chiếu tiền thật ⇒ chọn điều chỉnh
  * quỹ, (3) xác nhận. Một `yeuCauId` cho cả lượt mở màn: mất phản hồi rồi bấm lại cùng nội dung ⇒ server trả
  * "đã ghi rồi", không bật hai lần. Đổi số ở bước 1/ô ngân hàng sau khi đã tính ⇒ kết quả bước 2 bị bỏ, phải
- * tính lại (điều chỉnh luôn khớp đúng số đang hiện).
+ * tính lại (điều chỉnh luôn khớp đúng số đang hiện). Bấm bật gửi kèm vân tay số liệu bước 2 đã hiện: server
+ * thấy số liệu trước ngày bật đã đổi (`QUY_DA_DOI`) ⇒ bỏ kết quả bước 2, chủ shop tính lại rồi bấm lại.
  */
 export function XacNhanBatWizard({
   mocM,
@@ -39,6 +40,7 @@ export function XacNhanBatWizard({
   loiDieuKien,
   thieuHoSoVi = null,
   nhapHangSauM = null,
+  nhac = [],
 }: {
   mocM: string;
   nhanM: string;
@@ -58,6 +60,8 @@ export function XacNhanBatWizard({
    * sách dòng kèm link Sổ chi phí + ba trường hợp xử lý thay cho một câu dài.
    */
   nhapHangSauM?: NhapHangSauMChoManHinh | null;
+  /** Cảnh báo KHÔNG chặn bật (vd dữ liệu ví Shopee chưa phủ tới ngày bật) — khối vàng, không vào `loiDieuKien`. */
+  nhac?: readonly string[];
 }) {
   const router = useRouter();
   const [yeuCauId] = useState(() => crypto.randomUUID());
@@ -119,6 +123,7 @@ export function XacNhanBatWizard({
   const coTheBat = b1 && ketQua !== null && !thieuMoTa && dongY && loiDieuKien.length === 0 && nhapHangSauM === null && viDaXong && !dangBat;
 
   async function bat() {
+    if (ketQua === null) return;
     setDangBat(true);
     try {
       const res = await xacNhanBatNoPhaiTra({
@@ -136,9 +141,12 @@ export function XacNhanBatWizard({
         }),
         viAds: vi.map((v) => ({ viAdsId: v.id, soDuNeo: soDuVi[v.id] ?? 0 })),
         xacNhanViShopeeChuaTheoDoi: thieuHoSoVi !== null && xacNhanViChuaTheoDoi,
+        vanTayQuy: ketQua.vanTay,
         dieuChinh: dongGui.map((d) => ({ ...d, moTa: d.moTa.trim() })),
       });
       if (!res.ok) {
+        // Số liệu trước ngày bật đổi sau lúc tính ⇒ điều chỉnh đang hiện đã cũ: bỏ, bắt tính lại.
+        if (res.code === "QUY_DA_DOI") boKetQua();
         toast.error(res.error);
         return;
       }
@@ -164,6 +172,14 @@ export function XacNhanBatWizard({
             </ul>
           )}
           {nhapHangSauM !== null && <NhapHangSauMHuongDan duLieu={nhapHangSauM} />}
+        </div>
+      )}
+
+      {nhac.length > 0 && (
+        <div className="flex flex-col gap-1 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm text-ink" data-testid="bat-nhac-truoc-bat">
+          {nhac.map((n) => (
+            <p key={n}>{n}</p>
+          ))}
         </div>
       )}
 
@@ -247,6 +263,13 @@ export function XacNhanBatWizard({
         )}
         <ul className="list-disc pl-5 text-xs text-muted-foreground">
           <li>Bật MỘT lần, không tắt lại được. Từ ngày bật, quỹ chỉ giảm khi bạn THẬT trả thẻ / trả nhà cung cấp / nạp ví.</li>
+          <li data-testid="bat-canh-bao-khoa-so-nhap-hang">
+            Sau khi bật, MỌI chi phí trước {nhanM} (mọi danh mục) bị KHOÁ SỔ — không thêm, xoá, khôi phục, đổi số
+            tiền/ngày hay gỡ/đổi thẻ được nữa, chỉ còn đổi được danh mục, mô tả, kênh; khoản định kỳ đến hạn trước{" "}
+            {nhanM} chưa ghi cũng không được ghi bù. Chi phí &quot;Nhập hàng&quot; khoá cả từ {nhanM} (tiền hàng đi sổ nợ).
+            Thêm/sửa/xoá các khoản chi trước {nhanM} và duyệt xong phiếu nhập (duyệt phiếu = tạo chi phí Nhập hàng)
+            TRƯỚC khi bật.
+          </li>
           <li>Thẻ đang có nợ mà chưa có hồ sơ: thêm ở tab Chuẩn bị TRƯỚC — thẻ thêm sau khi bật chỉ khai dư nợ 0.</li>
           <li>Lãi/Lỗ không đổi.</li>
         </ul>

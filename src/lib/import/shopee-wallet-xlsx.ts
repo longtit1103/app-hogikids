@@ -1,3 +1,4 @@
+import { chuanHoaChiTiet, ganKhoaPhanBiet } from "./shopee-wallet-khoa-phan-biet";
 import { normHeader, parseVnInt, readSheetRows } from "./xlsx-shared";
 
 /**
@@ -26,6 +27,12 @@ export type ParsedWalletRow = {
   amount: number;
   status: string;
   runningBalance: number;
+  /**
+   * CHỈ có trên dòng VA CHẠM khoá trong cùng file mà cột "Chi tiết" phân biệt được (và không phải dòng
+   * giữ khoá gốc của nhóm) — xem `shopee-wallet-khoa-phan-biet.ts`. Dòng thường KHÔNG có field này
+   * (vắng hẳn, không phải `undefined` gán tay) ⇒ payload/`payloadHash` Bronze y hệt trước bản vá.
+   */
+  khoaPhu?: string;
 };
 
 export type WalletSummary = { totalIn: number; totalOut: number; countIn: number; countOut: number };
@@ -41,9 +48,10 @@ export type ParseWalletResult = {
   /** Tự tính từ `rows`, bucket theo Dòng tiền — action so với `summary` làm cổng chặn. */
   computed: WalletSummary;
   /**
-   * Các khoá tổng hợp `txnTime|type|orderCode|amount` xuất hiện >1 lần trong file. Bronze/Silver
-   * gộp các dòng cùng khoá thành 1 (khoá cố ý loại runningBalance) ⇒ checksum vẫn "khớp" nhưng
-   * Silver THIẾU dòng. Action TỪ CHỐI import khi có phần tử ở đây (giữ checksum trung thực).
+   * Các khoá tổng hợp `txnTime|type|orderCode|amount` xuất hiện >1 lần trong file mà cột "Chi tiết"
+   * cũng KHÔNG phân biệt được. Bronze/Silver gộp các dòng cùng khoá thành 1 (khoá cố ý loại
+   * runningBalance) ⇒ checksum vẫn "khớp" nhưng Silver THIẾU dòng. Action TỪ CHỐI import khi có phần
+   * tử ở đây (giữ checksum trung thực).
    */
   duplicateKeys: string[];
   /**
@@ -168,8 +176,9 @@ export function parseShopeeWalletFile(buf: ArrayBuffer): ParseWalletResult {
   const warnings: string[] = [];
   const rows: ParsedWalletRow[] = [];
   const computed: WalletSummary = { totalIn: 0, totalOut: 0, countIn: 0, countOut: 0 };
-  const seenKeys = new Set<string>();
-  const dupKeys = new Set<string>();
+  // Song song với `rows` — CHỈ để phân biệt dòng va chạm khoá, KHÔNG đi vào payload Bronze.
+  const chiTietTheoDong: string[] = [];
+  const soDongTrongFile: number[] = [];
 
   const aoa = readSheetRows(buf);
   const summary = readSummary(aoa);
@@ -207,6 +216,8 @@ export function parseShopeeWalletFile(buf: ArrayBuffer): ParseWalletResult {
   const flowCol = findCol(header, ["dong tien"]);
   const amountCol = findCol(header, ["so tien"]);
   const statusCol = findCol(header, ["trang thai"]);
+  // Chỉ khớp CHÍNH XÁC tên cột "Chi tiết" (không `includes`) — tránh bắt nhầm cột khác có chữ "chi tiết".
+  const detailCol = findCol(header, ["chi tiet"]);
   const balanceCol = findCol(header, ["so du vi sau giao dich"], ["so du"]);
 
   if (dateCol === -1 || typeCol === -1 || flowCol === -1 || amountCol === -1) {
@@ -254,12 +265,8 @@ export function parseShopeeWalletFile(buf: ArrayBuffer): ParseWalletResult {
     const runningBalance = balanceCol === -1 ? 0 : parseVnInt(raw[balanceCol]) ?? 0;
 
     rows.push({ txnTime, type, orderCode, amount, status, runningBalance });
-
-    // Khoá tổng hợp = idExpr Bronze (`coalesce(orderCode,'-')`). 2 dòng cùng khoá → Bronze/Silver
-    // gộp 1 (khoá loại runningBalance) ⇒ ghi lại để action từ chối (checksum vẫn "khớp" giả).
-    const key = `${txnTime}|${type}|${orderCode ?? "-"}|${amount}`;
-    if (seenKeys.has(key)) dupKeys.add(key);
-    else seenKeys.add(key);
+    chiTietTheoDong.push(detailCol === -1 ? "" : chuanHoaChiTiet(raw[detailCol]));
+    soDongTrongFile.push(line);
 
     if (sign > 0) {
       computed.totalIn += amount;
@@ -270,5 +277,18 @@ export function parseShopeeWalletFile(buf: ArrayBuffer): ParseWalletResult {
     }
   }
 
-  return { rows, errors, warnings, summary, computed, duplicateKeys: [...dupKeys], coCotSoDu: balanceCol !== -1 };
+  // Khoá tổng hợp = idExpr Bronze. Dòng cùng khoá mà "Chi tiết" phân biệt được ⇒ gán `khoaPhu`; không
+  // phân biệt được ⇒ `duplicateKeys` ⇒ action từ chối (Bronze/Silver sẽ gộp 1, checksum "khớp" giả).
+  const phanBiet = ganKhoaPhanBiet(rows, chiTietTheoDong, soDongTrongFile);
+  warnings.push(...phanBiet.warnings);
+
+  return {
+    rows,
+    errors,
+    warnings,
+    summary,
+    computed,
+    duplicateKeys: phanBiet.duplicateKeys,
+    coCotSoDu: balanceCol !== -1,
+  };
 }

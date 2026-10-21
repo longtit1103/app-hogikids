@@ -2,9 +2,9 @@ import { format } from "date-fns";
 
 import type { Prisma } from "@/generated/prisma/client";
 
-import type { CashMovementKind } from "@/lib/cash-movements/cash-movement-kinds";
+import { DAU_DU_NO_VAY, type CashMovementKindTatCa } from "@/lib/cash-movements/cash-movement-kinds";
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
-import { chanNhapHangSauM, LoiNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
+import { chanSoChiPhiDaKhoa, LoiSoChiPhiDaKhoa } from "@/lib/no-phai-tra/chan-so-chi-phi-da-khoa";
 import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 import { duNoSauKhiGhi, tienGuiDangGiu } from "@/lib/so-quy/vi-tu-du-no";
@@ -17,8 +17,9 @@ import {
 } from "@/lib/thung-rac/chup-anh-ban-ghi";
 import { viPhamNoPhaiTraKhiKhoiPhuc } from "@/lib/thung-rac/cua-so-no-phai-tra-khoi-phuc";
 import {
+  CAU_CHI_PHI_TRUOC_M_DA_KHOA_SO,
   CAU_HO_SO_NO_SAU_BAT,
-  CAU_NHAP_HANG_SAU_M,
+  CAU_NHAP_HANG_DA_KHOA_SO,
   type ChaDaMat,
   type ChaDaTatToan,
   type TinhTrangKhoiPhuc,
@@ -234,9 +235,11 @@ async function trangThaiCha(
  * Thêm `kind` mới mà quên khai ở đây thì cột "Trạng thái" bỏ sót một ca; hậu kiểm SAU câu ghi
  * (`chanDuNoAm`…) vẫn chặn được — hai lớp, không một lớp.
  */
-const DAU_THEO_KIND: Partial<Record<CashMovementKind, { truc: TrucSoDuAm; dau: 1 | -1 }>> = {
-  LOAN_IN: { truc: "duNo", dau: 1 },
-  LOAN_REPAY: { truc: "duNo", dau: -1 },
+const DAU_THEO_KIND: Partial<Record<CashMovementKindTatCa, { truc: TrucSoDuAm; dau: 1 | -1 }>> = {
+  // Trục dư nợ lấy THẲNG dấu chung `DAU_DU_NO_VAY` (gốc vay + lãi nhập gốc) — cùng công thức vị từ dư nợ.
+  LOAN_IN: { truc: "duNo", dau: DAU_DU_NO_VAY.LOAN_IN },
+  LAI_NHAP_GOC: { truc: "duNo", dau: DAU_DU_NO_VAY.LAI_NHAP_GOC },
+  LOAN_REPAY: { truc: "duNo", dau: DAU_DU_NO_VAY.LOAN_REPAY },
   DEPOSIT_OUT: { truc: "tienGui", dau: 1 },
   DEPOSIT_IN: { truc: "tienGui", dau: -1 },
   SAVINGS_OUT: { truc: "soDuTietKiem", dau: 1 },
@@ -253,7 +256,7 @@ function deltaSoDu(canDung: BanGhiCanDung[]): Record<TrucSoDuAm, Map<string, num
 
   for (const { bang, data } of canDung) {
     if (bang !== "CashMovement") continue;
-    const kind = chuoi(data, "kind") as CashMovementKind | null;
+    const kind = chuoi(data, "kind") as CashMovementKindTatCa | null;
     const meta = kind === null ? undefined : DAU_THEO_KIND[kind];
     if (meta === undefined) continue;
 
@@ -356,18 +359,23 @@ async function trungKhoanDinhKy(
 }
 
 /**
- * Expense "Nhập hàng" ngày ≥ M: đường ghi đó ĐÓNG ở mọi cửa (spec §5.3) — khôi phục là cửa thứ sáu, đi
- * qua ĐÚNG hàm chung `chanNhapHangSauM` (lưới `khoa-duong-ghi-nhap-hang-sau-m`). Trả câu từ chối hoặc null.
+ * Sổ chi phí khoá khi đã bật nợ phải trả — khôi phục một `Expense` là một lượt TẠO, đi qua ĐÚNG hàm chung
+ * `chanSoChiPhiDaKhoa` (lưới `khoa-duong-ghi-nhap-hang-da-khoa-so`): dòng ngày < M (mọi danh mục) dựng lại là trừ
+ * thêm quỹ cuối M−1 mà điều chỉnh mở sổ đã chốt theo tiền thật; dòng Nhập hàng ≥ M là trừ quỹ hai lần với sổ nợ.
+ * Áp cả Expense nằm trong cụm của bản ghi khác (vd lãi vay theo cụm khoản vay). Trả câu từ chối hoặc null.
  */
-async function nhapHangSauM(tx: Prisma.TransactionClient, { bang, data }: BanGhiCanDung): Promise<string | null> {
+async function soChiPhiDaKhoa(tx: Prisma.TransactionClient, { bang, data }: BanGhiCanDung): Promise<string | null> {
   if (bang !== "Expense") return null;
   const categoryId = chuoi(data, "categoryId");
-  if (categoryId === null || !(data.date instanceof Date)) return null;
+  if (categoryId === null) return null;
+  // `date` là cột NOT NULL nên ảnh chụp luôn có; thiếu (ảnh hỏng) thì coi như trước mọi mốc — chặn khi đã bật thay
+  // vì để lọt một dòng không biết ngày.
+  const date = data.date instanceof Date ? data.date : new Date(0);
   try {
-    await chanNhapHangSauM(tx, { categoryId, date: data.date });
+    await chanSoChiPhiDaKhoa(tx, { loai: "TAO", dong: { categoryId, date } });
     return null;
   } catch (e) {
-    if (e instanceof LoiNhapHangSauM) return CAU_NHAP_HANG_SAU_M;
+    if (e instanceof LoiSoChiPhiDaKhoa) return e.lyDo === "TRUOC_M" ? CAU_CHI_PHI_TRUOC_M_DA_KHOA_SO : CAU_NHAP_HANG_DA_KHOA_SO;
     throw e;
   }
 }
@@ -478,7 +486,7 @@ export async function doTinhTrang(
     }
 
     if (!thangDaCoDinhKy && (await trungKhoanDinhKy(tx, banGhi))) thangDaCoDinhKy = true;
-    viPhamNoPhaiTra ??= await nhapHangSauM(tx, banGhi);
+    viPhamNoPhaiTra ??= await soChiPhiDaKhoa(tx, banGhi);
   }
 
   return {

@@ -28,6 +28,7 @@ import type {
 import { listKhoanVay } from "@/lib/so-quy/khoan-vay-queries";
 import { docNguCanhLocTrongRequest } from "@/lib/no-phai-tra/doc-ngu-canh-loc";
 import { docPhaiTraCacThe } from "@/lib/no-phai-tra/phai-tra-the-queries";
+import { laNhapHangDaKhoaSo } from "@/lib/no-phai-tra/chan-so-chi-phi-da-khoa";
 
 /**
  * Đọc biểu đồ quỹ (90 ngày) + dự báo "quỹ sắp cạn" (30 ngày). Lõi tính ở `du-bao-quy.ts` (thuần).
@@ -90,10 +91,15 @@ async function docKhoanKyTraNo(bayGio: Date, homNay: KhoaNgay, den: KhoaNgay): P
  * đã tới hạn trong tháng hiện tại mà chưa sinh dòng tính vào hôm nay (`khoanDinhKy`).
  */
 async function docKhoanDinhKy(homNay: KhoaNgay, den: KhoaNgay, mocM: Date | null): Promise<KhoanDuKien[]> {
-  const mau = await prisma.recurringExpense.findMany({
-    where: { active: true },
-    select: { id: true, amount: true, dayOfMonth: true, description: true, activeFrom: true, categoryId: true },
-  });
+  // Đã bật nợ, cùng luật bộ sinh (`chan-so-chi-phi-da-khoa.ts`): mẫu "Nhập hàng" không sinh lần nào (vị từ
+  // `laNhapHangDaKhoaSo`), và lần đến hạn TRƯỚC M của mọi mẫu (M cùng tháng hiện tại) không bao giờ được ghi bù
+  // ⇒ dự báo không trừ (tham số `boQuaTruoc` của `khoanDinhKy`).
+  const mau = (
+    await prisma.recurringExpense.findMany({
+      where: { active: true },
+      select: { id: true, amount: true, dayOfMonth: true, description: true, activeFrom: true, categoryId: true },
+    })
+  ).filter((m) => !laNhapHangDaKhoaSo(m, mocM));
   if (mau.length === 0) return [];
   // Dòng đã sinh trong các tháng mà cửa sổ chạm — cổng "1 dòng/mẫu/tháng" của chính bộ sinh.
   const daSinhDong = await prisma.expense.findMany({
@@ -110,13 +116,11 @@ async function docKhoanDinhKy(homNay: KhoaNgay, den: KhoaNgay, mocM: Date | null
   for (const e of daSinhDong) {
     if (e.recurringId !== null) daSinh.add(khoaDaSinh(e.recurringId, khoaNgayVn(e.date)));
   }
-  // Mẫu "Nhập hàng" sau mốc bật nợ: bộ sinh bỏ mọi lần ≥ M (`laNhapHangSauM`) ⇒ dự báo cũng không trừ.
-  const mauCoMoc = mau.map(({ categoryId, ...m }) => ({
+  const mauCoMoc = mau.map((m) => ({
     ...m,
     activeFrom: m.activeFrom ? khoaNgayVn(m.activeFrom) : null,
-    boQuaTuNgay: categoryId === "purchase" && mocM !== null ? khoaNgayVn(mocM) : null,
   }));
-  return khoanDinhKy(mauCoMoc, homNay, den, daSinh);
+  return khoanDinhKy(mauCoMoc, homNay, den, daSinh, mocM === null ? null : khoaNgayVn(mocM));
 }
 
 /**

@@ -4,7 +4,9 @@ import { format, startOfDay } from "date-fns";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
+import { KIND_DU_NO_VAY } from "@/lib/cash-movements/cash-movement-kinds";
 import {
+  cauTatToanTruocM,
   LoiHopDong,
   loiKhoanVay,
   maLoiNhatKy,
@@ -17,9 +19,12 @@ import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
+import { chanDongTienTruocM } from "@/lib/no-phai-tra/chan-dong-tien-truoc-m";
+import { khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { congAction } from "@/lib/quyen/cong-action";
 import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
 import { laXungDotGhi } from "@/lib/prisma-loi-adapter";
+import { refLaiKy } from "@/lib/so-quy/cap-lai-nhap-goc";
 import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import { chanDuNoAm, duNoSauKhiGhi, khoaKhoanVay } from "@/lib/so-quy/vi-tu-du-no";
 
@@ -39,9 +44,11 @@ import { chanDuNoAm, duNoSauKhiGhi, khoaKhoanVay } from "@/lib/so-quy/vi-tu-du-n
  *
  * PHẢI nằm trong `DUONG_GHI` của `tests/khoa-bao-tri-duong-ghi.test.ts` — phép quét AST chỉ đọc THÂN
  * HÀM export nên `dangPhucHoi()` gọi trực tiếp ở đây, không uỷ quyền.
+ *
+ * Khoản "lãi nhập gốc" (`Loan.laiNhapGoc`): gốc tất toán = TOÀN BỘ dư nợ, đã gồm mọi kỳ lãi ngân hàng
+ * cộng vào (`LAI_NHAP_GOC`) — `duNoSauKhiGhi` cộng sẵn. Lãi ĐOẠN CUỐI (từ kỳ đã duyệt tới ngày tất toán)
+ * thì là tiền trả THẬT rời tài khoản cùng lượt tất toán ⇒ chỉ ghi `Expense` (trừ quỹ), KHÔNG nhập gốc.
  */
-
-const KIND_GOC = ["LOAN_IN", "LOAN_REPAY"] as const;
 
 const tatToanSchema = z.object({
   loanId: z.string().min(1, "Chọn khoản vay"),
@@ -71,7 +78,10 @@ async function chayTatToan({
   const ngay = startOfDay(ngayTatToan);
 
   return prisma.$transaction(async (tx) => {
-    // Khoá dòng `Loan` NGAY ĐẦU: dưới đây vừa ĐỌC dư nợ vừa ghi dòng trả gốc, mà `chanDuNoAm` cộng
+    // Khoá chung với bước bật nợ phải trả là câu ĐẦU (lượt này ghi tiền đề `ngay`, cần M mới nhất), rồi mới khoá
+    // dòng `Loan` — cùng thứ tự với mọi đường ghi khoản vay. Bước bật không khoá `Loan` ⇒ không có chu trình chờ.
+    await khoaChiaSeBatNoPhaiTra(tx);
+    // Khoá dòng `Loan` NGAY sau đó: dưới đây vừa ĐỌC dư nợ vừa ghi dòng trả gốc, mà `chanDuNoAm` cộng
     // lại từ bảng `CashMovement` nên một dòng trả gốc commit chen giữa sẽ để lại khoản "đã đóng" mà
     // dư nợ khác 0. Lý do đầy đủ ở `vi-tu-du-no.ts`.
     await khoaKhoanVay(tx, loanId);
@@ -113,7 +123,7 @@ async function chayTatToan({
     // Tất toán LÙI trước một lần trả gốc đã ghi = tính lãi cho những ngày mà dòng tiền nói là đã
     // trả xong, và con dấu nhảy về trước dòng đó. Chặn thẳng thay vì tính ra một số khó giải thích.
     const mocCuoi = await tx.cashMovement.aggregate({
-      where: { loanId, kind: { in: [...KIND_GOC] } },
+      where: { loanId, kind: { in: [...KIND_DU_NO_VAY] } },
       _max: { date: true },
     });
     const dongCuoi = mocCuoi._max.date;
@@ -123,6 +133,14 @@ async function chayTatToan({
         "ngayTatToan"
       );
     }
+
+    // Đã bật nợ phải trả: tất toán ghi lãi (`Expense`) + trọn gốc (`LOAN_REPAY`) đề `ngay` ⇒ `ngay` < M bị từ
+    // chối (tiền trước M đã chốt vào điều chỉnh mở sổ). Chặn cả khi lãi = gốc = 0: không có lý do gì đề lùi.
+    await chanDongTienTruocM(
+      tx,
+      { loai: "TAO", ngay: [ngay] },
+      { cau: cauTatToanTruocM, field: "ngayTatToan" }
+    );
 
     // Danh mục hệ thống "Lãi vay" xoá được tay ở màn Cài đặt ⇒ báo câu hiểu được thay vì để Postgres
     // ném lỗi khoá ngoại (cùng luật với `chayGhiKy`).
@@ -134,7 +152,8 @@ async function chayTatToan({
       if (!danhMuc) throw new LoiHopDong("Thiếu danh mục Lãi vay — chạy seed");
     }
 
-    // Gốc KHÔNG do client gửi: luôn là TOÀN BỘ dư nợ còn lại, suy lại từ chính các dòng tiền.
+    // Gốc KHÔNG do client gửi: luôn là TOÀN BỘ dư nợ còn lại, suy lại từ chính các dòng tiền (gồm cả
+    // lãi đã nhập gốc của khoản "lãi nhập gốc").
     const goc = await duNoSauKhiGhi(tx, loanId);
 
     // CỔNG 1 — fencing: mọi điều kiện nằm NGAY TRONG câu UPDATE, không phải check-then-act. Hai tab
@@ -169,7 +188,7 @@ async function chayTatToan({
           amount: lai,
           description: `Lãi vay ${loan.name} — tất toán ${format(ngay, "dd/MM/yyyy")}`,
           source: "MANUAL",
-          refId: `LOAN:${loanId}:${format(ngay, "yyyy-MM-dd")}`,
+          refId: refLaiKy(loanId, ngay),
         },
       });
     }

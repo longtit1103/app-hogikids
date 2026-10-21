@@ -98,13 +98,18 @@ describe("tạo khoản chi trừ vào thẻ", () => {
     ]);
   });
 
-  it("chưa bật ⇒ CHUA_BAT_NO_PHAI_TRA; ngày < M ⇒ từ chối ô ngày; không thẻ thì như cũ", async () => {
+  it("chưa bật ⇒ CHUA_BAT_NO_PHAI_TRA; ngày < M ⇒ từ chối ô ngày (có thẻ lẫn không — sổ trước M đã khoá); không thẻ từ M như cũ", async () => {
     const cardId = await taoThe();
     expect(await createExpense(chi({ cardId }))).toMatchObject({ ok: false, code: "CHUA_BAT_NO_PHAI_TRA" });
     await batM();
     expect(await createExpense(chi({ cardId, date: vn("2026-10-31") }))).toMatchObject({ ok: false, field: "date" });
+    expect(await createExpense(chi({ date: vn("2026-10-31") }))).toMatchObject({
+      ok: false,
+      code: "DA_BAT_NO_PHAI_TRA",
+      field: "date",
+    });
     expect(await prisma.expense.count()).toBe(0);
-    expect(await createExpense(chi({ date: vn("2026-10-31") }))).toEqual({ ok: true, data: undefined });
+    expect(await createExpense(chi())).toEqual({ ok: true, data: undefined });
   });
 
   it("lặp hàng tháng + thẻ ⇒ zod; dòng RECURRING mang thẻ ⇒ CHECK Expense_card_chi_manual", async () => {

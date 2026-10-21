@@ -138,7 +138,7 @@ describe("schema thật sau migration khớp schema.prisma", () => {
       // có sẵn từ trước (index biểu thức của M1…) Prisma có thể liệt kê như lệch dù không liên quan.
       const lech = lechSchemaVoiDb(db.url, thuMuc) ?? "";
       expect(lech).not.toMatch(
-        /TheTinDung|KySaoKeThe|GanNenTangThe|PhieuNhapNo|YeuCauGhi|ViAdsTraTruoc|cardId|phieuNhapId|viAdsId|yeuCauId|CashMovementKind/,
+        /TheTinDung|KySaoKeThe|GanNenTangThe|PhieuNhapNo|YeuCauGhi|ViAdsTraTruoc|cardId|phieuNhapId|viAdsId|yeuCauId|CashMovementKind|laiNhapGoc/,
       );
     },
     HAN,
@@ -166,6 +166,7 @@ describe("schema thật sau migration khớp schema.prisma", () => {
         "PhieuNhapNo_tien_khong_am",
         "KySaoKeThe_da_tra_truoc_khong_am",
         "ViAdsTraTruoc_so_du_neo_khong_am",
+        "Loan_lai_nhap_goc_chi_thau_chi",
       ]),
     );
   });
@@ -405,3 +406,52 @@ describe("khoá ngoại Restrict — hồ sơ còn dòng tiền thì không xoá
     );
   });
 });
+
+/**
+ * Thấu chi "lãi nhập gốc" (migration 20261015020000 + 20261015020100): cờ `Loan.laiNhapGoc` chỉ cho
+ * OVERDRAFT; dòng `LAI_NHAP_GOC` làm tăng dư nợ nên BẮT BUỘC gắn khoản vay, cấm khoá hồ sơ khác, và tối đa
+ * MỘT dòng mỗi khoản mỗi ngày kỳ (khoá cặp với dòng lãi `Expense` `LOAN:{loanId}:{ngày}`).
+ */
+describe("Thấu chi lãi nhập gốc — CHECK + index", () => {
+  it("cột `laiNhapGoc` mặc định false cho khoản chèn không khai (khoản cũ giữ hành vi cũ)", async () => {
+    const rows = await db.prisma.$queryRawUnsafe<{ laiNhapGoc: boolean }[]>(
+      `SELECT "laiNhapGoc" FROM "Loan" WHERE "id" = '${ID.loan}'`,
+    );
+    expect(rows).toEqual([{ laiNhapGoc: false }]);
+  });
+
+  it("bật cờ trên khoản KHÔNG phải thấu chi bị từ chối; thấu chi bật được", async () => {
+    await expect(
+      db.prisma.$executeRawUnsafe(`UPDATE "Loan" SET "laiNhapGoc" = true WHERE "id" = '${ID.loan}'`),
+    ).rejects.toThrow(/Loan_lai_nhap_goc_chi_thau_chi/);
+    await expect(
+      db.prisma.$executeRawUnsafe(
+        `INSERT INTO "Loan" ("id", "name", "startDate", "kind", "laiNhapGoc")
+         VALUES ('np-thau-chi-1', 'Thấu chi thử', '2026-09-10T00:00:00+07:00', 'OVERDRAFT', true)`,
+      ),
+    ).resolves.toBe(1);
+  });
+
+  it("LAI_NHAP_GOC thiếu loanId bị từ chối (`CashMovement_loan_bat_buoc`)", async () => {
+    await expect(chenDongTien({ kind: "LAI_NHAP_GOC" })).rejects.toThrow(/CashMovement_loan_bat_buoc/);
+  });
+
+  it("LAI_NHAP_GOC mang cardId / savingsId bị từ chối", async () => {
+    await expect(chenDongTien({ kind: "LAI_NHAP_GOC", loanId: "np-thau-chi-1", cardId: ID.the })).rejects.toThrow(
+      /CashMovement_kind_khoa_bat_buoc|CashMovement_toi_da_mot_ho_so/,
+    );
+    await expect(chenDongTien({ kind: "LAI_NHAP_GOC", loanId: "np-thau-chi-1", savingsId: ID.so })).rejects.toThrow(
+      /CashMovement_loan_savings_loai_tru|CashMovement_savings_dung_cho|CashMovement_toi_da_mot_ho_so/,
+    );
+  });
+
+  it("LAI_NHAP_GOC gắn khoản ghi được; dòng thứ hai cùng khoản + cùng ngày bị index duy nhất từ chối", async () => {
+    await expect(chenDongTien({ kind: "LAI_NHAP_GOC", loanId: "np-thau-chi-1" })).resolves.toBe(1);
+    await expect(chenDongTien({ kind: "LAI_NHAP_GOC", loanId: "np-thau-chi-1" })).rejects.toThrow(
+      /CashMovement_lai_nhap_goc_mot_ky/,
+    );
+    // Index CÓ ĐIỀU KIỆN: kind khác cùng khoản + cùng ngày vẫn ghi được (vd trả nợ gốc đúng ngày kỳ).
+    await expect(chenDongTien({ kind: "LOAN_REPAY", loanId: "np-thau-chi-1" })).resolves.toBe(1);
+  });
+});
+

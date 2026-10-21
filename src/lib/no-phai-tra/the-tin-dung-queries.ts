@@ -4,6 +4,7 @@ import { formatVnd } from "@/lib/format";
 import { LoiChuaBat } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docNguCanhLocTrongRequest } from "@/lib/no-phai-tra/doc-ngu-canh-loc";
 import { docDuNoCacThe, type DbDocThe } from "@/lib/no-phai-tra/du-no-the";
+import { khoangHieuLucCacMoc } from "@/lib/no-phai-tra/khoang-hieu-luc-moc-gan";
 import { ngayTrongThang, type PhaiTra } from "@/lib/no-phai-tra/ky-sao-ke";
 import type { GanNenTang } from "@/lib/no-phai-tra/the-cua-dong-chi";
 import { prisma } from "@/lib/prisma";
@@ -113,6 +114,11 @@ export function nenTangDangGanThe(gan: readonly GanNenTang[], cardId: string, ho
   return ketQua;
 }
 
+/** Tên thẻ của mốc kế tiếp, CHỈ khi nó khác thẻ đang xét (cùng thẻ ⇒ không cần ghi "sau đó"). */
+function tenTheKeTiep(cardIdKeTiep: string | null, cardIdHienTai: string, tenThe: ReadonlyMap<string, string>): string | null {
+  return cardIdKeTiep === null || cardIdKeTiep === cardIdHienTai ? null : (tenThe.get(cardIdKeTiep) ?? null);
+}
+
 /** Từ chối có MÃ máy đọc được (UI/test phân biệt không cần so câu chữ) — vd `GAN_LUI_NGAY`. */
 export class LoiTheCoMa extends LoiHopDong {
   constructor(
@@ -138,7 +144,20 @@ export function loiThe(e: unknown, macDinh: string): { error: string; field?: st
   return { error: macDinh };
 }
 
-export type MocGanThe = { id: string; nenTang: string; tuNgay: Date; xoaDuoc: boolean };
+/**
+ * Một mốc gắn nền tảng → thẻ. `xoaDuoc` khớp luật `xoaGanNenTang`: chưa bật ⇒ mọi mốc; đã bật ⇒ chỉ mốc
+ * `tuNgay` > hôm nay. `denNgay` / `theKeTiep` = khoảng hiệu lực tính trên mốc của MỌI thẻ cùng nền tảng
+ * (`khoangHieuLucCacMoc`): `denNgay` là ngày cuối còn gánh ads (null = mốc cuối); `theKeTiep` là TÊN thẻ của mốc
+ * kế tiếp khi mốc kế nằm ở thẻ KHÁC (null nếu cùng thẻ hoặc không có mốc kế).
+ */
+export type MocGanThe = {
+  id: string;
+  nenTang: string;
+  tuNgay: Date;
+  xoaDuoc: boolean;
+  denNgay: Date | null;
+  theKeTiep: string | null;
+};
 export type KySaoKeGanNhat = {
   ngayChot: Date;
   soDu: number;
@@ -204,6 +223,8 @@ export async function docTheKemTrangThai(
   ]);
 
   const kHomNay = khoaNgayVn(homNay);
+  const khoangMoc = khoangHieuLucCacMoc(ganDayDu);
+  const tenThe = new Map(the.map((t) => [t.id, t.ten]));
   const duNoTheo = new Map(duNoCacThe.map((d) => [d.cardId, d]));
   const dem = (rows: { cardId: string | null; _count: { _all: number } }[], id: string) =>
     rows.find((r) => r.cardId === id)?._count._all ?? 0;
@@ -229,7 +250,14 @@ export async function docTheKemTrangThai(
       kyGanNhat: ky0
         ? { ngayChot: ky0.ngayChot, soDu: ky0.soDu, hanTra: ky0.hanTra, laNeoMoSo: ky0.laNeoMoSo, uocTinhLucChot: ky0.uocTinhLucChot }
         : null,
-      gan: gan.map((g) => ({ id: g.id, nenTang: g.nenTang, tuNgay: g.tuNgay, xoaDuoc: khoaNgayVn(g.tuNgay) > kHomNay })),
+      gan: gan.map((g) => ({
+        id: g.id,
+        nenTang: g.nenTang,
+        tuNgay: g.tuNgay,
+        xoaDuoc: ctx.mocM === null || khoaNgayVn(g.tuNgay) > kHomNay,
+        denNgay: khoangMoc.get(g.id)?.denNgay ?? null,
+        theKeTiep: tenTheKeTiep(khoangMoc.get(g.id)?.cardIdKeTiep ?? null, t.id, tenThe),
+      })),
       nenTangDangGan,
       chuaChotKyGanNhat: ctx.mocM !== null && t.closedAt === null && !daCoKyGanNhat,
       lyDoKhongXoa: lyDoKhongXoaThe({

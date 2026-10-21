@@ -15,6 +15,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { xacNhanBatNoPhaiTra } from "@/lib/actions/bat-no-phai-tra";
 import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { docVanTayQuyTruocM } from "@/lib/no-phai-tra/doc-chenh-lech-tai-m";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 
@@ -66,8 +67,10 @@ const saoKe = (ghiDe: Partial<SaoKe> = {}): SaoKe => ({
   ...ghiDe,
 });
 
-const bat = (the: KhaiThe[], ghiDe: Record<string, unknown> = {}) =>
+// Vân tay quỹ đọc ngay trước khi bấm (như màn hình vừa tính bước 2) — mã từ chối ở đây không phải `QUY_DA_DOI`.
+const bat = async (the: KhaiThe[], ghiDe: Record<string, unknown> = {}) =>
   xacNhanBatNoPhaiTra({
+    vanTayQuy: await docVanTayQuyTruocM(vn(typeof ghiDe.mocM === "string" ? ghiDe.mocM : "2026-11-01")),
     yeuCauId: randomUUID(),
     mocM: "2026-11-01",
     the,

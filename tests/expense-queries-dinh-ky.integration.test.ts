@@ -54,6 +54,7 @@ describe("getRecurringExpenseList", () => {
 
     const matBang = rows.find((r) => r.description === "Mặt bằng");
     expect(matBang).toMatchObject({
+      categoryId: "fixed", // id thô cho giao diện nhận diện danh mục (vd Nhập hàng = `purchase`)
       categoryName: "Mặt bằng-cố định", // tra tên qua Map, KHÔNG phải id thô "fixed"
       channelName: "Shopee",
       amount: 3_000_000,

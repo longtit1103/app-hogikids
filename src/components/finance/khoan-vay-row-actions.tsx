@@ -71,6 +71,8 @@ function payloadGiuNguyen(loan: KhoanVayRow) {
     // để sáng lên câu lỗi đó.
     tienGuiBatBuocMoiKy: loan.kind === "BULLET" ? loan.tienGuiBatBuocMoiKy : 0,
     note: loan.note,
+    // Gửi lại đúng cờ hiện có — "Mở lại" không được tắt lãi nhập gốc của khoản thấu chi.
+    laiNhapGoc: loan.kind === "OVERDRAFT" && loan.laiNhapGoc,
     cheDo: laMoi ? "moi" : "mang-sang",
     ...(laMoi
       ? { soTienGiaiNgan: loan.giaiNgan, ngayGiaiNgan: loan.startDate }

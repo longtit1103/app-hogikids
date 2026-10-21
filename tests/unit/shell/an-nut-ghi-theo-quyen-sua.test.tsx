@@ -69,7 +69,6 @@ describe("SoDuChotThangCard — nút Chốt/Sửa/Xoá theo tai-chinh-dong-tien:
     quyHomNay: 1_000_000,
     cauTruc: { duNoThauChi: 0, tienDangGui: 0 },
     soChot: null,
-    chenhLechTho: null,
     chenhLech: null,
     thangTruocChuaChot: null,
   };

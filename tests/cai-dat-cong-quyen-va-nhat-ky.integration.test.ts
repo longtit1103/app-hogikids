@@ -194,11 +194,14 @@ describe("có cai-dat:sua ⇒ ghi + dòng nhật ký OK đúng mã, đúng ngư�
   });
 
   it("đồng bộ ngay: n8n nhận lệnh ⇒ DONG_BO_KICH_HOAT; n8n lỗi ⇒ không có dòng OK", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("ok", { status: 200 })));
+    const fetchN8n = vi.fn(async (_url: string, _init?: RequestInit) => new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchN8n);
     const truocKhiBam = Date.now();
     const kq = await triggerSyncNow();
     // `mocBam` = giờ SERVER chụp trước khi gọi n8n — nút dùng để chỉ nhận SyncLog của lượt vừa bấm.
-    expect(kq).toEqual({ ok: true, data: { mocBam: expect.any(String) } });
+    expect(kq).toEqual({ ok: true, data: { mocBam: expect.any(String), luotId: expect.any(String) } });
+    // Mã lượt đi trong body webhook — workflow chuyển nó sang bước cuối; lệch là nút không nhận ra lượt.
+    if (kq.ok) expect(JSON.parse(String(fetchN8n.mock.calls[0][1]?.body))).toEqual({ luotId: kq.data.luotId });
     // Cận dưới: chụp SAU lúc bắt đầu gọi; cận trên: không ở tương lai (mốc lệch tương lai ⇒ dòng
     // SyncLog của chính lượt này rơi khỏi bộ lọc `startedAt >= mocBam` ⇒ nút báo "chưa phản hồi" giả).
     if (kq.ok) {

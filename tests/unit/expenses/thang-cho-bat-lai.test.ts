@@ -60,6 +60,7 @@ describe("KhoanChiDinhKySection — truyền đúng cặp tháng xuống nút B�
     const mauDaDung: RecurringExpenseRow = {
       id: "mau-da-dung",
       description: "Mặt bằng",
+      categoryId: "fixed",
       categoryName: "Cố định",
       channelName: null,
       amount: 2_000_000,

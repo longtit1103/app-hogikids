@@ -170,4 +170,50 @@ describe("getTienDoDongBoNgay", () => {
     expect(tienDoGiuaChung).toMatchObject({ buocCuoi: { status: "RUNNING" }, coLuotDangChay: true });
     expect(ketLuanTienDo(tienDoGiuaChung!)).toEqual({ loai: "dang-chay" });
   });
+
+  it("hai lượt CHỒNG: bước cuối của lượt khác (mã khác) KHÔNG làm lượt mình báo xong", async () => {
+    const moc = new Date(Date.now() - 1_000);
+    const LUOT_A = "11111111-1111-4111-8111-111111111111";
+    const LUOT_B = "22222222-2222-4222-8222-222222222222";
+    const goiVoiLuot = (luotId: string) =>
+      demNhacViec(
+        new Request("http://localhost/api/ingest/dem-gia-von", {
+          method: "POST",
+          headers: { authorization: `Bearer ${SECRET}`, "content-type": "application/json" },
+          body: JSON.stringify({ soLoiKeo: 0, loiKeo: [], luotId }),
+        }),
+      );
+
+    // Lượt A (bấm trước) kết thúc trong lúc lượt B còn đang kéo.
+    expect((await goiVoiLuot(LUOT_A)).status).toBe(200);
+    const log = await prisma.syncLog.findFirstOrThrow({ where: { kind: "PANCAKE" }, orderBy: { startedAt: "desc" } });
+    expect(log.stats).toMatchObject({ mode: MODE_BUOC_CUOI_DONG_BO_NGAY, luotId: LUOT_A });
+
+    const rB = await getTienDoDongBoNgay(moc.toISOString(), LUOT_B);
+    if (!rB.ok) throw new Error(rB.error);
+    expect(rB.data.buocCuoi).toBeNull();
+    expect(ketLuanTienDo(rB.data)).toEqual({ loai: "dang-chay" });
+
+    // Bundle cũ (không gửi mã) ⇒ luật cũ: nhận dòng mới nhất.
+    expect((await tienDo(moc)).buocCuoi).toEqual({ status: "OK", error: null });
+
+    // Lượt B tới bước cuối ⇒ nhận đúng dòng của mình.
+    expect((await goiVoiLuot(LUOT_B)).status).toBe(200);
+    const rB2 = await getTienDoDongBoNgay(moc.toISOString(), LUOT_B);
+    if (!rB2.ok) throw new Error(rB2.error);
+    expect(ketLuanTienDo(rB2.data)).toEqual({ loai: "xong", soLuotLoi: 0 });
+  });
+
+  it("workflow chưa cài lại (bước cuối KHÔNG mang mã) ⇒ vẫn nhận, không quay tới trần", async () => {
+    const moc = new Date(Date.now() - 1_000);
+    expect((await goiRouteDem()).status).toBe(200);
+
+    const r = await getTienDoDongBoNgay(moc.toISOString(), "33333333-3333-4333-8333-333333333333");
+    if (!r.ok) throw new Error(r.error);
+    expect(ketLuanTienDo(r.data)).toEqual({ loai: "xong", soLuotLoi: 0 });
+  });
+
+  it("mã lượt sai hình ⇒ từ chối, không quét", async () => {
+    expect(await getTienDoDongBoNgay(new Date().toISOString(), "khong-phai-uuid")).toMatchObject({ ok: false });
+  });
 });

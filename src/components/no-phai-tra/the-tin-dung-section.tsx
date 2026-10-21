@@ -116,7 +116,7 @@ export function TheTinDungSection({
                     <KyGanNhat the={t} />
                   </TableCell>
                   <TableCell>
-                    <MocGanNenTang gan={t.gan} choPhepSua={choPhepSua} />
+                    <MocGanNenTang gan={t.gan} choPhepSua={choPhepSua} daBat={mocM !== null} />
                   </TableCell>
                   {choPhepSua && (
                     <TableCell className="text-right">

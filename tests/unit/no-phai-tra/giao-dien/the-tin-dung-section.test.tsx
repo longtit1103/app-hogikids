@@ -14,7 +14,7 @@ vi.mock("@/lib/actions/chot-sao-ke", () => ({ chotSaoKe: vi.fn() }));
 vi.mock("@/lib/actions/uoc-tinh-sao-ke", () => ({ docUocTinhSaoKe: vi.fn() }));
 
 import { TheTinDungSection } from "@/components/no-phai-tra/the-tin-dung-section";
-import type { TheKemTrangThai } from "@/lib/no-phai-tra/the-tin-dung-queries";
+import type { MocGanThe, TheKemTrangThai } from "@/lib/no-phai-tra/the-tin-dung-queries";
 
 const homNay = new Date();
 const ngay = (lui: number) => new Date(homNay.getFullYear(), homNay.getMonth(), homNay.getDate() - lui);
@@ -76,20 +76,48 @@ describe("TheTinDungSection", () => {
     expect(render(the({}))).not.toContain("Chưa chốt sao kê kỳ gần nhất");
   });
 
-  it("mốc gắn nền tảng: chỉ mốc đang hiệu lực + sắp áp dụng, bỏ mốc cũ đã bị thay", () => {
-    const html = render(
-      the({
-        gan: [
-          { id: "g1", nenTang: "META", tuNgay: ngay(40), xoaDuoc: false },
-          { id: "g2", nenTang: "META", tuNgay: ngay(5), xoaDuoc: false },
-          { id: "g3", nenTang: "TIKTOK_ADS", tuNgay: new Date(homNay.getFullYear() + 1, 0, 1), xoaDuoc: true },
-        ],
-      }),
-    );
-    expect(html).toContain("Meta từ");
+  // Mốc của MỘT thẻ ở dạng server trả: `denNgay` = ngày cuối còn gánh (null = mốc cuối).
+  const moc = (id: string, nenTang: string, tuNgay: Date, o: Partial<MocGanThe> = {}): MocGanThe => ({
+    id,
+    nenTang,
+    tuNgay,
+    xoaDuoc: false,
+    denNgay: null,
+    theKeTiep: null,
+    ...o,
+  });
+  const ngayTuongDoi = (d: number) => new Date(Date.now() + d * 86_400_000);
+  const ganMau = () => [
+    moc("g1", "META", ngayTuongDoi(-40), { denNgay: ngayTuongDoi(-6) }),
+    moc("g2", "META", ngayTuongDoi(-5)),
+    moc("g3", "TIKTOK_ADS", ngayTuongDoi(365), { xoaDuoc: true }),
+  ];
+
+  it("mốc gắn nền tảng ĐÃ bật: chỉ mốc đang gánh + sắp áp dụng, bỏ mốc đã bị thay", () => {
+    const html = render(the({ gan: ganMau() }));
     expect(html.match(/Meta từ/g)).toHaveLength(1);
     expect(html).toContain("TikTok Ads từ");
     expect(html).toContain("sắp áp dụng");
+    expect(html).not.toContain("đến");
+  });
+
+  it("mốc gắn nền tảng CHƯA bật (mocM null): đủ lịch sử, mỗi dòng có khoảng hiệu lực trung tính, không nhãn 'đã thay'", () => {
+    const html = render(
+      the({ gan: ganMau().map((g) => ({ ...g, xoaDuoc: true })) }),
+      { mocM: null }
+    );
+    expect(html.match(/Meta từ/g)).toHaveLength(2);
+    expect(html.match(/data-testid="moc-gan-dong"/g)).toHaveLength(3);
+    expect(html.match(/ đến /g)).toHaveLength(1); // chỉ mốc g1 có mốc kế
+    expect(html).toContain("(sắp áp dụng)");
+    expect(html).not.toContain("đã thay");
+    expect(html).not.toContain("line-through");
+    expect(html.match(/>xoá</g)).toHaveLength(3);
+  });
+
+  it("mốc gắn nền tảng ĐÃ bật: nút xoá chỉ ở mốc xoaDuoc", () => {
+    const html = render(the({ gan: ganMau() }));
+    expect(html.match(/>xoá</g)).toHaveLength(1);
   });
 
   it("thiếu quyền sửa ⇒ không nút Thêm thẻ, không cột Thao tác", () => {

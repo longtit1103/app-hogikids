@@ -44,9 +44,26 @@ export type KhoanVayLich = {
   laiCoDinhMoiKy: number | null;
   /** Tiền gửi tiết kiệm bắt buộc mỗi kỳ (0 = không có). DÒNG TIỀN thuần, KHÔNG BAO GIỜ là chi phí. */
   tienGuiBatBuocMoiKy: number;
+  /**
+   * Cờ "lãi nhập gốc" của hồ sơ (`Loan.laiNhapGoc`, chỉ có nghĩa với OVERDRAFT — xem `laLaiNhapGoc`):
+   * kỳ lãi ngân hàng CỘNG vào dư nợ thay vì trừ tài khoản. Chỉ đổi phần DỰ KIẾN (`duKienNKy`): lãi kỳ
+   * tương lai cộng vào dư nợ và không phải tiền chuyển ngân hàng. Kỳ ĐÃ duyệt đi qua `nhapGoc` (dòng thật).
+   */
+  laiNhapGoc: boolean;
+  /**
+   * Các dòng `LAI_NHAP_GOC` THẬT của khoản (ngày kỳ + số lãi) — TĂNG dư nợ từ chính ngày đó. Tách khỏi
+   * `traGoc` (chiều ngược) và khỏi cờ `laiNhapGoc`: dư nợ chỉ tin dòng đã ghi, kỳ duyệt trước khi bật cờ
+   * không có dòng nào và đúng là không nhập gốc.
+   */
+  nhapGoc: TraGoc[];
 };
 
 export type TraGoc = { ngay: Date; soTien: number };
+
+/** Khoản thấu chi đang bật "lãi nhập gốc" — loại khác bỏ qua cờ (CHECK DB cũng cấm bật). */
+export function laLaiNhapGoc(l: Pick<KhoanVayLich, "kind" | "laiNhapGoc">): boolean {
+  return l.kind === "OVERDRAFT" && l.laiNhapGoc;
+}
 
 export type DeXuatKy = {
   ky: number;
@@ -92,12 +109,15 @@ export function ngayTraKy(l: KhoanVayLich, k: number): Date {
   return startOfDay(addMonths(l.firstDueDate, k - 1));
 }
 
-/** Dư nợ tại cuối ngày t = mang sang + giải ngân (nếu dòng LOAN_IN đã có ngày ≤ t) − Σ trả gốc ≤ t. */
+/**
+ * Dư nợ tại cuối ngày t = mang sang + giải ngân (nếu dòng LOAN_IN đã có ngày ≤ t) + Σ lãi nhập gốc ≤ t
+ * − Σ trả gốc ≤ t. Cùng công thức `DAU_DU_NO_VAY` của vị từ dư nợ ở server.
+ */
 export function duNoTai(l: KhoanVayLich, traGoc: TraGoc[], t: Date): number {
   const moc = endOfDay(t);
-  const daTra = traGoc.filter((x) => x.ngay <= moc).reduce((s, x) => s + x.soTien, 0);
+  const tongToi = (ds: TraGoc[]) => ds.filter((x) => x.ngay <= moc).reduce((s, x) => s + x.soTien, 0);
   const daGiaiNgan = l.giaiNganNgay !== null && startOfDay(l.giaiNganNgay) <= moc;
-  return l.duNoMoSo + (daGiaiNgan ? l.giaiNgan : 0) - daTra;
+  return l.duNoMoSo + (daGiaiNgan ? l.giaiNgan : 0) + tongToi(l.nhapGoc) - tongToi(traGoc);
 }
 
 /**
@@ -137,6 +157,8 @@ export function laiTheoNgay(
   };
   themMoc(l.giaiNganNgay);
   for (const t of traGoc) themMoc(t.ngay);
+  // Lãi nhập gốc làm dư nợ TĂNG từ ngày kỳ ⇒ đoạn sau tính lãi trên dư nợ đã cộng lãi (lãi kép).
+  for (const t of l.nhapGoc) themMoc(t.ngay);
   moc.sort((a, b) => a.getTime() - b.getTime());
 
   // Σ(dư nợ × số ngày) — số nguyên, an toàn trong Number (≤ 2e9 × vài chục nghìn ngày).
@@ -224,12 +246,16 @@ export function deXuatKy(
   }
 }
 
-/** Kỳ SỚM NHẤT đã tới hạn mà chưa xử lý: due_k ≤ endOfDay(homNay) và (lastDueHandled null hoặc due_k > lastDueHandled). */
+/**
+ * Kỳ SỚM NHẤT đã tới hạn mà chưa xử lý: due_k ≤ endOfDay(homNay) và (lastDueHandled null hoặc due_k > lastDueHandled).
+ * `tuNgay` (tuỳ chọn) = cận dưới: bỏ qua kỳ đến hạn trước NGÀY đó (điều kiện bật nợ phải trả chỉ đòi kỳ từ ngày mở sổ).
+ */
 export function kyChoDuyet(
   l: KhoanVayLich,
   traGoc: TraGoc[],
   lastDueHandled: Date | null,
-  homNay: Date
+  homNay: Date,
+  tuNgay: Date | null = null
 ): DeXuatKy | null {
   if (!coLich(l)) return null;
   const han = endOfDay(homNay);
@@ -238,6 +264,7 @@ export function kyChoDuyet(
     const due = ngayTraKy(l, k);
     if (due > han) return null;
     if (lastDueHandled !== null && due <= startOfDay(lastDueHandled)) continue;
+    if (tuNgay !== null && due < startOfDay(tuNgay)) continue;
     const dx = deXuatKy(l, traGoc, k, lastDueHandled);
     // Dư nợ về 0 KHÔNG còn là dấu hiệu "hết nghĩa vụ": BULLET khai lãi CỐ ĐỊNH, độc lập dư nợ, và
     // tiền gửi tiết kiệm bắt buộc cũng vậy. Trả bớt gốc sớm ở kỳ 33 mà chỉ xét dư nợ thì kỳ 34–36
@@ -290,6 +317,8 @@ export function soKyChoTheoLich(
       giaiNganNgay: null,
       laiCoDinhMoiKy: null,
       tienGuiBatBuocMoiKy: 0,
+      laiNhapGoc: false,
+      nhapGoc: [],
     },
     homNay
   );
@@ -299,8 +328,13 @@ export function soKyChoTheoLich(
 export type KyDuKien = DeXuatKy & {
   /** Gốc thực trả — `DeXuatKy.goc` KẸP về dư nợ thật còn lại (`gocDeXuatKep`). Dùng số NÀY để hiển thị. */
   gocThuc: number;
-  /** Dư nợ gốc SAU khi trả kỳ này. Bằng dư nợ trước kỳ kế tiếp theo xây dựng. */
+  /** Dư nợ gốc SAU khi trả kỳ này (đã cộng `laiVaoGoc`). Bằng dư nợ trước kỳ kế tiếp theo xây dựng. */
   duNoSauKy: number;
+  /**
+   * Phần lãi kỳ này ngân hàng CỘNG vào dư nợ (khoản thấu chi "lãi nhập gốc") — bằng `lai` ở khoản đó,
+   * 0 ở mọi khoản khác. Phần này KHÔNG nằm trong `tongChuyen` (không rời tài khoản).
+   */
+  laiVaoGoc: number;
   /** TIỀN THẬT chuyển ngân hàng — qua `tongChuyenNganHang`, đã trừ phần sổ tiết kiệm cấn ở kỳ cuối. */
   tongChuyen: number;
   /** Phần ngân hàng trả lại ngay sau kỳ này (chỉ kỳ cuối, khoản có tiền gửi bắt buộc). */
@@ -352,8 +386,10 @@ export function duKienNKy(args: {
   const han = endOfDay(homNay);
   const tran = soKyToiDa(l);
   // Bản sao: caller truyền thẳng `loan.traGoc` dùng cho cả thẻ kỳ chờ duyệt và hộp tất toán — ghi vào
-  // mảng đó là hai nơi kia đọc phải khoản trả GIẢ.
+  // mảng đó là hai nơi kia đọc phải khoản trả GIẢ. Cùng luật cho `nhapGoc` (lãi nhập gốc giả của kỳ dự kiến).
   const mo = [...traGoc];
+  const lichMo: KhoanVayLich = { ...l, nhapGoc: [...l.nhapGoc] };
+  const nhapGocKy = laLaiNhapGoc(l);
   const ra: KyDuKien[] = [];
   // Hai số chạy theo chuỗi: dư nợ thật còn lại, và Σ tiền gửi ngân hàng đang giữ tại thời điểm mỗi kỳ.
   let duNoConLai = Math.max(0, args.duNoHienTai);
@@ -362,7 +398,7 @@ export function duKienNKy(args: {
   for (let k = 1; k <= tran && ra.length < soKy; k++) {
     const due = ngayTraKy(l, k);
     if (conDau !== null && due <= conDau) continue; // kỳ đã đóng dấu — bỏ qua, không phải dừng
-    const dx = deXuatKy(l, mo, k, lastDueHandled);
+    const dx = deXuatKy(lichMo, mo, k, lastDueHandled);
     // Cùng vị từ "hết nghĩa vụ" với `kyChoDuyet`: dư nợ 0 KHÔNG đủ để dừng, vì BULLET khai lãi cố
     // định và tiền gửi bắt buộc đều độc lập dư nợ.
     if (dx.duNoDauKy <= 0 && dx.lai <= 0 && dx.tienGui <= 0) break;
@@ -375,15 +411,19 @@ export function duKienNKy(args: {
       tienGuiKyNay: dx.tienGui,
     });
     const quaHan = due <= han;
+    // Lãi nhập gốc: ngân hàng cộng lãi vào dư nợ, KHÔNG thu tiền ⇒ ra khỏi tiền chuyển, vào dư nợ sau kỳ.
+    const laiVaoGoc = nhapGocKy ? dx.lai : 0;
     ra.push({
       ...dx,
       gocThuc,
-      duNoSauKy: duNoConLai - gocThuc,
+      duNoSauKy: duNoConLai - gocThuc + laiVaoGoc,
+      laiVaoGoc,
       tongChuyen: tongChuyenNganHang({
         lai: dx.lai,
         goc: gocThuc,
         tienGui: dx.tienGui,
         tienGuiSeNhanLai: hoanTienGui,
+        laiNhapGoc: nhapGocKy,
       }),
       hoanTienGui,
       quaHan,
@@ -392,10 +432,12 @@ export function duKienNKy(args: {
       dangChoDuyet: quaHan && !ra.some((x) => x.quaHan),
     });
 
-    duNoConLai -= gocThuc;
+    duNoConLai += laiVaoGoc - gocThuc;
     tienGuiGiu += dx.tienGui - hoanTienGui;
     // Khoản trả gốc GIẢ của chính kỳ vừa dự kiến ⇒ kỳ kế thấy dư nợ đã giảm khi tính LÃI.
     if (gocThuc > 0) mo.push({ ngay: dx.denNgay, soTien: gocThuc });
+    // Lãi nhập gốc GIẢ của kỳ vừa dự kiến ⇒ kỳ kế tính lãi trên dư nợ đã cộng lãi (lãi kép).
+    if (laiVaoGoc > 0) lichMo.nhapGoc.push({ ngay: dx.denNgay, soTien: laiVaoGoc });
   }
   return ra;
 }

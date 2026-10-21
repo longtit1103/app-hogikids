@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  chonBuocCuoiCuaLuot,
   ketLuanTienDo,
   mocBamHopLe,
   type SoLieuTienDoDongBoNgay,
@@ -168,8 +169,8 @@ describe("lỗi KÉO Pancake báo kèm bước cuối", () => {
   });
 
   it("body rỗng / `{}` ⇒ không lỗi kéo; soLoiKeo > số dòng ⇒ câu nói phần còn lại", () => {
-    expect(docTomTatLoiKeo("")).toEqual({ soLoiKeo: 0, loiKeo: [], canhBao: null });
-    expect(docTomTatLoiKeo("{}")).toEqual({ soLoiKeo: 0, loiKeo: [], canhBao: null });
+    expect(docTomTatLoiKeo("")).toEqual({ soLoiKeo: 0, loiKeo: [], canhBao: null, luotId: null });
+    expect(docTomTatLoiKeo("{}")).toEqual({ soLoiKeo: 0, loiKeo: [], canhBao: null, luotId: null });
     expect(cauLoiKeo(docTomTatLoiKeo("{}"))).toBeNull();
     const t = docTomTatLoiKeo(
       JSON.stringify({ soLoiKeo: 25, loiKeo: [{ scope: "MOT_TRANG", stream: "orders", shop: "shopee" }] }),
@@ -182,5 +183,47 @@ describe("lỗi KÉO Pancake báo kèm bước cuối", () => {
   it("soLoiKeo thiếu/nhỏ hơn số dòng ⇒ lấy số dòng (tổng không nói ít hơn chi tiết)", () => {
     const t = docTomTatLoiKeo(JSON.stringify({ loiKeo: [{ scope: "X", stream: "purchases", shop: "kho" }] }));
     expect(t.soLoiKeo).toBe(1);
+  });
+});
+
+describe("mã lượt (`luotId`) workflow chuyển kèm bước cuối", () => {
+  const ID = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b";
+
+  it("UUID hợp lệ ⇒ giữ nguyên văn, cùng tóm tắt lỗi kéo", () => {
+    const t = docTomTatLoiKeo(
+      JSON.stringify({ soLoiKeo: 1, loiKeo: [{ scope: "X", stream: "purchases", shop: "kho" }], luotId: ID }),
+    );
+    expect(t.luotId).toBe(ID);
+    expect(t.soLoiKeo).toBe(1);
+    expect(t.canhBao).toBeNull();
+  });
+
+  it("luotId sai hình ⇒ bỏ mã lượt, KHÔNG làm rơi tóm tắt lỗi kéo", () => {
+    const t = docTomTatLoiKeo(
+      JSON.stringify({ soLoiKeo: 1, loiKeo: [{ scope: "X", stream: "purchases", shop: "kho" }], luotId: "abc" }),
+    );
+    expect(t.luotId).toBeNull();
+    expect(t.soLoiKeo).toBe(1);
+    expect(t.canhBao).toBeNull();
+  });
+});
+
+describe("chonBuocCuoiCuaLuot — hai lượt chạy chồng", () => {
+  const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const dong = (ten: string, luotId: string | null) => ({ ten, luotId });
+
+  it("bỏ dòng của lượt khác, lấy dòng mới nhất của lượt mình", () => {
+    expect(chonBuocCuoiCuaLuot([dong("A2", A), dong("B1", B), dong("A1", A)], B)?.ten).toBe("B1");
+    expect(chonBuocCuoiCuaLuot([dong("A1", A)], B)).toBeNull();
+  });
+
+  it("dòng không mang mã (workflow chưa cài lại) vẫn nhận", () => {
+    expect(chonBuocCuoiCuaLuot([dong("A1", A), dong("cu", null)], B)?.ten).toBe("cu");
+  });
+
+  it("nút không có mã (bundle cũ) ⇒ luật cũ: dòng mới nhất", () => {
+    expect(chonBuocCuoiCuaLuot([dong("A1", A), dong("B1", B)], null)?.ten).toBe("A1");
+    expect(chonBuocCuoiCuaLuot([], null)).toBeNull();
   });
 });

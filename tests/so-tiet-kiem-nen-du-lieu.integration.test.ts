@@ -39,6 +39,8 @@ describe("enum CashMovementKind — 2 loại dòng tiền tiết kiệm sinh lã
       "DEPOSIT_OUT", "DEPOSIT_IN", "SAVINGS_OUT", "SAVINGS_IN",
       // Nợ phải trả (10/2026) nối TIẾP sau — hai giá trị tiết kiệm vẫn đúng vị trí của chúng.
       "CARD_PAY", "SUPPLIER_PAY", "SUPPLIER_REFUND", "CUTOVER_ADJ_IN", "CUTOVER_ADJ_OUT", "ADS_TOPUP",
+      // Lãi nhập gốc thấu chi (10/2026) nối tiếp cuối.
+      "LAI_NHAP_GOC",
     ]);
   });
 });

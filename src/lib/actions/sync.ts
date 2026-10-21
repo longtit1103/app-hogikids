@@ -1,14 +1,18 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
+
 import type { SyncKind } from "@/generated/prisma/client";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import type { LatestSync } from "@/lib/actions/sync-types";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
 import {
+  chonBuocCuoiCuaLuot,
   MA_MOC_NGOAI_DAI,
   mocBamHopLe,
   MODE_BUOC_CUOI_DONG_BO_NGAY,
+  SO_DONG_BUOC_CUOI_XET,
   type SoLieuTienDoDongBoNgay,
 } from "@/lib/ingest/tien-do-dong-bo-ngay";
 import { giaiUrlSyncNow } from "@/lib/n8n/giai-url-sync-now";
@@ -49,11 +53,21 @@ export async function getLatestSync(kind: SyncKind): Promise<ActionResult<Latest
  *
  * `mocBam` do máy khách gửi lại ⇒ KẸP theo `mocBamHopLe` (giờ server): ngoài dải ⇒ từ chối với mã
  * `MA_MOC_NGOAI_DAI` (nút dừng theo dõi), không quét bảng.
+ *
+ * `luotId` (mã lượt `triggerSyncNow` cấp) ⇒ chỉ nhận bước cuối của lượt mình khi hai lượt chạy chồng —
+ * luật ở `chonBuocCuoiCuaLuot`. Thiếu (bundle cũ) ⇒ luật cũ. Các số đếm khác (số dòng, còn RUNNING,
+ * hoạt động cuối) vẫn tính chung mọi lượt sau mốc bấm: chúng chỉ nói "còn sống", không kết luận "xong".
  */
-export async function getTienDoDongBoNgay(mocBam: string): Promise<ActionResult<SoLieuTienDoDongBoNgay>> {
+export async function getTienDoDongBoNgay(
+  mocBam: string,
+  luotId?: string,
+): Promise<ActionResult<SoLieuTienDoDongBoNgay>> {
   const cong = await congAction("cai-dat:xem");
   if (!cong.ok) return cong;
   if (typeof mocBam !== "string") return { ok: false, error: "Mốc bấm không hợp lệ" };
+  if (luotId !== undefined && (typeof luotId !== "string" || !UUID.test(luotId))) {
+    return { ok: false, error: "Mã lượt đồng bộ không hợp lệ" };
+  }
   const tu = new Date(mocBam);
   if (Number.isNaN(tu.getTime())) return { ok: false, error: "Mốc bấm không hợp lệ" };
   if (!mocBamHopLe(tu.getTime(), Date.now())) {
@@ -61,16 +75,21 @@ export async function getTienDoDongBoNgay(mocBam: string): Promise<ActionResult<
   }
 
   const tuMoc = { kind: "PANCAKE" as const, startedAt: { gte: tu } };
-  const [buocCuoi, theoTrangThai, moc] = await Promise.all([
-    prisma.syncLog.findFirst({
+  const [dongBuocCuoi, theoTrangThai, moc] = await Promise.all([
+    prisma.syncLog.findMany({
       where: { ...tuMoc, stats: { path: ["mode"], equals: MODE_BUOC_CUOI_DONG_BO_NGAY } },
       orderBy: { startedAt: "desc" },
-      select: { status: true, error: true },
+      take: SO_DONG_BUOC_CUOI_XET,
+      select: { status: true, error: true, stats: true },
     }),
     prisma.syncLog.groupBy({ by: ["status"], where: tuMoc, _count: { _all: true } }),
     prisma.syncLog.aggregate({ where: tuMoc, _max: { startedAt: true, finishedAt: true } }),
   ]);
 
+  const buocCuoi = chonBuocCuoiCuaLuot(
+    dongBuocCuoi.map((d) => ({ status: d.status, error: d.error, luotId: luotIdCua(d.stats) })),
+    luotId ?? null,
+  );
   const dem = (st: string) => theoTrangThai.find((r) => r.status === st)?._count._all ?? 0;
   const soLuot = theoTrangThai.reduce((tong, r) => tong + r._count._all, 0);
   const mocHoatDong = [moc._max.startedAt, moc._max.finishedAt]
@@ -91,12 +110,22 @@ export async function getTienDoDongBoNgay(mocBam: string): Promise<ActionResult<
   };
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** `stats.luotId` của dòng bước cuối, `null` khi không có (workflow bản cũ). */
+function luotIdCua(stats: unknown): string | null {
+  if (!stats || typeof stats !== "object" || Array.isArray(stats)) return null;
+  const v = (stats as Record<string, unknown>).luotId;
+  return typeof v === "string" ? v : null;
+}
+
 /**
  * Bấm "Đồng bộ ngay" → kích webhook n8n (POST kèm header auth). Không tiết lộ URL xuống client.
  * Trả `mocBam` = giờ SERVER chụp TRƯỚC khi gọi n8n — nút dùng mốc này để chỉ nhận dòng SyncLog của
- * lượt vừa bấm (không so đồng hồ máy khách với `startedAt` trong DB).
+ * lượt vừa bấm (không so đồng hồ máy khách với `startedAt` trong DB), và `luotId` = mã lượt gửi trong
+ * body webhook — workflow chuyển nó sang bước cuối để nút nhận đúng kết cục của lượt mình.
  */
-export async function triggerSyncNow(): Promise<ActionResult<{ mocBam: string }>> {
+export async function triggerSyncNow(): Promise<ActionResult<{ mocBam: string; luotId: string }>> {
   const cong = await congAction("cai-dat:sua");
   if (!cong.ok) return cong;
   // Không ghi DB, nhưng vẫn phải chặn: mọi trang n8n đẩy về sẽ bị 503 ở `/api/ingest/raw` TRƯỚC
@@ -107,6 +136,7 @@ export async function triggerSyncNow(): Promise<ActionResult<{ mocBam: string }>
   // MỘT nguồn giải URL cho cả nút này lẫn badge trạng thái — xem `giai-url-sync-now.ts`.
   const dich = await giaiUrlSyncNow();
   const mocBam = new Date().toISOString();
+  const luotId = randomUUID();
   if (!dich) {
     return { ok: false, error: "Chưa cấu hình kết nối n8n — điền n8n URL ở Cài đặt › Kết nối n8n" };
   }
@@ -117,7 +147,8 @@ export async function triggerSyncNow(): Promise<ActionResult<{ mocBam: string }>
     const secretRow = await prisma.setting.findUnique({ where: { key: "n8nSyncNowSecret" } });
     const res = await fetch(dich.url, {
       method: "POST",
-      headers: { [SYNC_NOW_AUTH_HEADER]: secretRow?.value ?? "" },
+      headers: { [SYNC_NOW_AUTH_HEADER]: secretRow?.value ?? "", "Content-Type": "application/json" },
+      body: JSON.stringify({ luotId }),
       // Đây là đường THỨ BA mang secret ra ngoài (cùng họ với lượt Cài workflows và probe). Đo thật
       // 22/09 trên undici: qua chuyển hướng KHÁC ORIGIN, chỉ `Authorization` bị strip — **header
       // custom như header auth ở đây đi tiếp nguyên vẹn**. Nên không chặn là `n8nSyncNowSecret`
@@ -140,5 +171,5 @@ export async function triggerSyncNow(): Promise<ActionResult<{ mocBam: string }>
   // Không có DB write nào để ghi kèm (lượt đồng bộ tự ghi SyncLog phía ingest) ⇒ nhật ký ghi sau khi
   // n8n nhận lệnh, NGOÀI `try`: nhật ký hỏng là lỗi hệ thống, không được báo nhầm "không gọi được n8n".
   await ghiNhatKy(prisma, { actor: cong.nguoiDung, hanhDong: HANH_DONG.DONG_BO_KICH_HOAT });
-  return { ok: true, data: { mocBam } };
+  return { ok: true, data: { mocBam, luotId } };
 }

@@ -5,7 +5,7 @@ import { addMonths, endOfDay, format, getDaysInMonth, setDate, startOfMonth } fr
 
 import { dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
-import { chanNhapHangSauM, LoiNhapHangSauM } from "@/lib/no-phai-tra/chan-nhap-hang-sau-m";
+import { chanSoChiPhiDaKhoa, LoiSoChiPhiDaKhoa } from "@/lib/no-phai-tra/chan-so-chi-phi-da-khoa";
 import { khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 import { laLoiDongTienBan, OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
@@ -39,12 +39,12 @@ export async function ensureRecurringExpensesForMonths(months: Date[]): Promise<
 }
 
 /**
- * Như `ensureRecurringExpensesForMonths` nhưng trả cả `boQuaNhapHang` cộng dồn các tháng — tab Sổ chi
- * phí dùng để nhắc "mẫu Nhập hàng không còn sinh sau ngày bật theo dõi nợ".
+ * Như `ensureRecurringExpensesForMonths` nhưng trả cả số lần BỎ QUA cộng dồn các tháng — tab Sổ chi phí dùng để
+ * nhắc "mẫu Nhập hàng không còn sinh" và "lần đến hạn trước ngày bật theo dõi nợ không ghi bù".
  */
 export async function ensureRecurringExpensesForMonthsChiTiet(months: Date[]): Promise<KetQuaSinhDinhKy> {
   const seen = new Set<string>();
-  const tong: KetQuaSinhDinhKy = { daTao: 0, boQuaNhapHang: 0 };
+  const tong: KetQuaSinhDinhKy = { ...KHONG_SINH };
 
   for (const month of months) {
     const key = format(month, "yyyy-MM");
@@ -53,6 +53,7 @@ export async function ensureRecurringExpensesForMonthsChiTiet(months: Date[]): P
     const kq = await ensureRecurringExpensesChiTiet(month);
     tong.daTao += kq.daTao;
     tong.boQuaNhapHang += kq.boQuaNhapHang;
+    tong.boQuaTruocM += kq.boQuaTruocM;
   }
 
   return tong;
@@ -113,27 +114,35 @@ export function mauDinhKySinhChoThang(activeFrom: Date | null, month: Date): boo
  * bỏ qua êm (không lỗi, không retry). Câu chèn tự xét lại `active`/mốc trên dòng mẫu đã khoá
  * `FOR SHARE` ⇒ "Xoá và dừng lặp lại" chạy xen giữa không làm dòng vừa xoá sống lại. Một câu = nguyên
  * tử: request bị huỷ giữa chừng (rời trang khi đang stream) hoặc chèn trọn hoặc không chèn gì — không
- * có transaction tương tác nào để bị cắt ngang thành "Transaction not found" ⇒ trang 500. Ngoại lệ DUY
- * NHẤT: mẫu "Nhập hàng" cần khoá chung với bước bật nợ phải trả ⇒ transaction riêng (`sinhNhapHangCoKhoa`).
+ * có transaction tương tác nào để bị cắt ngang thành "Transaction not found" ⇒ trang 500. Câu chèn đó nay nằm
+ * trong MỘT transaction ngắn (`sinhCoKhoaChung`) chỉ khi THẬT có lần còn thiếu: cần khoá chung với bước bật nợ
+ * phải trả để đọc M đúng (sổ chi phí trước M khoá mọi danh mục). Transaction bị cắt (P2028) hay chờ khoá quá hạn
+ * ⇒ lượt render này không sinh (trả 0), không 500 — bộ sinh lazy, lần sau sinh bù.
  */
 export async function ensureRecurringExpenses(month: Date = new Date()): Promise<number> {
   return (await ensureRecurringExpensesChiTiet(month)).daTao;
 }
 
 /**
- * Kết quả một lượt sinh: `daTao` = số dòng chèn thật; `boQuaNhapHang` = số lần phát sinh của mẫu
- * "Nhập hàng" (`purchase`) có ngày ≥ mốc bật nợ phải trả M bị BỎ QUA (spec §5.3 — sau M tiền hàng đi
- * phiếu nợ + `SUPPLIER_PAY`; sinh thêm chi phí Nhập hàng là trừ quỹ hai lần cho cùng lô). Mẫu vẫn
- * `active` và vẫn sinh các tháng TRƯỚC M (ghi bù) — chỉ lần phát sinh ≥ M bị bỏ; khối định kỳ dùng số
- * này để nhắc chủ shop dừng mẫu.
+ * Kết quả một lượt sinh — đã bật nợ phải trả thì bộ sinh đi qua CÙNG cổng khoá sổ với mọi đường ghi tay
+ * (`chan-so-chi-phi-da-khoa.ts`) và BỎ QUA (đếm, không ném) lần phát sinh bị chặn:
+ *  - `daTao`: số dòng chèn thật;
+ *  - `boQuaTruocM`: lần phát sinh ngày < M của mẫu BẤT KỲ (ghi bù muộn — tháng chưa ai mở xem, mẫu `activeFrom`
+ *    NULL, mẫu bật lại cùng tháng với M): quỹ cuối M−1 đã chốt theo tiền thật bằng điều chỉnh mở sổ, ghi bù là quỹ
+ *    từ M lệch. Mẫu Nhập hàng trước M cũng đếm ở đây (luật "trước M" xét trước);
+ *  - `boQuaNhapHang`: lần phát sinh ngày ≥ M của mẫu "Nhập hàng" — tiền hàng đi phiếu nợ + `SUPPLIER_PAY`. Thực tế
+ *    sau bật không còn mẫu Nhập hàng `active` (bước bật đòi dừng hết — `CON_MAU_DINH_KY_NHAP_HANG`; dựng mẫu mới /
+ *    bật lại đều bị chặn) nên số này là lưới an toàn; khối định kỳ dùng nó để nhắc chủ shop dừng mẫu.
  */
-export type KetQuaSinhDinhKy = { daTao: number; boQuaNhapHang: number };
+export type KetQuaSinhDinhKy = { daTao: number; boQuaNhapHang: number; boQuaTruocM: number };
+
+const KHONG_SINH: KetQuaSinhDinhKy = { daTao: 0, boQuaNhapHang: 0, boQuaTruocM: 0 };
 
 export async function ensureRecurringExpensesChiTiet(month: Date = new Date()): Promise<KetQuaSinhDinhKy> {
   // Đây là writer DUY NHẤT bắn khi chỉ điều hướng trang (`/`, `/tai-chinh` gọi ở đầu render). Giữa
   // lượt phục hồi nó hoặc ghi dòng rồi bị bản backup lùi mất, hoặc throw và biến trang thành 500.
   // Trả 0 an toàn vì backfill này lazy + idempotent — lần render sau khi phục hồi xong sinh lại đủ.
-  if (dangPhucHoi()) return { daTao: 0, boQuaNhapHang: 0 };
+  if (dangPhucHoi()) return { ...KHONG_SINH };
 
   const khoaThang = khoaThangDinhKy(month);
   const today = endOfDay(new Date());
@@ -145,7 +154,7 @@ export async function ensureRecurringExpensesChiTiet(month: Date = new Date()): 
     if (target > today) return []; // chưa tới hạn trong tháng → chưa sinh
     return [{ r, target }];
   });
-  if (denHan.length === 0) return { daTao: 0, boQuaNhapHang: 0 };
+  if (denHan.length === 0) return { ...KHONG_SINH };
 
   // Lượt kiểm CHỈ ĐỌC trước: gần như mọi lần render, mọi dòng của tháng đã có sẵn ⇒ không phát câu
   // ghi nào. Chỉ là lối tắt — thiếu kiểm này thì câu chèn dưới đây vẫn đúng nhờ ON CONFLICT.
@@ -156,30 +165,22 @@ export async function ensureRecurringExpensesChiTiet(month: Date = new Date()): 
   const daCoIds = new Set(daCo.map((e) => e.recurringId));
   const conThieu = denHan.filter((d) => !daCoIds.has(d.r.id));
 
-  // Mẫu KHÔNG phải Nhập hàng: đường cũ — một câu chèn autocommit, không transaction tương tác. Mẫu Nhập hàng
-  // (`categoryId` của mẫu không action nào sửa được ⇒ tách theo bản đọc là chắc) đi `sinhNhapHangCoKhoa`.
-  const dauThangSau = startOfMonth(addMonths(month, 1));
-  const thuong = conThieu.filter((d) => d.r.categoryId !== "purchase");
-  const nhapHang = conThieu.filter((d) => d.r.categoryId === "purchase");
-  const daTaoThuong = thuong.length === 0 ? 0 : await chenDongDinhKy(prisma, thuong, dauThangSau);
-  if (nhapHang.length === 0) return { daTao: daTaoThuong, boQuaNhapHang: 0 };
-
-  const kq = await sinhNhapHangCoKhoa(nhapHang, dauThangSau);
-  return { daTao: daTaoThuong + kq.daTao, boQuaNhapHang: kq.boQuaNhapHang };
+  if (conThieu.length === 0) return { ...KHONG_SINH };
+  return sinhCoKhoaChung(conThieu, startOfMonth(addMonths(month, 1)));
 }
 
 /**
- * Sinh các lần phát sinh của mẫu "Nhập hàng" — TRANSACTION riêng, câu ĐẦU là khoá SHARED với bước bật
- * (`khoaChiaSeBatNoPhaiTra`), rồi cổng "Nhập hàng sau M" — CÙNG hàm với mọi đường ghi Expense khác (lưới
- * `khoa-duong-ghi-nhap-hang-sau-m`) — đọc M SAU khi giành khoá, rồi mới chèn (vẫn `ON CONFLICT DO NOTHING`).
- * Không khoá thì lượt sinh đọc M = null trong lúc bước bật chưa commit và chèn lần phát sinh ≥ M mà bước bật
- * đã kiểm xong. Chỉ xét lần CÒN THIẾU: lần đã sinh trước khi bật không phải "bỏ qua".
+ * Sinh các lần CÒN THIẾU trong MỘT transaction ngắn: câu ĐẦU là khoá SHARED với bước bật
+ * (`khoaChiaSeBatNoPhaiTra`), rồi cổng khoá sổ `chanSoChiPhiDaKhoa` — CÙNG hàm với mọi đường ghi Expense tay
+ * (lưới `khoa-duong-ghi-nhap-hang-da-khoa-so`) — đọc M SAU khi giành khoá, rồi mới chèn (vẫn `ON CONFLICT DO
+ * NOTHING`). Không khoá thì lượt sinh đọc M = null trong lúc bước bật chưa commit và chèn dòng (trước M, hay Nhập
+ * hàng) sau lưng bước bật ⇒ quỹ lệch điều chỉnh vừa chốt. Áp MỌI danh mục: luật "trước M" không phân danh mục.
+ * Chỉ xét lần CÒN THIẾU: lần đã sinh trước khi bật không phải "bỏ qua".
  *
- * Chờ khoá quá hạn (bước bật kẹt) ⇒ lượt render này không sinh mẫu Nhập hàng, không làm trang 500 — bộ sinh
- * lazy + idempotent, lần render sau sinh bù. Transaction tương tác ở đây là ngoại lệ có chủ ý của bộ sinh
- * (thường chỉ một câu): mẫu Nhập hàng hiếm, và bước bật đòi dừng hết chúng trước khi bật.
+ * Chờ khoá quá hạn (bước bật kẹt) hay transaction bị cắt (P2028 — request bị huỷ giữa chừng) ⇒ lượt render này
+ * không sinh, không làm trang 500 — bộ sinh lazy + idempotent, lần render sau sinh bù.
  */
-async function sinhNhapHangCoKhoa(
+async function sinhCoKhoaChung(
   ds: { r: { id: string; categoryId: string }; target: Date }[],
   dauThangSau: Date
 ): Promise<KetQuaSinhDinhKy> {
@@ -187,21 +188,22 @@ async function sinhNhapHangCoKhoa(
     return await prisma.$transaction(async (tx) => {
       await khoaChiaSeBatNoPhaiTra(tx);
       const duoc: typeof ds = [];
-      let boQuaNhapHang = 0;
+      const kq = { ...KHONG_SINH };
       for (const d of ds) {
         try {
-          await chanNhapHangSauM(tx, { categoryId: d.r.categoryId, date: d.target });
+          await chanSoChiPhiDaKhoa(tx, { loai: "TAO", dong: { categoryId: d.r.categoryId, date: d.target } });
           duoc.push(d);
         } catch (e) {
-          if (!(e instanceof LoiNhapHangSauM)) throw e;
-          boQuaNhapHang++;
+          if (!(e instanceof LoiSoChiPhiDaKhoa)) throw e;
+          if (e.lyDo === "TRUOC_M") kq.boQuaTruocM++;
+          else kq.boQuaNhapHang++;
         }
       }
-      const daTao = duoc.length === 0 ? 0 : await chenDongDinhKy(tx, duoc, dauThangSau);
-      return { daTao, boQuaNhapHang };
+      kq.daTao = duoc.length === 0 ? 0 : await chenDongDinhKy(tx, duoc, dauThangSau);
+      return kq;
     }, OPT_TX_DONG_TIEN);
   } catch (e) {
-    if (laLoiDongTienBan(e)) return { daTao: 0, boQuaNhapHang: 0 };
+    if (laLoiDongTienBan(e)) return { ...KHONG_SINH };
     throw e;
   }
 }

@@ -8,6 +8,11 @@ import {
   khoaDocQuyenBatNoPhaiTra,
 } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { kiemDieuKienBat } from "@/lib/no-phai-tra/dieu-kien-bat-no-phai-tra";
+import {
+  docVanTayQuyTruocM,
+  moTaVanTayLech,
+  type VanTayQuyTruocM,
+} from "@/lib/no-phai-tra/doc-chenh-lech-tai-m";
 import { dauNgayVn } from "@/lib/no-phai-tra/du-no-the";
 import { khoaThe, LoiTheCoMa } from "@/lib/no-phai-tra/the-tin-dung-queries";
 import { khoaViAds } from "@/lib/no-phai-tra/vi-ads-queries";
@@ -23,7 +28,10 @@ import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
  *       (hai tab cùng bấm ⇒ đúng một lượt ghi điều chỉnh) → CHỐT THỨ HAI: đã có `CUTOVER_ADJ_*` hoặc yêu cầu
  *       `XAC_NHAN_BAT` đã ghi kết quả ok ⇒ cũng `DA_BAT_ROI` (ai đó gỡ Setting bằng tay — gỡ Setting KHÔNG
  *       phải cách tắt, bật lại là ghi bộ điều chỉnh thứ hai) → kiểm lại điều kiện tiên quyết sau khoá
- *       (`THIEU_HO_SO_VI` được bỏ qua khi chủ shop xác nhận ví Shopee chưa theo dõi);
+ *       (`THIEU_HO_SO_VI` được bỏ qua khi chủ shop xác nhận ví Shopee chưa theo dõi) → VÂN TAY QUỸ: tính lại
+ *       {quỹ app, dư nợ thấu chi, Σ phiếu Y} cuối M − 1 bằng CÙNG hàm màn đối chiếu, đọc trong `tx` sau khoá;
+ *       lệch bộ màn hình đã thấy ⇒ `QUY_DA_DOI` (một lượt ghi trước M — kể cả nguồn máy không lấy khoá bật —
+ *       chen giữa lúc tính chênh lệch và lúc bấm: điều chỉnh client gửi đã cũ);
  *   (1) mỗi thẻ đang mở (BẮT BUỘC đủ bộ — thẻ thiếu neo thì sau bật không có điểm xuất phát dư nợ):
  *       (i) sao kê gần nhất trước M (tuỳ chọn, có hạn trả + phần đã trả trước M), (ii) neo dư nợ cuối
  *       ngày M − 1 (`laNeoMoSo`). Sao kê chốt ĐÚNG ngày M − 1 thì một dòng làm cả hai (cùng ngày = cùng
@@ -50,6 +58,8 @@ export type DuLieuKhoiTao = {
    * bật; chi ads Shopee tiếp tục trừ quỹ theo ngày chạy (không có hồ sơ ví thì bộ lọc không loại).
    */
   xacNhanViShopeeChuaTheoDoi?: boolean;
+  /** Vân tay số liệu trước M màn đối chiếu đã hiện (bước 2) — bước bật tính lại và so từng số. */
+  vanTayQuyDaThay: VanTayQuyTruocM;
 };
 
 export type KetQuaKhoiTao = {
@@ -61,6 +71,11 @@ export type KetQuaKhoiTao = {
   tacDong: number;
   /** true khi bật nhờ xác nhận "ví Shopee chưa theo dõi" (lúc bật THẬT thiếu hồ sơ ví) — lưu vết nhật ký. */
   viShopeeChuaTheoDoi: boolean;
+  /**
+   * Vân tay số liệu cuối M − 1 ĐÚNG LÚC bật (đã khớp màn hình) — lưu trong `YeuCauGhi.ketQua` để về sau so quỹ
+   * trước M hiện tại với lúc bật (dữ liệu nguồn máy về muộn làm quỹ trước M trôi).
+   */
+  vanTayQuy: VanTayQuyTruocM;
 };
 
 const nhan = (d: Date) => format(d, "dd/MM/yyyy");
@@ -97,6 +112,16 @@ export async function ghiKhoiTaoNoPhaiTra(tx: Prisma.TransactionClient, d: DuLie
 
   const mocM = dauNgayVn(d.mocM);
   const truocM = dauNgayVn(subDays(mocM, 1));
+  const vanTayQuy = await docVanTayQuyTruocM(mocM, tx);
+  const lechVanTay = moTaVanTayLech(d.vanTayQuyDaThay, vanTayQuy, nhan(truocM));
+  if (lechVanTay !== null) {
+    throw new LoiTheCoMa(
+      "QUY_DA_DOI",
+      `Số liệu trước ngày bật vừa thay đổi (${lechVanTay}) — tính lại chênh lệch ở bước 2 (hoặc tải lại trang) ` +
+        "rồi bấm bật lại.",
+      "vanTayQuy"
+    );
+  }
   const khoaTruocM = khoaNgayVn(truocM);
 
   // (1) Thẻ — khoá theo id tăng dần (thứ tự toàn cục, không khoá chéo với lượt khác), đọc lại SAU khoá.
@@ -205,6 +230,7 @@ export async function ghiKhoiTaoNoPhaiTra(tx: Prisma.TransactionClient, d: DuLie
     dieuChinh,
     tacDong: dieuChinh.reduce((s, x) => s + (x.chieu === "IN" ? x.soTien : -x.soTien), 0),
     viShopeeChuaTheoDoi,
+    vanTayQuy,
   };
 }
 

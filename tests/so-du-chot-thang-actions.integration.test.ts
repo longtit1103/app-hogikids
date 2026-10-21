@@ -214,7 +214,7 @@ describe("doiChieuSoDuChot — số THẬT trong DB", () => {
     expect((await doiChieuSoDuChot(T7, await tinhSoQuyThang(T7))).thangTruocChuaChot).toBeNull();
   });
 
-  it("THẤU CHI thật: góp 30tr + thấu chi 20tr cầm mặt ⇒ bank 10tr + tiền mặt 20tr là KHỚP, không phải chi thiếu 20tr", async () => {
+  it("THẤU CHI giải ngân vào tài khoản: góp 30tr + thấu chi 20tr, rút 20tr cầm mặt ⇒ bank 30tr + tiền mặt 20tr là KHỚP", async () => {
     const loan = await prisma.loan.create({
       data: { name: "Thấu chi test", kind: "OVERDRAFT", startDate: new Date(2026, 6, 5), annualRateBp: 1500 },
     });
@@ -224,16 +224,17 @@ describe("doiChieuSoDuChot — số THẬT trong DB", () => {
         { date: new Date(2026, 7, 10), kind: "LOAN_IN", amount: 20_000_000, description: "Rút thấu chi TK A", loanId: loan.id },
       ],
     });
-    expect((await luuSoDuChotThang(chot({ soDuBank: 10_000_000, tienMat: 20_000_000 }))).ok).toBe(true);
+    // Tài khoản: 30 góp + 20 thấu chi giải ngân − 20 rút tiền mặt = 30.
+    expect((await luuSoDuChotThang(chot({ soDuBank: 30_000_000, tienMat: 20_000_000 }))).ok).toBe(true);
 
     const soQuy = await tinhSoQuyThang(T8);
     expect(soQuy.cuoiKy).toBe(50_000_000);
     const cauTruc = tinhKhoanCauTruc(await listKhoanVay(), 0);
     expect(cauTruc.duNoThauChi).toBe(20_000_000);
 
+    // Quỹ (gồm LOAN_IN 20) và tài khoản (gồm tiền giải ngân) so thẳng — dư nợ thấu chi KHÔNG được cộng.
     const dc = await doiChieuSoDuChot(T8, soQuy, cauTruc);
-    expect(dc.chenhLechTho).toBe(-20_000_000); // thô: trông như "chi thiếu 20tr"
-    expect(dc.chenhLech).toBe(0); // thật: khớp — dư nợ thấu chi đã được cộng
+    expect(dc.chenhLech).toBe(0);
   });
 
   it("chưa mở sổ ⇒ 'chua_mo_so'; tháng trước D0 ⇒ 'truoc_mo_so'", async () => {

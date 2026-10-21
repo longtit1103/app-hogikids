@@ -159,8 +159,8 @@ export function SoQuyCard({
     );
   }
 
-  // Thấu chi còn hiệu lực: quỹ đã cộng tiền rút vào (như vay thường), nên số dư app ngân hàng có thể
-  // THẤP hơn đúng bằng dư nợ thấu chi — nói trước để chủ shop khỏi tưởng app tính dư.
+  // Thấu chi còn hiệu lực: giải ngân vào tài khoản như vay thường — quỹ đã cộng `LOAN_IN`, số dư tài khoản
+  // cũng đã gồm tiền đó ⇒ so thẳng; dư nợ chỉ nhắc để chủ shop nhớ khoản phải trả nằm ngoài quỹ.
   const duNoThauChi = loans
     .filter((l) => l.kind === "OVERDRAFT" && l.closedAt === null)
     .reduce((s, l) => s + l.duNo, 0);
@@ -205,8 +205,8 @@ export function SoQuyCard({
         </p>
         {duNoThauChi > 0 && (
           <p>
-            đang thấu chi {formatVnd(duNoThauChi)} — số dư app ngân hàng có thể âm; cộng số này vào
-            số dư ngân hàng thì khớp quỹ
+            dư nợ thấu chi {formatVnd(duNoThauChi)} — tiền đã giải ngân vào tài khoản và đã tính trong quỹ;
+            khoản phải trả này theo dõi riêng ở Khoản vay, không cộng vào số dư ngân hàng khi so
           </p>
         )}
         {tongTienGuiDangGiu > 0 && (

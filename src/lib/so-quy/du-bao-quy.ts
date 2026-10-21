@@ -183,11 +183,6 @@ export type MauDinhKy = {
   dayOfMonth: number;
   description: string;
   activeFrom: KhoaNgay | null;
-  /**
-   * Lần phát sinh có ngày ≥ khoá này bộ sinh BỎ QUA (mẫu "Nhập hàng" sau mốc bật nợ phải trả M —
-   * `ensureRecurringExpensesChiTiet`). Không có / null ⇒ không bỏ.
-   */
-  boQuaTuNgay?: KhoaNgay | null;
 };
 
 /** Khoá "mẫu đã sinh dòng trong tháng" — `recurringId|yyyy-MM` (tháng theo giờ VN). */
@@ -210,12 +205,16 @@ export function khoaDaSinh(recurringId: string, ngay: KhoaNgay): string {
  * `daSinh` (khoá `khoaDaSinh`) = mẫu đã có dòng `Expense` trong tháng đó — cổng chống trùng của chính
  * bộ sinh là "mỗi mẫu tối đa 1 dòng/tháng", nên tháng đã có dòng thì bộ sinh sẽ KHÔNG đẻ thêm; dòng
  * đó đã nằm trong quỹ hôm nay (ngày ≤ hôm nay) hoặc phần `DA_GHI` (ngày sau). Bỏ cổng này là đếm đôi.
+ *
+ * `boQuaTruoc` = mốc M (khoá ngày) khi đã bật theo dõi nợ: lần phát sinh ngày < M bộ sinh không bao giờ ghi
+ * (sổ chi phí trước M khoá — quỹ trước M đã chốt bằng điều chỉnh mở sổ) ⇒ dự báo không trừ. `null` = chưa bật.
  */
 export function khoanDinhKy(
   mau: readonly MauDinhKy[],
   homNay: KhoaNgay,
   den: KhoaNgay,
-  daSinh: ReadonlySet<string>
+  daSinh: ReadonlySet<string>,
+  boQuaTruoc: KhoaNgay | null = null
 ): KhoanDuKien[] {
   const ra: KhoanDuKien[] = [];
   let nam = Number(homNay.slice(0, 4));
@@ -232,8 +231,8 @@ export function khoanDinhKy(
       if (m.activeFrom !== null && tienTo < m.activeFrom.slice(0, 7)) continue;
       const ngayPhatSinh = `${tienTo}-${pad2(Math.min(m.dayOfMonth, soNgay))}`;
       if (ngayPhatSinh > den) continue;
-      if (m.boQuaTuNgay != null && ngayPhatSinh >= m.boQuaTuNgay) continue;
       if (daSinh.has(khoaDaSinh(m.id, ngayPhatSinh))) continue;
+      if (boQuaTruoc !== null && ngayPhatSinh < boQuaTruoc) continue;
       // Vòng lặp bắt đầu từ tháng hiện tại ⇒ `ngayPhatSinh ≤ homNay` chỉ có thể là tháng hiện tại.
       const denHan = ngayPhatSinh <= homNay;
       const moTa = m.description.trim();

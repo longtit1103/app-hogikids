@@ -41,6 +41,9 @@ function lichCuaRow(loan: KhoanVayRow): KhoanVayLich {
     // nhánh BULLET, `tienGuiBatBuocMoiKy` không ảnh hưởng `deXuatTatToan`) — pass-through cho đủ kiểu.
     laiCoDinhMoiKy: loan.laiCoDinhMoiKy,
     tienGuiBatBuocMoiKy: loan.tienGuiBatBuocMoiKy,
+    // Lãi nhập gốc: dư nợ tất toán đã gồm mọi kỳ lãi ngân hàng cộng vào; lãi đoạn cuối tính trên dư nợ đó.
+    laiNhapGoc: loan.laiNhapGoc,
+    nhapGoc: loan.nhapGoc,
   };
 }
 

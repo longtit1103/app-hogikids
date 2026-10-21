@@ -96,8 +96,9 @@ describe("pancake-sync-now kéo phiếu nhập — cấu hình STREAMS", () => {
 type LoiGoi = {
   method: string;
   url: string;
+  timeout?: number;
   /** POST raw: `{stream, shopId, payload}`; POST dem-gia-von: `{soLoiKeo, loiKeo}`. */
-  body?: { stream?: string; shopId?: string; payload?: unknown; soLoiKeo?: number; loiKeo?: unknown };
+  body?: { stream?: string; shopId?: string; payload?: unknown; soLoiKeo?: number; loiKeo?: unknown; luotId?: string };
 };
 
 const KHOA = {
@@ -118,10 +119,11 @@ const KHOA = {
 async function chayWorkflow(
   js: string,
   loiChoGet: (url: string) => Error | null = () => null,
+  bodyWebhook?: unknown,
 ): Promise<{ goi: LoiGoi[]; ketQua: unknown; loi: unknown }> {
   const goi: LoiGoi[] = [];
   const httpRequest = async (opts: LoiGoi & { body?: LoiGoi["body"] }) => {
-    goi.push({ method: opts.method, url: opts.url, body: opts.body });
+    goi.push({ method: opts.method, url: opts.url, body: opts.body, timeout: opts.timeout });
     if (opts.method === "GET") {
       const loi = loiChoGet(opts.url);
       if (loi) throw loi;
@@ -136,12 +138,21 @@ async function chayWorkflow(
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (
     ...args: string[]
   ) => (...a: unknown[]) => Promise<unknown>;
-  const chay = new AsyncFunction("$input", "setTimeout", js);
+  // `$("<tên node>")` của n8n: chỉ node webhook được tra (lấy body `{ luotId }`). Không truyền body ⇒
+  // `$` không tồn tại ⇒ workflow phải tự nuốt lỗi tra và coi như không có mã lượt.
+  const $ =
+    bodyWebhook === undefined
+      ? undefined
+      : (ten: string) => {
+          if (ten !== "Webhook Đồng bộ ngay") throw new Error(`node lạ: ${ten}`);
+          return { first: () => ({ json: { body: bodyWebhook } }) };
+        };
+  const chay = new AsyncFunction("$input", "setTimeout", "$", js);
   // Lỗi NẶNG (vd cả stream bị bỏ) ⇒ workflow cố ý NÉM ở cuối để lượt n8n đỏ — bắt lại để soi `goi`.
   let ketQua: unknown = null;
   let loi: unknown = null;
   try {
-    ketQua = await chay.call({ helpers: { httpRequest } }, $input, ngayLapTuc);
+    ketQua = await chay.call({ helpers: { httpRequest } }, $input, ngayLapTuc, $);
   } catch (e) {
     loi = e;
   }
@@ -190,5 +201,26 @@ describe("pancake-sync-now kéo phiếu nhập — hành vi khi chạy thật", 
     // Lời gọi đếm vẫn là lời gọi app CUỐI; sau đó workflow ném để lượt n8n đỏ (luật chặn nuốt lỗi).
     expect(goi.at(-1)?.url).toBe(`${KHOA.n8nAppUrl}/api/ingest/dem-gia-von`);
     expect(String(loi)).toContain("BỊ BỎ");
+  });
+
+  it("mọi GET Pancake có trần thời gian 60s (GET treo không được làm lượt im quá trần 3' của nút)", async () => {
+    const { goi } = await chayWorkflow(SYNC_NOW);
+    const get = goi.filter((g) => g.method === "GET");
+    expect(get.length).toBeGreaterThan(0);
+    for (const g of get) expect(g.timeout, g.url).toBe(60_000);
+  });
+
+  it("mã lượt trong body webhook được chuyển NGUYÊN VĂN sang bước cuối", async () => {
+    const luotId = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b";
+    const { goi } = await chayWorkflow(SYNC_NOW, () => null, { luotId });
+    expect(goi.at(-1)?.body).toEqual({ soLoiKeo: 0, loiKeo: [], luotId });
+  });
+
+  it("body webhook không có / sai hình mã lượt ⇒ bước cuối không mang mã, lượt vẫn chạy", async () => {
+    for (const body of [{}, { luotId: "abc" }, { luotId: 42 }, null]) {
+      const { goi, loi } = await chayWorkflow(SYNC_NOW, () => null, body);
+      expect(loi).toBeNull();
+      expect(goi.at(-1)?.body).toEqual({ soLoiKeo: 0, loiKeo: [] });
+    }
   });
 });
