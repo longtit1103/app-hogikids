@@ -9,6 +9,8 @@
  * TAY (`Expense` source MANUAL/RECURRING/IMPORT) — những thứ đó không có nguồn nào để dựng lại.
  * Phần `Expense` DUY NHẤT lượt này ghi là chi tiêu quảng cáo (`source=ADS_API`), dựng lại từ bản gốc
  * báo cáo Meta/TikTok trong kho thô theo đúng khoá `refId` nên chạy lại không nhân bản chi phí.
+ * Đã bật Nợ phải trả (mốc M) ⇒ BỎ QUA chi tiêu ads ngày < M (giữ số đã chốt vào số dư mở sổ), đếm
+ * `skippedTruocM` và in riêng cảnh báo — KHÔNG làm exit 1 (bỏ cố ý, không phải dòng kẹt).
  *
  * ⚠️ Trên máy dev, `DATABASE_URL` trỏ THẲNG vào DB PROD (chỉ có 1 DB thật) → script LUÔN in DB
  * đích và hỏi xác nhận trước khi ghi. Không TTY (container/CI) thì bắt buộc truyền `--yes`.
@@ -80,6 +82,7 @@ async function main(): Promise<void> {
 
   const { hasBronzeBacklog } = await import("@/lib/bronze/bronze-only");
   const { rebuildFromRaw } = await import("@/lib/bronze/rebuild");
+  const { TIEN_TO_CANH_BAO_CAT_TAI_M } = await import("@/lib/bronze/transform-ads-expense");
   const { coLuotDangChay, withSyncLog } = await import("@/lib/ingest/sync-log");
   const { prisma } = await import("@/lib/prisma");
 
@@ -185,6 +188,13 @@ async function main(): Promise<void> {
       // `stats` đã bị cắt còn 50 dòng + 1 dòng tóm tắt.
       const { warnings: canhBaoDaLuu, ...soLieu } = body.stats;
       console.table(soLieu);
+      // Cắt tại mốc Nợ phải trả: in RIÊNG, không để chìm sau 20 cảnh báo đầu — người chạy phải thấy lượt này
+      // CỐ Ý không ghi lại chi tiêu ads ngày < M (số ngày đó đã chốt vào số dư mở sổ lúc bật).
+      if (soLieu.skippedTruocM > 0) {
+        canhBao
+          .filter((w) => w.startsWith(TIEN_TO_CANH_BAO_CAT_TAI_M))
+          .forEach((w) => console.warn("⚠", w));
+      }
       if (canhBao.length) {
         console.log(
           `\n${canhBao.length} cảnh báo (nhật ký đồng bộ giữ ${canhBaoDaLuu.length} dòng):`,

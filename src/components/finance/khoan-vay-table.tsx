@@ -1,9 +1,10 @@
 "use client";
 
-import { differenceInCalendarDays, format } from "date-fns";
+import { differenceInCalendarDays } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 
@@ -50,9 +51,9 @@ function ngayTraText(loan: KhoanVayRow): string {
   if (loan.kind === "OVERDRAFT") {
     return loan.firstDueDate === null
       ? "lãi khi tất toán"
-      : `lãi ngày ${format(loan.firstDueDate, "dd")} hàng tháng`;
+      : `lãi ngày ${formatNgayVn(loan.firstDueDate, "dd")} hàng tháng`;
   }
-  return loan.firstDueDate === null ? "—" : `${format(loan.firstDueDate, "dd/MM")} hàng tháng`;
+  return loan.firstDueDate === null ? "—" : `${formatNgayVn(loan.firstDueDate, "dd/MM")} hàng tháng`;
 }
 
 function KyToi({ loan }: { loan: KhoanVayRow }) {
@@ -60,7 +61,7 @@ function KyToi({ loan }: { loan: KhoanVayRow }) {
   const tre = differenceInCalendarDays(new Date(), loan.kyCho.denNgay) > NGAY_COI_LA_TRE;
   return (
     <span className="inline-flex items-center gap-1.5">
-      {format(loan.kyCho.denNgay, "dd/MM")}
+      {formatNgayVn(loan.kyCho.denNgay, "dd/MM")}
       {tre && <Badge variant="outline">trễ</Badge>}
     </span>
   );

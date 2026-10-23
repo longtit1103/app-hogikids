@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { format } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import {
   formatPlatformFeeRatio,
@@ -80,10 +80,10 @@ export function OrderTable({
                 <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
                   {o.maSan ? <span className="select-all">{o.maSan}</span> : "—"}
                 </TableCell>
-                <TableCell className="text-sm">{format(o.orderedAt, "dd/MM HH:mm")}</TableCell>
+                <TableCell className="text-sm">{formatNgayVn(o.orderedAt, "dd/MM HH:mm")}</TableCell>
                 {/* Thời điểm đơn VÀO trạng thái hiện tại (Pancake status_history) — "—" khi thiếu dữ liệu. */}
                 <TableCell className="text-sm">
-                  {o.statusChangedAt ? format(o.statusChangedAt, "dd/MM HH:mm") : "—"}
+                  {o.statusChangedAt ? formatNgayVn(o.statusChangedAt, "dd/MM HH:mm") : "—"}
                 </TableCell>
                 <TableCell>
                   <Badge variant="outline" className="gap-1.5">
@@ -139,8 +139,8 @@ export function OrderTable({
             {o.maSan && <span className="font-mono text-xs text-muted-foreground">Mã sàn {o.maSan}</span>}
             <div className="flex items-center justify-between text-sm text-muted-foreground">
               <span>
-                {format(o.orderedAt, "dd/MM HH:mm")}
-                {o.statusChangedAt && <> · cập nhật {format(o.statusChangedAt, "dd/MM HH:mm")}</>}
+                {formatNgayVn(o.orderedAt, "dd/MM HH:mm")}
+                {o.statusChangedAt && <> · cập nhật {formatNgayVn(o.statusChangedAt, "dd/MM HH:mm")}</>}
               </span>
               <span className="tabular-nums">{formatVnd(o.itemsTotal)}</span>
             </div>

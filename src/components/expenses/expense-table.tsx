@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { format } from "date-fns";
 import { ArrowDown, ArrowUp, ChevronsUpDown, Pencil, PencilLine, Trash2 } from "lucide-react";
 
 import { ExpenseDeleteDialog } from "@/components/expenses/expense-delete-dialog";
@@ -12,6 +11,7 @@ import { ExpenseTableToolbar } from "@/components/expenses/expense-table-toolbar
 import { SuaTienTruocMocModal } from "@/components/expenses/sua-tien-truoc-moc-modal";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import type { ExpenseListParams, ExpenseRow } from "@/lib/expenses/expense-queries";
 import { formatVnd } from "@/lib/format";
 import { lyDoKhongSuaTienTruocMoc } from "@/lib/no-phai-tra/sua-tien-truoc-moc";
@@ -270,7 +270,7 @@ export function ExpenseTable({
             <TableBody>
               {rows.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell className="text-sm">{format(row.date, "dd/MM/yyyy")}</TableCell>
+                  <TableCell className="text-sm">{formatNgayVn(row.date, "dd/MM/yyyy")}</TableCell>
                   <TableCell>
                     <Badge
                       variant={row.categoryIsHidden ? "outline" : "secondary"}
@@ -317,7 +317,7 @@ export function ExpenseTable({
                 <p className="text-sm text-ink">{row.description || "—"}</p>
                 <NhanTruThe tenThe={row.tenThe} />
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{format(row.date, "dd/MM/yyyy")}</span>
+                  <span>{formatNgayVn(row.date, "dd/MM/yyyy")}</span>
                   <span className="flex items-center gap-1.5">
                     {row.channelName && (
                       <span className="size-2 rounded-full" style={{ backgroundColor: row.channelColor ?? undefined }} />

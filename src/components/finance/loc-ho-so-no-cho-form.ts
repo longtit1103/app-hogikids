@@ -7,7 +7,8 @@ import type { LuaChonHoSo } from "./ho-so-no-select";
 /**
  * Hồ sơ nợ chọn được cho form "Nhập quỹ / rút quỹ" — CÙNG luật với server (`kiemHoSoNo` ở
  * `ho-so-dong-tien-no.ts`) để chủ shop không chọn xong mới bị từ chối:
- *  - thẻ ĐÃ ĐÓNG không nhận dòng nào (trả thẻ, nạp ví bằng thẻ);
+ *  - thẻ ĐÃ ĐÓNG không nhận dòng MỚI (nạp ví bằng thẻ, trả thẻ) — trừ "Trả thẻ" (`CARD_PAY`) khi thẻ còn nợ
+ *    ước tính > 0 (`chiTraThe`, ads về muộn gán thẻ đóng): chỉ liệt kê thẻ đó khi loại là `CARD_PAY`;
  *  - `SUPPLIER_PAY` không trả vào phiếu ĐÃ HUỶ; `SUPPLIER_REFUND` thì được (cách thu hồi tiền).
  * Hồ sơ của chính dòng đang sửa LUÔN giữ lại — không thì mở form Sửa mà ô chọn trống trơn.
  * Thuần (không React) để test được không cần render.
@@ -19,9 +20,17 @@ export type DongDangSuaNo = {
   phieuNhapId: string | null;
 } | null;
 
-export function locTheChoForm(no: LuaChonDongTienNo, dangSua: DongDangSuaNo): LuaChonHoSo[] {
+/**
+ * `kind` = loại đang chọn trên form. Vắng ⇒ không lọc theo loại (thẻ đóng-còn-nợ vẫn hiện; server là cổng cuối).
+ */
+export function locTheChoForm(
+  no: LuaChonDongTienNo,
+  dangSua: DongDangSuaNo,
+  kind?: CashMovementKindGhiTay | "",
+): LuaChonHoSo[] {
+  const anTheChiTra = kind !== undefined && kind !== "CARD_PAY";
   return no.the
-    .filter((t) => !t.dong || t.id === dangSua?.cardId)
+    .filter((t) => t.id === dangSua?.cardId || (!t.dong && !(anTheChiTra && t.chiTraThe)))
     .map((t) => ({ id: t.id, nhan: t.dong ? `${t.ten} (đã đóng)` : t.ten }));
 }
 

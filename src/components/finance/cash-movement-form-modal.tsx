@@ -29,6 +29,7 @@ import {
   type CashMovementKindGhiTay,
 } from "@/lib/cash-movements/cash-movement-kinds";
 import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
 import type { LuaChonDongTienNo } from "@/lib/no-phai-tra/lua-chon-dong-tien-no";
@@ -304,7 +305,7 @@ export function CashMovementFormModal({
   const canPhieu = kind === "SUPPLIER_PAY" || kind === "SUPPLIER_REFUND";
   const canVi = kind === "ADS_TOPUP";
   const laNo = coOThe || canPhieu;
-  const nhanMocM = noPhaiTra ? format(noPhaiTra.mocM, "dd/MM/yyyy") : "";
+  const nhanMocM = noPhaiTra ? formatNgayVn(noPhaiTra.mocM, "dd/MM/yyyy") : "";
   const canSave = laDieuChinh
     ? amount > 0 && description.trim().length > 0 && !saving
     : Boolean(date) &&
@@ -394,7 +395,7 @@ export function CashMovementFormModal({
         <div className="flex flex-col gap-4">
           {laDieuChinh && (
             <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
-              Điều chỉnh MỘT LẦN lúc bật theo dõi nợ ({row && format(row.date, "dd/MM/yyyy")}) — chỉ sửa được số tiền
+              Điều chỉnh MỘT LẦN lúc bật theo dõi nợ ({row && formatNgayVn(row.date, "dd/MM/yyyy")}) — chỉ sửa được số tiền
               và lý do. Quỹ mọi ngày từ đó đổi theo.
             </p>
           )}
@@ -423,7 +424,7 @@ export function CashMovementFormModal({
             )}
             {hoiTruocD0 && d0 !== null && (
               <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
-                Ngày này sớm hơn ngày mở sổ ({format(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày
+                Ngày này sớm hơn ngày mở sổ ({formatNgayVn(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày
                 mới; dòng số dư mở sổ có thể phải sửa lại.
               </p>
             )}
@@ -464,7 +465,7 @@ export function CashMovementFormModal({
               label={canThe ? "Thẻ" : "Nguồn nạp"}
               placeholder="Chọn thẻ"
               mucKhongChon={canThe ? undefined : MUC_NAP_TU_NGAN_HANG}
-              options={locTheChoForm(noPhaiTra, dangSuaNo)}
+              options={locTheChoForm(noPhaiTra, dangSuaNo, kind)}
               value={cardId}
               onChange={(id) => {
                 setCardId(id);

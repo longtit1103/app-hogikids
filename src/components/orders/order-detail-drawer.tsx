@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { format } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import { usesRealPlatformFee } from "@/lib/channels/real-fee-channels";
 import { buildOrderProfitLines, buildSettlementLines } from "@/lib/orders/order-detail-lines";
@@ -117,9 +117,9 @@ export function OrderDetailDrawer({ order }: { order: OrderDetailTheoQuyen | nul
             </p>
           )}
           <p className="text-xs text-muted-foreground">
-            đặt {format(order.orderedAt, "dd/MM HH:mm")}
-            {order.statusChangedAt && <> · cập nhật {format(order.statusChangedAt, "dd/MM HH:mm")}</>}
-            {" "}· đồng bộ {format(order.syncedAt, "dd/MM HH:mm")}
+            đặt {formatNgayVn(order.orderedAt, "dd/MM HH:mm")}
+            {order.statusChangedAt && <> · cập nhật {formatNgayVn(order.statusChangedAt, "dd/MM HH:mm")}</>}
+            {" "}· đồng bộ {formatNgayVn(order.syncedAt, "dd/MM HH:mm")}
           </p>
         </SheetHeader>
 

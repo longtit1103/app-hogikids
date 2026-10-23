@@ -2,20 +2,23 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { addDays, format, startOfDay } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { tatToanThauChi } from "@/lib/actions/tat-toan-thau-chi";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
 import { deXuatTatToan } from "@/lib/so-quy/lai-thau-chi";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { KhoanVayLich } from "@/lib/so-quy/lich-tra-no";
 
-import { NGAY, ngayVn } from "./khoan-vay-form-fields";
+import { ngayVn } from "./khoan-vay-form-fields";
+
+/** VN không có giờ mùa hè ⇒ mốc 00:00 VN + 24h luôn là 00:00 VN ngày kế. */
+const MOT_NGAY_MS = 86_400_000;
 
 /**
  * Hộp "Tất toán" DÀNH RIÊNG cho thấu chi (`kind = OVERDRAFT`, spec thấu chi §5–§6) — khác nút Tất
@@ -57,7 +60,7 @@ export function ThauChiTatToanDialog({
   onOpenChange: (o: boolean) => void;
 }) {
   const router = useRouter();
-  const homNay = format(new Date(), NGAY);
+  const homNay = formatNgayVn(new Date(), "yyyy-MM-dd");
   const [ngay, setNgay] = useState(homNay);
   const [goc, setGoc] = useState(0);
   const [lai, setLai] = useState(0);
@@ -68,10 +71,16 @@ export function ThauChiTatToanDialog({
    * Ngày tất toán phải SAU con dấu kỳ lãi đã thu — `tatToanThauChi` fencing đúng luật đó. Nói ra ở
    * hộp (min + hint + nút mờ) thay vì để chủ shop bấm rồi mới nhận câu lỗi: hộp vẫn hiện đủ gốc/lãi
    * nên trông như một lượt ghi hợp lệ.
+   *
+   * Mọi phép so ở đây chạy trên KHOÁ NGÀY VN `yyyy-MM-dd` (cùng hệ với chuỗi của `<input type=date>` và
+   * với chữ in ra): `startOfDay`/`format` của date-fns theo múi giờ TRÌNH DUYỆT — máy ở múi khác VN
+   * cắt con dấu (00:00 VN) sang ngày hôm trước/hôm sau, chặn sai một ngày và in lệch ngày.
    */
-  const conDau = loan.lastDueHandled === null ? null : startOfDay(loan.lastDueHandled);
-  const ngayToiThieu = conDau === null ? undefined : format(addDays(conDau, 1), NGAY);
-  const ngaySomQua = conDau !== null && Boolean(ngay) && startOfDay(ngayVn(ngay)) <= conDau;
+  const khoaConDau = loan.lastDueHandled === null ? null : formatNgayVn(loan.lastDueHandled, "yyyy-MM-dd");
+  const ngayToiThieu =
+    khoaConDau === null ? undefined : formatNgayVn(ngayVn(khoaConDau).getTime() + MOT_NGAY_MS, "yyyy-MM-dd");
+  // Hai chuỗi `yyyy-MM-dd` so từ điển = so ngày.
+  const ngaySomQua = khoaConDau !== null && Boolean(ngay) && ngay <= khoaConDau;
 
   /** Tính lại Gốc/Lãi ở CLIENT (thuần, không gọi server) mỗi khi đổi ngày tất toán. */
   function tinhLai(ngayMoi: string) {
@@ -84,7 +93,7 @@ export function ThauChiTatToanDialog({
 
   useEffect(() => {
     if (!open) return;
-    const homNayMoi = format(new Date(), NGAY);
+    const homNayMoi = formatNgayVn(new Date(), "yyyy-MM-dd");
     setNgay(homNayMoi);
     tinhLai(homNayMoi);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -138,9 +147,9 @@ export function ThauChiTatToanDialog({
               }}
             />
           </label>
-          {ngaySomQua && conDau !== null && (
+          {ngaySomQua && loan.lastDueHandled !== null && (
             <p className="text-xs text-error">
-              Kỳ lãi ngày {format(conDau, "dd/MM/yyyy")} đã thu — chọn ngày sau ngày đó.
+              Kỳ lãi ngày {formatNgayVn(loan.lastDueHandled, "dd/MM/yyyy")} đã thu — chọn ngày sau ngày đó.
             </p>
           )}
 
@@ -155,7 +164,7 @@ export function ThauChiTatToanDialog({
                 tab khác) sẽ hiện mốc SAI, nhìn là biết phải tải lại trang. */}
             {de === null
               ? "Lãi"
-              : `Lãi — từ ${format(de.tuNgay, "dd/MM/yyyy")}, ${de.soNgay} ngày`}
+              : `Lãi — từ ${formatNgayVn(de.tuNgay, "dd/MM/yyyy")}, ${de.soNgay} ngày`}
             <Input
               inputMode="numeric"
               aria-label="Lãi"

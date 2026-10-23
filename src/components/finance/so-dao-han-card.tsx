@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { tatToanSoTietKiem } from "@/lib/actions/tat-toan-so-tiet-kiem";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
 import { formatVnd } from "@/lib/format";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
@@ -68,7 +69,7 @@ export function SoDaoHanCard({ so }: { so: SoTietKiemRow }) {
     <div className="mt-3 rounded-xl border-l-4 border-warning bg-surface-card p-4">
       <p className="flex flex-wrap items-center gap-2 text-sm text-ink">
         <span>
-          {so.name} — đáo hạn {format(so.maturityDate, "dd/MM/yyyy")} · gốc {formatVnd(so.principal)}
+          {so.name} — đáo hạn {formatNgayVn(so.maturityDate, "dd/MM/yyyy")} · gốc {formatVnd(so.principal)}
         </span>
         {tre && <Badge variant="outline">trễ</Badge>}
       </p>

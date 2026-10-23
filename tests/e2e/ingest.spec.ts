@@ -112,12 +112,12 @@ test("đơn mirror shop kho bị loại khỏi doanh thu (raw vẫn giữ)", asy
   }
 });
 
-test("payload vượt trần 10MB → 400", async ({ request }) => {
+test("body vượt trần 10MB (byte UTF-8) → 413, chặn trước khi đọc trọn body", async ({ request }) => {
   const res = await request.post("/api/ingest/raw", {
     headers: AUTH,
     data: { stream: "orders", shopId: SHOP_TIKTOK, payload: "x".repeat(10_000_001) },
   });
-  expect(res.status()).toBe(400);
+  expect(res.status()).toBe(413);
 });
 
 test("POST /api/ingest/ads → idempotent theo refId (2 lần = 1 Expense, amount mới)", async ({ request }) => {

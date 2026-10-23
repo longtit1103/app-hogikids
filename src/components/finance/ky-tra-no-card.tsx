@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { differenceInCalendarDays, format } from "date-fns";
+import { differenceInCalendarDays } from "date-fns";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ghiKyTraNo } from "@/lib/actions/khoan-vay";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { laLaiNhapGoc, type DeXuatKy } from "@/lib/so-quy/lich-tra-no";
@@ -35,9 +36,9 @@ import { KyTraNoInputs } from "./ky-tra-no-inputs";
  * thẻ ở `khoan-vay-section.tsx` gồm cả ngày đến hạn, đừng rút gọn về `loan.id`: duyệt xong kỳ 1 là
  * kỳ 2 hiện ra ngay, giữ nguyên state cũ thì chủ shop bấm tiếp và ghi đúng số tiền của kỳ TRƯỚC.
  *
- * `format()` chạy ở client tức theo múi giờ TRÌNH DUYỆT — giả định máy chủ shop ở VN (bất biến #3).
- * Máy lệch múi giờ chỉ làm ngày HIỂN THỊ lệch: `ghiKyTraNo` tính lại kỳ từ server và từ chối nếu
- * `dueDate` không khớp ("Kỳ không hợp lệ — tải lại trang"), tức fail-closed chứ không ghi sai tiền.
+ * Ngày hiển thị và `dueDate` gửi đi đều qua `formatNgayVn` (neo giờ VN, không phụ thuộc múi giờ trình
+ * duyệt). Dù vậy `ghiKyTraNo` vẫn tính lại kỳ từ server và từ chối nếu `dueDate` không khớp
+ * ("Kỳ không hợp lệ — tải lại trang"), tức fail-closed chứ không ghi sai tiền.
  */
 
 const NGAY_COI_LA_TRE = 7;
@@ -86,7 +87,7 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
     try {
       const res = await ghiKyTraNo({
         loanId: loan.id,
-        dueDate: format(ky.denNgay, "yyyy-MM-dd"),
+        dueDate: formatNgayVn(ky.denNgay, "yyyy-MM-dd"),
         lai: boQua ? 0 : lai,
         goc: boQua ? 0 : goc,
         tienGui: boQua ? 0 : tienGui,
@@ -101,7 +102,7 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
       const veTienGui = !boQua && tienGui > 0 ? ` + tiền gửi ${formatVnd(tienGui)}` : "";
       toast.success(
         boQua
-          ? `Đã đánh dấu kỳ ${format(ky.denNgay, "dd/MM/yyyy")} không thu`
+          ? `Đã đánh dấu kỳ ${formatNgayVn(ky.denNgay, "dd/MM/yyyy")} không thu`
           : laiNhapGoc
             ? `Đã ghi lãi ${formatVnd(lai)} cộng vào dư nợ${goc > 0 ? ` + trả gốc ${formatVnd(goc)}` : ""} — dư nợ còn ${formatVnd(res.data.duNoConLai)}`
             : `Đã ghi lãi ${formatVnd(lai)} + gốc ${formatVnd(goc)}${veTienGui} — dư nợ còn ${formatVnd(res.data.duNoConLai)}`
@@ -118,7 +119,7 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
     <div className="mt-3 rounded-xl border-l-4 border-warning bg-surface-card p-4">
       <p className="flex flex-wrap items-center gap-2 text-sm text-ink">
         <span>
-          {loan.name} — {nhanKy} {format(ky.tuNgay, "dd/MM")} → {format(ky.denNgay, "dd/MM")} (
+          {loan.name} — {nhanKy} {formatNgayVn(ky.tuNgay, "dd/MM")} → {formatNgayVn(ky.denNgay, "dd/MM")} (
           {ky.soNgay} ngày) · dư nợ đầu kỳ {formatVnd(ky.duNoDauKy)}
         </span>
         {tre && <Badge variant="outline">trễ</Badge>}
@@ -138,7 +139,7 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
       />
 
       <p className="mt-2 text-xs text-muted-foreground">
-        Lãi, gốc và tiền gửi được ghi theo ngày đến hạn {format(ky.denNgay, "dd/MM/yyyy")} — duyệt trễ
+        Lãi, gốc và tiền gửi được ghi theo ngày đến hạn {formatNgayVn(ky.denNgay, "dd/MM/yyyy")} — duyệt trễ
         thì số của tháng đó cập nhật lại.
       </p>
       {/* Kỳ cuối của khoản có sổ tiết kiệm: server ĐÒI dư nợ về 0 mới cho tất toán (chanDuNoAm), mà

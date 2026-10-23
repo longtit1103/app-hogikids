@@ -152,6 +152,16 @@ export function BuocDoiChieu({
               {nhanTruocM} ở Sổ quỹ để tìm khoản thu/chi ghi thiếu hoặc thừa trước khi bật.
             </p>
           )}
+          {/* Chọn "chỉ phần giải thích được" khi còn phần chưa giải thích = quỹ từ ngày bật LỆCH tiền thật đúng
+              số đó. Sau bật không còn lối sửa tay (sổ khoá) nên phải nói rõ hệ quả ngay tại đây; không chặn. */}
+          {ketQua.chuaGiaiThich !== 0 && luaChon === "giai-thich-duoc" && (
+            <p className="text-xs text-warning" data-testid="bat-canh-bao-khoa-sau-bat">
+              Sau khi bật, Sổ chi phí và Dòng tiền trước ngày bật bị KHOÁ — bạn không thể tự bổ sung khoản chi trước mốc
+              đó trên app. Phần chưa giải thích ({formatVnd(Math.abs(ketQua.chuaGiaiThich))}) chỉ bù được bằng điều chỉnh
+              mở sổ: chọn &quot;Toàn bộ chênh lệch&quot; để quỹ khớp đúng ngân hàng, hoặc chốt số dư tháng{" "}
+              {nhanTruocM} để tìm khoản ghi thiếu/thừa trước khi bật.
+            </p>
+          )}
           {laTruNhamThauChi(ketQua.chuaGiaiThich, ketQua.duNoThauChi) && (
             <p className="text-xs text-warning" data-testid="bat-canh-bao-tru-nham-thau-chi">
               {CAU_TRU_NHAM_THAU_CHI}

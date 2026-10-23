@@ -1,8 +1,8 @@
-import { format } from "date-fns";
 import type { SyncKind, SyncLog, SyncStatus } from "@/generated/prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 
 export const KIND_LABEL: Record<SyncKind, string> = {
   PANCAKE: "Pancake POS",
@@ -81,8 +81,8 @@ function StatusBadge({ status }: { status: SyncStatus }) {
 }
 
 function formatWhen(startedAt: Date, finishedAt: Date | null): string {
-  const start = format(startedAt, "dd/MM HH:mm");
-  const end = finishedAt ? format(finishedAt, "dd/MM HH:mm") : "—";
+  const start = formatNgayVn(startedAt, "dd/MM HH:mm");
+  const end = finishedAt ? formatNgayVn(finishedAt, "dd/MM HH:mm") : "—";
   return `${start} → ${end}`;
 }
 

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { OrderStatus } from "@/generated/prisma/browser";
-import { format } from "date-fns";
 
 import { OrderStatusBadge } from "@/components/orders/order-status-badge";
 import { useOTimKiemUrl } from "@/components/shell/use-o-tim-kiem-url";
@@ -12,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import { ORDER_STATUS_META } from "@/lib/orders/order-status-meta";
 import type { OrderListRow } from "@/lib/queries/orders";
@@ -131,7 +131,7 @@ export function ChannelOrdersTab({
                       {o.code}
                     </Link>
                   </TableCell>
-                  <TableCell className="text-sm">{format(o.orderedAt, "dd/MM HH:mm")}</TableCell>
+                  <TableCell className="text-sm">{formatNgayVn(o.orderedAt, "dd/MM HH:mm")}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{o.customerName ?? "Khách sàn"}</TableCell>
                   <TableCell className="text-sm">{o.itemCount} sp</TableCell>
                   <TableCell>
@@ -152,7 +152,7 @@ export function ChannelOrdersTab({
                   <OrderStatusBadge status={o.status} />
                 </div>
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
-                  <span>{format(o.orderedAt, "dd/MM HH:mm")}</span>
+                  <span>{formatNgayVn(o.orderedAt, "dd/MM HH:mm")}</span>
                   <span>{formatVnd(o.itemsTotal)}</span>
                 </div>
                 <div className="text-sm text-muted-foreground">{o.customerName ?? "Khách sàn"} · {o.itemCount} sp</div>

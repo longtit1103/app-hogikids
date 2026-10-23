@@ -7,6 +7,7 @@ import { ghepVariantThuCong } from "./ghep-variant-thu-cong";
 import { laLoiHeThong } from "./loi-he-thong";
 
 import { mapPancakeProduct, type MappedOrder } from "./pancake-mapping";
+import { mocCapNhatHong, soThuTuCapNhatDon, updatedAtCuaPayload } from "./thu-tu-cap-nhat-don";
 
 /**
  * Kết cục một lượt ghi đơn — nguồn để đóng dấu `RawPancakeOrder.silverOutcome`.
@@ -170,8 +171,9 @@ export async function upsertOneOrder(
   stats: UpsertStats,
   warnings: string[],
   /**
-   * `fetchedAt` của dòng kho thô sinh ra bản này = SỐ PHIÊN BẢN. Bỏ trống ⇒ ghi vô điều kiện
-   * (giữ nguyên hành vi cũ cho các đường gọi chưa có mốc, vd test mapping).
+   * `fetchedAt` của dòng kho thô sinh ra bản này = SỐ PHIÊN BẢN phụ (xếp sau `updated_at` của
+   * payload — xem `ghiMotLuot`). Bỏ trống ⇒ ghi vô điều kiện, KHÔNG so cả `updated_at` (giữ
+   * nguyên hành vi cũ cho các đường gọi chưa có mốc, vd test mapping).
    */
   mocNguon?: Date,
   opts?: {
@@ -340,15 +342,27 @@ export async function upsertOneOrder(
     /**
      * Một lượt ghi. Trả `false` = KHÔNG ghi vì Silver đang giữ bản mới hơn (kết cục ĐÚNG).
      *
-     * ĐIỀU KIỆN PHIÊN BẢN NẰM TRONG CHÍNH CÂU UPDATE chứ không phải "đọc rồi so rồi ghi": ở mức
-     * READ COMMITTED, Postgres ĐÁNH GIÁ LẠI mệnh đề WHERE sau khi nhả khoá dòng, nên hai lượt song
-     * song không thể cùng thấy "mình mới hơn". Đọc-rồi-ghi thì cả hai đều lọt.
+     * THỨ TỰ PHIÊN BẢN = cặp (`updated_at` Pancake, `rawFetchedAt` mốc land), so theo kiểu từ điển:
+     * `updated_at` (mốc NỘI DUNG) quyết trước; chỉ khi BẰNG nhau hoặc không so được mới rơi về
+     * mốc land như cũ. Mốc land một mình không đủ: trang API chụp TRƯỚC một sự kiện webhook mà POST
+     * SAU vẫn land muộn hơn và từng kéo Silver lùi (RETURNED → COMPLETED) tới lượt API kế tiếp.
+     * Thứ tự từ điển là thứ tự TOÀN PHẦN ⇒ dựng theo trình tự nào cũng hội tụ về cùng một bản.
+     *
+     * An toàn song song bằng hai lớp: (1) `SELECT … FOR UPDATE` khoá dòng `Order` TRƯỚC khi đọc
+     * mốc đang giữ — lượt thứ hai CHỜ, và ở READ COMMITTED nó đọc lại đúng bản lượt đầu vừa commit,
+     * nên "đọc mốc rồi quyết" không còn khe; (2) điều kiện mốc land vẫn nằm TRONG câu UPDATE như cũ.
+     * Đơn CHƯA có thì không có dòng để khoá — hai lượt cùng tạo đụng P2002 và lượt thua chạy lại từ
+     * đầu (xem dưới), lúc đó dòng đã tồn tại và đi đúng nhánh so mốc.
      */
     // "chan" = precondition (kênh, mã) phát hiện đơn khác NGAY TRONG transaction → không ghi gì.
     let donKhacCungKenhMa: string | null = null;
     // "chan" vì `pancakeId` đang thuộc đơn của SHOP KHÁC — xem cổng ngay đầu transaction.
     let shopDangGiu: string | null = null;
     const shopMoi = shopCuaPayload(raw);
+    const updatedAtMoi = updatedAtCuaPayload(raw);
+    // Cảnh báo "không so được mốc cập nhật" — gom ra ngoài transaction để lượt chạy lại sau P2002
+    // không đẩy trùng hai dòng.
+    let canhBaoMocHong: string | null = null;
     const ghiMotLuot = (): Promise<boolean | "chan"> =>
       prisma.$transaction(async (tx) => {
         // KHOÁ TƯ VẤN theo (kênh, mã) cho MỌI lượt ghi đơn: hai transaction khác `pancakeId` nhưng
@@ -363,12 +377,14 @@ export async function upsertOneOrder(
         // `id` = số thứ tự RIÊNG từng shop, nên shop A và shop B đều có thể có đơn "776". Không chặn
         // thì `updateMany where pancakeId` ghi đè IM LẶNG đơn của shop kia — mất cả doanh thu lẫn
         // tiền Sổ quỹ. Đơn sàn mang mã sàn (duy nhất toàn cục) nên không bao giờ vướng cổng này.
-        if (shopMoi !== null) {
-          const [dang] = await tx.$queryRaw<{ shop: string | null }[]>`SELECT raw->>'shop_id' AS shop FROM "Order" WHERE "pancakeId" = ${mo.pancakeId}`;
-          if (dang?.shop != null && dang.shop !== shopMoi) {
-            shopDangGiu = dang.shop;
-            return "chan";
-          }
+        //
+        // Cùng câu đọc lấy luôn `updated_at` của bản đang giữ cho guard thứ tự bên dưới, và KHOÁ
+        // DÒNG (`FOR UPDATE`) để quyết định dựa trên mốc vừa đọc không bị lượt song song lật.
+        // `->>` rút chuỗi ngay trong Postgres — không đi qua JS số (int64 an toàn).
+        const [dang] = await tx.$queryRaw<{ shop: string | null; updatedAt: string | null }[]>`SELECT raw->>'shop_id' AS shop, raw->>'updated_at' AS "updatedAt" FROM "Order" WHERE "pancakeId" = ${mo.pancakeId} FOR UPDATE`;
+        if (shopMoi !== null && dang?.shop != null && dang.shop !== shopMoi) {
+          shopDangGiu = dang.shop;
+          return "chan";
         }
         if (opts?.chanKhiCoDonKhacCungKenhMa) {
           const khac = await tx.order.findFirst({
@@ -387,9 +403,30 @@ export async function upsertOneOrder(
         // bản tới sau thắng. Không xảy ra trong thực tế — hai lượt land của cùng một đơn bị khoá tư
         // vấn tuần tự hoá (giữa chúng luôn có ≥1 COMMIT có fsync + nhiều round-trip DB), còn hai bản
         // trong CÙNG một trang API thì đến từ MỘT lần chụp nên không có khái niệm cũ/mới.
-        const dieuKienMoiHon: Prisma.OrderWhereInput = mocNguon
-          ? { OR: [{ rawFetchedAt: null }, { rawFetchedAt: { lte: mocNguon } }] }
-          : {};
+        //
+        // GUARD THỨ TỰ THEO `updated_at` — chỉ áp ở đường có mốc nguồn (dựng từ kho thô); đường
+        // không mốc (test mapping) giữ "ghi vô điều kiện" như hợp đồng tham số `mocNguon`.
+        //   CU_HON  ⇒ Silver đang giữ nội dung MỚI HƠN: không ghi, kết cục SUPERSEDED (cổng đối
+        //             soát tính là đã hạch toán — không bật backlog oan). Bronze vẫn giữ dòng này.
+        //   MOI_HON ⇒ ghi, BỎ điều kiện mốc land: bản land sớm hơn mà nội dung mới hơn phải thắng
+        //             (ca dựng Silver so le: trang API cũ dựng xong TRƯỚC webhook mới).
+        //   BANG / KHONG_SO_DUOC ⇒ luật mốc land cũ (`lte`). Cùng `updated_at` KHÔNG đủ quyết vì
+        //             Pancake có sửa phí lúc đối soát mà giữ nguyên mốc; dựng lại đúng dòng cũ thì
+        //             mốc bằng nhau ⇒ vẫn ghi (idempotent).
+        const thuTu = mocNguon && dang ? soThuTuCapNhatDon(updatedAtMoi, dang.updatedAt) : "KHONG_SO_DUOC";
+        if (thuTu === "CU_HON") {
+          if (opts?.rawRowId) await dauKetCuc(opts)(tx, opts.rawRowId, KET_CUC.SUPERSEDED);
+          return false;
+        }
+        if (mocNguon && dang && (mocCapNhatHong(updatedAtMoi) || mocCapNhatHong(dang.updatedAt))) {
+          canhBaoMocHong =
+            `Đơn ${mo.pancakeId}: không so được updated_at (bản mới "${updatedAtMoi ?? ""}", bản đang giữ ` +
+            `"${dang.updatedAt ?? ""}") — chỉ dựa mốc land, trang API cũ có thể đè tạm bản mới hơn; kiểm khuôn ngày giờ Pancake`;
+        }
+        const dieuKienMoiHon: Prisma.OrderWhereInput =
+          mocNguon && thuTu !== "MOI_HON"
+            ? { OR: [{ rawFetchedAt: null }, { rawFetchedAt: { lte: mocNguon } }] }
+            : {};
         const sua = await tx.order.updateMany({
           where: { pancakeId: mo.pancakeId, ...dieuKienMoiHon },
           data,
@@ -442,6 +479,7 @@ export async function upsertOneOrder(
       }
     }
 
+    if (canhBaoMocHong) warnings.push(canhBaoMocHong);
     if (daGhi === "chan") {
       // Không phải lỗi dữ liệu (`skipped`) cũng không phải bản cũ (`ordersSkippedStale`) — đơn bị
       // CHẶN CHỦ ĐÍCH vì đơn khác cùng (kênh, mã) đã tồn tại (thường là đơn gốc vừa quay lại).

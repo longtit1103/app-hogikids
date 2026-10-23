@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { format } from "date-fns";
 
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import { nhanCuoiKySoQuy } from "@/lib/so-quy/cong-thuc-so-quy";
 import type { DuBaoQuy } from "@/lib/so-quy/du-bao-quy-types";
@@ -139,7 +140,7 @@ export function SoQuyDongChayTab({
         <div className="rounded-xl border border-hairline p-4">
           <p className="text-sm text-muted-foreground">Sổ quỹ</p>
           <p className="mt-2 text-sm text-ink">
-            Tháng này trước ngày mở sổ ({format(dongChay.d0, "dd/MM/yyyy")}) — chưa có sổ.
+            Tháng này trước ngày mở sổ ({formatNgayVn(dongChay.d0, "dd/MM/yyyy")}) — chưa có sổ.
           </p>
         </div>
       </div>

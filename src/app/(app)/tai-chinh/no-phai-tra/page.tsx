@@ -23,6 +23,8 @@ import {
   theChoBat,
   viChoBat,
 } from "@/lib/no-phai-tra/doc-trang-no-phai-tra";
+import { locTheDongConNo } from "@/lib/no-phai-tra/the-da-dong-con-no";
+import { docTheKemTrangThai } from "@/lib/no-phai-tra/the-tin-dung-queries";
 import { docHoSoViAds } from "@/lib/no-phai-tra/vi-ads-queries";
 import { prisma } from "@/lib/prisma";
 import { yeuCauChuShopTrang } from "@/lib/quyen/cong-trang";
@@ -36,7 +38,8 @@ type SearchParams = { tab?: string; m?: string };
  * Chưa bật: tab **Chuẩn bị** (chọn ngày bật, checklist điều kiện, hồ sơ thẻ + gắn nền tảng, ghi nhận phiếu
  * còn nợ, hồ sơ ví quảng cáo trả trước — hồ sơ KHÔNG đổi quỹ) và tab **Xác nhận** (chỉ mở khi hôm nay ≥
  * ngày bật: khai số dư cuối ngày trước đó, đối chiếu tiền thật, chọn điều chỉnh, bật một lần). Đã bật:
- * hiện mốc + chỉ báo trôi quỹ trước ngày bật + các dòng điều chỉnh đã ghi + hồ sơ ví (ví mới vẫn tạo được).
+ * hiện mốc + chỉ báo trôi quỹ trước ngày bật + chỉ báo thẻ đã đóng còn dư nợ + các dòng điều chỉnh đã ghi + hồ sơ
+ * ví (ví mới vẫn tạo được).
  */
 export default async function NoPhaiTraPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await yeuCauChuShopTrang("/tai-chinh/no-phai-tra");
@@ -44,15 +47,22 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
   const daBat = await docMocM();
 
   if (daBat !== null) {
-    const [dieuChinh, vis, troi] = await Promise.all([
+    const [dieuChinh, vis, troi, the] = await Promise.all([
       docDieuChinhDaGhi(),
       docHoSoViAds(),
       docTroiQuyTruocM(daBat),
+      // Thẻ đã đóng còn dư nợ ≠ 0 (ads về muộn gán thẻ đóng) — chỉ báo cạnh trôi quỹ.
+      docTheKemTrangThai(),
     ]);
     return (
       <div className="flex flex-col gap-6">
         <TieuDe />
-        <BatDaBatTomTat nhanM={format(daBat, "dd/MM/yyyy")} dieuChinh={dieuChinh} troi={troi} />
+        <BatDaBatTomTat
+          nhanM={format(daBat, "dd/MM/yyyy")}
+          dieuChinh={dieuChinh}
+          troi={troi}
+          theDongConNo={locTheDongConNo(the)}
+        />
         <ViAdsSection vis={vis} daBat />
       </div>
     );

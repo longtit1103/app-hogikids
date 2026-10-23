@@ -9,6 +9,7 @@ import { ExpenseTable } from "@/components/expenses/expense-table";
 import { KhoanChiDinhKySection } from "@/components/finance/khoan-chi-dinh-ky-section";
 import { chuanHoaSearchParams } from "@/lib/chuan-hoa-search-params";
 import { type DateRange } from "@/lib/date-range";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { ensureRecurringExpensesForMonthsChiTiet, monthStartsInRange } from "@/lib/expenses/ensure-recurring-expenses";
 import { EXPENSE_PAGE_SIZE } from "@/lib/expenses/expense-page-size";
 import {
@@ -196,7 +197,7 @@ export async function ExpenseLedgerTab({
           mount nên có thể còn hiện preset cũ. Số phải tự nói nó thuộc kỳ nào. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          Kỳ: {format(range.from, "dd/MM/yyyy")} – {format(range.to, "dd/MM/yyyy")}
+          Kỳ: {formatNgayVn(range.from, "dd/MM/yyyy")} – {formatNgayVn(range.to, "dd/MM/yyyy")}
         </p>
         <div className="flex flex-wrap items-center gap-3">
           {/*

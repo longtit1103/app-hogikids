@@ -4,7 +4,11 @@ import type { Prisma } from "@/generated/prisma/client";
 
 import type { CashMovementKindTatCa } from "@/lib/cash-movements/cash-movement-kinds";
 import { formatVnd } from "@/lib/format";
+import { docNguCanhLoc } from "@/lib/no-phai-tra/doc-ngu-canh-loc";
+import { docGiaoDichThe, docKyNeoThe } from "@/lib/no-phai-tra/du-no-the";
+import type { GiaoDichThe, KyNeo } from "@/lib/no-phai-tra/ky-sao-ke";
 import { khoaCacPhieu } from "@/lib/no-phai-tra/phieu-nhap-no-queries";
+import { denChoCongTheDaDong, xetTraVaoTheDaDong } from "@/lib/no-phai-tra/the-da-dong-con-no";
 import { khoaThe } from "@/lib/no-phai-tra/the-tin-dung-queries";
 import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 import { HAN_CHO_KHOA_DONG_TIEN_MS, khoaDongTienCoHan } from "@/lib/so-quy/khoa-dong-tien-co-han";
@@ -71,7 +75,10 @@ export async function khoaHoSoNo(tx: Prisma.TransactionClient, phia: readonly Kh
   await khoaCacViAds(tx, sapKhacNull(phia.map((p) => p.viAdsId)));
 }
 
-/** Thẻ phải còn và CHƯA đóng — thẻ đóng có dư nợ 0, ghi/sửa/xoá dòng của nó là làm dư nợ khác 0. */
+/**
+ * Thẻ phải còn và CHƯA đóng — dùng cho khoản chi trừ thẻ (`Expense.cardId`): thẻ đóng không nhận thêm chi
+ * phí nào. Đường dòng tiền dùng `kiemTheChoDongTien` (có lối trả nốt nợ của thẻ đóng).
+ */
 async function kiemTheConMo(tx: Prisma.TransactionClient, cardId: string): Promise<void> {
   const the = await tx.theTinDung.findUnique({ where: { id: cardId }, select: { closedAt: true, ten: true } });
   if (!the) throw new LoiHoSoNo("Không tìm thấy thẻ — tải lại trang", "cardId", "KHONG_TIM_THAY_HO_SO");
@@ -82,6 +89,36 @@ async function kiemTheConMo(tx: Prisma.TransactionClient, cardId: string): Promi
       "THE_DA_DONG",
     );
   }
+}
+
+/**
+ * Cổng thẻ của ĐƯỜNG DÒNG TIỀN (`kiemHoSoNo`): thẻ mở ⇒ qua; thẻ ĐÃ ĐÓNG ⇒ chỉ một lần `CARD_PAY` vào chính thẻ
+ * đó khi thẻ còn nợ > 0 (chưa tính chính dòng đang sửa) và ngày trả sau ngày chốt neo (`xetTraVaoTheDaDong` — ads
+ * về muộn gán thẻ đóng theo đúng lịch sử mốc gắn, đây là lối DUY NHẤT tất toán phần nợ đó). KHÔNG kẹp số trả: dư
+ * nợ là ước tính, trả vượt hiện thành "trả thừa" ở chỉ báo thẻ đóng. Dư nợ đọc TRONG transaction, sau khoá thẻ
+ * (`khoaHoSoNo` chạy trước): lượt trả song song thứ hai chờ khoá rồi thấy nợ đã giảm. Đường `Expense.cardId`
+ * (`khoaVaKiemCacTheConMo`) KHÔNG đi qua đây — khoản chi vào thẻ đóng vẫn bị chặn tuyệt đối.
+ */
+async function kiemTheChoDongTien(
+  tx: Prisma.TransactionClient,
+  cardId: string,
+  truoc: DongHoSoNo | null,
+  sau: DongHoSoNo | null,
+): Promise<void> {
+  const the = await tx.theTinDung.findUnique({ where: { id: cardId }, select: { closedAt: true, ten: true } });
+  if (!the) throw new LoiHoSoNo("Không tìm thấy thẻ — tải lại trang", "cardId", "KHONG_TIM_THAY_HO_SO");
+  if (the.closedAt === null) return;
+  // Chỉ đọc dư nợ khi lượt ghi CÓ THỂ được nhận (trả vào chính thẻ này); mọi ca khác pure function chặn ngay.
+  const coTheNhan = sau?.kind === "CARD_PAY" && sau.cardId === cardId;
+  const den = denChoCongTheDaDong(new Date(), cardId, truoc, sau);
+  let kys: KyNeo[] = [];
+  let gd: GiaoDichThe[] = [];
+  if (coTheNhan) {
+    const ctx = await docNguCanhLoc(tx);
+    [kys, gd] = await Promise.all([docKyNeoThe(cardId, tx), docGiaoDichThe(cardId, den, tx, ctx)]);
+  }
+  const loi = xetTraVaoTheDaDong({ the: { id: cardId, ten: the.ten }, kys, gd, den, truoc, sau });
+  if (loi !== null) throw new LoiHoSoNo(loi.message, loi.field, "THE_DA_DONG");
 }
 
 /**
@@ -137,8 +174,9 @@ export async function khoaVaKiemCacTheConMo(
 /**
  * Cổng sau khoá, chạy TRƯỚC câu ghi. `truoc` = dòng đang có (null khi tạo/khôi phục), `sau` = dòng sẽ có
  * (null khi xoá).
- *  - Thẻ: MỌI thẻ dính tới (trước lẫn sau) phải còn mở; thẻ của phía SAU còn phải qua cửa sổ neo đầu
- *    tiên (`kiemNgaySauNeoThe`).
+ *  - Thẻ: MỌI thẻ dính tới (trước lẫn sau) phải còn mở — ngoại lệ DUY NHẤT: `CARD_PAY` vào thẻ đã đóng còn
+ *    nợ > 0 (`kiemTheChoDongTien`); thẻ của phía SAU còn phải qua cửa sổ neo đầu tiên
+ *    (`kiemNgaySauNeoThe`).
  *  - Phiếu: phải còn. `SUPPLIER_PAY` vào phiếu đã HUỶ bị chặn — trừ khi chính dòng đó vốn đã là trả cho
  *    đúng phiếu này VÀ không tăng số (sửa ngày/mô tả, hoặc GIẢM số vì gõ nhầm thì được; tăng là trả thêm
  *    vào phiếu huỷ — đúng điều §5.3 cấm). `SUPPLIER_REFUND` vào phiếu huỷ được (trần ở `chanHoanVuotDaTra`) —
@@ -151,7 +189,7 @@ export async function kiemHoSoNo(
   p: { truoc: DongHoSoNo | null; sau: DongHoSoNo | null; choPhepTraVaoPhieuHuy?: boolean },
 ): Promise<void> {
   for (const cardId of sapKhacNull([p.truoc?.cardId ?? null, p.sau?.cardId ?? null])) {
-    await kiemTheConMo(tx, cardId);
+    await kiemTheChoDongTien(tx, cardId, p.truoc, p.sau);
   }
   if (p.sau?.cardId) await kiemNgaySauNeoThe(tx, p.sau.cardId, p.sau.date);
 

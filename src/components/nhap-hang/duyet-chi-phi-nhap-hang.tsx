@@ -1,6 +1,5 @@
 "use client";
 
-import { format } from "date-fns";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -19,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ghiChiPhiNhapHang } from "@/lib/actions/chi-phi-nhap-hang";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import { parseAmountInput } from "@/lib/format-amount-input";
 import type { PhieuNhapDeXuat, PhieuNhapDeXuatChe } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
@@ -159,7 +159,7 @@ export function DuyetChiPhiNhapHang({
                       />
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-ink">
-                      {format(d.ngay, "dd/MM/yyyy")}
+                      {formatNgayVn(d.ngay, "dd/MM/yyyy")}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-ink">
                       #{d.displayId ?? d.uuid.slice(0, 8)}

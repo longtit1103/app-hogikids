@@ -18,11 +18,10 @@ describe("hashPassword / verifyPassword", () => {
     await expect(verifyPassword("mat-khau-sai", hash)).resolves.toBe(false);
   });
 
-  it("stores '<saltHex>:<derivedKeyHex>' with a 16-byte salt and 64-byte key", async () => {
+  // Định dạng có phiên bản `s2$<N>$<saltHex>:<keyHex>` — chi tiết + hash cũ: tests/unit/auth/hash-mat-khau-co-phien-ban.test.ts.
+  it("stores 's2$<N>$<saltHex>:<derivedKeyHex>' with a 16-byte salt and 64-byte key", async () => {
     const hash = await hashPassword("Mat-khau-manh-123");
-    const [salt, derivedKeyHex] = hash.split(":");
-    expect(salt).toMatch(/^[0-9a-f]{32}$/);
-    expect(derivedKeyHex).toMatch(/^[0-9a-f]{128}$/);
+    expect(hash).toMatch(/^s2\$131072\$[0-9a-f]{32}:[0-9a-f]{128}$/);
   });
 
   it("does not throw on a malformed stored hash — just fails verification", async () => {

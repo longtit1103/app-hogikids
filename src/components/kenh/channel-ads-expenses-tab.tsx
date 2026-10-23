@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { format } from "date-fns";
 import { Pencil, Trash2 } from "lucide-react";
 
 import { ExpenseDeleteDialog } from "@/components/expenses/expense-delete-dialog";
@@ -11,6 +10,7 @@ import { formatRoas } from "@/components/kenh/channel-format";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { adsSourceLabel } from "@/lib/ads-source-label";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { formatVnd } from "@/lib/format";
 
@@ -108,7 +108,7 @@ export function ChannelAdsExpensesTab({
             <TableBody>
               {rows.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell className="text-sm">{format(row.date, "dd/MM/yyyy")}</TableCell>
+                  <TableCell className="text-sm">{formatNgayVn(row.date, "dd/MM/yyyy")}</TableCell>
                   <TableCell>
                     <Badge variant="outline">{adsSourceLabel(row.adsSource)}</Badge>
                   </TableCell>
@@ -133,7 +133,7 @@ export function ChannelAdsExpensesTab({
                 </div>
                 <p className="text-sm text-ink">{row.description || "—"}</p>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{format(row.date, "dd/MM/yyyy")}</span>
+                  <span>{formatNgayVn(row.date, "dd/MM/yyyy")}</span>
                   {sourceBadge(row.source) ?? <span />}
                 </div>
                 <div className="flex justify-end">{renderRowActions(row)}</div>

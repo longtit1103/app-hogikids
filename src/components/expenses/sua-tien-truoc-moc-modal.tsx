@@ -2,13 +2,13 @@
 
 import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { suaSoTienTruocMoc } from "@/lib/actions/sua-tien-truoc-moc";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { formatVnd } from "@/lib/format";
 import { parseAmountInput } from "@/lib/format-amount-input";
@@ -31,7 +31,7 @@ export function cauThanhCongSuaTien(kq: KetQuaSuaTienTruocMoc, mocM: Date | null
     return "Đã sửa số tiền — dòng trước ngày mở sổ quỹ nên không ghi điều chỉnh, chỉ Lãi/Lỗ đổi.";
   }
   const huong = kq.chieu === "OUT" ? "ra" : "vào";
-  const ngay = mocM === null ? "" : ` ngày ${format(mocM, "dd/MM")}`;
+  const ngay = mocM === null ? "" : ` ngày ${formatNgayVn(mocM, "dd/MM")}`;
   return `Đã sửa số tiền — đã thêm điều chỉnh mở sổ ${huong} ${formatVnd(kq.soTienBu)}${ngay}.`;
 }
 
@@ -113,7 +113,7 @@ export function SuaTienTruocMocModal({ open, onOpenChange, expense, mocM }: SuaT
 
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm" data-testid="sua-tien-thong-tin-dong">
           <dt className="text-muted-foreground">Ngày</dt>
-          <dd className="text-ink">{format(expense.date, "dd/MM/yyyy")}</dd>
+          <dd className="text-ink">{formatNgayVn(expense.date, "dd/MM/yyyy")}</dd>
           <dt className="text-muted-foreground">Danh mục</dt>
           <dd className="text-ink">{expense.categoryName}</dd>
           <dt className="text-muted-foreground">Mô tả</dt>

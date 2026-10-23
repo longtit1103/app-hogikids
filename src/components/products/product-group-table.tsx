@@ -15,6 +15,7 @@ import {
   updateVariantThreshold,
 } from "@/lib/actions/cost-price";
 import { formatVnd } from "@/lib/format";
+import { parseMoneyInput, parseThresholdInput } from "@/lib/parse-inline-product-input";
 import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
 import type { ProductRow, ProductRowChe, ProductVariantRowChe } from "@/lib/queries/products";
 import { cn } from "@/lib/utils";
@@ -22,24 +23,6 @@ import { InlineMoneyCell } from "./inline-money-cell";
 import { ProductApplyCell } from "./product-apply-cell";
 
 const PAGE_SIZE = 20;
-
-/** "45.000" hoặc "45000" → 45000 (int ≥0); rỗng/không hợp lệ → undefined (không lưu). */
-function parseMoneyInput(raw: string): number | undefined {
-  const cleaned = raw.replace(/[^\d]/g, "");
-  if (cleaned === "") return undefined;
-  const n = Number.parseInt(cleaned, 10);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-/** Như trên nhưng rỗng → null (xóa ngưỡng riêng, dùng mặc định). */
-function parseThresholdInput(raw: string): number | null | undefined {
-  const trimmed = raw.trim();
-  if (trimmed === "") return null;
-  const cleaned = trimmed.replace(/[^\d]/g, "");
-  if (cleaned === "") return undefined;
-  const n = Number.parseInt(cleaned, 10);
-  return Number.isFinite(n) ? n : undefined;
-}
 
 /**
  * Phần giá vốn của một sản phẩm — null ở nhánh che (người thiếu `gia-von-loi-nhuan:xem`: server không

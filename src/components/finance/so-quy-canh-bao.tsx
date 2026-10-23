@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { differenceInCalendarDays, format } from "date-fns";
+import { differenceInCalendarDays } from "date-fns";
 
 import { type DateRange, serializeDateRange } from "@/lib/date-range";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
 
 import { ShopeeImportButton } from "./shopee-import-button";
@@ -52,13 +53,13 @@ export function SoQuyCanhBao({
       )}
       {c.shopeeThieuTruocD0 && c.shopeeViTuNgay !== null && (
         <p>
-          ⚠️ ví Shopee chỉ có dữ liệu từ {format(c.shopeeViTuNgay, "dd/MM")} — thiếu tiền rút Shopee
+          ⚠️ ví Shopee chỉ có dữ liệu từ {formatNgayVn(c.shopeeViTuNgay, "dd/MM")} — thiếu tiền rút Shopee
           trước đó
         </p>
       )}
       {viCu && c.shopeeViToiNgay !== null && (
         <p className="flex flex-wrap items-center gap-2">
-          <span>⚠️ ví Shopee mới nhập tới {format(c.shopeeViToiNgay, "dd/MM")}</span>
+          <span>⚠️ ví Shopee mới nhập tới {formatNgayVn(c.shopeeViToiNgay, "dd/MM")}</span>
           <ShopeeImportButton nhan="Nhập file ví Shopee" />
         </p>
       )}

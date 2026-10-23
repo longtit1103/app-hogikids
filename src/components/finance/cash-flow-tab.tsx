@@ -211,9 +211,12 @@ function KhoiQuy({ quy, isCurrentMonth, viTiktok }: { quy: NhomQuy; isCurrentMon
     noPhaiTra,
     laChuShop,
   } = quy;
-  // Dòng phụ "Sau khi trả hết nợ" chỉ có SAU khi bật (trước đó thẻ Quỹ y như cũ).
+  // Dòng phụ "Sau khi trả hết nợ" chỉ có SAU khi bật (trước đó thẻ Quỹ y như cũ). Trừ cả dư nợ thấu chi
+  // đang mở (tiền ngân hàng đã giải ngân vào quỹ); vay kỳ hạn chỉ hiện tham khảo — xem `sau-khi-tra-het-no.ts`.
   const sauKhiTraHetNo =
-    noPhaiTra.mocM === null ? null : tinhSauKhiTraHetNo(soQuy.quyHomNay, noPhaiTra.the, noPhaiTra.phieu);
+    noPhaiTra.mocM === null
+      ? null
+      : tinhSauKhiTraHetNo(soQuy.quyHomNay, noPhaiTra.the, noPhaiTra.phieu, loans);
   // Số KHOẢN VAY có kỳ tới hạn chưa ghi (mỗi khoản tối đa 1 kỳ chờ) — thẻ Quỹ nhắc một dòng, khối
   // Khoản vay mới là chỗ duyệt. Cùng phép đếm với banner shell (`demKhoanVayCoKyChoDuyet`).
   const soKhoanVayCoKyCho = demKhoanVayCoKyCho(loans);

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { format } from "date-fns";
 import { Pencil, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +15,7 @@ import {
   signedAmount,
 } from "@/lib/cash-movements/cash-movement-kinds";
 import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import type { LuaChonDongTienNo } from "@/lib/no-phai-tra/lua-chon-dong-tien-no";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
@@ -148,7 +148,7 @@ export function CashMovementTable({
         <TableBody>
           {rows.map((row) => (
             <TableRow key={row.id}>
-              <TableCell className="text-sm">{format(row.date, "dd/MM/yyyy")}</TableCell>
+              <TableCell className="text-sm">{formatNgayVn(row.date, "dd/MM/yyyy")}</TableCell>
               <TableCell>{kindBadge(row)}</TableCell>
               <TableCell className="max-w-[280px] truncate" title={row.description}>
                 {row.description || "—"}
@@ -170,7 +170,7 @@ export function CashMovementTable({
             </div>
             <p className="text-sm text-ink">{row.description || "—"}</p>
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{format(row.date, "dd/MM/yyyy")}</span>
+              <span>{formatNgayVn(row.date, "dd/MM/yyyy")}</span>
               {rowActions(row)}
             </div>
           </div>

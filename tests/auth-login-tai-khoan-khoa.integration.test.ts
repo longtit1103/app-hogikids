@@ -109,11 +109,11 @@ describe("login — tài khoản bị khoá", () => {
 });
 
 describe("login — sai / không tồn tại", () => {
-  it("email không tồn tại ⇒ thông báo chung + DANG_NHAP_SAI ghi email khai", async () => {
+  // Email lạ KHÔNG ghi nhật ký (chặn rải email giả làm phình AuditLog) — thông báo vẫn y hệt nhánh
+  // email có thật, không lộ tài khoản.
+  it("email không tồn tại ⇒ thông báo chung, KHÔNG ghi DANG_NHAP_SAI", async () => {
     expect(await login(form(EMAIL_KHONG_CO, MAT_KHAU))).toEqual({ ok: false, error: LOI_CHUNG });
-    expect(await nhatKy()).toMatchObject([
-      { hanhDong: "DANG_NHAP_SAI", actorId: null, danhTinhKhaiBao: EMAIL_KHONG_CO },
-    ]);
+    expect(await nhatKy()).toEqual([]);
   });
 });
 

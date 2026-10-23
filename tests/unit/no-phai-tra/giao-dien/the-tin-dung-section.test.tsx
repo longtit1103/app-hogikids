@@ -129,4 +129,19 @@ describe("TheTinDungSection", () => {
   it("thẻ đã đóng có nhãn", () => {
     expect(render(the({ closedAt: ngay(2) }))).toContain("Đã đóng");
   });
+
+  it("thẻ đã đóng còn nợ (ads về muộn) ⇒ chỉ báo nêu số + gợi ý ghi Trả thẻ; trả thừa ⇒ nhắc đối chiếu", () => {
+    const conNo = render(the({ closedAt: ngay(2), duNo: 1_200_000 }));
+    expect(conNo).toContain('data-testid="the-dong-con-no"');
+    expect(conNo).toContain("còn nợ 1.200.000");
+    expect(conNo).toContain("Trả thẻ");
+    const traThua = render(the({ closedAt: ngay(2), duNo: -300_000 }));
+    expect(traThua).toContain("trả thừa 300.000");
+  });
+
+  it("không chỉ báo khi thẻ đóng nợ 0 / chưa có neo, hay thẻ còn mở dù có nợ", () => {
+    expect(render(the({ closedAt: ngay(2), duNo: 0 }))).not.toContain("the-dong-con-no");
+    expect(render(the({ closedAt: ngay(2), duNo: null }))).not.toContain("the-dong-con-no");
+    expect(render(the({ duNo: 8_000_000 }))).not.toContain("the-dong-con-no");
+  });
 });

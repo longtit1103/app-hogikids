@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { format } from "date-fns";
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { NHAN_LOAI_THUNG_RAC, THUNG_RAC_PAGE_SIZE, type ThungRacRow } from "@/lib/thung-rac/thung-rac-queries";
@@ -63,11 +63,11 @@ export function ThungRacTable({
             return (
               <TableRow key={dong.id} className={cn(t.kind === "da_khoi_phuc" && "opacity-50")}>
                 <TableCell className="text-sm text-muted-foreground">
-                  {format(dong.xoaLuc, "dd/MM/yyyy HH:mm")}
+                  {formatNgayVn(dong.xoaLuc, "dd/MM/yyyy HH:mm")}
                 </TableCell>
                 <TableCell className="text-sm">{NHAN_LOAI_THUNG_RAC[dong.bang]}</TableCell>
                 <TableCell className="text-sm text-ink">{dong.nhan}</TableCell>
-                <TableCell className="text-sm">{format(dong.ngay, "dd/MM/yyyy")}</TableCell>
+                <TableCell className="text-sm">{formatNgayVn(dong.ngay, "dd/MM/yyyy")}</TableCell>
                 <TableCell className="text-right font-serif text-ink tabular-nums">
                   {formatVnd(dong.soTien)}
                 </TableCell>
@@ -102,7 +102,7 @@ export function ThungRacTable({
               </div>
               <p className="font-serif text-lg text-ink tabular-nums">{formatVnd(dong.soTien)}</p>
               <p className="text-xs text-muted-foreground">
-                Ngày {format(dong.ngay, "dd/MM/yyyy")} · Xoá lúc {format(dong.xoaLuc, "dd/MM/yyyy HH:mm")}
+                Ngày {formatNgayVn(dong.ngay, "dd/MM/yyyy")} · Xoá lúc {formatNgayVn(dong.xoaLuc, "dd/MM/yyyy HH:mm")}
               </p>
               <p className="text-xs">
                 <TrangThaiCell dong={dong} />

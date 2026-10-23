@@ -3,6 +3,7 @@
 import { format } from "date-fns";
 
 import { Input } from "@/components/ui/input";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { soKyChoTheoLich } from "@/lib/so-quy/lich-tra-no";
 import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
 
@@ -138,7 +139,7 @@ export function KhoanVayFormFields({ f, setF, loi, khoaNen, khoaCheDo, daDuyetKy
   const canhBaoD0 =
     hoiTruocD0 && d0 !== null ? (
       <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
-        Ngày giải ngân sớm hơn ngày mở sổ ({format(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày mới;
+        Ngày giải ngân sớm hơn ngày mở sổ ({formatNgayVn(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày mới;
         dòng số dư mở sổ có thể phải sửa lại.
         {(f.cheDo === "moi" || f.cheDo === "thau-chi") &&
           ` Khoản đã có trước ngày mở sổ thì chọn cách khai "đã có từ trước" — tiền đó đã nằm trong số dư mở sổ, ghi giải ngân nữa là đếm hai lần.`}

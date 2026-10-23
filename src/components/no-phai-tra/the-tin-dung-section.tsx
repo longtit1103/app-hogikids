@@ -5,8 +5,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatVnd } from "@/lib/format";
 import type { GoiYChotSaoKe } from "@/lib/no-phai-tra/doc-khoi-no-phai-tra";
 import type { PhanPhaiTra } from "@/lib/no-phai-tra/ky-sao-ke";
+import { locTheDongConNo } from "@/lib/no-phai-tra/the-da-dong-con-no";
 import type { TheKemTrangThai } from "@/lib/no-phai-tra/the-tin-dung-queries";
 
+import { CanhBaoTheDongConNo } from "./canh-bao-the-dong-con-no";
 import { MocGanNenTang } from "./moc-gan-nen-tang";
 import { TheTinDungAddButton } from "./the-tin-dung-add-button";
 import { TheTinDungRowActions } from "./the-tin-dung-row-actions";
@@ -44,6 +46,7 @@ function KyGanNhat({ the }: { the: TheKemTrangThai }) {
  * Khối "Thẻ tín dụng" (tab Dòng tiền, dưới Khoản vay) — thuần hiển thị, dữ liệu do `docKhoiNoPhaiTra`.
  * Dư nợ là số ƯỚC TÍNH (neo sao kê + giao dịch gán về thẻ), KHÔNG phải số ngân hàng; chốt sao kê là
  * cách đưa nó về đúng số thật. Quỹ chỉ đổi khi trả thẻ thật — khối này không động tới quỹ.
+ * Thẻ đã đóng còn dư nợ ≠ 0 (ads về muộn) có chỉ báo riêng ngay dưới tiêu đề.
  */
 export function TheTinDungSection({
   the,
@@ -70,6 +73,7 @@ export function TheTinDungSection({
         </div>
         {choPhepSua && <TheTinDungAddButton mocM={mocM} />}
       </div>
+      <CanhBaoTheDongConNo the={locTheDongConNo(the)} />
 
       {the.length === 0 ? (
         <p className="mt-3 text-xs text-muted-foreground">Chưa có thẻ tín dụng nào.</p>

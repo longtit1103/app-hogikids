@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { suaSoTietKiem, taoSoTietKiem } from "@/lib/actions/so-tiet-kiem";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
@@ -293,7 +294,7 @@ export function SoTietKiemFormModal({
 
           {canXacNhan && ngayTruocD0 && d0 !== null && (
             <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
-              Ngày này sớm hơn ngày mở sổ ({format(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày mới;
+              Ngày này sớm hơn ngày mở sổ ({formatNgayVn(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày mới;
               dòng số dư mở sổ có thể phải sửa lại.
             </p>
           )}

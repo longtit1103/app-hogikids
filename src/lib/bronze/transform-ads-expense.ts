@@ -14,7 +14,9 @@ import {
   type AdsReportRow,
 } from "@/lib/ingest/ads-report-mapping";
 import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
+import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
+import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 
 import {
   chamMoc,
@@ -37,6 +39,58 @@ import {
  * Không lọc theo `shopId`: `shopId` ở đây là tài khoản quảng cáo (chủ shop tự tạo thêm được), lọc
  * cứng là bỏ sót chi phí của tài khoản mới.
  */
+
+/**
+ * CẮT TẠI MỐC NỢ PHẢI TRẢ M (chủ shop chốt 23/10): đã bật (M ≠ null) ⇒ lượt dựng lại BỎ QUA mọi dòng ngày VN < M —
+ * không tạo, không sửa (kể cả hạ về 0đ), không xoá `Expense` ADS_API ngày < M.
+ *
+ * Vì sao: quỹ cuối M−1 đã CHỐT theo tiền thật bằng điều chỉnh mở sổ `CUTOVER_ADJ_*` lúc bật, nên mọi thay đổi chi
+ * phí ngày < M làm `Q(M−1) + ΣCUTOVER` lệch ⇒ trang Nợ phải trả báo "trôi quỹ", P&L tháng đã chốt cũng nhích. Mà
+ * lượt dựng lại KHÔNG tái tạo được đúng số n8n đã ghi: VAT TikTok ở đây gộp theo THÁNG hoá đơn, còn n8n tính theo
+ * CỬA SỔ 7 ngày ⇒ chạy lại là đổi số ngày cũ dù nền tảng không chốt lại gì. Số ngày < M đang nằm trong sổ là số đã
+ * đối chiếu lúc bật — giữ nguyên.
+ *
+ * Đường n8n hằng ngày (`/api/ingest/ads`) KHÔNG đi qua đây và GIỮ ngoại lệ của nó (nền tảng chốt lại số ngày cũ vài
+ * hôm sau — xem `upsertOneAdsExpense`). Cắt ở TẦNG GỌI này chứ không ở cổng ghi chung, để cổng ghi chung vẫn phục
+ * vụ đúng một luật cho cả hai đường.
+ *
+ * Đếm `skippedTruocM`, KHÔNG `skipped`: dòng bỏ cố ý không được giữ cờ backlog dính vĩnh viễn (xem `TransformStats`).
+ * So theo KHOÁ NGÀY VN: `row.date` là chuỗi `YYYY-MM-DD` (đã kiểm khuôn năm 4 chữ số ở `ads-report-mapping.ts`) nên
+ * so chuỗi = so ngày; M quy về khoá bằng `khoaNgayVn`. Cắt TRƯỚC bước tra VAT / khoá trùng: dòng < M không được
+ * sinh `skipped` hay cảnh báo nào cho một khoản ta đằng nào cũng không ghi.
+ */
+type CatTaiMocM = {
+  /** Khoá ngày VN của M (`YYYY-MM-DD`), `null` = chưa bật ⇒ không cắt gì. */
+  khoaM: string | null;
+  /** Số dòng đã bỏ vì ngày < M trong nhánh này. */
+  soDong: number;
+};
+
+/** Đọc mốc M cho một nhánh ads: lấy M người gọi truyền xuống, chỉ tự đọc DB khi người gọi bỏ trống. */
+async function napCatTaiMocM(opts: TransformOptions): Promise<CatTaiMocM> {
+  const moc = opts.mocNoPhaiTra === undefined ? await docMocM() : opts.mocNoPhaiTra;
+  return { khoaM: moc === null ? null : khoaNgayVn(moc), soDong: 0 };
+}
+
+/** Dòng ngày `ngay` có nằm trước M không — có thì đếm và báo người gọi bỏ dòng. */
+function boQuaViTruocMocM(cat: CatTaiMocM, ngay: string): boolean {
+  if (cat.khoaM === null || ngay >= cat.khoaM) return false;
+  cat.soDong++;
+  return true;
+}
+
+/** Tiền tố cảnh báo cắt tại M — script dựng lại lọc theo tiền tố này để in riêng, không chìm giữa cảnh báo khác. */
+export const TIEN_TO_CANH_BAO_CAT_TAI_M = "Đã bật Nợ phải trả từ ";
+
+/** Cộng bộ đếm + đẩy MỘT dòng cảnh báo cho cả nhánh (không lặp mỗi dòng). */
+function chotCatTaiMocM(cat: CatTaiMocM, nhan: string, stats: TransformStats, warnings: string[]): void {
+  if (cat.khoaM === null || cat.soDong === 0) return;
+  stats.skippedTruocM += cat.soDong;
+  const [y, m, d] = cat.khoaM.split("-");
+  warnings.push(
+    `${TIEN_TO_CANH_BAO_CAT_TAI_M}${d}/${m}/${y}: bỏ qua ${cat.soDong} dòng ads ${nhan} trước mốc (giữ số đã chốt)`,
+  );
+}
 
 /**
  * Mở transaction riêng, giành KHOÁ GHI CHI TIÊU ADS rồi mới chạy `fn`.
@@ -129,6 +183,7 @@ export async function transformMetaAdsReport(
   const rows = await latestPayloads("RawMetaAdsReport", { externalIds });
   if (rows.length === 0) return;
 
+  const cat = await napCatTaiMocM(opts);
   const seen = new Set<string>();
   const so = await napSoChiTieuAds(prisma);
   let iMeta = 0;
@@ -140,10 +195,12 @@ export async function transformMetaAdsReport(
       warnings.push(`Bỏ qua báo cáo ads Meta ${row.externalId}: ${m.loi}`);
       continue;
     }
+    if (boQuaViTruocMocM(cat, m.row.date)) continue;
     // Meta KHÔNG có API hoá đơn cho tài khoản trả thẻ ⇒ VAT là hằng số khai tay, phải bằng
     // `CONFIG.vatRate` của `n8n/meta-ads-nightly.json` (đổi bên nào cũng phải đổi bên kia).
     await ghiChiTieuAds("META", m.row, VAT_META, seen, so, stats, warnings);
   }
+  chotCatTaiMocM(cat, "Meta", stats, warnings);
 }
 
 /** Báo cáo quảng cáo TikTok Business trong kho thô → `Expense`. CHỈ chạy ở lượt dựng lại. */
@@ -167,6 +224,7 @@ export async function transformTiktokAdsReport(
     warnings,
   );
 
+  const cat = await napCatTaiMocM(opts);
   const seen = new Set<string>();
   const so = await napSoChiTieuAds(prisma);
   let iTkb = 0;
@@ -178,6 +236,8 @@ export async function transformTiktokAdsReport(
       warnings.push(`Bỏ qua báo cáo ads TikTok ${row.externalId}: ${m.loi}`);
       continue;
     }
+    // Cắt TRƯỚC tra VAT: tháng < M có VAT vô lý sẽ `skipped++` (giữ cờ) cho một dòng đằng nào cũng không ghi.
+    if (boQuaViTruocMocM(cat, m.row.date)) continue;
     const vatRate = vat.rateForDate(m.row.date);
     if (vatRate === null) {
       stats.skipped++; // tháng có VAT vô lý — đã cảnh báo MỘT lần ở buildVatByMonth, không lặp mỗi dòng
@@ -193,4 +253,5 @@ export async function transformTiktokAdsReport(
       warnings,
     );
   }
+  chotCatTaiMocM(cat, "TikTok", stats, warnings);
 }

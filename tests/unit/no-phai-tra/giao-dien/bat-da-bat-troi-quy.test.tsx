@@ -115,3 +115,17 @@ describe("BatDaBatTomTat — cảnh báo trôi quỹ trước ngày bật", () =
     expect(screen.queryByTestId("no-phai-tra-bu-sua-tien")).toBeNull();
   });
 });
+
+describe("BatDaBatTomTat — thẻ đã đóng còn dư nợ", () => {
+  it("vắng/rỗng ⇒ không chỉ báo; có thẻ ⇒ nêu tên + số còn nợ", () => {
+    render(<BatDaBatTomTat nhanM="01/11/2026" dieuChinh={[]} />);
+    expect(screen.queryByTestId("the-dong-con-no")).toBeNull();
+    cleanup();
+    render(
+      <BatDaBatTomTat nhanM="01/11/2026" dieuChinh={[]} theDongConNo={[{ id: "a", ten: "Thẻ cũ", duNo: 2_000_000 }]} />,
+    );
+    const khoi = screen.getByTestId("the-dong-con-no");
+    expect(khoi.textContent).toContain("Thẻ cũ");
+    expect(khoi.textContent).toContain(formatVnd(2_000_000));
+  });
+});

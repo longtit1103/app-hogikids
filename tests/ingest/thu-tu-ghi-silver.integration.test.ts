@@ -1,10 +1,13 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { demDaHachToan } from "@/lib/bronze/doi-soat-hach-toan";
+import { landRaw } from "@/lib/bronze/land-raw";
+import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
 import { mapPancakeOrder } from "@/lib/ingest/pancake-mapping";
 import { upsertOneOrder, type UpsertStats } from "@/lib/ingest/pancake-upsert";
 import { prisma } from "@/lib/prisma";
 
+import { SHOP_TIKTOK } from "../helpers/shop-ids-fixture";
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
 
 /**
@@ -23,13 +26,13 @@ const MOC_CU = new Date("2026-07-01T10:00:00+07:00");
 const MOC_MOI = new Date("2026-07-01T10:05:00+07:00");
 
 /** Đơn TikTok: `fee` và `status` là hai thứ ca lỗi thật từng làm sai (phí tạm đè phí thật). */
-const DON = (id: string, fee: number, status: number) => ({
+const DON = (id: string, fee: number, status: number, updatedAt = "2026-07-01T05:00:00.000000") => ({
   id,
   system_id: id,
   status,
   status_name: "x",
   inserted_at: "2026-07-01T03:00:00.000000",
-  updated_at: "2026-07-01T05:00:00.000000",
+  updated_at: updatedAt,
   status_history: [],
   order_sources_name: "Tiktok",
   marketplace_id: "-9",
@@ -71,9 +74,10 @@ async function ghi(
   id: string,
   fee: number,
   status: number,
-  moc?: Date
+  moc?: Date,
+  updatedAt?: string
 ): Promise<{ stats: UpsertStats }> {
-  const raw = DON(id, fee, status);
+  const raw = DON(id, fee, status, updatedAt);
   const stats = statsRong();
   await upsertOneOrder(mapPancakeOrder(raw as never, { channels: {} }), raw, stats, [], moc);
   return { stats };
@@ -195,6 +199,140 @@ describe("thứ tự ghi Silver theo mốc nguồn", () => {
       select: { items: { select: { id: true } } },
     });
     expect(don?.items).toHaveLength(1);
+  });
+});
+
+/**
+ * THỨ TỰ THEO `updated_at` (mốc NỘI DUNG Pancake) — xếp TRƯỚC mốc land.
+ *
+ * Ca thật: trang API (lịch kéo, "Đồng bộ ngay") CHỤP trước một sự kiện webhook nhưng POST tới sau
+ * ⇒ land muộn hơn ⇒ nếu chỉ so mốc land thì bản cũ thắng, Silver lùi (RETURNED → COMPLETED, đơn
+ * quay lại doanh thu) cho tới lượt API kế tiếp. `updated_at` naive là giờ UTC (bất biến #3).
+ */
+const T1 = "2026-07-01T05:00:00.000000";
+const T2 = "2026-07-01T06:30:00.123456";
+
+describe("thứ tự ghi Silver theo updated_at của Pancake", () => {
+  it("webhook T2 rồi trang API T1 (land SAU) ⇒ Silver giữ T2, đếm SUPERSEDED", async () => {
+    await ghi("U-1", 5_839, 4, MOC_CU, T2); // webhook: RETURNED, phí thật
+    const { stats } = await ghi("U-1", 16_000, 3, MOC_MOI, T1); // trang API chụp trước, tới sau
+
+    const don = await docDon("U-1");
+    expect(don?.status).toBe("RETURNED");
+    expect(don?.platformFeeEst).toBe(5_839);
+    expect(don?.rawFetchedAt?.getTime()).toBe(MOC_CU.getTime());
+    expect(stats.ordersUpserted).toBe(0);
+    expect(stats.ordersSkippedStale).toBe(1);
+    expect(stats.skipped).toBe(0);
+    expect(demDaHachToan(stats)).toBe(1); // bỏ qua đúng ý ⇒ không bật backlog oan
+  });
+
+  it("T1 rồi T2 ⇒ T2 (đường bình thường không đổi)", async () => {
+    await ghi("U-2", 16_000, 3, MOC_CU, T1);
+    const { stats } = await ghi("U-2", 5_839, 4, MOC_MOI, T2);
+
+    expect((await docDon("U-2"))?.platformFeeEst).toBe(5_839);
+    expect(stats.ordersUpserted).toBe(1);
+  });
+
+  it("dựng Silver SO LE: bản T1 land muộn dựng trước, bản T2 land sớm dựng sau ⇒ T2 vẫn thắng", async () => {
+    await ghi("U-3", 16_000, 3, MOC_MOI, T1);
+    const { stats } = await ghi("U-3", 5_839, 4, MOC_CU, T2);
+
+    const don = await docDon("U-3");
+    expect(don?.status).toBe("RETURNED");
+    expect(don?.rawFetchedAt?.getTime()).toBe(MOC_CU.getTime());
+    expect(stats.ordersUpserted).toBe(1);
+  });
+
+  it("cùng updated_at, mốc land mới hơn ⇒ ghi (Pancake đối soát phí mà giữ nguyên mốc)", async () => {
+    await ghi("U-4", 16_000, 3, MOC_CU, T2);
+    const { stats } = await ghi("U-4", 5_839, 3, MOC_MOI, T2);
+
+    expect((await docDon("U-4"))?.platformFeeEst).toBe(5_839);
+    expect(stats.ordersUpserted).toBe(1);
+  });
+
+  it("cùng updated_at, mốc land cũ hơn ⇒ luật mốc land cũ vẫn chặn", async () => {
+    await ghi("U-5", 5_839, 3, MOC_MOI, T2);
+    const { stats } = await ghi("U-5", 16_000, 3, MOC_CU, T2);
+
+    expect((await docDon("U-5"))?.platformFeeEst).toBe(5_839);
+    expect(stats.ordersSkippedStale).toBe(1);
+  });
+
+  it("dựng lại đúng bản đang giữ (cùng updated_at + cùng mốc land) ⇒ ghi, idempotent", async () => {
+    await ghi("U-6", 5_839, 4, MOC_CU, T2);
+    const { stats } = await ghi("U-6", 5_839, 4, MOC_CU, T2);
+
+    expect(stats.ordersUpserted).toBe(1);
+    expect(await prisma.orderItem.count({ where: { order: { pancakeId: "U-6" } } })).toBe(1);
+  });
+
+  it("separator khác (khoảng trắng vs T) vẫn so theo thời điểm, không so chuỗi", async () => {
+    await ghi("U-7", 5_839, 4, MOC_CU, "2026-07-01 06:30:00");
+    // Chuỗi "2026-07-01T05:00:00" > "2026-07-01 06:30:00" nếu so theo ký tự — so chuỗi là đè nhầm.
+    const { stats } = await ghi("U-7", 16_000, 3, MOC_MOI, "2026-07-01T05:00:00");
+
+    expect((await docDon("U-7"))?.status).toBe("RETURNED");
+    expect(stats.ordersSkippedStale).toBe(1);
+  });
+
+  it("updated_at SAI khuôn ⇒ giữ luật mốc land cũ + cảnh báo nêu rõ không so được", async () => {
+    await ghi("U-8", 5_839, 4, MOC_CU, T2);
+    const raw = DON("U-8", 16_000, 3, "01/07/2026 05:00");
+    const stats = statsRong();
+    const canhBao: string[] = [];
+    await upsertOneOrder(mapPancakeOrder(raw as never, { channels: {} }), raw, stats, canhBao, MOC_MOI);
+
+    expect((await docDon("U-8"))?.platformFeeEst).toBe(16_000); // mốc land mới hơn ⇒ ghi như cũ
+    expect(canhBao.some((c) => c.includes("U-8") && c.includes("không so được updated_at"))).toBe(true);
+  });
+
+  it("KHÔNG truyền mốc nguồn ⇒ ghi vô điều kiện như hợp đồng cũ, kể cả updated_at cũ hơn", async () => {
+    await ghi("U-9", 5_839, 4, MOC_CU, T2);
+    const { stats } = await ghi("U-9", 16_000, 3, undefined, T1);
+
+    expect((await docDon("U-9"))?.platformFeeEst).toBe(16_000);
+    expect(stats.ordersUpserted).toBe(1);
+  });
+});
+
+/**
+ * Đường THẬT qua kho thô: land Bronze rồi dựng Silver — đúng chuỗi `/api/ingest/raw` chạy cho mỗi
+ * trang. Bronze VẪN land bản cũ (append-only, không bỏ raw); chỉ Silver không lùi, và dòng Bronze
+ * bị bỏ qua mang kết cục SUPERSEDED (đã hạch toán — lượt đối soát đêm không nhặt lại).
+ */
+describe("trang API cũ land sau webhook mới — qua landRaw + transformFromRaw", () => {
+  const ID = "585229755054261999";
+  const trang = (fee: number, status: number, updatedAt: string) =>
+    JSON.stringify({ success: true, data: [DON(ID, fee, status, updatedAt)] });
+
+  beforeEach(async () => {
+    await prisma.rawPancakeOrder.deleteMany();
+  });
+
+  it("Silver giữ bản T2, Bronze giữ cả hai dòng, dòng T1 đóng dấu SUPERSEDED", async () => {
+    const w1: string[] = [];
+    const l1 = await landRaw("orders", SHOP_TIKTOK, trang(5_839, 4, T2));
+    await transformFromRaw("orders", w1, { externalIds: l1.landedIds, shopId: SHOP_TIKTOK });
+
+    const w2: string[] = [];
+    const l2 = await landRaw("orders", SHOP_TIKTOK, trang(16_000, 3, T1));
+    expect(l2.landed).toBe(1); // Bronze KHÔNG bỏ raw
+    const t = await transformFromRaw("orders", w2, { externalIds: l2.landedIds, shopId: SHOP_TIKTOK });
+
+    const don = await prisma.order.findUniqueOrThrow({ where: { pancakeId: ID } });
+    expect(don.status).toBe("RETURNED");
+    expect(don.platformFeeEst).toBe(5_839);
+    expect(t.ordersSkippedStale).toBe(1);
+    expect(demDaHachToan(t)).toBe(1);
+    expect(await prisma.rawPancakeOrder.count({ where: { externalId: ID } })).toBe(2);
+    const moiNhat = await prisma.rawPancakeOrder.findFirstOrThrow({
+      where: { externalId: ID },
+      orderBy: [{ fetchedAt: "desc" }, { id: "desc" }],
+    });
+    expect(moiNhat.silverOutcome).toBe("SUPERSEDED");
   });
 });
 

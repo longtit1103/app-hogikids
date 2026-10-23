@@ -1,5 +1,5 @@
-import { format } from "date-fns";
 import { RefreshCw } from "lucide-react";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 
 /** Banner đầu /don-hang: thời điểm sync Pancake gần nhất (hoặc cảnh báo chưa sync). */
 export function SyncBanner({ lastSyncAt }: { lastSyncAt: Date | null }) {
@@ -14,7 +14,7 @@ export function SyncBanner({ lastSyncAt }: { lastSyncAt: Date | null }) {
   return (
     <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
       <RefreshCw className="size-3.5" />
-      Đồng bộ Pancake lúc {format(lastSyncAt, "dd/MM HH:mm")}
+      Đồng bộ Pancake lúc {formatNgayVn(lastSyncAt, "dd/MM HH:mm")}
     </p>
   );
 }

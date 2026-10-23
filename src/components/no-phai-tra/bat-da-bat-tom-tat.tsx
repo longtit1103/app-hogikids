@@ -2,6 +2,9 @@ import Link from "next/link";
 
 import { formatVnd } from "@/lib/format";
 import type { TroiQuyHienThi } from "@/lib/no-phai-tra/doc-trang-no-phai-tra";
+import type { TheDongConNo } from "@/lib/no-phai-tra/the-da-dong-con-no";
+
+import { CanhBaoTheDongConNo } from "./canh-bao-the-dong-con-no";
 
 export type DongDieuChinhDaGhi = {
   id: string;
@@ -21,15 +24,18 @@ const coDau = (n: number) => `${n >= 0 ? "+" : "−"}${formatVnd(Math.abs(n))}`;
  * dòng" và "tổng tác động" của bước bật đúng là của bước bật), và đường tới các khối nợ. Thuần hiển thị; ngày đã
  * format ở server.
  * `troi` null ⇒ không có chỉ báo (bật trước khi lưu vân tay quỹ) ⇒ ẩn khối.
+ * `theDongConNo` (từ `locTheDongConNo`) rỗng/vắng ⇒ không có chỉ báo thẻ đã đóng còn nợ.
  */
 export function BatDaBatTomTat({
   nhanM,
   dieuChinh,
   troi = null,
+  theDongConNo = [],
 }: {
   nhanM: string;
   dieuChinh: readonly DongDieuChinhDaGhi[];
   troi?: TroiQuyHienThi | null;
+  theDongConNo?: readonly TheDongConNo[];
 }) {
   const cuaBuocBat = dieuChinh.filter((d) => d.cuaBuocBat);
   const buSuaTien = dieuChinh.filter((d) => !d.cuaBuocBat);
@@ -40,6 +46,7 @@ export function BatDaBatTomTat({
         nhà cung cấp hoặc nạp ví quảng cáo; chi phí vẫn vào Lãi/Lỗ như cũ.
       </p>
       {troi !== null && troi.troi !== 0 && <CanhBaoTroiQuy nhanM={nhanM} troi={troi} />}
+      <CanhBaoTheDongConNo the={theDongConNo} />
       <div>
         <p className="text-xs text-muted-foreground">Điều chỉnh quỹ ngày bật ({cuaBuocBat.length} dòng)</p>
         {cuaBuocBat.length === 0 ? (

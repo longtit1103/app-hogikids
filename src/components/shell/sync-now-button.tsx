@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
@@ -16,6 +15,7 @@ import {
   thongDiepKetLuan,
   TRAN_MAY_KHACH_MS,
 } from "@/lib/ingest/tien-do-dong-bo-ngay";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { cn } from "@/lib/utils";
 
 const POLL_MS = 5000;
@@ -76,65 +76,70 @@ function NutDongBoNgay({ trongTopbar }: { trongTopbar: boolean }) {
 
   const onClick = useCallback(async () => {
     setBusy(true);
-    let res: Awaited<ReturnType<typeof triggerSyncNow>>;
+    // Nhánh thành công CỐ Ý giữ busy=true cho tới khi poll xong (poll/timeout tự hạ cờ). MỌI nhánh còn lại —
+    // kể cả mất mạng giữa chừng hay hàm ném bất ngờ — đều hạ cờ ở `finally`, không để nút kẹt "Đang đồng bộ…".
+    let giuBusy = false;
     try {
-      res = await triggerSyncNow();
-    } catch {
-      // Không dùng `finally`: nhánh thành công CỐ Ý giữ busy=true cho tới khi poll xong (poll tự hạ cờ).
-      setBusy(false);
-      toast.error("Gọi đồng bộ thất bại — kiểm tra kết nối");
-      return;
-    }
-    if (!res.ok) {
-      setBusy(false);
-      toast.error(res.error);
-      return;
-    }
-    const { mocBam, luotId } = res.data;
-    toast.success("Đã gọi đồng bộ — đang chờ n8n…");
+      const res = await triggerSyncNow();
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      const { mocBam, luotId } = res.data;
+      toast.success("Đã gọi đồng bộ — đang chờ n8n…");
 
-    clearTimers();
-    // Một lời hỏi một lúc: server action chậm hơn nhịp poll thì không chồng lời hỏi lên nhau.
-    let dangHoi = false;
-    pollRef.current = setInterval(async () => {
-      if (dangHoi) return;
-      dangHoi = true;
-      try {
-        const r = await getTienDoDongBoNgay(mocBam, luotId).catch(() => null);
-        if (r && !r.ok && r.code === MA_MOC_NGOAI_DAI) {
-          // Server từ chối mốc (ngoài dải theo dõi) ⇒ hỏi lại cũng vô ích: dừng, báo rõ.
+      clearTimers();
+      // Một lời hỏi một lúc: server action chậm hơn nhịp poll thì không chồng lời hỏi lên nhau.
+      let dangHoi = false;
+      pollRef.current = setInterval(async () => {
+        if (dangHoi) return;
+        dangHoi = true;
+        try {
+          const r = await getTienDoDongBoNgay(mocBam, luotId).catch(() => null);
+          if (r && !r.ok && r.code === MA_MOC_NGOAI_DAI) {
+            // Server từ chối mốc (ngoài dải theo dõi) ⇒ hỏi lại cũng vô ích: dừng, báo rõ.
+            clearTimers();
+            setBusy(false);
+            toast.error(r.error);
+            return;
+          }
+          if (!r?.ok) return; // hỏng lẻ ⇒ hỏi lại nhịp sau; hỏng mãi ⇒ lưới cuối phía máy khách
+          const thongDiep = thongDiepKetLuan(ketLuanTienDo(r.data));
+          if (!thongDiep) return;
+
           clearTimers();
           setBusy(false);
-          toast.error(r.error);
-          return;
+          void getLatestSync("PANCAKE")
+            .then((l) => {
+              if (l.ok) setLatest(l.data);
+            })
+            .catch(() => {});
+          // Nạp lại số của trang đang xem VÀ bỏ bản tải sẵn của các tab (thanh tab dưới tải sẵn
+          // `prefetch`, giữ tới 5 phút) — không có dòng này thì "Đồng bộ xong" mà số vẫn cũ. Gọi cả khi
+          // lỗi/dừng giữa chừng: phần dữ liệu đã về vẫn là dữ liệu thật.
+          if (r.data.soLuot > 0) router.refresh();
+          if (thongDiep.muc === "thanh-cong") toast.success(thongDiep.noiDung);
+          else if (thongDiep.muc === "canh-bao") toast.warning(thongDiep.noiDung);
+          else toast.error(thongDiep.noiDung);
+        } catch {
+          // Lỗi bất ngờ trong một nhịp poll không được thành unhandled rejection: nhịp sau hỏi lại, còn
+          // lưới cuối là trần phía máy khách bên dưới — nó luôn hạ cờ busy.
+        } finally {
+          dangHoi = false;
         }
-        if (!r?.ok) return; // hỏng lẻ ⇒ hỏi lại nhịp sau; hỏng mãi ⇒ lưới cuối phía máy khách
-        const thongDiep = thongDiepKetLuan(ketLuanTienDo(r.data));
-        if (!thongDiep) return;
-
+      }, POLL_MS);
+      timeoutRef.current = setTimeout(() => {
         clearTimers();
         setBusy(false);
-        void getLatestSync("PANCAKE")
-          .then((l) => {
-            if (l.ok) setLatest(l.data);
-          })
-          .catch(() => {});
-        // Nạp lại số của trang đang xem VÀ bỏ bản tải sẵn của các tab (thanh tab dưới tải sẵn
-        // `prefetch`, giữ tới 5 phút) — không có dòng này thì "Đồng bộ xong" mà số vẫn cũ. Gọi cả khi
-        // lỗi/dừng giữa chừng: phần dữ liệu đã về vẫn là dữ liệu thật.
-        if (r.data.soLuot > 0) router.refresh();
-        if (thongDiep.muc === "thanh-cong") toast.success(thongDiep.noiDung);
-        else if (thongDiep.muc === "canh-bao") toast.warning(thongDiep.noiDung);
-        else toast.error(thongDiep.noiDung);
-      } finally {
-        dangHoi = false;
-      }
-    }, POLL_MS);
-    timeoutRef.current = setTimeout(() => {
+        toast.error("Không theo dõi được tiến độ đồng bộ — tải lại trang để xem kết quả");
+      }, TRAN_MAY_KHACH_MS);
+      giuBusy = true;
+    } catch {
       clearTimers();
-      setBusy(false);
-      toast.error("Không theo dõi được tiến độ đồng bộ — tải lại trang để xem kết quả");
-    }, TRAN_MAY_KHACH_MS);
+      toast.error("Gọi đồng bộ thất bại — kiểm tra kết nối mạng rồi thử lại");
+    } finally {
+      if (!giuBusy) setBusy(false);
+    }
   }, [clearTimers, router]);
 
   // RUNNING treo do app crash đã được withSyncLog cleanup >15' → không kẹt disabled vĩnh viễn.
@@ -151,7 +156,7 @@ function NutDongBoNgay({ trongTopbar }: { trongTopbar: boolean }) {
           trongTopbar && "md:hidden xl:inline-flex",
         )}
       >
-        {when ? `Đồng bộ lúc ${format(new Date(when), "HH:mm dd/MM")}` : "Chưa đồng bộ"}
+        {when ? `Đồng bộ lúc ${formatNgayVn(new Date(when), "HH:mm dd/MM")}` : "Chưa đồng bộ"}
         {latest?.status === "OK" && <Badge className="bg-success/15 text-success">OK</Badge>}
         {latest?.status === "ERROR" && (
           <Badge className="bg-error/15 text-error" title={latest.error ?? undefined}>

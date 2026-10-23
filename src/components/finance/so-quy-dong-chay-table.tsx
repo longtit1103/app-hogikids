@@ -1,7 +1,8 @@
-import { format, isAfter, startOfDay } from "date-fns";
+import { isAfter, startOfDay } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import type { DongSoQuy } from "@/lib/so-quy/dong-chay-so-quy-types";
 import { NGUON_LABEL } from "@/lib/so-quy/nhan-nguon-dong-quy";
@@ -15,10 +16,10 @@ import { cn } from "@/lib/utils";
  * hiển thị.
  */
 
-/** dd/MM, cộng thêm giờ HH:mm khi giờ (đã ở múi VN — container `TZ=Asia/Ho_Chi_Minh`) khác 00:00. */
+/** dd/MM, cộng thêm giờ HH:mm khi giờ VN (`formatNgayVn` neo Asia/Ho_Chi_Minh) khác 00:00. */
 function formatNgay(d: Date): string {
-  const ngay = format(d, "dd/MM");
-  const gio = format(d, "HH:mm");
+  const ngay = formatNgayVn(d, "dd/MM");
+  const gio = formatNgayVn(d, "HH:mm");
   return gio === "00:00" ? ngay : `${ngay} ${gio}`;
 }
 

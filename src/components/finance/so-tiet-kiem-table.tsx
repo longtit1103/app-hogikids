@@ -1,9 +1,10 @@
 "use client";
 
-import { differenceInCalendarDays, format } from "date-fns";
+import { differenceInCalendarDays } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
@@ -32,9 +33,9 @@ export function daoHanTatToanText(
     const conLai = differenceInCalendarDays(so.maturityDate, homNay);
     const veSau =
       conLai >= 0 ? `còn ${conLai} ngày` : `${NGAY_COI_LA_TRE_CHU} ${Math.abs(conLai)} ngày`;
-    return { text: `đáo hạn ${format(so.maturityDate, "dd/MM")} · ${veSau}`, rutTruocHan: false };
+    return { text: `đáo hạn ${formatNgayVn(so.maturityDate, "dd/MM")} · ${veSau}`, rutTruocHan: false };
   }
-  return { text: `tất toán ${format(so.closedAt, "dd/MM")}`, rutTruocHan: so.rutTruocHan };
+  return { text: `tất toán ${formatNgayVn(so.closedAt, "dd/MM")}`, rutTruocHan: so.rutTruocHan };
 }
 
 /** Cột "Lãi". Đang gửi: hai dòng (dự kiến + dồn tới nay). Đã tất toán: MỘT dòng "thực nhận" — không
@@ -186,7 +187,7 @@ export function SoTietKiemTable({
                 {formatVnd(so.principal)}
               </TableCell>
               <TableCell className="text-sm">
-                {format(so.startDate, "dd/MM/yyyy")} · {so.termMonths} tháng
+                {formatNgayVn(so.startDate, "dd/MM/yyyy")} · {so.termMonths} tháng
               </TableCell>
               <TableCell className="text-sm">
                 <DaoHanBadge so={so} homNay={homNay} />
@@ -226,7 +227,7 @@ export function SoTietKiemTable({
               <LaiCell so={so} />
             </div>
             <p className="text-xs text-muted-foreground">
-              {format(so.startDate, "dd/MM/yyyy")} · {so.termMonths} tháng · <LaiSuatText so={so} />
+              {formatNgayVn(so.startDate, "dd/MM/yyyy")} · {so.termMonths} tháng · <LaiSuatText so={so} />
             </p>
           </div>
         ))}

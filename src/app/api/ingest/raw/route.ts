@@ -8,6 +8,7 @@ import { giuKhoaLandDon } from "@/lib/bronze/khoa-land-don";
 import { landRaw } from "@/lib/bronze/land-raw";
 import { BRONZE_STREAMS, isBronzeStream } from "@/lib/bronze/streams";
 import { transformFromRaw, type TransformStats } from "@/lib/bronze/transform-from-raw";
+import { docBodyCoTran } from "@/lib/ingest/doc-body-co-tran";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { withSyncLog } from "@/lib/ingest/sync-log";
 import { layCauHinhShop, shopIdsChoVai } from "@/lib/ket-noi/cau-hinh-shop";
@@ -19,7 +20,7 @@ import { prisma } from "@/lib/prisma";
  *
  * Body: `{ stream: BronzeStream, shopId: string, payload: string, ngay?: "YYYY-MM-DD" }`.
  * `payload` là CHUỖI: nội dung JSON của Pancake KHÔNG bị JS parse → int64 an toàn
- * (chỉ 4 field vỏ ngoài của request mới đi qua `req.json()`).
+ * (chỉ 4 field vỏ ngoài của request mới đi qua `JSON.parse`).
  * `ngay` chỉ dành cho stream khai `chapNhanNgay` (record không mang trường ngày) — 3 nhánh 400 ở
  * dưới, fail-closed cả hai chiều: gửi thừa cũng chặn, thiếu cũng chặn.
  *
@@ -35,7 +36,12 @@ import { prisma } from "@/lib/prisma";
  * `stats` là số của TRANG NÀY (không phải tổng tích luỹ toàn bảng).
  */
 
-/** Trần payload 10MB — 1 trang Pancake thực tế < 1MB; chặn body khổng lồ trước khi đụng Postgres. */
+/**
+ * Trần 10MB tính theo BYTE UTF-8 của CẢ thân request (vỏ JSON + payload đã escape) — 1 trang
+ * Pancake thực tế < 1MB. Áp TRƯỚC khi đọc trọn body (Content-Length rồi đếm byte theo luồng), nên
+ * body khổng lồ bị chặn mà không dựng vào RAM, không đụng Postgres. Payload nằm trong body nên
+ * body ≤ trần thì payload (đếm ký tự) cũng chắc chắn ≤ trần — không cần kiểm lần hai.
+ */
 const MAX_PAYLOAD_LENGTH = 10_000_000;
 
 /** Cửa sổ cho transaction land 1 trang (1 truy vấn đếm + 1 INSERT nhiều dòng). */
@@ -48,9 +54,29 @@ export async function POST(req: Request): Promise<Response> {
   const dangPhucHoi = chanRouteKhiDangPhucHoi();
   if (dangPhucHoi) return dangPhucHoi;
 
+  // Đọc thân có trần TRƯỚC khi parse. Lỗi đọc luồng (client ngắt giữa chừng) rơi về đúng nhánh
+  // 400 mà `req.json()` cũ trả cho cùng ca.
+  const doc = await docBodyCoTran(req, MAX_PAYLOAD_LENGTH).catch(() => null);
+  if (doc === null) {
+    return Response.json({ ok: false, error: "invalid json" }, { status: 400 });
+  }
+  if (!doc.ok) {
+    return Response.json(
+      {
+        ok: false,
+        error: `payload ${doc.bytes} byte vượt trần ${MAX_PAYLOAD_LENGTH} byte — giảm page size khi fetch Pancake`,
+      },
+      { status: 413 }
+    );
+  }
+
   let body: { stream?: string; shopId?: string; payload?: string; ngay?: string };
   try {
-    body = await req.json();
+    const parsed: unknown = JSON.parse(doc.text);
+    // `null`/mảng/số là JSON hợp lệ nhưng không phải vỏ request — trước đây lọt tới bước
+    // destructure rồi nổ 500; chặn 400 tại cửa.
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not object");
+    body = parsed as typeof body;
   } catch {
     return Response.json({ ok: false, error: "invalid json" }, { status: 400 });
   }
@@ -61,15 +87,6 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (!shopId || typeof shopId !== "string" || typeof payload !== "string") {
     return Response.json({ ok: false, error: "thiếu shopId hoặc payload (string)" }, { status: 400 });
-  }
-  if (payload.length > MAX_PAYLOAD_LENGTH) {
-    return Response.json(
-      {
-        ok: false,
-        error: `payload ${payload.length} ký tự vượt trần ${MAX_PAYLOAD_LENGTH} — giảm page size khi fetch Pancake`,
-      },
-      { status: 400 }
-    );
   }
 
   // `ngay` — CỘNG THÊM, tuỳ chọn ở mức hợp đồng nhưng BẮT BUỘC với stream khai `chapNhanNgay`

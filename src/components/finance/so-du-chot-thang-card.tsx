@@ -1,7 +1,8 @@
-import { endOfMonth, format } from "date-fns";
+import { endOfMonth } from "date-fns";
 import Link from "next/link";
 
 import { serializeDateRange } from "@/lib/date-range";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import {
   cauChenhLech,
@@ -49,7 +50,7 @@ function NhacThangTruoc({ thang }: { thang: Date | null }) {
   if (thang === null) return null;
   return (
     <p className="text-xs text-warning" data-testid="so-du-chot-nhac-thang-truoc">
-      Tháng {format(thang, "MM/yyyy")} chưa chốt số dư —{" "}
+      Tháng {formatNgayVn(thang, "MM/yyyy")} chưa chốt số dư —{" "}
       <Link href={hrefThang(thang)} className="underline">
         chốt ngay
       </Link>{" "}
@@ -71,7 +72,7 @@ export function SoDuChotThangCard({
   /** Nợ phải trả của tháng đang chốt (đã bật chưa, có ví trả trước không) — đổi câu dặn / câu giải thích. */
   nguCanhChot?: NguCanhChot;
 }) {
-  const thangNhan = format(doiChieu.thang, "MM/yyyy");
+  const thangNhan = formatNgayVn(doiChieu.thang, "MM/yyyy");
   const { cauTruc } = doiChieu;
 
   if (doiChieu.khaDung !== "ok") {
@@ -155,7 +156,7 @@ export function SoDuChotThangCard({
       <div className="mt-3 flex flex-col gap-1 border-t border-hairline pt-2 text-xs text-muted-foreground">
         <p>
           chênh lệch = Σ tiền thật − cuối kỳ sổ{" "}
-          · chốt lúc {format(chot.updatedAt, "HH:mm dd/MM/yyyy")}
+          · chốt lúc {formatNgayVn(chot.updatedAt, "HH:mm dd/MM/yyyy")}
           {chot.note ? ` · ${chot.note}` : ""}
         </p>
         {dongCauTruc.map((d) => (

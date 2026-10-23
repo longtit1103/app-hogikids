@@ -233,6 +233,8 @@ export async function upsertOneAdsExpense(
     // khai ở lưới `khoa-duong-ghi-nhap-hang-da-khoa-so`: số ads là số nền tảng tự báo và nền tảng còn chốt lại số
     // ngày cũ vài hôm sau — chặn ngày < M là Lãi/Lỗ thiếu chi phí ads thật. Đổi lại quỹ cuối M−1 có thể lệch đúng
     // phần nền tảng chốt lại sau ngày bật. Chỉ ghi danh mục ads (máy soi mọi `categoryId` của file).
+    // Ngoại lệ chỉ dành cho đường n8n hằng ngày: lượt DỰNG LẠI từ kho thô tự cắt ngày < M ở tầng gọi
+    // (`bronze/transform-ads-expense.ts`) trước khi tới đây — nó không tái tạo được đúng số n8n đã ghi.
     await tx.expense.create({
       data: {
         date: m.date,

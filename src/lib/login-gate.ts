@@ -2,7 +2,7 @@
  * Cổng nối tiếp theo email cho MỌI đường kiểm mật khẩu (đăng nhập, đổi mật khẩu).
  *
  * VÌ SAO CẦN: chốt khoá ở `login-lockout.ts` là chuỗi ĐỌC-RỒI-GHI vắt qua hai lệnh `await`
- * (truy vấn DB, rồi `verifyPassword` ~36ms): đọc trạng thái khoá ở đầu, ghi lượt sai ở cuối.
+ * (truy vấn DB, rồi `verifyPassword` ~300ms với hash `s2$` N=2^17, ~35ms với hash cũ N=2^14 tới khi được nâng cấp): đọc trạng thái khoá ở đầu, ghi lượt sai ở cuối.
  * Bắn song song thì TẤT CẢ request đều đọc "chưa khoá" trước khi request đầu tiên kịp ghi. Đo
  * thật: 1000 request đồng thời ⇒ **1000 lượt đoán mật khẩu, 0 bị chặn**, trong khi chạy tuần tự
  * thì đúng 5 — tức vượt 200 lần mức thiết kế. Chốt 5-lần-sai/60-giây chỉ có nghĩa khi các lượt

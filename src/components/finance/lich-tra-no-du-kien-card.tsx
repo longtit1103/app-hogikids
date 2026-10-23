@@ -1,6 +1,6 @@
-import { format } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { duKienNKy, type KyDuKien } from "@/lib/so-quy/lich-tra-no";
@@ -47,7 +47,7 @@ function BangKy({ ds, coTienGui }: { ds: KyDuKien[]; coTienGui: boolean }) {
             <tr key={k.ky} className="border-b border-hairline/50 last:border-0">
               <td className="py-1 pr-2 tabular-nums">{k.ky}</td>
               <td className="py-1 pr-2 whitespace-nowrap">
-                {format(k.denNgay, "dd/MM/yyyy")}
+                {formatNgayVn(k.denNgay, "dd/MM/yyyy")}
                 {k.dangChoDuyet && (
                   <Badge variant="secondary" className="ml-1">
                     đang chờ duyệt

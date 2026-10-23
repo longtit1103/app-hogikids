@@ -1,6 +1,7 @@
-import { endOfMonth, format, startOfMonth } from "date-fns";
+import { endOfMonth, startOfMonth } from "date-fns";
 import type { OrderStatus } from "@/generated/prisma/client";
 
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import { ORDER_STATUS_META } from "@/lib/orders/order-status-meta";
 import { formatPlatformFeeRatio } from "@/lib/orders/provisional-fee";
@@ -86,7 +87,7 @@ export function OrderTotalsStrip({
   const netFromPlatform = totals.itemsTotal - totals.platformFee - totals.discount;
 
   const periodText = range
-    ? `${format(range.from, "dd/MM/yyyy")} – ${format(range.to, "dd/MM/yyyy")}`
+    ? `${formatNgayVn(range.from, "dd/MM/yyyy")} – ${formatNgayVn(range.to, "dd/MM/yyyy")}`
     : "tất cả thời gian";
   const statusText = statuses.length
     ? statuses.map((s) => ORDER_STATUS_META[s].label).join(", ")

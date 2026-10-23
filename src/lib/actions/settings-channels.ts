@@ -30,7 +30,7 @@ const channelConfigSchema = z
   .length(5)
   .refine((a) => a.some((c) => c.isActive), "Phải có ít nhất 1 kênh hoạt động");
 
-/** Trần số ngày của kỳ "Tính lại phí": một transaction UPDATE từng đơn có hạn 60s, kỳ vô hạn sẽ vượt. */
+/** Trần số ngày của kỳ "Tính lại phí": cả kỳ chạy trong MỘT transaction có hạn 60s, kỳ vô hạn sẽ vượt. */
 const TRAN_NGAY_TINH_LAI_PHI = 366;
 
 /**
@@ -43,6 +43,9 @@ const rangeTinhLaiPhiSchema = z
   .refine((r) => differenceInCalendarDays(r.to, r.from) + 1 <= TRAN_NGAY_TINH_LAI_PHI, {
     message: `Kỳ tính lại phí tối đa ${TRAN_NGAY_TINH_LAI_PHI} ngày — chọn kỳ ngắn hơn`,
   });
+
+/** Trần số id trong một `updateMany` của "Tính lại phí" — giữ câu SQL dưới trần tham số của Postgres. */
+const SO_DON_MOI_CAU_UPDATE = 5000;
 
 /** Làm tròn % về 2 chữ số thập phân (nhập tay có thể ra 3.333…). */
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -120,7 +123,8 @@ export async function countRecomputableOrders(
  * Idempotent: chỉ ghi khi phí mới khác phí cũ → chạy lần 2 trả updated=0. Ghi
  * mọi status (P&L tự loại RETURNED/CANCELLED khi cộng). Biên `endOfDay(to)`
  * khớp toàn app (tránh sót đơn ngày cuối kỳ); giờ VN vì container
- * TZ=Asia/Ho_Chi_Minh. Nới timeout vì loop UPDATE có thể > 5s mặc định.
+ * TZ=Asia/Ho_Chi_Minh. Ghi bằng `updateMany` gom theo phí đích (không UPDATE từng đơn); vẫn nới
+ * timeout cho kỳ dài nhiều đơn.
  */
 export async function recomputeFeesInRange(
   range: DateRange,
@@ -151,12 +155,31 @@ export async function recomputeFeesInRange(
         select: { id: true, channelId: true, itemsTotal: true, platformFeeEst: true },
       });
 
-      let n = 0;
+      // Phí vẫn tính ở JS bằng ĐÚNG công thức cũ (`Math.round`) — KHÔNG đẩy phép tính xuống SQL:
+      // `round` của Postgres làm tròn khác `Math.round` ở số âm/nửa đơn vị, kết quả sẽ lệch từng đồng.
+      // Chỉ gom các đơn cùng phí ĐÍCH vào một `updateMany` thay vì UPDATE từng đơn. Số nhóm = số giá trị
+      // phí đích KHÁC NHAU: kênh có % = 0 ⇒ cả kênh một nhóm phí 0 (lợi lớn); kênh có % ≠ 0 thì
+      // `itemsTotal` khác nhau ⇒ gần như mỗi đơn một nhóm, số câu UPDATE có thể xấp xỉ số đơn như cách
+      // cũ. Mỗi nhóm vẫn cắt theo lô `SO_DON_MOI_CAU_UPDATE` id để một câu không quá dài.
+      const idTheoPhiMoi = new Map<number, string[]>();
       for (const o of orders) {
         const fee = Math.round((o.itemsTotal * (pctById.get(o.channelId) ?? 0)) / 100);
-        if (fee !== o.platformFeeEst) {
-          await tx.order.update({ where: { id: o.id }, data: { platformFeeEst: fee } });
-          n++;
+        if (fee === o.platformFeeEst) continue;
+        const nhom = idTheoPhiMoi.get(fee);
+        if (nhom) nhom.push(o.id);
+        else idTheoPhiMoi.set(fee, [o.id]);
+      }
+
+      let n = 0;
+      for (const [fee, ids] of idTheoPhiMoi) {
+        for (let i = 0; i < ids.length; i += SO_DON_MOI_CAU_UPDATE) {
+          const res = await tx.order.updateMany({
+            // Hàng rào phí THẬT nhắc lại NGAY Ở CÂU GHI (không chỉ ở câu đọc): `id in` mà lọt một đơn
+            // Shopee/TikTok vì bất kỳ lý do gì thì câu này vẫn không đụng tới nó.
+            where: { id: { in: ids.slice(i, i + SO_DON_MOI_CAU_UPDATE) }, channelId: { notIn: [...REAL_FEE_CHANNELS] } },
+            data: { platformFeeEst: fee },
+          });
+          n += res.count;
         }
       }
       await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_TINH_LAI_PHI, ghiChu: { soDong: n } });

@@ -1,7 +1,7 @@
-import { format } from "date-fns";
 
 import { NutBatLaiKhoanChiDinhKy } from "@/components/finance/nut-bat-lai-khoan-chi-dinh-ky";
 import { Badge } from "@/components/ui/badge";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import type { RecurringExpenseRow } from "@/lib/expenses/expense-queries";
 import { thangChoBatLai } from "@/lib/expenses/thang-cho-bat-lai";
@@ -100,7 +100,7 @@ export function KhoanChiDinhKySection({
                 <td className="py-1.5 pr-2 whitespace-nowrap">
                   ngày {item.dayOfMonth} hằng tháng
                   {item.activeFrom && (
-                    <span className="text-muted-foreground"> · từ {format(item.activeFrom, "MM/yyyy")}</span>
+                    <span className="text-muted-foreground"> · từ {formatNgayVn(item.activeFrom, "MM/yyyy")}</span>
                   )}
                 </td>
                 <td className="py-1.5 pr-2">
@@ -113,7 +113,7 @@ export function KhoanChiDinhKySection({
                     !item.active &&
                     (mocNoPhaiTra !== null && laNhapHangDaKhoaSo(item, mocNoPhaiTra) ? (
                       <span data-testid="dinh-ky-nhap-hang-di-so-no" className="text-xs text-muted-foreground">
-                        Từ {format(mocNoPhaiTra, "dd/MM/yyyy")} tiền hàng ghi qua sổ nợ phiếu nhập
+                        Từ {formatNgayVn(mocNoPhaiTra, "dd/MM/yyyy")} tiền hàng ghi qua sổ nợ phiếu nhập
                       </span>
                     ) : (
                       <NutBatLaiKhoanChiDinhKy

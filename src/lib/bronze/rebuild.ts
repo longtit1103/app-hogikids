@@ -6,6 +6,7 @@ import {
   hasBronzeBacklog,
 } from "./bronze-only";
 import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
+import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { transformFromRaw, type TransformStats } from "./transform-from-raw";
 
 /**
@@ -98,14 +99,23 @@ export async function rebuildFromRaw(
 
   // Chi tiêu quảng cáo → `Expense` source=ADS_API (CHỈ dòng ads, xem `upsertOneAdsExpense`). Cờ
   // `rebuild` là điều kiện BẮT BUỘC: thiếu nó nhánh ads đứng yên (xem `TransformOptions.rebuild`).
+  //
+  // Đã bật Nợ phải trả ⇒ nhánh ads CẮT TẠI M (lý do: `transform-ads-expense.ts`). Đọc M MỘT lần cho cả hai nhánh
+  // (cùng một mốc, không query mỗi dòng); `null` = chưa bật ⇒ ghi đủ mọi ngày như cũ. Đọc NGAY TRƯỚC nhánh ads chứ
+  // không ở đầu lượt: products/orders chạy hàng phút trước đó, đọc sát lúc ghi thì khe "chủ shop vừa bật giữa chừng
+  // mà lượt này vẫn ghi lại ngày < M" hẹp nhất. Khe còn lại (bật đúng lúc nhánh ads đang chạy) chấp nhận: bước bật
+  // là sự kiện MỘT lần, và nếu xảy ra thì trang Nợ phải trả báo "trôi quỹ" để sửa dòng điều chỉnh mở sổ.
+  const mocNoPhaiTra = await docMocM();
   await checkpoint?.();
   const meta = await transformFromRaw("meta/report", warnings, {
     rebuild: true,
+    mocNoPhaiTra,
     checkpoint,
   });
   await checkpoint?.();
   const ttAds = await transformFromRaw("tiktokbusiness/report", warnings, {
     rebuild: true,
+    mocNoPhaiTra,
     checkpoint,
   });
 
@@ -127,7 +137,8 @@ export async function rebuildFromRaw(
   //     chạy chính lệnh này ⇒ họ làm theo, cờ tắt, số vẫn thiếu và không còn dấu hiệu nào.
   //     (`boQuaCoChuDich` — ngày chủ shop đã ghi đè bằng file, khoá thuộc chi phí nhập tay — CỐ Ý
   //     KHÔNG vào điều kiện: đó là kết cục ĐÚNG, tính vào thì một lần import ghi đè là cờ dính
-  //     vĩnh viễn.)
+  //     vĩnh viễn. `skippedTruocM` — dòng ads ngày < mốc Nợ phải trả cố ý không ghi lại — cũng thế:
+  //     sau ngày bật, kho thô luôn còn dòng < M nên tính vào là cờ không bao giờ hạ được nữa.)
   //  2. Cờ CHƯA BỊ BẬT LẠI kể từ lúc lượt này bắt đầu: lượt quét cả bảng chạy HÀNG PHÚT, mà trong
   //     quãng đó webhook Pancake và `/api/ingest/raw` KHÔNG bị chặn — chúng vẫn bật cờ được cho một
   //     dòng VỪA tới mà lượt này chưa hề chữa (dòng đó land sau lượt quét, rồi dedupe theo hash chặn
@@ -184,6 +195,8 @@ export async function rebuildFromRaw(
     paymentsUpserted: pay.paymentsUpserted,
     shopeeUpserted: sh.shopeeUpserted,
     adsExpensesUpserted: meta.adsExpensesUpserted + ttAds.adsExpensesUpserted,
+    // Bỏ CỐ Ý (ngày < mốc Nợ phải trả) — KHÔNG cộng vào `skipped` ở trên, nên không giữ cờ backlog.
+    skippedTruocM: meta.skippedTruocM + ttAds.skippedTruocM,
   };
 }
 
@@ -257,14 +270,18 @@ export async function dungLaiGiaoDichTuKhoTho(
   // `Expense` source=ADS_API — chi phí chủ shop nhập tay không có nguồn nào để dựng lại, đụng vào
   // là mất vĩnh viễn (cổng chặn ở `upsertOneAdsExpense`). Cờ `rebuild` là điều kiện BẮT BUỘC để
   // nhánh ads chạy — trang ingest thường ngày không được ghi chi phí (xem `TransformOptions`).
+  // Đã bật Nợ phải trả ⇒ CẮT TẠI M, cùng luật + cùng chỗ đọc mốc với `rebuildFromRaw` (xem lý do ở đó).
+  const mocNoPhaiTra = await docMocM();
   await checkpoint?.();
   const meta = await transformFromRaw("meta/report", warnings, {
     rebuild: true,
+    mocNoPhaiTra,
     checkpoint,
   });
   await checkpoint?.();
   const ttAds = await transformFromRaw("tiktokbusiness/report", warnings, {
     rebuild: true,
+    mocNoPhaiTra,
     checkpoint,
   });
 
@@ -326,6 +343,8 @@ export async function dungLaiGiaoDichTuKhoTho(
     paymentsUpserted: pay.paymentsUpserted,
     shopeeUpserted: sh.shopeeUpserted,
     adsExpensesUpserted: meta.adsExpensesUpserted + ttAds.adsExpensesUpserted,
+    // Bỏ CỐ Ý (ngày < mốc Nợ phải trả) — KHÔNG cộng vào `skipped` ở trên, nên không giữ cờ backlog.
+    skippedTruocM: meta.skippedTruocM + ttAds.skippedTruocM,
   };
 }
 

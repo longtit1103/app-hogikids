@@ -1,9 +1,9 @@
 "use client";
 
-import { format } from "date-fns";
 
 import type { AdsMoCoi, ChiPhiKhongDungLai, DonMoCoi } from "@/lib/actions/data-admin";
 import type { TrangThaiSaoLuu } from "@/lib/backup/trang-thai-sao-luu";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { BackupButton } from "./backup-button";
 import { DeleteAllDialog } from "./delete-all-dialog";
 import { RebuildFromRawButton } from "./rebuild-from-raw-button";
@@ -30,7 +30,7 @@ function TrangThaiSaoLuuText({ trangThai }: { trangThai: TrangThaiSaoLuu }) {
     return <p className="text-sm text-warning">Chưa sao lưu lần nào</p>;
   }
 
-  const moc = trangThai.finishedAt ? format(trangThai.finishedAt, "dd/MM/yyyy HH:mm") : null;
+  const moc = trangThai.finishedAt ? formatNgayVn(trangThai.finishedAt, "dd/MM/yyyy HH:mm") : null;
 
   if (trangThai.muc === "loi") {
     return (

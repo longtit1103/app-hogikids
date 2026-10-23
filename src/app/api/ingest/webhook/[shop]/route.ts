@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { docBodyCoTran } from "@/lib/ingest/doc-body-co-tran";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { catNote, xuLySuKienWebhook, type KetQuaXuLy } from "@/lib/ingest/webhook-processor";
 import { LOI_CHUA_CAU_HINH_SHOP } from "@/lib/ket-noi/cau-hinh-shop";
@@ -15,7 +16,8 @@ import {
  * POST /api/ingest/webhook/:shop — hộp thư THÔ + bộ xử lý pha 2 cho webhook Pancake POS.
  * `:shop` = `kho` | `shopee` | `tiktok` (whitelist trong webhook-inbox.ts).
  *
- * Body là **bytes nguyên xi Pancake gửi**, KHÔNG bọc JSON: đọc bằng `req.text()` nên không
+ * Body là **bytes nguyên xi Pancake gửi**, KHÔNG bọc JSON: đọc thành TEXT (`docBodyCoTran` —
+ * chuỗi y hệt `req.text()`, có trần byte theo luồng) nên không
  * có bước parse nào chạm vào payload ⇒ id int64 (`585140898791786238`) giữ đúng từng chữ số.
  * Đây là lý do tồn tại của endpoint riêng thay vì dùng `/api/ingest/raw` (endpoint đó bọc
  * payload trong một JSON envelope 3 field).
@@ -66,7 +68,18 @@ export async function POST(
     );
   }
 
-  const payload = await req.text();
+  // Trần BYTE khi đọc = 3 × trần ký tự: một code unit UTF-16 (đơn vị của `.length`) mã hoá tối đa
+  // 3 byte UTF-8, nên mọi payload trước đây lọt trần ký tự vẫn đọc được trọn — không chặn oan sự
+  // kiện nào (mất raw là mất vĩnh viễn); chỉ thêm việc DỪNG ĐỌC body khổng lồ trước khi dựng vào RAM.
+  // Trần ký tự cũ bên dưới vẫn là cổng quyết định như trước.
+  const doc = await docBodyCoTran(req, MAX_WEBHOOK_PAYLOAD * 3);
+  if (!doc.ok) {
+    return Response.json(
+      { ok: false, error: `payload ${doc.bytes} byte vượt trần ${MAX_WEBHOOK_PAYLOAD * 3} byte` },
+      { status: 413 }
+    );
+  }
+  const payload = doc.text;
   if (!payload) {
     return Response.json({ ok: false, error: "body rỗng" }, { status: 400 });
   }

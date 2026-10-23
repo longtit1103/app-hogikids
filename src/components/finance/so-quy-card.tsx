@@ -69,7 +69,11 @@ function ONho({
   );
 }
 
-/** Dòng phụ "Sau khi trả hết nợ" — quỹ hôm nay trừ mọi nghĩa vụ đang nợ (thẻ + tiền hàng). */
+/**
+ * Dòng phụ "Sau khi trả hết nợ" — quỹ hôm nay trừ mọi nghĩa vụ phải trả ngay (thẻ + tiền hàng + thấu chi).
+ * Vế thấu chi chỉ in khi có dư nợ (không có thấu chi thì câu công thức y như cũ). Vay kỳ hạn là dòng THAM
+ * KHẢO riêng — không nằm trong phép trừ, nói rõ để chủ shop khỏi tự trừ thêm lần nữa.
+ */
 function DongSauKhiTraHetNo({ t }: { t: SauKhiTraHetNo }) {
   return (
     <div className="mt-3 rounded-xl bg-surface-card p-3" data-testid="so-quy-sau-khi-tra-het-no">
@@ -78,7 +82,13 @@ function DongSauKhiTraHetNo({ t }: { t: SauKhiTraHetNo }) {
       <p className="mt-0.5 text-xs text-muted-foreground">
         = quỹ hôm nay {formatVnd(t.quyHomNay)} − nợ thẻ tín dụng (ước tính) {formatVnd(t.noThe)} − nợ tiền hàng
         nhà cung cấp {formatVnd(t.noPhieu)}
+        {t.noThauChi > 0 && <> − dư nợ thấu chi {formatVnd(t.noThauChi)}</>}
       </p>
+      {t.vayKyHan > 0 && (
+        <p className="mt-0.5 text-xs text-muted-foreground" data-testid="so-quy-vay-ky-han-tham-khao">
+          Vay kỳ hạn còn dư nợ: {formatVnd(t.vayKyHan)} — trả dần theo lịch ở Khoản vay, không trừ ở đây
+        </p>
+      )}
     </div>
   );
 }
@@ -111,7 +121,8 @@ export function SoQuyCard({
   choPhepNhapQuy?: boolean;
   /**
    * Chỉ có SAU khi bật theo dõi nợ phải trả (null = chưa bật ⇒ thẻ Quỹ y như cũ). Quỹ hôm nay trừ nợ thẻ
-   * (ước tính) và nợ tiền hàng nhà cung cấp — hai khoản nghĩa vụ NGOÀI quỹ.
+   * (ước tính), nợ tiền hàng nhà cung cấp (hai nghĩa vụ NGOÀI quỹ) và dư nợ thấu chi đang mở (tiền ngân
+   * hàng đã nằm TRONG quỹ). Vay kỳ hạn chỉ là dòng tham khảo.
    */
   sauKhiTraHetNo?: SauKhiTraHetNo | null;
   /**
