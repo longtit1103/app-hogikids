@@ -12,9 +12,10 @@ import {
 } from "@/lib/no-phai-tra/the-da-dong-con-no";
 
 /**
- * Lõi THUẦN cổng thẻ ĐÃ ĐÓNG còn nợ (ads về muộn gán thẻ đóng): một lần trả (`CARD_PAY`) vào chính thẻ khi còn
- * nợ > 0 (không tính chính dòng đang sửa), ngày sau ngày chốt neo. KHÔNG kẹp số trả — dư nợ là ước tính, trả vượt
- * thành "trả thừa". Mọi loại dòng khác / xoá / chuyển lần trả ra khỏi thẻ đều chặn. Số liệu LITERAL, đơn vị đồng.
+ * Lõi THUẦN cổng thẻ ĐÃ ĐÓNG còn nợ (ads về muộn gán thẻ đóng): lần trả (`CARD_PAY`) MỚI vào chính thẻ khi còn
+ * nợ > 0, ngày sau ngày chốt neo. KHÔNG kẹp số trả — dư nợ là ước tính, trả vượt thành "trả thừa". Lần trả ĐÃ CÓ
+ * của thẻ: xoá / sửa giảm / sửa tăng đều được. Loại dòng khác / chuyển lần trả ra khỏi thẻ đều chặn. Số liệu
+ * LITERAL, đơn vị đồng.
  */
 
 const vn = (ngay: string) => new Date(`${ngay}T00:00:00+07:00`);
@@ -72,27 +73,46 @@ describe("xetTraVaoTheDaDong", () => {
     expect(xet({ sau: phia("ADS_TOPUP", 1) })?.field).toBe("cardId");
   });
 
-  it("xoá lần trả (sau = null) hoặc chuyển lần trả sang thẻ khác ⇒ chặn", () => {
+  it("xoá lần trả đã có ⇒ được (dư nợ chỉ quay về số trước lần trả), kể cả khi thẻ đã hết nợ", () => {
+    const truoc = phia("CARD_PAY", 2, "2026-11-20");
+    expect(xet({ gd: [...GD_NO_5, tra("2026-11-20", 2)], truoc, sau: null })).toBeNull();
+    // Đã trả đủ 5tr bằng hai lần: xoá một lần thì nợ hiện lại — vẫn được, đó là sửa nhầm lẫn.
+    expect(xet({ gd: [...GD_NO_5, tra("2026-11-20", 2), tra("2026-11-21", 3)], truoc, sau: null })).toBeNull();
+  });
+
+  it("chuyển lần trả của thẻ đóng sang thẻ khác hay đổi loại ⇒ chặn", () => {
     const gd = [...GD_NO_5, tra("2026-11-20", 2)];
-    expect(xet({ gd, truoc: phia("CARD_PAY", 2, "2026-11-20"), sau: null })?.field).toBe("cardId");
-    expect(
-      xet({ gd, truoc: phia("CARD_PAY", 2, "2026-11-20"), sau: phia("CARD_PAY", 2, "2026-11-20", "the-moi") })?.field,
-    ).toBe("cardId");
+    const truoc = phia("CARD_PAY", 2, "2026-11-20");
+    expect(xet({ gd, truoc, sau: phia("CARD_PAY", 2, "2026-11-20", "the-moi") })?.field).toBe("cardId");
+    expect(xet({ gd, truoc, sau: phia("ADS_TOPUP", 2, "2026-11-20") })?.field).toBe("cardId");
+    expect(xet({ gd, truoc, sau: phia("SUPPLIER_PAY", 2, "2026-11-20", null) })?.field).toBe("cardId");
   });
 
-  it("sửa dòng nạp ví bằng thẻ đóng thành trả thẻ ⇒ chặn (xoá một khoản chi khỏi thẻ đóng)", () => {
+  it("sửa / xoá dòng nạp ví bằng thẻ đóng ⇒ chặn (kể cả sửa thành trả thẻ — xoá một khoản chi khỏi thẻ đóng)", () => {
     expect(xet({ truoc: phia("ADS_TOPUP", 1), sau: phia("CARD_PAY", 1) })?.field).toBe("cardId");
+    expect(xet({ truoc: phia("ADS_TOPUP", 1), sau: phia("ADS_TOPUP", 2) })?.field).toBe("cardId");
+    expect(xet({ truoc: phia("ADS_TOPUP", 1), sau: null })?.field).toBe("cardId");
   });
 
-  it("sửa lần trả đã có: tính nợ KHÔNG gồm chính dòng đó — nợ về 0 rồi vẫn sửa mô tả / số được", () => {
+  it("sửa lần trả đã có: giảm, tăng, đổi ngày / mô tả đều được — không phụ thuộc dư nợ hiện tại", () => {
     const gd = [...GD_NO_5, tra("2026-11-20", 5)];
     const truoc = phia("CARD_PAY", 5, "2026-11-20");
     expect(xet({ gd, truoc, sau: phia("CARD_PAY", 5, "2026-11-20") })).toBeNull();
+    expect(xet({ gd, truoc, sau: phia("CARD_PAY", 1, "2026-11-20") })).toBeNull();
     expect(xet({ gd, truoc, sau: phia("CARD_PAY", 4, "2026-11-22") })).toBeNull();
     expect(xet({ gd, truoc, sau: phia("CARD_PAY", 6, "2026-11-20") })).toBeNull();
-    // Hai lần trả 5tr: bỏ dòng đang sửa vẫn còn lần kia ⇒ nợ (không tính dòng này) = 0 ⇒ chặn.
+    // Hai lần trả 5tr (nợ đang −5tr): sửa giảm hay tăng một lần vẫn được.
     const haiLan = [...GD_NO_5, tra("2026-11-20", 5), tra("2026-11-21", 5)];
-    expect(xet({ gd: haiLan, truoc, sau: phia("CARD_PAY", 5, "2026-11-20") })?.field).toBe("cardId");
+    expect(xet({ gd: haiLan, truoc, sau: phia("CARD_PAY", 2, "2026-11-20") })).toBeNull();
+    expect(xet({ gd: haiLan, truoc, sau: phia("CARD_PAY", 8, "2026-11-20") })).toBeNull();
+  });
+
+  it("chuyển lần trả từ thẻ khác SANG thẻ đóng = dòng mới: còn nợ thì được, hết nợ thì chặn", () => {
+    const truoc = phia("CARD_PAY", 2, "2026-11-20", "the-moi");
+    expect(xet({ truoc, sau: phia("CARD_PAY", 2, "2026-11-20") })).toBeNull();
+    expect(
+      xet({ gd: [...GD_NO_5, tra("2026-11-10", 5)], truoc, sau: phia("CARD_PAY", 2, "2026-11-20") })?.field,
+    ).toBe("cardId");
   });
 
   it("ngày trả không sau ngày chốt của neo đang dùng ⇒ không trừ được nợ ⇒ chặn ô ngày, nêu ngày chốt", () => {

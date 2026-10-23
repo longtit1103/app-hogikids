@@ -766,7 +766,7 @@ export async function deleteCashMovement(id: string): Promise<ActionResult> {
     if (isKindNoPhaiTraGhiTay(truoc.kind)) {
       await prisma.$transaction(async (tx) => {
         await khoaHoSoNo(tx, [truoc]);
-        // Xoá trả thẻ của thẻ ĐÃ ĐÓNG là làm dư nợ của nó khác 0 — cùng luật "sổ đã chốt" với khoản vay.
+        // Thẻ ĐÃ ĐÓNG: xoá lần Trả thẻ đã có vẫn được (dư nợ chỉ quay về số cũ); cổng chặn các loại dòng khác + ngày trước M.
         await kiemHoSoNo(tx, { truoc: phiaNo(truoc), sau: null });
         const row = await docLaiTrongTx(tx, id, truoc);
         await chupVaoThungRac(tx, { bang: "CashMovement", banGhi: row });

@@ -4,8 +4,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
  * Thẻ tín dụng ĐÃ ĐÓNG còn dư nợ (ads về muộn gán thẻ đóng theo đúng lịch sử mốc gắn) trên DB thật
  * (`hogikids_test`). M = 01/11/2026, "hôm nay" ghim 26/11/2026 bằng fake timer CHỈ cho `Date`.
  *
- * Lối duy nhất tất toán: `CARD_PAY` vào thẻ đóng khi thẻ còn nợ > 0 (dư nợ tính trong transaction sau khoá thẻ).
- * KHÔNG kẹp số trả theo dư nợ ước tính — ngân hàng trừ nhiều hơn là ca thật, phần vượt thành "trả thừa". Mọi đường khác vào thẻ đóng vẫn chặn: xoá lần trả, khoản chi trừ thẻ, gắn nền tảng.
+ * Lối duy nhất tất toán: `CARD_PAY` MỚI vào thẻ đóng khi thẻ còn nợ > 0 (dư nợ tính trong transaction sau khoá thẻ).
+ * KHÔNG kẹp số trả theo dư nợ ước tính — ngân hàng trừ nhiều hơn là ca thật, phần vượt thành "trả thừa". Lần trả ĐÃ
+ * CÓ của thẻ đóng: xoá / sửa giảm / sửa tăng đều được (dư nợ chỉ quay về số trước đó). Mọi đường khác vào thẻ đóng
+ * vẫn chặn: khoản chi trừ thẻ, gắn nền tảng.
  * Dư nợ dựng bằng neo mở sổ `soDu > 0` ghi thẳng DB (khuôn bước bật) — nguồn nợ không quan trọng với cổng.
  */
 vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => ({
@@ -112,13 +114,14 @@ describe("trả thẻ vào thẻ đã đóng còn nợ", () => {
     expect(await prisma.cashMovement.count()).toBe(2);
   });
 
-  it("sửa lần trả của thẻ đóng: nợ tính KHÔNG gồm chính dòng đó ⇒ sửa mô tả / giảm / tăng vượt đều được", async () => {
+  it("sửa lần trả của thẻ đóng: sửa mô tả / giảm / tăng vượt đều được, kể cả khi thẻ đã hết nợ", async () => {
     await batM();
     const cardId = await taoTheDong(5);
     expect(await createCashMovement(traThe(cardId, tr(5)))).toEqual({ ok: true, data: undefined });
     const dong = await prisma.cashMovement.findFirstOrThrow();
+    expect(await duNoCua(cardId)).toBe(0);
 
-    // Nợ đã 0 nhưng bỏ chính dòng này ra thì thẻ còn nợ 5tr ⇒ sửa mô tả / giảm số vẫn được.
+    // Nợ đã 0 — vẫn sửa mô tả / giảm số được (sửa nhầm lẫn), nợ hiện lại đúng phần giảm.
     expect(await updateCashMovement(dong.id, { ...traThe(cardId, tr(5)), description: "Sửa mô tả" })).toEqual({
       ok: true,
       data: undefined,
@@ -129,15 +132,39 @@ describe("trả thẻ vào thẻ đã đóng còn nợ", () => {
     expect(await updateCashMovement(dong.id, traThe(cardId, tr(6)))).toEqual({ ok: true, data: undefined });
     expect((await prisma.cashMovement.findUniqueOrThrow({ where: { id: dong.id } })).amount).toBe(tr(6));
     expect(await duNoCua(cardId)).toBe(-tr(1));
+
+    // Đang trả thừa (nợ −1tr) vẫn giảm về được.
+    expect(await updateCashMovement(dong.id, traThe(cardId, tr(2)))).toEqual({ ok: true, data: undefined });
+    expect(await duNoCua(cardId)).toBe(tr(3));
   });
 
-  it("xoá lần trả của thẻ đóng ⇒ chặn (nợ sẽ tăng lại), dòng còn nguyên", async () => {
+  it("xoá lần trả của thẻ đóng ⇒ được, dư nợ tăng lại đúng số đã trả; ghi lại lần trả mới khi còn nợ vẫn được", async () => {
     await batM();
     const cardId = await taoTheDong(5);
+    expect(await createCashMovement(traThe(cardId, tr(5)))).toEqual({ ok: true, data: undefined });
+    expect(await duNoCua(cardId)).toBe(0);
+    const dong = await prisma.cashMovement.findFirstOrThrow();
+
+    expect(await deleteCashMovement(dong.id)).toEqual({ ok: true, data: undefined });
+    expect(await prisma.cashMovement.count({ where: { id: dong.id } })).toBe(0);
+    expect(await duNoCua(cardId)).toBe(tr(5));
+
+    expect(await createCashMovement(traThe(cardId, tr(5)))).toEqual({ ok: true, data: undefined });
+    expect(await duNoCua(cardId)).toBe(0);
+  });
+
+  it("chuyển lần trả của thẻ đóng sang thẻ khác ⇒ chặn, dòng giữ nguyên thẻ cũ", async () => {
+    await batM();
+    const cardId = await taoTheDong(5);
+    const theMo = (
+      await prisma.theTinDung.create({ data: { ten: "Thẻ mới", ngayChotSaoKe: 25, ngayHanTra: 10 } })
+    ).id;
+    await prisma.kySaoKeThe.create({ data: { cardId: theMo, ngayChot: vn("2026-10-31"), soDu: 0, laNeoMoSo: true } });
     expect(await createCashMovement(traThe(cardId, tr(2)))).toEqual({ ok: true, data: undefined });
     const dong = await prisma.cashMovement.findFirstOrThrow();
-    expect(await deleteCashMovement(dong.id)).toMatchObject({ ok: false, code: "THE_DA_DONG" });
-    expect(await prisma.cashMovement.count({ where: { id: dong.id } })).toBe(1);
+
+    expect(await updateCashMovement(dong.id, traThe(theMo, tr(2)))).toMatchObject({ ok: false, code: "THE_DA_DONG" });
+    expect((await prisma.cashMovement.findUniqueOrThrow({ where: { id: dong.id } })).cardId).toBe(cardId);
   });
 
   it("thẻ đóng còn nợ vẫn KHÔNG nhận khoản chi trừ thẻ, cũng không gắn thêm nền tảng", async () => {

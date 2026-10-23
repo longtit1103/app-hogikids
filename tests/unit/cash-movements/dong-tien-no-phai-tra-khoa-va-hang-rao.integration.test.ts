@@ -135,7 +135,9 @@ describe("khoá hồ sơ ở TẠO và XOÁ dòng nợ phải trả", () => {
     expect(await prisma.cashMovement.count()).toBe(0);
   });
 
-  it("XOÁ CARD_PAY khi lượt đóng thẻ đang giữ khoá ⇒ chờ ≥ 0,7s rồi thấy thẻ đã đóng, dòng còn nguyên", async () => {
+  // Thẻ đóng nay vẫn cho xoá lần Trả thẻ đã có, nên ca này chỉ còn ghim THỨ TỰ: lượt xoá phải chờ khoá
+  // thẻ nhả (≥ 0,7s), không ghi nhật ký trước đó, rồi mới xoá — không còn ghim "thấy thẻ đã đóng ⇒ từ chối".
+  it("XOÁ CARD_PAY khi lượt đóng thẻ đang giữ khoá ⇒ chờ ≥ 0,7s rồi mới xoá (thẻ vừa đóng vẫn xoá được)", async () => {
     const cardId = await taoThe("Thẻ X");
     expect(
       await createCashMovement({ date: vn("2026-11-20"), kind: "CARD_PAY", amount: tr(2), description: "", cardId }),
@@ -149,8 +151,8 @@ describe("khoá hồ sơ ở TẠO và XOÁ dòng nợ phải trả", () => {
     const { r, ms, nhatKyTruocKhiNha } = await chayKhiBiGiu(giu, () => deleteCashMovement(dong.id));
     expect(ms).toBeGreaterThan(700);
     expect(nhatKyTruocKhiNha).toBe(0);
-    expect(r).toMatchObject({ ok: false, code: "THE_DA_DONG" });
-    expect(await prisma.cashMovement.count({ where: { id: dong.id } })).toBe(1);
+    expect(r).toEqual({ ok: true, data: undefined });
+    expect(await prisma.cashMovement.count({ where: { id: dong.id } })).toBe(0);
   });
 });
 

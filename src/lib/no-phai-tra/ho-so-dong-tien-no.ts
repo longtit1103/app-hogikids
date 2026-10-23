@@ -92,12 +92,15 @@ async function kiemTheConMo(tx: Prisma.TransactionClient, cardId: string): Promi
 }
 
 /**
- * Cổng thẻ của ĐƯỜNG DÒNG TIỀN (`kiemHoSoNo`): thẻ mở ⇒ qua; thẻ ĐÃ ĐÓNG ⇒ chỉ một lần `CARD_PAY` vào chính thẻ
- * đó khi thẻ còn nợ > 0 (chưa tính chính dòng đang sửa) và ngày trả sau ngày chốt neo (`xetTraVaoTheDaDong` — ads
- * về muộn gán thẻ đóng theo đúng lịch sử mốc gắn, đây là lối DUY NHẤT tất toán phần nợ đó). KHÔNG kẹp số trả: dư
- * nợ là ước tính, trả vượt hiện thành "trả thừa" ở chỉ báo thẻ đóng. Dư nợ đọc TRONG transaction, sau khoá thẻ
- * (`khoaHoSoNo` chạy trước): lượt trả song song thứ hai chờ khoá rồi thấy nợ đã giảm. Đường `Expense.cardId`
- * (`khoaVaKiemCacTheConMo`) KHÔNG đi qua đây — khoản chi vào thẻ đóng vẫn bị chặn tuyệt đối.
+ * Cổng thẻ của ĐƯỜNG DÒNG TIỀN (`kiemHoSoNo`): thẻ mở ⇒ qua; thẻ ĐÃ ĐÓNG (`xetTraVaoTheDaDong`) ⇒
+ *  - dòng MỚI vào thẻ (tạo, khôi phục thùng rác, chuyển từ thẻ/loại khác sang) chỉ là `CARD_PAY` khi thẻ còn nợ
+ *    > 0 và ngày trả sau ngày chốt neo — ads về muộn gán thẻ đóng theo đúng lịch sử mốc gắn, đây là lối DUY NHẤT
+ *    tất toán phần nợ đó. KHÔNG kẹp số trả: dư nợ là ước tính, trả vượt hiện thành "trả thừa" ở chỉ báo thẻ đóng;
+ *  - lần `CARD_PAY` ĐÃ CÓ của chính thẻ: xoá / sửa giảm / sửa tăng đều được (dư nợ chỉ quay về số trước đó);
+ *    chuyển nó ra khỏi thẻ hay đổi loại thì chặn; dòng loại khác của thẻ đóng không sửa/xoá được.
+ * Dư nợ chỉ đọc cho ca dòng MỚI, TRONG transaction, sau khoá thẻ (`khoaHoSoNo` chạy trước): lượt trả song song
+ * thứ hai chờ khoá rồi thấy nợ đã giảm. Đường `Expense.cardId` (`khoaVaKiemCacTheConMo`) KHÔNG đi qua đây —
+ * khoản chi vào thẻ đóng vẫn bị chặn tuyệt đối.
  */
 async function kiemTheChoDongTien(
   tx: Prisma.TransactionClient,
@@ -108,8 +111,9 @@ async function kiemTheChoDongTien(
   const the = await tx.theTinDung.findUnique({ where: { id: cardId }, select: { closedAt: true, ten: true } });
   if (!the) throw new LoiHoSoNo("Không tìm thấy thẻ — tải lại trang", "cardId", "KHONG_TIM_THAY_HO_SO");
   if (the.closedAt === null) return;
-  // Chỉ đọc dư nợ khi lượt ghi CÓ THỂ được nhận (trả vào chính thẻ này); mọi ca khác pure function chặn ngay.
-  const coTheNhan = sau?.kind === "CARD_PAY" && sau.cardId === cardId;
+  // Chỉ đọc dư nợ khi lượt ghi đưa một lần trả MỚI vào chính thẻ này; sửa/xoá dòng đã có của thẻ không cần dư nợ,
+  // mọi ca khác pure function chặn ngay.
+  const coTheNhan = sau?.kind === "CARD_PAY" && sau.cardId === cardId && truoc?.cardId !== cardId;
   const den = denChoCongTheDaDong(new Date(), cardId, truoc, sau);
   let kys: KyNeo[] = [];
   let gd: GiaoDichThe[] = [];
@@ -174,9 +178,10 @@ export async function khoaVaKiemCacTheConMo(
 /**
  * Cổng sau khoá, chạy TRƯỚC câu ghi. `truoc` = dòng đang có (null khi tạo/khôi phục), `sau` = dòng sẽ có
  * (null khi xoá).
- *  - Thẻ: MỌI thẻ dính tới (trước lẫn sau) phải còn mở — ngoại lệ DUY NHẤT: `CARD_PAY` vào thẻ đã đóng còn
- *    nợ > 0 (`kiemTheChoDongTien`); thẻ của phía SAU còn phải qua cửa sổ neo đầu tiên
- *    (`kiemNgaySauNeoThe`).
+ *  - Thẻ: MỌI thẻ dính tới (trước lẫn sau) phải còn mở — ngoại lệ DUY NHẤT là `CARD_PAY` của thẻ đã đóng
+ *    (`kiemTheChoDongTien`): lần trả MỚI khi thẻ còn nợ > 0; lần trả ĐÃ CÓ của chính thẻ thì xoá / sửa giảm /
+ *    sửa tăng đều được (không chuyển ra khỏi thẻ, không đổi loại). Thẻ của phía SAU còn phải qua cửa sổ neo
+ *    đầu tiên (`kiemNgaySauNeoThe`).
  *  - Phiếu: phải còn. `SUPPLIER_PAY` vào phiếu đã HUỶ bị chặn — trừ khi chính dòng đó vốn đã là trả cho
  *    đúng phiếu này VÀ không tăng số (sửa ngày/mô tả, hoặc GIẢM số vì gõ nhầm thì được; tăng là trả thêm
  *    vào phiếu huỷ — đúng điều §5.3 cấm). `SUPPLIER_REFUND` vào phiếu huỷ được (trần ở `chanHoanVuotDaTra`) —

@@ -244,14 +244,12 @@ describe("sửa / xoá dòng nợ phải trả", () => {
     expect((await prisma.cashMovement.findUniqueOrThrow({ where: { id: dong.id } })).cardId).toBe(a);
   });
 
-  it("xoá CARD_PAY ⇒ chụp thùng rác kèm cardId; thẻ đóng ⇒ không xoá được", async () => {
+  it("xoá CARD_PAY ⇒ chụp thùng rác kèm cardId; thẻ đã đóng vẫn xoá được (dư nợ chỉ quay về số cũ)", async () => {
     await batM();
     const cardId = await taoThe();
     await createCashMovement(traThe(cardId));
     const dong = await prisma.cashMovement.findFirstOrThrow();
     await prisma.theTinDung.update({ where: { id: cardId }, data: { closedAt: vn("2026-11-25") } });
-    expect(await deleteCashMovement(dong.id)).toMatchObject({ ok: false, code: "THE_DA_DONG" });
-    await prisma.theTinDung.update({ where: { id: cardId }, data: { closedAt: null } });
     expect(await deleteCashMovement(dong.id)).toEqual({ ok: true, data: undefined });
     const anh = (await prisma.banGhiDaXoa.findFirstOrThrow()).anh as { chinh: { cardId: string; kind: string } };
     expect(anh.chinh).toMatchObject({ cardId, kind: "CARD_PAY" });

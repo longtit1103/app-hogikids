@@ -12,11 +12,16 @@ import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
  * thẻ khác: ngân hàng thật đã trừ vào thẻ cũ. Kết quả là thẻ đóng còn nợ > 0 mà trước đây không có lối ghi
  * "Trả thẻ" (cổng thẻ đóng chặn mọi dòng) ⇒ nợ treo mãi, "Sau khi trả hết nợ" hụt đúng số đó.
  *
- * Lối thoát DUY NHẤT: `CARD_PAY` vào thẻ đóng khi và chỉ khi thẻ còn nợ > 0 (chưa tính chính dòng đang sửa) và
- * ngày trả sau ngày chốt của neo đang dùng. KHÔNG kẹp số trả theo dư nợ: dư nợ thẻ là số ƯỚC TÍNH, ngân hàng trừ
- * nhiều hơn (phí, lãi chưa ghi) là ca thật — ghi đúng số ngân hàng đã trừ, phần vượt hiện thành "trả thừa" ở chỉ
- * báo thẻ đóng. Mọi loại dòng khác (nạp ví bằng thẻ, khoản chi trừ thẻ, gắn nền tảng) vào thẻ đóng vẫn bị chặn;
- * xoá / chuyển một lần trả RA khỏi thẻ đóng cũng chặn (nợ tăng lại).
+ * Lối thoát DUY NHẤT: dòng MỚI vào thẻ đóng (tạo, khôi phục thùng rác, chuyển từ thẻ/loại khác sang) chỉ được là
+ * `CARD_PAY` khi thẻ còn nợ > 0 và ngày trả sau ngày chốt của neo đang dùng. KHÔNG kẹp số trả theo dư nợ: dư nợ
+ * thẻ là số ƯỚC TÍNH, ngân hàng trừ nhiều hơn (phí, lãi chưa ghi) là ca thật — ghi đúng số ngân hàng đã trừ, phần
+ * vượt hiện thành "trả thừa" ở chỉ báo thẻ đóng.
+ *
+ * Lần trả ĐÃ CÓ của chính thẻ đóng thì xoá / sửa số (giảm hay tăng) / sửa ngày, mô tả đều được (chủ shop chốt
+ * 23/10): dư nợ chỉ quay về con số trước lần trả đó, người dùng sửa được nhầm lẫn. Trước đây cấm xoá nhưng lại cho
+ * giảm số xuống gần 0 — cùng hệ quả mà khác luật. Vẫn chặn: chuyển lần trả đó RA khỏi thẻ (sang thẻ khác / đổi
+ * loại), sửa hay xoá dòng loại khác của thẻ đóng (nạp ví bằng thẻ), và mọi dòng mới không phải `CARD_PAY`. Khoản chi
+ * trừ thẻ và gắn nền tảng vào thẻ đóng chặn ở cổng riêng.
  */
 
 /** Một phía (trước/sau) của lượt ghi dòng tiền — chỉ các trường cổng thẻ đóng cần. */
@@ -24,16 +29,11 @@ export type PhiaDongTienThe = { kind: string; cardId: string | null; date: Date;
 
 export type LoiTraTheDaDong = { message: string; field: "cardId" | "date" };
 
-/** Bỏ ĐÚNG MỘT giao dịch TRA khớp ngày + số tiền (dòng đang sửa) — không tìm thấy thì giữ nguyên danh sách. */
-function boMotLanTra(gd: readonly GiaoDichThe[], ngay: Date, soTien: number): GiaoDichThe[] {
-  const i = gd.findIndex((g) => g.loai === "TRA" && g.soTien === soTien && g.ngay.getTime() === ngay.getTime());
-  return i < 0 ? [...gd] : [...gd.slice(0, i), ...gd.slice(i + 1)];
-}
-
 /**
  * Xét một lượt ghi chạm thẻ ĐÃ ĐÓNG `the`. `kys`/`gd` = neo + giao dịch của thẻ tới hết ngày `den` (đọc TRONG
- * transaction, SAU khoá thẻ) — `gd` đã gồm dòng `truoc` nếu dòng đó là lần trả của thẻ này. `den` phải ≥ ngày của
- * cả hai phía (caller lấy max với hôm nay) để lần trả đang xét nằm trong khoảng đếm.
+ * transaction, SAU khoá thẻ) — chỉ cần khi lượt ghi đưa một dòng MỚI vào thẻ (`truoc` không thuộc thẻ này); sửa /
+ * xoá lần trả đã có của thẻ không đọc dư nợ. `den` phải ≥ ngày của phía sau (caller lấy max với hôm nay) để lần
+ * trả đang xét nằm trong khoảng đếm.
  *
  * Trả `null` = cho ghi; ngược lại là lý do từ chối (caller ném `THE_DA_DONG`).
  */
@@ -45,23 +45,28 @@ export function xetTraVaoTheDaDong(p: {
   truoc: PhiaDongTienThe | null;
   sau: PhiaDongTienThe | null;
 }): LoiTraTheDaDong | null {
-  const { the, kys, den, truoc, sau } = p;
+  const { the, kys, gd, den, truoc, sau } = p;
   const chanChung: LoiTraTheDaDong = {
     message: `Thẻ ${the.ten} đã đóng — không ghi, sửa hay xoá dòng tiền của thẻ đã đóng`,
     field: "cardId",
   };
-  // Chỉ một lần TRẢ vào chính thẻ này mới có thể kéo nợ về 0; dòng cũ của thẻ (nếu có) cũng phải là lần trả —
-  // sửa một dòng nạp ví bằng thẻ thành "trả thẻ" là xoá một khoản chi khỏi thẻ đã đóng.
-  if (sau === null || sau.kind !== "CARD_PAY" || sau.cardId !== the.id) return chanChung;
-  if (truoc !== null && truoc.cardId === the.id && truoc.kind !== "CARD_PAY") return chanChung;
+  const sauLaTraTheNay = sau !== null && sau.kind === "CARD_PAY" && sau.cardId === the.id;
 
-  const gdKhongDongNay =
-    truoc !== null && truoc.cardId === the.id ? boMotLanTra(p.gd, truoc.date, truoc.amount) : [...p.gd];
-  const noTruoc = duNo(kys, gdKhongDongNay, den);
+  if (truoc !== null && truoc.cardId === the.id) {
+    // Dòng ĐÃ CÓ của thẻ đóng: chỉ lần trả mới sửa/xoá được, và chỉ khi vẫn là lần trả của chính thẻ này (hoặc xoá
+    // hẳn). Sửa một dòng nạp ví bằng thẻ thành "trả thẻ" là xoá một khoản chi khỏi thẻ đã đóng; chuyển lần trả sang
+    // thẻ khác / đổi loại là đẩy nghĩa vụ đi chỗ khác — cả hai chặn.
+    if (truoc.kind !== "CARD_PAY") return chanChung;
+    return sau === null || sauLaTraTheNay ? null : chanChung;
+  }
+
+  // Dòng MỚI vào thẻ đóng: chỉ một lần TRẢ mới có thể kéo nợ về 0.
+  if (sau === null || !sauLaTraTheNay) return chanChung;
+  const noTruoc = duNo(kys, gd, den);
   if (noTruoc === null || noTruoc <= 0) {
     return { message: `Thẻ ${the.ten} đã đóng và không còn nợ — không ghi thêm dòng trả thẻ`, field: "cardId" };
   }
-  const noSau = duNo(kys, [...gdKhongDongNay, { ngay: sau.date, soTien: sau.amount, loai: "TRA" }], den) ?? noTruoc;
+  const noSau = duNo(kys, [...gd, { ngay: sau.date, soTien: sau.amount, loai: "TRA" }], den) ?? noTruoc;
   if (noSau === noTruoc) {
     // Ngày trả không sau ngày chốt của neo đang dùng ⇒ lần trả nằm trong số sao kê, không trừ được nợ còn treo.
     const neo = neoTai(kys, den);
