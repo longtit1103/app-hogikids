@@ -32,6 +32,7 @@
  */
 import { Prisma } from "@/generated/prisma/client";
 
+import { noiMocPhienBanDon, thuTuPhienBanDon } from "@/lib/bronze/thu-tu-phien-ban-don";
 import { prisma } from "@/lib/prisma";
 import { formatVnd } from "@/lib/format";
 import { mapPancakeOrder, type MapOrderCtx } from "@/lib/ingest/pancake-mapping";
@@ -72,12 +73,14 @@ async function main(): Promise<void> {
     ),
   };
 
-  // Bản kho thô MỚI NHẤT của mỗi đơn mirror Shopee.
+  // Bản kho thô ĐỨNG ĐẦU của mỗi đơn mirror Shopee — theo MỘT thứ tự phiên bản chung của đơn Pancake
+  // (`thu-tu-phien-ban-don.ts`). Script chỉ dựng đơn Silver CHƯA có, nên guard `updated_at` ở upsert
+  // không có bản nào để so: xếp theo `fetchedAt` ở đây là trang cũ land muộn thắng nội dung mới.
   const rows = await prisma.$queryRaw<{ externalId: string; payload: unknown; fetchedAt: Date }[]>`
     SELECT DISTINCT ON ("externalId") "externalId", payload, "fetchedAt"
-    FROM "RawPancakeOrder"
+    FROM "RawPancakeOrder" ${noiMocPhienBanDon}
     WHERE "shopId" = ${SHOP_KHO} AND "externalId" LIKE ${`AF${SHOP_SHOPEE}O%`}
-    ORDER BY "externalId", "fetchedAt" DESC
+    ORDER BY "externalId", ${thuTuPhienBanDon}
   `;
   console.log(`Đơn mirror Shopee trong kho thô: ${rows.length}`);
 

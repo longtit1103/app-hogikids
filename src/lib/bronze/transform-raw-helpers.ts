@@ -1,6 +1,8 @@
 import type { UpsertStats } from "@/lib/ingest/pancake-upsert";
 import { prisma } from "@/lib/prisma";
 
+import { NOI_MOC_PHIEN_BAN_DON_SQL, THU_TU_PHIEN_BAN_DON_SQL } from "./thu-tu-phien-ban-don";
+
 /**
  * Cùng bộ đếm với upsert Silver — 1 kiểu, không nhân bản định nghĩa — cộng MỘT bộ đếm chỉ lượt dựng lại có.
  *
@@ -127,53 +129,19 @@ export type LatestFilter = {
   externalIds?: string[];
 };
 
-/** `updated_at` thô của payload đơn Pancake (TEXT — rút trong Postgres). */
-const UPDATED_AT = `(payload->>'updated_at')`;
-
-/**
- * Mốc `updated_at` của payload đơn dưới dạng `timestamptz` — CÙNG luật với `parseVnDate` (đường guard
- * ở `thu-tu-cap-nhat-don.ts`) để hai nơi không bao giờ bất đồng "bản nào mới hơn":
- *  - So theo THỜI ĐIỂM, không so chuỗi: separator `T`/khoảng trắng, độ dài phần lẻ giây và đuôi múi giờ
- *    khác nhau giữa API và webhook. Naive = giờ UTC (bất biến #3, `docs/tu-dien-du-lieu-bronze.md`)
- *    ⇒ `AT TIME ZONE 'UTC'`, KHÔNG dựa `TimeZone` của phiên DB.
- *  - Cắt phần lẻ giây về mili-giây (V8 cắt, không làm tròn) ⇒ hai bản lệch dưới 1ms là BẰNG, rơi về
- *    luật `fetchedAt` — đúng như `soThuTuCapNhatDon` trả `BANG`.
- *  - Thiếu hoặc sai khuôn ⇒ NULL (xếp SAU). Ép kiểu thẳng sẽ NÉM và làm hỏng CẢ câu dựng lại vì một
- *    dòng rác, nên phải lọc khuôn bằng regex rồi kiểm ngày có thật trong tháng ("2026-02-31") — lồng
- *    CASE vì Postgres không hứa thứ tự đánh giá `AND`, chỉ CASE mới chắn được phép ép kiểu. Lệch DUY
- *    NHẤT so với `parseVnDate`: năm 0000 thành NULL (`make_date` không nhận năm 0) — không có dữ liệu thật.
- * Regex chỉ dùng lớp ký tự (`[.]`, `[0-9]`) để khỏi phải thoát `\` qua hai tầng chuỗi TS + SQL; dấu
- * `\` DUY NHẤT là `\\1` (tham chiếu nhóm của `regexp_replace`, ra SQL thành `'\1'`).
- */
-const MOC_CAP_NHAT_DON_SQL = `
-  CASE WHEN ${UPDATED_AT} ~ '^[1-9][0-9]{3}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])([T ]([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9]([.][0-9]+)?)?([zZ]|[+-](0[0-9]|1[0-4]):?[0-5][0-9])?)?$' THEN
-    CASE WHEN substr(${UPDATED_AT}, 9, 2)::int <= extract(day from
-           make_date(substr(${UPDATED_AT}, 1, 4)::int, substr(${UPDATED_AT}, 6, 2)::int, 1)
-           + interval '1 month' - interval '1 day') THEN
-      CASE WHEN ${UPDATED_AT} ~ '[T ][0-9:.]+([zZ]|[+-][0-9]{2}:?[0-9]{2})$'
-        THEN regexp_replace(${UPDATED_AT}, '([.][0-9]{3})[0-9]+', '\\1')::timestamptz
-        ELSE regexp_replace(${UPDATED_AT}, '([.][0-9]{3})[0-9]+', '\\1')::timestamp AT TIME ZONE 'UTC'
-      END
-    END
-  END`;
-
 /**
  * Lấy BẢN MỚI NHẤT của mỗi `externalId` trong 1 bảng Bronze (raw là append-only nhiều phiên bản
  * → transform luôn dùng bản `fetchedAt` mới nhất).
  *
- * NGOẠI LỆ — đơn Pancake khi QUÉT CẢ BẢNG (dựng lại từ kho thô: `rebuild-from-raw`, nút "Dựng lại",
- * DR với Silver rỗng): xếp theo (`updated_at` Pancake mới nhất, rồi `fetchedAt` mới nhất). Lý do:
- * `fetchedAt` là mốc LAND, không phải mốc NỘI DUNG — trang API chụp trước một sự kiện webhook mà POST
- * sau vẫn land muộn hơn. Khi Silver rỗng thì guard `updated_at` ở `upsertOneOrder` không có bản nào để
- * so ⇒ bản cũ được dựng và KHÔNG tự lành (lượt API kế tiếp trùng hash, không land lại). Dòng thiếu/sai
- * khuôn `updated_at` xếp SAU mọi dòng có mốc; giữa chúng vẫn là luật `fetchedAt` như cũ.
- *
- * Đường theo TỪNG ĐƠN (`externalIds` có mặt — ingest từng trang, webhook, đối soát đêm, backfill
- * LEGACY) CỐ Ý GIỮ luật `fetchedAt`: các câu "bản mới nhất" của sổ kết cục (`ket-cuc-silver.ts`)
- * định nghĩa bản mới nhất theo `fetchedAt`, và đường này phải đóng dấu ĐÚNG dòng đó. Nếu ở đây chọn
- * bản `updated_at` lớn hơn thì dòng trang cũ land sau (bản mới nhất theo `fetchedAt`) không bao giờ
- * được đóng dấu ⇒ đối soát đêm thử lại nó mãi tới `FAILED_RETRY_LIMIT` = báo động giả. Ở đường này
- * Silver đã có bản để so nên guard ở upsert chặn được trang cũ (đóng dấu `SUPERSEDED`).
+ * NGOẠI LỆ — đơn Pancake (`RawPancakeOrder`), MỌI đường (quét cả bảng lẫn theo từng đơn `externalIds`):
+ * xếp bằng MỘT thứ tự phiên bản duy nhất `THU_TU_PHIEN_BAN_DON_SQL` (`updated_at` Pancake trước,
+ * `fetchedAt` sau — `thu-tu-phien-ban-don.ts`), CÙNG thứ tự mà sổ kết cục (`ket-cuc-silver.ts`) dùng
+ * để nói bản nào là bản đứng đầu, bản nào là bản cũ. Lý do: `fetchedAt` là mốc LAND, không phải mốc
+ * NỘI DUNG — trang API chụp trước một sự kiện webhook mà POST sau vẫn land muộn hơn. Khi Silver chưa
+ * có đơn (DR, hoặc transform của bản mới từng hỏng) thì guard `updated_at` ở `upsertOneOrder` không
+ * có bản nào để so ⇒ chọn theo `fetchedAt` là dựng nội dung cũ. Bản nằm dưới bản đứng đầu được đóng
+ * dấu `SUPERSEDED` ngay khi bản đứng đầu có kết cục (`dongDauKetCuc`), nên đối soát đêm không bao
+ * giờ thử lại nó.
  *
  * Tiebreaker `"id" DESC`: `fetchedAt` là TIMESTAMP(3) — 2 phiên bản cùng entity land trong CÙNG
  * mili-giây thì `DISTINCT ON` chọn bản tuỳ ý, tức số TIỀN của đơn phụ thuộc may rủi. Thêm `id`
@@ -204,17 +172,18 @@ export async function latestPayloads(
     conds.push(`"externalId" = ANY($${params.length}::text[])`);
   }
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  // Chỉ đơn Pancake + quét cả bảng mới xếp theo `updated_at` trước — xem ghi chú hàm.
-  const theoMocNoiDung = table === "RawPancakeOrder" && filter.externalIds === undefined;
-  const khoaMocNoiDung = theoMocNoiDung ? `${MOC_CAP_NHAT_DON_SQL} DESC NULLS LAST, ` : "";
+  // Đơn Pancake xếp theo thứ tự phiên bản dùng chung với sổ kết cục — xem ghi chú hàm.
+  const laDonPancake = table === "RawPancakeOrder";
+  const noiMoc = laDonPancake ? NOI_MOC_PHIEN_BAN_DON_SQL : "";
+  const thuTu = laDonPancake ? THU_TU_PHIEN_BAN_DON_SQL : `"fetchedAt" DESC, "id" DESC`;
   // `fetchedAt` đi kèm payload: nhánh `orders` dùng nó làm SỐ PHIÊN BẢN cho phép ghi Silver, để hai
   // lượt transform song song không ghi ngược thứ tự (xem `Order.rawFetchedAt`).
   return prisma.$queryRawUnsafe<RawRow[]>(
     `
     SELECT DISTINCT ON ("shopId", "externalId") "id", "shopId", "externalId", payload, "fetchedAt"
-    FROM "${table}"
+    FROM "${table}" ${noiMoc}
     ${where}
-    ORDER BY "shopId", "externalId", ${khoaMocNoiDung}"fetchedAt" DESC, "id" DESC
+    ORDER BY "shopId", "externalId", ${thuTu}
     `,
     ...params,
   );

@@ -2,6 +2,8 @@ import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
+import { noiMocPhienBanDon, thuTuPhienBanDon } from "./thu-tu-phien-ban-don";
+
 /**
  * KẾT CỤC dựng Silver của một dòng `RawPancakeOrder` — lời đáp bền vững cho câu "dòng Bronze này
  * đã được xử lý xong chưa".
@@ -15,13 +17,22 @@ import { prisma } from "@/lib/prisma";
  *
  * Cùng khuôn với `RawPancakeWebhookEvent.processedAs`: payload gốc không bao giờ bị sửa, chỉ cột
  * metadata bên cạnh được ghi.
+ *
+ * "BẢN MỚI NHẤT" / "BẢN ĐỨNG ĐẦU" ở MỌI câu trong file này = dòng đứng đầu theo MỘT thứ tự phiên bản
+ * duy nhất `thuTuPhienBanDon` (`updated_at` Pancake trước, `fetchedAt` sau — `thu-tu-phien-ban-don.ts`),
+ * đúng thứ tự `latestPayloads` dùng để chọn payload dựng Silver. "Bản cũ" = mọi dòng khác của cùng
+ * (`shopId`, `externalId`), KỂ CẢ dòng land SAU mà nội dung cũ hơn (trang API chụp trước sự kiện
+ * webhook). Hai bên lệch thứ tự là đường dựng một bản mà sổ chờ dấu trên bản khác — báo kẹt giả.
  */
 export const KET_CUC = {
   /** Đã ghi vào Silver. */
   APPLIED: "APPLIED",
   /** Transform CỐ Ý không ghi (đơn mirror kho — bất biến doanh thu #2). */
   EXCLUDED_MIRROR: "EXCLUDED_MIRROR",
-  /** Có phiên bản mới hơn thắng (thua CAS `rawFetchedAt`, hoặc không phải bản mới nhất của khoá). */
+  /**
+   * Có phiên bản mới hơn thắng: thua guard ở `upsertOneOrder` (Silver đang giữ bản mới hơn), hoặc dòng
+   * nằm DƯỚI bản đứng đầu của khoá theo thứ tự phiên bản (`dongDauCacBanDuoi`, `dongDauCacBanCu`).
+   */
   SUPERSEDED: "SUPERSEDED",
   /**
    * Payload hiện KHÔNG map được. Payload Bronze bất biến ⇒ lỗi TẤT ĐỊNH, đêm nào thử lại cũng
@@ -69,6 +80,27 @@ export class KetCucDaXoaTay extends Error {
 }
 
 /**
+ * Trượt CAS vì dòng đang dựng đã bị đóng `SUPERSEDED` bởi lượt dựng một bản ĐỨNG TRÊN nó
+ * (`dongDauCacBanDuoi`) — tức lượt này đang cầm ẢNH CHỤP CŨ: đọc payload xong thì một phiên bản mới
+ * hơn land và được dựng xong trước khi lượt này kịp đóng dấu (lô trang API chạy vài giây, webhook
+ * chen giữa).
+ *
+ * Kết cục ĐÚNG, không phải hỏng hóc: bản đứng trên đã có số phận, dòng này đúng là "đã bị thay". Phải
+ * là lớp lỗi RIÊNG vì caller cần xử khác lỗi thường: lượt ghi Silver của bản cũ PHẢI cuộn lại (không
+ * đè nội dung bản mới bằng ảnh chụp cũ) — nên vẫn ném; nhưng KHÔNG được chết cả lô, KHÔNG đếm
+ * `skipped` (bật backlog GIẢ). Caller bắt lớp này ⇒ đếm `ordersSkippedStale` (đã-hạch-toán).
+ */
+export class BanDaBiThayThe extends Error {
+  constructor(rawRowId: string) {
+    super(
+      `Dòng kho thô ${rawRowId} vừa bị một phiên bản mới hơn của cùng đơn thay thế (SUPERSEDED) trong ` +
+        `lúc đang dựng Sổ — huỷ lượt ghi bằng ảnh chụp cũ này.`
+    );
+    this.name = "BanDaBiThayThe";
+  }
+}
+
+/**
  * Đóng dấu kết cục lên ĐÚNG dòng Bronze.
  *
  * `db` nhận client của transaction đang ghi Silver: với `APPLIED`/`SUPERSEDED`, dấu PHẢI commit
@@ -100,19 +132,24 @@ export async function dongDauKetCuc(
     data: { silverOutcome: ketCuc, silverProcessedAt: new Date(), silverNote: note ?? null },
   });
   if (r.count === 0) {
-    // Phân biệt VÌ SAO trượt để caller xử đúng: `DISCARDED` là kết cục có chủ đích (ném lớp riêng —
-    // cuộn lại lượt ghi nhưng KHÔNG đếm là mất dòng); còn lại (dòng không tồn tại, hay một kết cục
-    // khác không có đường hợp lệ nào dẫn tới) thì ném to như cũ.
+    // Phân biệt VÌ SAO trượt để caller xử đúng — hai kết cục có chủ đích ném lớp riêng (cuộn lại lượt
+    // ghi nhưng KHÔNG đếm là mất dòng):
+    //  - `DISCARDED`: chủ shop vừa "Xóa dữ liệu giao dịch".
+    //  - `SUPERSEDED`: lượt dựng bản đứng trên vừa đóng dòng này (`dongDauCacBanDuoi`) — ta đang cầm
+    //    ảnh chụp cũ. Chỉ tới được đây khi `ketCuc` ≠ `SUPERSEDED` (bằng thì CAS `= ketCuc` đã khớp).
+    // Còn lại (dòng không tồn tại, hay một kết cục khác không có đường hợp lệ nào dẫn tới) thì ném to.
     const hienTai = await db.rawPancakeOrder.findUnique({
       where: { id: rawRowId },
       select: { silverOutcome: true },
     });
     if (hienTai?.silverOutcome === KET_CUC.DISCARDED) throw new KetCucDaXoaTay(rawRowId);
+    if (hienTai?.silverOutcome === KET_CUC.SUPERSEDED) throw new BanDaBiThayThe(rawRowId);
     throw new Error(
       `Dòng kho thô ${rawRowId} đã có kết cục khác trong lúc đang dựng Sổ — huỷ lượt ghi này để ` +
         `không ghi đè một kết cục đã chốt.`
     );
   }
+  await dongDauCacBanDuoi(db, rawRowId, false);
 }
 
 /**
@@ -132,6 +169,59 @@ export async function dongDauKetCucBoiLuotTay(
     where: { id: rawRowId },
     data: { silverOutcome: ketCuc, silverProcessedAt: new Date(), silverNote: note ?? null },
   });
+  await dongDauCacBanDuoi(db, rawRowId, true);
+}
+
+/**
+ * Đóng `SUPERSEDED` cho các dòng CÙNG khoá (`shopId`, `externalId`) đứng DƯỚI `rawRowId` theo thứ tự
+ * phiên bản — gọi ngay sau khi `rawRowId` vừa có kết cục, trong CÙNG client (transaction ghi Silver
+ * nếu có) để dấu bản đầu và dấu bản dưới cùng sống cùng chết.
+ *
+ * Vì sao phải đóng NGAY ở đường theo từng đơn chứ không chờ lượt quét đêm: ca trang API chụp TRƯỚC sự
+ * kiện webhook mà land SAU — đường từng đơn dựng bản đứng đầu (nội dung mới, land sớm), còn dòng trang
+ * cũ thì không bao giờ được transform chạm tới; để nó ở `NULL` là phép đếm "còn dở" và cảnh báo "còn
+ * dở từ lượt trước" của từng trang mang một dòng ma tới tận đêm.
+ *
+ * CHỈ dòng xếp SAU `rawRowId` — KHÔNG phải "mọi dòng không phải `rawRowId`": giữa lúc đọc payload và
+ * lúc đóng dấu, một phiên bản MỚI HƠN có thể vừa land; đóng nó `SUPERSEDED` là CAS của chính lượt dựng
+ * nó trượt ⇒ bản mới nhất không bao giờ vào Sổ. Dòng xếp sau một bản đã xử lý thì chắc chắn đã lỗi thời.
+ *
+ * `FOR UPDATE SKIP LOCKED`: đây là việc DỌN DẸP, không được chặn hay deadlock lượt ghi tiền. Dòng đang
+ * bị ai khác khoá (lượt quét bản cũ đêm, lượt dựng song song, lượt "Xóa dữ liệu giao dịch") thì bỏ
+ * qua — kẻ đang giữ nó tự đóng dấu, và `dongDauCacBanCuChuaDongDau` là lưới cuối.
+ *
+ * `ghiDeMoiKetCuc` = quyền của LƯỢT TAY (`dongDauKetCucBoiLuotTay`): ghi đè mọi kết cục cũ của bản
+ * dưới (kể cả `FAILED_*`/`LEGACY`/`DISCARDED`) — chủ shop đang chủ động dựng lại nên bản dưới mang
+ * đúng sự thật mới là "đã bị thay". Đường thường chỉ đóng dòng `NULL` (cùng quyền hạn
+ * `dongDauCacBanCuChuaDongDau`). KHÔNG export: quyền hạn nằm ở TÊN hai hàm gọi nó.
+ */
+async function dongDauCacBanDuoi(db: ClientGhi, rawRowId: string, ghiDeMoiKetCuc: boolean): Promise<void> {
+  await db.$executeRaw`
+    WITH xep AS (
+      SELECT "id", row_number() OVER (ORDER BY ${thuTuPhienBanDon}) AS hang
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
+      WHERE ("shopId", "externalId") = (
+        SELECT "shopId", "externalId" FROM "RawPancakeOrder" WHERE "id" = ${rawRowId}
+      )
+    ),
+    khoa AS (
+      SELECT r."id" FROM "RawPancakeOrder" r
+      WHERE r."id" IN (
+          SELECT x."id" FROM xep x
+          WHERE x.hang > (SELECT y.hang FROM xep y WHERE y."id" = ${rawRowId})
+        )
+        AND (
+          r."silverOutcome" IS NULL
+          OR (${ghiDeMoiKetCuc}::boolean AND r."silverOutcome" <> ${KET_CUC.SUPERSEDED})
+        )
+      FOR UPDATE OF r SKIP LOCKED
+    )
+    UPDATE "RawPancakeOrder" r
+    SET "silverOutcome" = ${KET_CUC.SUPERSEDED},
+        "silverProcessedAt" = now(),
+        "silverNote" = 'Bản cũ hơn — đã có phiên bản đứng trên của cùng đơn được xử lý'
+    WHERE r."id" IN (SELECT "id" FROM khoa)
+  `;
 }
 
 /**
@@ -158,9 +248,9 @@ export async function locDonChuaDongDau(shopId: string, externalIds: string[]): 
   const rows = await prisma.$queryRaw<{ externalId: string }[]>`
     SELECT m."externalId" FROM (
       SELECT DISTINCT ON ("shopId", "externalId") "externalId", "silverOutcome"
-      FROM "RawPancakeOrder"
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
       WHERE "shopId" = ${shopId} AND "externalId" = ANY(${externalIds}::text[])
-      ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+      ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
     ) m
     WHERE m."silverOutcome" IS NULL
   `;
@@ -185,8 +275,8 @@ export async function locDonQuaHanChuaDongDau(
     SELECT m."id", m."shopId", m."externalId" FROM (
       SELECT DISTINCT ON ("shopId", "externalId")
         "id", "shopId", "externalId", "silverOutcome", "fetchedAt", "silverAttempts"
-      FROM "RawPancakeOrder"
-      ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
+      ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
     ) m
     WHERE m."silverOutcome" IS NULL
       AND m."fetchedAt" < now() - make_interval(mins => ${quaHanPhut}::int)
@@ -208,8 +298,8 @@ export async function demTonDong(quaHanPhut: number): Promise<{ tong: number; cu
   const [r] = await prisma.$queryRaw<{ tong: bigint; cuNhat: Date | null }[]>`
     SELECT count(*)::bigint AS tong, min(m."fetchedAt") AS "cuNhat" FROM (
       SELECT DISTINCT ON ("shopId", "externalId") "silverOutcome", "fetchedAt"
-      FROM "RawPancakeOrder"
-      ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
+      ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
     ) m
     WHERE m."silverOutcome" IS NULL
       AND m."fetchedAt" < now() - make_interval(mins => ${quaHanPhut}::int)
@@ -222,8 +312,8 @@ export async function demCanXem(): Promise<number> {
   const [r] = await prisma.$queryRaw<{ tong: bigint }[]>`
     SELECT count(*)::bigint AS tong FROM (
       SELECT DISTINCT ON ("shopId", "externalId") "silverOutcome"
-      FROM "RawPancakeOrder"
-      ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
+      ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
     ) m
     WHERE m."silverOutcome" IN (${KET_CUC.FAILED_SHAPE}, ${KET_CUC.FAILED_RETRY_LIMIT})
   `;
@@ -251,8 +341,8 @@ export async function dsDonCanXem(gioiHan: number): Promise<DonCanXem[]> {
     SELECT m."shopId", m."externalId", m."silverOutcome", m."silverNote", m."silverProcessedAt" FROM (
       SELECT DISTINCT ON ("shopId", "externalId")
         "shopId", "externalId", "silverOutcome", "silverNote", "silverProcessedAt"
-      FROM "RawPancakeOrder"
-      ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
+      ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
     ) m
     WHERE m."silverOutcome" IN (${KET_CUC.FAILED_SHAPE}, ${KET_CUC.FAILED_RETRY_LIMIT})
     ORDER BY m."silverProcessedAt" DESC NULLS LAST
@@ -358,11 +448,11 @@ export async function ketCucHienTaiCuaDon(
   return prisma.$queryRaw`
     SELECT m."shopId", m."externalId", m."silverOutcome" FROM (
       SELECT DISTINCT ON ("shopId", "externalId") "shopId", "externalId", "silverOutcome"
-      FROM "RawPancakeOrder"
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
       WHERE ("shopId", "externalId") IN (
         SELECT * FROM unnest(${shopIds}::text[], ${externalIds}::text[])
       )
-      ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+      ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
     ) m
   `;
 }
@@ -378,8 +468,8 @@ export async function locDonLegacy(gioiHan: number): Promise<{ shopId: string; e
   return prisma.$queryRaw<{ shopId: string; externalId: string }[]>`
     SELECT m."shopId", m."externalId" FROM (
       SELECT DISTINCT ON ("shopId", "externalId") "shopId", "externalId", "silverOutcome"
-      FROM "RawPancakeOrder"
-      ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
+      ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
     ) m
     WHERE m."silverOutcome" = ${KET_CUC.LEGACY}
     LIMIT ${gioiHan}
@@ -387,8 +477,8 @@ export async function locDonLegacy(gioiHan: number): Promise<{ shopId: string; e
 }
 
 /**
- * Đóng dấu `SUPERSEDED` cho mọi dòng chưa có kết cục mà KHÔNG phải bản mới nhất của khoá
- * (shopId, externalId).
+ * Đóng dấu `SUPERSEDED` cho mọi dòng chưa có kết cục mà KHÔNG phải bản đứng đầu của khoá
+ * (shopId, externalId) theo thứ tự phiên bản — kể cả dòng land SAU mà nội dung cũ hơn.
  *
  * Transform chỉ chạm bản mới nhất mỗi khoá, nên các bản cũ hơn không bao giờ được đóng dấu —
  * chúng sẽ nằm mãi trong nhóm "chưa xong" và làm phép đếm tồn đọng hiện hàng trăm dòng ma (đo
@@ -405,8 +495,8 @@ async function dongDauCacBanCu(gomLegacy: boolean): Promise<number> {
   const rows = await prisma.$queryRaw<{ count: bigint }[]>`
     WITH moi_nhat AS (
       SELECT DISTINCT ON ("shopId", "externalId") "id"
-      FROM "RawPancakeOrder"
-      ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
+      ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
     ),
     da_dong AS (
       UPDATE "RawPancakeOrder" r

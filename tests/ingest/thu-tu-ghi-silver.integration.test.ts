@@ -325,7 +325,10 @@ describe("trang API cũ land sau webhook mới — qua landRaw + transformFromRa
     const don = await prisma.order.findUniqueOrThrow({ where: { pancakeId: ID } });
     expect(don.status).toBe("RETURNED");
     expect(don.platformFeeEst).toBe(5_839);
-    expect(t.ordersSkippedStale).toBe(1);
+    // Lượt của trang T1 dựng bản ĐỨNG ĐẦU theo thứ tự phiên bản chung (T2, land sớm) ⇒ ghi lại T2
+    // idempotent chứ không cầm T1 rồi bị guard chặn; dòng T1 đóng SUPERSEDED vì nằm dưới T2.
+    expect(t.ordersUpserted).toBe(1);
+    expect(t.ordersSkippedStale).toBe(0);
     expect(demDaHachToan(t)).toBe(1);
     expect(await prisma.rawPancakeOrder.count({ where: { externalId: ID } })).toBe(2);
     const moiNhat = await prisma.rawPancakeOrder.findFirstOrThrow({

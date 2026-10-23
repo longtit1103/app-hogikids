@@ -9,6 +9,7 @@ import {
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
 import { QUA_HAN_PHUT } from "@/lib/bronze/doi-soat-don-con-do";
 import { demDonBiLuatLoaiConTrongSo } from "@/lib/bronze/rebuild";
+import { noiMocPhienBanDon, thuTuPhienBanDon } from "@/lib/bronze/thu-tu-phien-ban-don";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -108,14 +109,19 @@ export type KhaoSatLegacy = {
   hetLegacy: boolean;
 };
 
-/** ĐỌC trạng thái, KHÔNG ghi gì — dùng cho cả lượt thử lẫn phép kiểm sau lượt ghi. */
+/**
+ * ĐỌC trạng thái, KHÔNG ghi gì — dùng cho cả lượt thử lẫn phép kiểm sau lượt ghi.
+ *
+ * "Bản mới nhất" theo MỘT thứ tự phiên bản chung (`thuTuPhienBanDon`) — đúng thứ tự `locDonLegacy`
+ * chọn lô; xếp riêng thì `legacyMoiNhat` (và trần lô suy ra từ nó) lệch số đơn thật sự còn phải dựng.
+ */
 export async function khaoSatLegacy(): Promise<KhaoSatLegacy> {
   const [theoDonRows, theoDongRows, legacyShopRows] = await Promise.all([
     prisma.$queryRaw<{ kc: string; so: bigint }[]>`
       SELECT coalesce(m."silverOutcome", '(NULL)') AS kc, count(*)::bigint AS so FROM (
         SELECT DISTINCT ON ("shopId", "externalId") "shopId", "externalId", "silverOutcome"
-        FROM "RawPancakeOrder"
-        ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+        FROM "RawPancakeOrder" ${noiMocPhienBanDon}
+        ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
       ) m
       GROUP BY 1
     `,
@@ -127,8 +133,8 @@ export async function khaoSatLegacy(): Promise<KhaoSatLegacy> {
     prisma.$queryRaw<{ shopId: string; so: bigint }[]>`
       SELECT m."shopId", count(*)::bigint AS so FROM (
         SELECT DISTINCT ON ("shopId", "externalId") "shopId", "externalId", "silverOutcome"
-        FROM "RawPancakeOrder"
-        ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+        FROM "RawPancakeOrder" ${noiMocPhienBanDon}
+        ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}
       ) m
       WHERE m."silverOutcome" = ${KET_CUC.LEGACY}
       GROUP BY 1

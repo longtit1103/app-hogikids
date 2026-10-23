@@ -1,3 +1,4 @@
+import { noiMocPhienBanDon, thuTuPhienBanDon } from "@/lib/bronze/thu-tu-phien-ban-don";
 import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { parseVnDate } from "@/lib/ingest/pancake-mapping";
 import { prisma } from "@/lib/prisma";
@@ -60,9 +61,11 @@ export async function doiChieuDonKhoVsSan(): Promise<KetQuaDoiChieuKho> {
   >`
     WITH ban_sao AS (
       SELECT DISTINCT ON ("externalId") "externalId", payload
-      FROM "RawPancakeOrder"
+      FROM "RawPancakeOrder" ${noiMocPhienBanDon}
       WHERE "shopId" = ${kho} AND "externalId" ~ '^AF[0-9]+O'
-      ORDER BY "externalId", "fetchedAt" DESC
+      -- Bản sao đứng đầu theo MỘT thứ tự phiên bản chung của đơn Pancake (cùng thứ tự đường dựng
+      -- Silver + sổ kết cục dùng) — xếp riêng ở đây là trạng thái/tiền bản sao lệch bản app coi là mới nhất.
+      ORDER BY "externalId", ${thuTuPhienBanDon}
     ), tach AS (
       SELECT substring("externalId" from '^AF([0-9]+)O')        AS shop_ban,
              CASE substring("externalId" from '^AF([0-9]+)O')

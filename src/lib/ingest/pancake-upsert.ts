@@ -1,6 +1,12 @@
 import { Prisma } from "@/generated/prisma/client";
 
-import { dongDauKetCuc, dongDauKetCucBoiLuotTay, KET_CUC, KetCucDaXoaTay } from "@/lib/bronze/ket-cuc-silver";
+import {
+  BanDaBiThayThe,
+  dongDauKetCuc,
+  dongDauKetCucBoiLuotTay,
+  KET_CUC,
+  KetCucDaXoaTay,
+} from "@/lib/bronze/ket-cuc-silver";
 import { prisma } from "@/lib/prisma";
 
 import { ghepVariantThuCong } from "./ghep-variant-thu-cong";
@@ -505,6 +511,13 @@ export async function upsertOneOrder(
     if (e instanceof KetCucDaXoaTay) {
       stats.ordersDiscardedGiuaChung++;
       return "DISCARDED";
+    }
+    // Lượt này cầm ẢNH CHỤP CŨ: giữa lúc đọc payload và lúc đóng dấu, một bản đứng trên của cùng đơn
+    // đã được dựng và đóng dòng này `SUPERSEDED`. Transaction trên ĐÃ cuộn lại (không đè nội dung bản
+    // mới) — đúng kết cục "bản cũ", đếm `ordersSkippedStale` như guard `CU_HON`, KHÔNG `skipped`.
+    if (e instanceof BanDaBiThayThe) {
+      stats.ordersSkippedStale++;
+      return "SUPERSEDED";
     }
     // LỖI HỆ THỐNG thì ném tiếp, KHÔNG hạ cấp thành "đơn này hỏng". Xem `LoiHeThongKhiGhiDon`:
     // nuốt nó ở đây là để lượt đối soát đếm nhầm thành lượt-thử-của-dòng, và sau vài đêm chôn sạch

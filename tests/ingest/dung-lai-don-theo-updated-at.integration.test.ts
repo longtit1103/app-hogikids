@@ -92,11 +92,14 @@ describe("dựng lại đơn từ kho thô — bản thắng theo updated_at r�
     expect(don.rawFetchedAt?.getTime()).toBe(MOC_LAND_SOM.getTime());
     expect(t.ordersUpserted).toBe(1);
     expect(await ketCuc(dongT2)).toBe("APPLIED");
+    // Dòng T1 nằm DƯỚI bản đứng đầu theo thứ tự phiên bản chung ⇒ đóng SUPERSEDED ngay lượt này.
+    expect(await ketCuc(dongT1)).toBe("SUPERSEDED");
 
-    // Dòng T1 (bản mới nhất theo `fetchedAt` của sổ kết cục) chưa có dấu ⇒ đối soát đêm nhặt nó theo
-    // từng đơn: guard ở upsert thấy Silver đã giữ T2 ⇒ SUPERSEDED, Silver không lùi, không báo kẹt.
+    // Đường theo từng đơn (ingest trang / đối soát đêm) chọn CÙNG bản T2 ⇒ ghi lại idempotent,
+    // Silver không lùi, T1 giữ dấu, không báo kẹt.
     const dem = await transformFromRaw("orders", [], { externalIds: [ID], shopId: SHOP_TIKTOK });
-    expect(dem.ordersSkippedStale).toBe(1);
+    expect(dem.ordersUpserted).toBe(1);
+    expect(dem.ordersSkippedStale).toBe(0);
     expect(await ketCuc(dongT1)).toBe("SUPERSEDED");
     expect((await prisma.order.findUniqueOrThrow({ where: { pancakeId: ID } })).status).toBe("RETURNED");
   });
@@ -157,12 +160,12 @@ describe("dựng lại đơn từ kho thô — bản thắng theo updated_at r�
     });
   });
 
-  it("đường theo TỪNG ĐƠN (externalIds) giữ luật fetchedAt — khớp bản mới nhất của sổ kết cục", async () => {
+  it("đường theo TỪNG ĐƠN (externalIds) dùng CÙNG thứ tự với quét cả bảng", async () => {
     await chen("TUNG-DON", { id: "TUNG-DON", updated_at: T2, v: "T2" }, MOC_LAND_SOM);
     await chen("TUNG-DON", { id: "TUNG-DON", updated_at: T1, v: "T1" }, MOC_LAND_MUON);
 
     const [row] = await latestPayloads("RawPancakeOrder", { externalIds: ["TUNG-DON"], shopId: SHOP_TIKTOK });
-    expect((row?.payload as { v: string }).v).toBe("T1");
+    expect((row?.payload as { v: string }).v).toBe("T2");
     expect((await banThang())["TUNG-DON"]).toBe("T2");
   });
 });

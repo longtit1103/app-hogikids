@@ -4,6 +4,7 @@ import { locDonChuaDongDau } from "@/lib/bronze/ket-cuc-silver";
 import { giuKhoaLandDon } from "@/lib/bronze/khoa-land-don";
 import { landRaw } from "@/lib/bronze/land-raw";
 import { BRONZE_STREAMS } from "@/lib/bronze/streams";
+import { NOI_MOC_PHIEN_BAN_DON_SQL, THU_TU_PHIEN_BAN_DON_SQL } from "@/lib/bronze/thu-tu-phien-ban-don";
 import { transformFromRaw, type TransformStats } from "@/lib/bronze/transform-from-raw";
 import { shopIdsChoVai } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
@@ -228,17 +229,27 @@ type SoSanhBanApi = {
 /**
  * GUARD THỨ TỰ (bịt lỗi Silver thụt lùi — chứng minh thực nghiệm 2026-07-27).
  *
- * `landRaw` đóng dấu `fetchedAt = now()` và transform luôn chọn bản `fetchedAt` mới nhất ⇒ nguồn
- * land SAU luôn thắng, BẤT KỂ nội dung nó chụp lúc nào. Đường API cũ miễn nhiễm (API luôn trả
- * trạng thái hiện tại), nhưng webhook là nguồn ĐẦU TIÊN có thể mang nội dung CŨ tới muộn:
+ * `landRaw` đóng dấu `fetchedAt = now()` — mốc LAND, không phải mốc NỘI DUNG. Đây là lớp guard ĐẦU
+ * TIÊN (trước khi land) của MỘT thứ tự phiên bản chung cho đơn Pancake (`thu-tu-phien-ban-don.ts`:
+ * `updated_at` trước, `fetchedAt` sau — đường dựng Silver và sổ kết cục cùng xếp theo nó; lớp sau là
+ * guard `updated_at` ở `upsertOneOrder`). Trước khi có thứ tự đó, transform chọn bản `fetchedAt` mới
+ * nhất ⇒ nguồn land SAU luôn thắng, BẤT KỂ nội dung nó chụp lúc nào. Đường API cũ miễn nhiễm (API
+ * luôn trả trạng thái hiện tại), nhưng webhook là nguồn ĐẦU TIÊN có thể mang nội dung CŨ tới muộn:
  * 2 sự kiện cách nhau vài trăm ms chạy song song trong n8n, hoặc sự kiện bắn ngay trước lượt sync
  * nhưng tới app ngay sau. Hậu quả đã đo: phí sàn tụt từ số THẬT về số tạm, đơn RETURNED lùi về
  * PENDING và được tính lại vào doanh thu (phá bất biến #1) — và KHÔNG tự lành: lượt API kế tiếp
  * trùng hash nên không land lại, `rebuild-from-raw` cũng chọn đúng bản webhook cũ đó.
  *
- * Vì vậy sự kiện cũ hơn KHÔNG được land vào Bronze (không chỉ "không transform"): dòng Bronze cũ
- * hơn mà `fetchedAt` mới hơn là quả mìn hẹn giờ cho mọi lần rebuild sau này. Không mất dữ liệu —
+ * Vì vậy sự kiện cũ hơn KHÔNG được land vào Bronze (không chỉ "không transform"): thứ tự phiên bản
+ * chung đã xếp nó xuống dưới, nhưng bản CÙNG mốc `updated_at` thì land muộn vẫn thắng — sự kiện
+ * cùng mốc mà thiếu field/phí tạm sẽ đè số API nếu được land. Không mất dữ liệu —
  * hộp thư `RawPancakeWebhookEvent` giữ nguyên payload, nó mới là kho raw của webhook.
+ *
+ * So với BẢN ĐỨNG ĐẦU theo thứ tự phiên bản chung — đúng bản Silver đang phản ánh — KHÔNG phải dòng
+ * land gần nhất. Ca đo được khi còn so với dòng land gần nhất: A (mốc X, phí thật 5.839) đã dựng; trang
+ * API cũ B (mốc W < X) land muộn và nằm dưới A; sự kiện E cùng mốc X mang phí tạm 16.000 được so với
+ * B ⇒ X > W ⇒ land, đứng đầu (cùng mốc, land muộn) ⇒ Silver 5.839 → 16.000, lượt API sau trùng hash
+ * nên không tự lành. `thieuField`/`matFieldLong` cũng phải so với bản đứng đầu vì lý do y hệt.
  *
  * So bằng `parseVnDate` (KHÔNG so chuỗi): naive datetime Pancake là giờ UTC (bất biến #3) và
  * định dạng có thể đổi separator T/khoảng trắng.
@@ -256,9 +267,9 @@ async function laSuKienCuHon(
     `
     WITH moi AS MATERIALIZED (SELECT ($1::jsonb) AS o),
     cu AS MATERIALIZED (
-      SELECT payload FROM "RawPancakeOrder"
+      SELECT payload FROM "RawPancakeOrder" ${NOI_MOC_PHIEN_BAN_DON_SQL}
       WHERE "shopId" = $2 AND "externalId" = (SELECT o->>'id' FROM moi)
-      ORDER BY "fetchedAt" DESC, "id" DESC LIMIT 1
+      ORDER BY ${THU_TU_PHIEN_BAN_DON_SQL} LIMIT 1
     )
     SELECT
       (SELECT o->>'id' FROM moi) AS "externalId",
@@ -387,7 +398,8 @@ async function xuLyDonHang(shopId: string, payload: string): Promise<KetQuaXuLy>
     // kiện gửi lại sau đó mang đúng `updated_at` cũ ⇒ guard kết luận "cũ hơn" ⇒ hàm thoát ngay tại
     // đây và đơn kẹt vĩnh viễn, đúng cái mà cột kết cục sinh ra để chặn.
     //
-    // Dựng lại BẢN BRONZE MỚI NHẤT (qua `externalIds`, transform tự chọn bản `fetchedAt` mới nhất),
+    // Dựng lại BẢN BRONZE ĐỨNG ĐẦU (qua `externalIds`, transform tự chọn theo thứ tự phiên bản chung
+    // `updated_at` rồi `fetchedAt` — cùng thứ tự `locDonChuaDongDau` vừa hỏi),
     // TUYỆT ĐỐI không dựng payload đang bị chặn — nếu không thì đây thành cửa sau để webhook cũ đè
     // lên số API đã đối soát, tức phá chính luật guard vừa bảo vệ.
     const conDo = thuTu.externalId ? await locDonChuaDongDau(shopId, [thuTu.externalId]) : [];

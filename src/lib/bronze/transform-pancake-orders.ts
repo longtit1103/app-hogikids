@@ -1,4 +1,5 @@
 import {
+  BanDaBiThayThe,
   dongDauKetCuc,
   dongDauKetCucBoiLuotTay,
   KET_CUC,
@@ -110,9 +111,11 @@ export async function transformOrders(
   // Một chỗ duy nhất quyết định "được ghi đè kết cục cũ hay không", để nhánh nào cũng dùng đúng
   // quyền hạn của lượt đang chạy.
   const dauKetCuc = luotTayDuocGhiDe ? dongDauKetCucBoiLuotTay : dongDauKetCuc;
-  // Đóng dấu kết cục nhánh loại-trừ (mirror/shape); CAS thua vì dòng vừa bị "Xóa dữ liệu giao
-  // dịch" đóng DISCARDED là kết cục CÓ CHỦ ĐÍCH — đếm `ordersDiscardedGiuaChung` (cổng đối soát
-  // tính là đã-hạch-toán) và trả true để caller BỎ bộ đếm thường, KHÔNG để ném trào ra huỷ cả lô.
+  // Đóng dấu kết cục nhánh loại-trừ (mirror/shape); CAS thua vì một kết cục CÓ CHỦ ĐÍCH vừa chốt
+  // trên dòng ⇒ đếm vào bộ đếm đã-hạch-toán tương ứng và trả true để caller BỎ bộ đếm thường, KHÔNG
+  // để ném trào ra huỷ cả lô:
+  //  - DISCARDED (vừa "Xóa dữ liệu giao dịch") ⇒ `ordersDiscardedGiuaChung`;
+  //  - SUPERSEDED (lô cầm ảnh chụp cũ, bản đứng trên vừa được dựng và đóng dòng này) ⇒ `ordersSkippedStale`.
   // Đường tay (`dongDauKetCucBoiLuotTay`) ghi đè vô điều kiện nên không bao giờ vào nhánh catch.
   const dongDauHoacDaXoa = async (
     rawRowId: string,
@@ -125,6 +128,10 @@ export async function transformOrders(
     } catch (e) {
       if (e instanceof KetCucDaXoaTay) {
         stats.ordersDiscardedGiuaChung++;
+        return true;
+      }
+      if (e instanceof BanDaBiThayThe) {
+        stats.ordersSkippedStale++;
         return true;
       }
       throw e;
