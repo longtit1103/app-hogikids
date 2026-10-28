@@ -76,6 +76,10 @@ beforeEach(async () => {
   await prisma.rawPancakeOrder.deleteMany();
   await prisma.rawShopeeWalletTxn.deleteMany();
   await prisma.rawPancakeProduct.deleteMany();
+  // Lượt dựng lại quét cả hai stream TikTok Business (hoá đơn + ảnh chụp chi phí) — dòng sót từ suite khác đẩy
+  // `skipped`/đếm lệch vì lý do sai.
+  await prisma.rawTiktokBusinessInvoice.deleteMany();
+  await prisma.rawTiktokBusinessCost.deleteMany();
   await prisma.variant.deleteMany();
   await prisma.product.deleteMany();
   await prisma.shopeeSettlement.deleteMany();

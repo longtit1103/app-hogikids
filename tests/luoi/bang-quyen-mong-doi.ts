@@ -71,6 +71,8 @@ export const BANG_QUYEN_MONG_DOI: Readonly<Record<string, CongMongDoiCoKieu>> = 
   [`${A}/the-tin-dung.ts#xoaGanNenTang`]: "tai-chinh-so-quy:sua",
   [`${A}/chot-sao-ke.ts#chotSaoKe`]: "CHU_SHOP",
   [`${A}/uoc-tinh-sao-ke.ts#docUocTinhSaoKe`]: "CHU_SHOP",
+  [`${A}/sao-ke-the.ts#xemTruocSaoKeThe`]: "CHU_SHOP",
+  [`${A}/sao-ke-the.ts#chotSaoKeTuPdf`]: "CHU_SHOP",
   [`${A}/vi-ads.ts#taoViAds`]: "CHU_SHOP",
   [`${A}/vi-ads.ts#suaViAds`]: "CHU_SHOP",
   [`${A}/vi-ads.ts#xoaViAds`]: "CHU_SHOP",

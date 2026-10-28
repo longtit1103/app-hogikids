@@ -131,6 +131,30 @@ describe("src/lib/so-quy không dùng tiền dự kiến / net sàn chốt", () 
     }
   );
 
+  /**
+   * Hoá đơn TikTok (`TiktokAdsHoaDon` — nguồn DƯ NỢ THẺ) và tín dụng TikTok tặng (`TiktokAdsTinDung` — chỉ Lãi/Lỗ đọc)
+   * KHÔNG phải tiền rời tài khoản: quỹ chỉ trừ tiền thẻ lúc TRẢ THẺ (`CARD_PAY`). Một lần chép câu đọc hai bảng này
+   * vào Sổ quỹ (hoặc trục Dòng tiền `cash-flow.ts`) là quỹ trừ hai lần tiền ads trả bằng thẻ, hoặc trừ cả phần TikTok
+   * trả bằng tín dụng — mà không test số nào khác đỏ. Bắt cả delegate Prisma lẫn tên model.
+   */
+  const CAM_BANG_TIKTOK_ADS = /tiktokAdsHoaDon|tiktokAdsTinDung|TiktokAdsHoaDon|TiktokAdsTinDung/;
+  const CASH_FLOW = path.resolve(__dirname, "../../../src/lib/reports/cash-flow.ts");
+
+  it.each([
+    ...moiFile.map((f) => [`so-quy/${f.file}`, f.noiDung] as const),
+    ["reports/cash-flow.ts", readFileSync(CASH_FLOW, "utf8")] as const,
+  ])("%s không đọc hoá đơn / tín dụng quảng cáo TikTok", (_file, noiDung) => {
+    expect(noiDung).not.toMatch(CAM_BANG_TIKTOK_ADS);
+  });
+
+  it("regex CAM_BANG_TIKTOK_ADS bắt delegate + tên model (tự kiểm lưới)", () => {
+    expect("await prisma.tiktokAdsHoaDon.findMany({})").toMatch(CAM_BANG_TIKTOK_ADS);
+    expect("await tx.tiktokAdsTinDung.aggregate({})").toMatch(CAM_BANG_TIKTOK_ADS);
+    expect('FROM "TiktokAdsHoaDon"').toMatch(CAM_BANG_TIKTOK_ADS);
+    expect("// Σ TiktokAdsTinDung.grantGomVat").toMatch(CAM_BANG_TIKTOK_ADS);
+    expect("await prisma.tiktokAdsSettlement.findMany({})").not.toMatch(CAM_BANG_TIKTOK_ADS);
+  });
+
   it("regex CAM_SO_DU_TINH_TOAN bắt alias lẫn relative, không bắt bộ lọc trừ quỹ (tự kiểm lưới)", () => {
     expect('import { duNoThe } from "@/lib/no-phai-tra/du-no-the";').toMatch(CAM_SO_DU_TINH_TOAN);
     expect('import { soDuViAds } from "../no-phai-tra/so-du-vi-ads";').toMatch(CAM_SO_DU_TINH_TOAN);

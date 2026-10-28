@@ -113,6 +113,8 @@ const BANG_NGHIEP_VU: { ten: string; dem: (db: Db) => Promise<number>; xoa: (db:
   },
   { ten: "TiktokPayment", dem: (db) => db.tiktokPayment.count(), xoa: (db) => db.tiktokPayment.deleteMany() },
   { ten: "ShopeeSettlement", dem: (db) => db.shopeeSettlement.count(), xoa: (db) => db.shopeeSettlement.deleteMany() },
+  { ten: "TiktokAdsHoaDon", dem: (db) => db.tiktokAdsHoaDon.count(), xoa: (db) => db.tiktokAdsHoaDon.deleteMany() },
+  { ten: "TiktokAdsTinDung", dem: (db) => db.tiktokAdsTinDung.count(), xoa: (db) => db.tiktokAdsTinDung.deleteMany() },
 ];
 
 async function main(): Promise<void> {

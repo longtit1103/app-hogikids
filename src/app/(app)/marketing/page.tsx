@@ -1,3 +1,4 @@
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import { ChuThichNguon } from "@/components/marketing/chu-thich-nguon";
 import { CreatorDrawer } from "@/components/marketing/creator-drawer";
 import { CreatorSection } from "@/components/marketing/creator-section";
@@ -69,10 +70,10 @@ function docKhoiNguon(v: string | undefined): KhoiNguon {
  * là được PHÉP và có chủ đích — bất biến #1: một nguồn công thức doanh thu duy nhất, Marketing
  * không được tự cộng lại đơn/doanh thu Pancake mà phải MƯỢN hàm đã có.
  */
-export default async function MarketingPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function MarketingPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SearchParams>> }) {
   await yeuCauQuyenTrang("/marketing", "marketing:xem");
 
-  const sp = await searchParams;
+  const sp = chuanHoaSearchParams(await searchParams);
   const now = new Date();
   // Kẹp biên phải về hôm nay như `/kenh`: "Tháng này" không được kéo tới ngày tương lai.
   const range = clampRangeEndToNow(
@@ -175,6 +176,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
           donPancake={pancake.orderCount}
           doanhThuGopPancake={pancake.revenue}
           chiQuangCao={pancake.ads}
+          tinDungTang={pancake.adsTinDungTang}
           donTheoNgayPancake={donTheoNgayPancake}
           chuThichPheu={chuThichPheu}
           chuThichNguon={chuThichNguon}

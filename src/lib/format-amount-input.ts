@@ -1,14 +1,38 @@
 /**
- * Ô nhập TIỀN của form ghi tay: gõ gì cũng chỉ giữ chữ số, kẹp trần rồi hiện lại có dấu phân cách.
+ * Ô nhập TIỀN của form ghi tay: gõ gì cũng chỉ giữ chữ số rồi hiện lại có dấu phân cách.
  *
- * Trần 2 tỷ khớp zod ở mọi action (Prisma `Int` = int32, chết ở 2.147.483.647). Kẹp ở client CHỈ là
- * UX — cổng thật vẫn ở action, đừng bỏ bên đó đi.
+ * Trần 2 tỷ khớp zod ở mọi action (Prisma `Int` = int32, chết ở 2.147.483.647). Vượt trần KHÔNG bị
+ * kẹp im lặng (gõ 2,5 tỷ mà ô tự nhảy về 2 tỷ ⇒ lưu sai 500tr không ai biết): giữ nguyên số gõ, form
+ * soi bằng `docAmountInput().vuotTran` / `loiVuotTranAmount` để hiện lỗi và chặn nút lưu. Cổng thật
+ * vẫn ở action — đừng bỏ bên đó đi.
  */
 export const MAX_AMOUNT_INPUT = 2_000_000_000;
 
+/** Số chữ số tối đa còn là số nguyên an toàn của JS (15 < 16 = độ dài `MAX_SAFE_INTEGER`). */
+const MAX_CHU_SO = 15;
+
+export type KetQuaAmountInput = {
+  /** Số đã gõ, KHÔNG kẹp trần (chuỗi quá 15 chữ số bị cắt để vẫn là số nguyên an toàn — vẫn vượt trần). */
+  value: number;
+  /** `value` > `MAX_AMOUNT_INPUT` — form phải báo lỗi, không được lưu. */
+  vuotTran: boolean;
+};
+
+export function docAmountInput(raw: string): KetQuaAmountInput {
+  const digits = raw.replace(/\D/g, "").slice(0, MAX_CHU_SO);
+  const value = digits ? Number.parseInt(digits, 10) : 0;
+  return { value, vuotTran: value > MAX_AMOUNT_INPUT };
+}
+
 export function parseAmountInput(raw: string): number {
-  const digits = raw.replace(/\D/g, "");
-  return digits ? Math.min(Number.parseInt(digits, 10), MAX_AMOUNT_INPUT) : 0;
+  return docAmountInput(raw).value;
+}
+
+/** Câu lỗi hiện dưới ô tiền khi vượt trần; `null` = hợp lệ. Dùng chung để mọi form nói cùng một câu. */
+export function loiVuotTranAmount(value: number): string | null {
+  return value > MAX_AMOUNT_INPUT
+    ? `Số tiền tối đa ${new Intl.NumberFormat("vi-VN").format(MAX_AMOUNT_INPUT)} đ`
+    : null;
 }
 
 /** Hiện lại số trong ô: 0 ⇒ để TRỐNG (đừng ép chủ shop xoá số 0 trước khi gõ). */

@@ -2,10 +2,8 @@
 
 import { format } from "date-fns";
 
-import { Input } from "@/components/ui/input";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { soKyChoTheoLich } from "@/lib/so-quy/lich-tra-no";
-import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
 
 import { KhoanVayFormGocCuoiKyFields } from "./khoan-vay-form-goc-cuoi-ky-fields";
 import { KhoanVayFormTermFields } from "./khoan-vay-form-term-fields";

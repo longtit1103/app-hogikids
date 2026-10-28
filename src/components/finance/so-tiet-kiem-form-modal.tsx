@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { suaSoTietKiem, taoSoTietKiem } from "@/lib/actions/so-tiet-kiem";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
@@ -142,9 +142,12 @@ export function SoTietKiemFormModal({
   // Chạy cho CẢ tạo lẫn sửa (khác `doiNenTang`, chỉ có nghĩa lúc sửa) — sổ mới gửi ngày trước D0 cũng
   // phải hỏi, vì dòng `SAVINGS_OUT` sinh ra là dòng tiền THẬT đầu tiên có thể kéo D0 lùi theo.
   const ngayTruocD0 = ngayTruocMoSo(f.startDate, d0);
+  // Gõ quá trần KHÔNG bị kẹp im lặng: ô giữ số gõ, báo lỗi và khoá nút Lưu.
+  const loiTran = loiVuotTranAmount(f.principal);
   const canSave =
     f.name.trim().length > 0 &&
     f.principal > 0 &&
+    !loiTran &&
     Boolean(f.startDate) &&
     Number(f.termMonths) >= 1 &&
     Boolean(f.maturityDate) &&
@@ -207,7 +210,7 @@ export function SoTietKiemFormModal({
           <O label="Ngân hàng" error={loi.bank}>
             <Input value={f.bank} maxLength={60} onChange={(e) => setF((p) => ({ ...p, bank: e.target.value }))} />
           </O>
-          <O label="Số tiền gửi" error={loi.principal}>
+          <O label="Số tiền gửi" error={loi.principal ?? loiTran ?? undefined}>
             <Input
               inputMode="numeric"
               value={formatAmountInput(f.principal)}

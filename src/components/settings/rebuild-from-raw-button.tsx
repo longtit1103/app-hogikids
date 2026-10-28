@@ -131,7 +131,8 @@ export function RebuildFromRawButton() {
           toast.success(
             `Đã dựng lại ${d.ordersUpserted} đơn và ${d.adsExpensesUpserted} dòng chi tiêu quảng cáo; ` +
               `Tiền đã về: ${d.settlementsUpserted} sao kê, ${d.adsUpserted} khoản quảng cáo, ` +
-              `${d.paymentsUpserted} lệnh rút tiền, ${d.shopeeUpserted} dòng ví Shopee`,
+              `${d.paymentsUpserted} lệnh rút tiền, ${d.shopeeUpserted} dòng ví Shopee; ` +
+              `Quảng cáo TikTok: ${d.hoaDonAdsUpserted} hoá đơn, ${d.tinDungAdsUpserted} dòng tín dụng tặng`,
           );
           if (d.soCanhBao > 0) {
             toast.warning(`${d.soCanhBao} cảnh báo: ${d.canhBao.join(" · ")}`);
@@ -141,7 +142,17 @@ export function RebuildFromRawButton() {
           router.refresh();
         });
       })
-      .catch(() => {});
+      .catch(() => {
+        // Lời gọi ném (mất mạng, Cloudflare cắt kết nối quá ~100s): KHÔNG nuốt im — nếu nuốt, `running`
+        // kẹt tới hết 15 phút và hộp thoại không đóng được. Hạ cờ chạy + báo; nạp lại nhật ký để nút
+        // vẫn khoá khi server THẬT SỰ còn RUNNING (`dangKhoa`) và lượt đã xong thì mở lại ngay.
+        ketLuan(() => {
+          toast.error(
+            "Mất kết nối khi gọi lượt dựng lại — xem nhật ký ở khu Kết nối & Đồng bộ (lượt dựng có thể vẫn đang chạy trên máy chủ)",
+          );
+          napTrangThai();
+        });
+      });
   }
 
   return (

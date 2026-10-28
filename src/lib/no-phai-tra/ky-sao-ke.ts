@@ -13,6 +13,16 @@ import type { KhoaNgay } from "@/lib/so-quy/du-bao-quy-types";
  * FIFO: tiền trả sau kỳ mới nhất ăn phần còn treo của kỳ TRƯỚC (hạn cũ, có thể đã quá) trước, phần dư mới
  * sang kỳ mới — phần kỳ cũ KHÔNG được dời hạn chỉ vì đã gộp vào sao kê mới.
  *
+ * NEO DƯ NỢ ≠ NGHĨA VỤ KỲ: `soDu` là NEO cho dư nợ — với kỳ nhập từ PDF nó = dư nợ in trên sao kê + bill TikTok
+ * ngày giao dịch ≤ ngày chốt mà ngân hàng ghi sổ SAU ngày chốt (cố ý: lõi chỉ đếm giao dịch > ngày chốt, thiếu
+ * phần này là dư nợ hụt). Nhưng ngân hàng CHỈ đòi số in trên sao kê trước hạn — bill ghi sổ trễ bị xếp sang kỳ
+ * sau. Nên trần nghĩa vụ của một kỳ là `nghiaVu ?? soDu`: `nghiaVu` = số sao kê (`saoKeSoDu`), NULL = kỳ gõ tay
+ * (chủ shop gõ đúng số sao kê, `soDu` vừa là neo vừa là nghĩa vụ). `duNo()` LUÔN dùng `soDu`.
+ *
+ * TRẢ CHƯA LÊN SAO KÊ: lần trả thẻ ngày ≤ ngày chốt mà ngân hàng ghi sổ SAU ngày chốt (P) đã được trừ khỏi neo, và lõi
+ * không đếm lại nó (ngày ≤ chốt) — nhưng số sao kê vẫn GỒM phần P đã trả ⇒ ngân hàng chỉ còn đòi `saoKe − P`. Kỳ PDF lưu
+ * P ở `saoKeTraChuaLen`; NULL (kỳ chốt trước khi có cột, kỳ gõ tay) ⇒ 0, nghĩa vụ như cũ.
+ *
  * KẸP: sao kê mới ĐÃ gồm phần chưa trả của kỳ cũ, nên trần nghĩa vụ là `nghiaVuKy` của kỳ mới nhất; phần
  * kỳ cũ lấy `min(nghiaVuKy, …)` để hai phần cộng lại không bao giờ vượt trần — kể cả khi chủ shop gõ số
  * sao kê mới NHỎ HƠN phần kỳ cũ còn treo (cũ còn 4, mới gõ 2 ⇒ 2 + 0, không phải 4). Không cộng hai sao kê.
@@ -26,7 +36,63 @@ export type KyNeo = {
   /** Phần của kỳ đã trả TRƯỚC mốc mở sổ (không có `CARD_PAY` tương ứng). */
   daTraTruocMoSo: number;
   laNeoMoSo: boolean;
+  /**
+   * Số ngân hàng ĐÒI của kỳ (dư nợ in trên sao kê PDF, `KySaoKeThe.saoKeSoDu`). NULL = dùng `soDu` (kỳ gõ tay,
+   * neo mở sổ). Chỉ `phaiTra()` đọc; `duNo()` không.
+   */
+  nghiaVu: number | null;
+  /**
+   * Kỳ PDF: Σ lần trả ngày ≤ ngày chốt chưa lên sao kê (`KySaoKeThe.saoKeTraChuaLen`) — trừ khỏi `nghiaVu`.
+   * NULL = 0 (kỳ chốt trước khi có cột, kỳ gõ tay, neo mở sổ). Chỉ `phaiTra()` đọc; `duNo()` không.
+   */
+  saoKeTraChuaLen: number | null;
 };
+
+/**
+ * Cột `KySaoKeThe` để dựng `KyNeo` — MỌI loader chọn đúng bộ này rồi đổi qua `kyNeoTuDong`: thiếu một cột là nghĩa vụ
+ * kỳ sai im lặng (đã có hai nơi tự map riêng từng cột).
+ */
+export const COT_KY_NEO = {
+  ngayChot: true,
+  soDu: true,
+  hanTra: true,
+  daTraTruocMoSo: true,
+  laNeoMoSo: true,
+  saoKeSoDu: true,
+  saoKeTraChuaLen: true,
+} as const;
+
+/** Một dòng `KySaoKeThe` đã chọn theo `COT_KY_NEO`. */
+export type DongKyNeo = {
+  ngayChot: Date;
+  soDu: number;
+  hanTra: Date | null;
+  daTraTruocMoSo: number;
+  laNeoMoSo: boolean;
+  saoKeSoDu: number | null;
+  saoKeTraChuaLen: number | null;
+};
+
+/** Dòng DB ⇒ `KyNeo`: số in trên sao kê PDF (`saoKeSoDu`) là nghĩa vụ kỳ; NULL ở kỳ gõ tay/neo mở sổ ⇒ lõi dùng `soDu`. */
+export function kyNeoTuDong(r: DongKyNeo): KyNeo {
+  return {
+    ngayChot: r.ngayChot,
+    soDu: r.soDu,
+    hanTra: r.hanTra,
+    daTraTruocMoSo: r.daTraTruocMoSo,
+    laNeoMoSo: r.laNeoMoSo,
+    nghiaVu: r.saoKeSoDu,
+    saoKeTraChuaLen: r.saoKeTraChuaLen,
+  };
+}
+
+/**
+ * Trần nghĩa vụ của một kỳ: số sao kê (trừ phần đã trả mà sao kê chưa in) nếu có, không thì neo `soDu` — và KHÔNG
+ * BAO GIỜ vượt neo: chủ shop sửa số chốt THẤP hơn số sao kê (có ghi chú) là đang nói "ngân hàng thật sự chỉ còn chừng
+ * này", đòi trả hơn số đó là đòi trả nợ không tồn tại. Kẹp ≥ 0 (P lớn hơn số sao kê là dữ liệu lạ — không đòi âm).
+ */
+const tranNghiaVu = (k: KyNeo): number =>
+  Math.max(0, Math.min((k.nghiaVu ?? k.soDu) - (k.saoKeTraChuaLen ?? 0), k.soDu));
 
 /**
  * Một giao dịch đã gán về thẻ. `soTien` là ĐÓNG GÓP CÓ DẤU theo `loai`, công thức
@@ -121,6 +187,7 @@ function phan(soTien: number, hanTra: Date, kt: KhoaNgay): PhanPhaiTra | null {
 
 /**
  * Số phải trả tại t, tách hai phần theo HẠN THẬT. `tra` có thể chứa mọi loại giao dịch — chỉ TRA được đọc.
+ * Trần mỗi kỳ = `nghiaVu ?? soDu` (số ngân hàng đòi, không phải neo dư nợ — xem docblock đầu file).
  *
  * Trả null khi chưa có kỳ nào CÓ HẠN với `ngayChot` ≤ t (vd chỉ có neo mở sổ): chưa có sao kê thì không có
  * gì để nhắc trả. Khác `nghiaVuKy` 0 = có kỳ nhưng đã trả hết.
@@ -133,13 +200,13 @@ export function phaiTra(kys: readonly KyNeo[], tra: readonly GiaoDichThe[], t: D
   const kChot = khoaNgayVn(ky.ngayChot);
 
   const pSau = tongTrongKhoang(tra, "TRA", kChot, kt);
-  const nghiaVuKy = Math.max(0, ky.soDu - ky.daTraTruocMoSo - pSau);
+  const nghiaVuKy = Math.max(0, tranNghiaVu(ky) - ky.daTraTruocMoSo - pSau);
 
   const truoc = kyTruoc(kys, ky);
   let soTruoc = 0;
   if (truoc?.hanTra) {
     const traGiuaHaiChot = tongTrongKhoang(tra, "TRA", khoaNgayVn(truoc.ngayChot), kChot);
-    const quaHanTruocChot = Math.max(0, truoc.soDu - truoc.daTraTruocMoSo - traGiuaHaiChot);
+    const quaHanTruocChot = Math.max(0, tranNghiaVu(truoc) - truoc.daTraTruocMoSo - traGiuaHaiChot);
     soTruoc = Math.min(nghiaVuKy, Math.max(0, quaHanTruocChot - pSau));
   }
 

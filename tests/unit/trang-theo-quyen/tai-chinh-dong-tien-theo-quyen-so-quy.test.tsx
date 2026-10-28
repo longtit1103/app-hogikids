@@ -95,6 +95,10 @@ vi.mock("@/lib/so-quy/doi-chieu-so-du-chot", () => ({
 }));
 vi.mock("@/lib/so-quy/du-bao-quy-queries", () => ({ docDuBaoQuy: async () => null }));
 vi.mock("@/lib/so-quy/dong-chay-so-quy-queries", () => ({ docSoQuyDongChay: async () => ({}) }));
+vi.mock("@/lib/no-phai-tra/canh-bao-tin-dung-tiktok-tre", async (goc) => ({
+  ...(await goc<typeof import("@/lib/no-phai-tra/canh-bao-tin-dung-tiktok-tre")>()),
+  docCanhBaoTinDungTiktokTre: async () => null,
+}));
 vi.mock("@/lib/expenses/ensure-recurring-expenses", () => ({
   ensureRecurringExpensesForMonths: async () => undefined,
 }));

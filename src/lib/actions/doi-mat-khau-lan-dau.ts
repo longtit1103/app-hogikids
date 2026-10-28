@@ -10,6 +10,7 @@
 import type { ActionResult } from "@/lib/actions/action-result";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { kiemKhongPhucHoiTrongTx, LoiDangPhucHoiTrongTx } from "@/lib/backup/kiem-khong-phuc-hoi-trong-tx";
 import { matKhauMoiVaXacNhanSchema } from "@/lib/mat-khau-moi-schema";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
@@ -73,12 +74,16 @@ export async function doiMatKhauLanDau(formData: FormData): Promise<ActionResult
       if (!dong || dong.sessionEpoch !== nd.mocPhien || !dong.mustChangePassword || !dong.isActive) {
         throw new TrangThaiDaDoi();
       }
+      kiemKhongPhucHoiTrongTx(); // sau FOR UPDATE — lượt phục hồi bật cờ giữa chừng ⇒ cuộn lại, không ghi hash mới lên schema sắp bị thay
       await tx.user.update({ where: { id: nd.id }, data: { passwordHash: hashMoi, mustChangePassword: false } });
       const moc = await thuHoiPhienCuaNguoi(tx, nd.id);
       await ghiNhatKy(tx, { actor, hanhDong: HANH_DONG.DOI_MAT_KHAU_LAN_DAU });
+      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
       return moc;
     });
   } catch (loi) {
+    // Không ghi nhật ký lỗi: schema sắp bị bản phục hồi thay (cùng luật với action tài khoản).
+    if (loi instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
     if (loi instanceof TrangThaiDaDoi) {
       await ghiNhatKyLoi({ actor, hanhDong: HANH_DONG.DOI_MAT_KHAU_LAN_DAU, ghiChu: { lyDo: "TRANG_THAI_DA_DOI" } });
       return { ok: false, error: LOI_TRANG_THAI_DA_DOI, code: "TRANG_THAI_DA_DOI" };

@@ -58,6 +58,8 @@ export const HANH_DONG = {
   TIET_KIEM_XOA: "TIET_KIEM_XOA",
   TIET_KIEM_TAT_TOAN: "TIET_KIEM_TAT_TOAN",
   TIET_KIEM_MO_LAI: "TIET_KIEM_MO_LAI",
+  // Script gán dấu dòng nhận gốc cho sổ tất toán trước khi có cột trỏ dòng — không phải server action.
+  TIET_KIEM_GAN_DAU_DONG_NHAN_GOC: "TIET_KIEM_GAN_DAU_DONG_NHAN_GOC",
   CHI_PHI_TAO: "CHI_PHI_TAO",
   CHI_PHI_SUA: "CHI_PHI_SUA",
   CHI_PHI_XOA: "CHI_PHI_XOA",
@@ -86,6 +88,7 @@ export const HANH_DONG = {
   THE_GAN_NEN_TANG: "THE_GAN_NEN_TANG",
   THE_XOA_GAN_NEN_TANG: "THE_XOA_GAN_NEN_TANG",
   THE_CHOT_SAO_KE: "THE_CHOT_SAO_KE",
+  CHOT_SAO_KE_PDF: "CHOT_SAO_KE_PDF",
   // Nợ phải trả — ví ads trả trước + bước xác nhận bật
   VI_ADS_TAO: "VI_ADS_TAO",
   VI_ADS_SUA: "VI_ADS_SUA",
@@ -179,6 +182,7 @@ export const ANH_XA_ACTION_HANH_DONG: Record<string, HanhDong> = {
   ganNenTang: HANH_DONG.THE_GAN_NEN_TANG,
   xoaGanNenTang: HANH_DONG.THE_XOA_GAN_NEN_TANG,
   chotSaoKe: HANH_DONG.THE_CHOT_SAO_KE,
+  chotSaoKeTuPdf: HANH_DONG.CHOT_SAO_KE_PDF,
   // Nợ phải trả — ví ads trả trước + bước xác nhận bật
   taoViAds: HANH_DONG.VI_ADS_TAO,
   suaViAds: HANH_DONG.VI_ADS_SUA,

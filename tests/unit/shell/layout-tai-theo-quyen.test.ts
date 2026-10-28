@@ -62,7 +62,7 @@ beforeEach(() => {
   nguon.hasLowStockVariants.mockResolvedValue(true);
   nguon.getRecentDataErrorKinds.mockResolvedValue([]);
   nguon.hasBronzeBacklog.mockResolvedValue(false);
-  nguon.docTrangThaiSaoLuu.mockResolvedValue({ muc: "tot" });
+  nguon.docTrangThaiSaoLuu.mockResolvedValue({ muc: "ok" });
   nguon.settingFindMany.mockResolvedValue([]);
   nguon.demKhoanVayCoKyChoDuyet.mockResolvedValue(2);
   nguon.docCanhBaoSapCan.mockResolvedValue(null);

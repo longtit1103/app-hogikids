@@ -31,7 +31,7 @@ import {
 import type { CashMovementRow, CashMovementRowCoBan } from "@/lib/cash-movements/cash-movement-queries";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 import type { LuaChonDongTienNo } from "@/lib/no-phai-tra/lua-chon-dong-tien-no";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
@@ -266,7 +266,7 @@ export function CashMovementFormModal({
     setFieldErrors({});
     setHoiTruocD0(false);
     initialSnapshotRef.current = JSON.stringify(initial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Chủ ý chỉ nạp lại khi mở hộp thoại / đổi bản ghi — không chạy theo các state còn lại.
   }, [open, row?.id]);
 
   function isDirty(): boolean {
@@ -306,11 +306,14 @@ export function CashMovementFormModal({
   const canVi = kind === "ADS_TOPUP";
   const laNo = coOThe || canPhieu;
   const nhanMocM = noPhaiTra ? formatNgayVn(noPhaiTra.mocM, "dd/MM/yyyy") : "";
+  // Gõ quá trần KHÔNG bị kẹp im lặng: ô giữ số gõ, báo lỗi và khoá nút Lưu.
+  const loiTran = loiVuotTranAmount(amount);
   const canSave = laDieuChinh
-    ? amount > 0 && description.trim().length > 0 && !saving
+    ? amount > 0 && !loiTran && description.trim().length > 0 && !saving
     : Boolean(date) &&
       Boolean(kind) &&
       amount > 0 &&
+      !loiTran &&
       (!laLoaiVay || Boolean(loanId)) &&
       (!laSoTietKiem || Boolean(savingsId)) &&
       (!canThe || Boolean(cardId)) &&
@@ -551,7 +554,7 @@ export function CashMovementFormModal({
             />
           )}
 
-          <Field label="Số tiền" error={fieldErrors.amount}>
+          <Field label="Số tiền" error={fieldErrors.amount ?? loiTran ?? undefined}>
             <div className="relative">
               <Input
                 inputMode="numeric"

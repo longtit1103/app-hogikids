@@ -94,7 +94,13 @@ export async function POST(req: Request): Promise<Response> {
       select: { id: true, stock: true, stockUpdatedAt: true },
     });
 
-    const t = await transformFromRaw("products", warnings);
+    // Mốc "API đi nhìn" đi XUỐNG tận câu ghi biến thể: `stock` chỉ bị ghi khi webhook chưa ghi gì mới
+    // hơn mốc đó. Danh sách chụp ở trên không đủ — webhook commit SAU lúc chụp mà TRƯỚC lúc transform
+    // tới biến thể đó (khe 10–120 giây) nằm ngoài danh sách, và nếu câu ghi không tự so mốc thì ảnh
+    // API cũ hơn đè số webhook trong khi mốc webhook (muộn hơn lúc chụp) vẫn được giữ ⇒ tồn sai mà mốc
+    // nói "đã có sự kiện mới", sự kiện tới trễ sau đó bị guard thứ tự loại. `chayLuc` chắc chắn có
+    // (chốt chặn ở trên đã ném nếu không).
+    const t = await transformFromRaw("products", warnings, { mocApiTonKho: moc?.chayLuc ?? undefined });
 
     // AI BIẾT CHUYỆN MỚI HƠN? So mốc webhook với LÚC API ĐI NHÌN Pancake (`moc.chayLuc` = lượt kéo
     // products shop kho gần nhất), KHÔNG so với `fetchedAt` của từng sản phẩm.
@@ -109,7 +115,8 @@ export async function POST(req: Request): Promise<Response> {
     const mocApiNhin = moc?.chayLuc?.getTime() ?? 0;
 
     // Webhook biết chuyện MỚI HƠN ⇒ trả tồn webhook về chỗ cũ, giữ nguyên mốc để guard thứ tự còn
-    // điểm tựa. Ngược lại ⇒ API đã khẳng định, xoá mốc webhook.
+    // điểm tựa. Ngược lại ⇒ API đã khẳng định, xoá mốc webhook. (Câu ghi biến thể nay đã tự bỏ qua
+    // tồn của nhóm này nhờ `mocApiTonKho`; vòng trả lại giữ làm lưới an toàn và để đếm `stockGiuWebhook`.)
     // Transform ở trên mất 10-120 giây, trong quãng đó webhook VẪN ghi tiếp. Nên cả hai câu lệnh
     // dưới đây đều phải là compare-and-set trên `stockUpdatedAt`: bản ghi nào đổi mốc kể từ lúc chụp
     // là bản MỚI HƠN mọi thứ ta đang cầm ⇒ không được đụng vào.

@@ -1,3 +1,4 @@
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import { startOfDay, startOfMonth, subMonths } from "date-fns";
 
 import { ChannelDonut } from "@/components/dashboard/channel-donut";
@@ -47,7 +48,7 @@ function buildKpiRanges(now: Date): { today: DateRange; thisMonth: DateRange; la
   };
 }
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SearchParams>> }) {
   const nd = await yeuCauQuyenTrang("/", "tong-quan:xem");
   // Thiếu `gia-von-loi-nhuan:xem`: `calcPnl`/`computeChannelPnl`/`computeDailySeries` VẪN tính đủ trong
   // pnl.ts (ngoại lệ chốt 30/09, spec phân quyền §4.1) rồi chiếu DTO che TRƯỚC khi vào props bên dưới.
@@ -63,7 +64,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     return <ChuaSyncEmptyState choPhepDongBo={coQuyen(nd, "cai-dat:sua")} hrefDuocPhep={hrefs} />;
   }
 
-  const sp = await searchParams;
+  const sp = chuanHoaSearchParams(await searchParams);
   // Range chung cho biểu đồ/donut/top: ?tu=&den= (Tùy chọn) → ?range=<preset> → this_month.
   // Hàng KPI phía dưới CỐ Ý độc lập range này (today/tháng-này/tháng-trước cố định — xem buildKpiRanges).
   const range = resolveRangeFromParams({ tu: sp.tu, den: sp.den, range: sp.range }, new Date(), await docLuaChonDaLuu());

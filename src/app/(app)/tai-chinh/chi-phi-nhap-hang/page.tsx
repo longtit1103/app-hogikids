@@ -68,6 +68,8 @@ export default async function ChiPhiNhapHangPage() {
               laChuShop={laChuShop(nd)}
             />
             <GhiNhanPhieuVaoSoNo
+              key={phieuChoGhiNo.map((p) => p.uuid).join("|")}
+              // key: đổi tập phiếu (Đồng bộ ngay + refresh) ⇒ dựng lại state theo từng phiếu từ props mới.
               phieu={phieuChoGhiNo}
               mocM={format(mocM, "yyyy-MM-dd")}
               laChuShop={laChuShop(nd)}
@@ -110,6 +112,8 @@ export default async function ChiPhiNhapHangPage() {
           </div>
         ) : (
           <DuyetChiPhiNhapHang
+            key={deXuat.map((d) => d.uuid).join("|")}
+            // key: đổi tập phiếu đề xuất ⇒ dựng lại state chọn/số tiền theo danh sách mới.
             // Thiếu quyền giá vốn ⇒ bỏ số lượng (tổng ÷ số lượng = giá nhập ≈ giá vốn), giữ tổng phiếu.
             deXuat={quyenGiaVonCua(nd).coQuyenGiaVon ? deXuat : chePhieuNhapDeXuat(deXuat)}
             // Vân tay của ĐÚNG danh sách đang hiện trên màn — lượt ghi từ chối nếu nó đã đổi.

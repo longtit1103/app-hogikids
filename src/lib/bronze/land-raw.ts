@@ -17,7 +17,7 @@ type ClientBronze = PrismaClient | Prisma.TransactionClient;
  * Ép SHAPE của shopId theo TÊN STREAM — regex là HẰNG trong code, TUYỆT ĐỐI KHÔNG lấy từ input:
  *   - `meta/report`: ad account Meta dạng `act_<số>`.
  *   - `tiktokbusiness/report`: advertiser_id (chuỗi số ≥6 chữ số).
- *   - `tiktokbusiness/invoice`: bc_id Business Center (chuỗi số ≥6 chữ số).
+ *   - `tiktokbusiness/invoice` + `tiktokbusiness/cost`: bc_id Business Center (chuỗi số ≥6 chữ số).
  * Không phân biệt được bc_id với advertiser_id (đều là chuỗi số) — nhưng chặn được id SAI KIỂU (vd
  * `act_...` của Meta lọt vào stream TikTok, hoặc chuỗi rác) TRƯỚC khi nó nằm vĩnh viễn trong Bronze
  * (append-only, không sửa được) làm mọi đối soát join theo shopId về sau lệch.
@@ -26,6 +26,7 @@ const OPEN_SHOP_SHAPE: Partial<Record<BronzeStream, { re: RegExp; moTa: string }
   "meta/report": { re: /^act_\d+$/, moTa: "ad account Meta dạng 'act_<số>'" },
   "tiktokbusiness/report": { re: /^\d{6,}$/, moTa: "advertiser_id TikTok Business (chuỗi ≥6 chữ số)" },
   "tiktokbusiness/invoice": { re: /^\d{6,}$/, moTa: "bc_id Business Center (chuỗi ≥6 chữ số)" },
+  "tiktokbusiness/cost": { re: /^\d{6,}$/, moTa: "bc_id Business Center (chuỗi ≥6 chữ số)" },
   "tiktokbusiness/gmvmax_item": { re: /^\d{6,}$/, moTa: "advertiser_id TikTok Business (chuỗi ≥6 chữ số)" },
 };
 
@@ -73,6 +74,27 @@ function ngayCoThatTrenLich(ngay: string): boolean {
   return (
     d.getUTCFullYear() === nam && d.getUTCMonth() === thang - 1 && d.getUTCDate() === ngayTrongThang
   );
+}
+
+/**
+ * Trang của stream TIỀN (`laStreamTien`) có record thiếu khoá ⇒ cả trang bị từ chối, KHÔNG dòng nào
+ * vào Bronze. Lớp lỗi riêng để `/api/ingest/raw` nhận ra và ghi SyncLog ERROR mà vẫn trả HTTP 200
+ * (5xx làm n8n thử lại rồi dừng hẳn các trang sau). Người gọi khác (import ví Shopee, script) không bắt
+ * riêng ⇒ lỗi nổi lên như mọi lỗi land khác — không đường nào land được một phần trong im lặng.
+ */
+export class LoiThieuKhoaStreamTien extends Error {
+  constructor(
+    public readonly stream: BronzeStream,
+    public readonly soThieuKhoa: number,
+    public readonly tong: number
+  ) {
+    super(
+      `${soThieuKhoa} record thiếu khoá trong trang ${tong} record của stream tiền "${stream}" — TỪ CHỐI cả ` +
+        `trang, không land dòng nào: record thiếu khoá không vào được kho thô nên dựng lại cũng không cứu, land ` +
+        `phần còn lại là mất tiền mà không ai thấy. Kiểm hợp đồng API của nguồn này; lượt kéo lại sẽ land đủ khi sửa.`
+    );
+    this.name = "LoiThieuKhoaStreamTien";
+  }
 }
 
 export type LandResult = {
@@ -147,7 +169,7 @@ export async function landRaw(
 ): Promise<LandResult> {
   if (!isBronzeStream(stream)) throw new Error(`Stream không hợp lệ: ${stream}`);
   // `table` + `arrayPath` + `idExpr` là hằng số trong code (registry), KHÔNG lấy từ input.
-  const { table, arrayPath, shops, idExpr, chapNhanNgay } = BRONZE_STREAMS[stream];
+  const { table, arrayPath, shops, idExpr, chapNhanNgay, laStreamTien } = BRONZE_STREAMS[stream];
 
   // `ngay` — CỘNG THÊM cho stream mà record không mang trường ngày (analytics products/videos).
   // Kiểm Ở ĐÂY chứ không chỉ ở route: webhook và script cũng gọi landRaw, và một lần land nhầm
@@ -301,6 +323,12 @@ export async function landRaw(
       `Stream "${stream}": mảng có ${total} record nhưng rút được 0 khoá (idExpr: ${khoa}) — ` +
         `hợp đồng API đã trôi (nhiều khả năng nhà cung cấp đổi tên field khoá). Không land trang này.`
     );
+  }
+
+  // Stream TIỀN có MỘT PHẦN record thiếu khoá: từ chối cả trang TRƯỚC insert (xem `laStreamTien`).
+  // Stream khác giữ hành vi land phần còn lại + đếm `skippedNoId` (route đẩy vào warnings/stats).
+  if (laStreamTien && withId < total) {
+    throw new LoiThieuKhoaStreamTien(stream, total - withId, total);
   }
 
   const inserted = await db.$queryRawUnsafe<{ externalId: string }[]>(

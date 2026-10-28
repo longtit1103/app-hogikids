@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
-import { docDuNoCacThe, docGiaoDichThe, docKyNeoThe } from "@/lib/no-phai-tra/du-no-the";
+import { docDuNoCacThe, docGiaoDichThe, docHoaDonTiktokTrongNgay, docKyNeoThe } from "@/lib/no-phai-tra/du-no-the";
 import { duNo } from "@/lib/no-phai-tra/ky-sao-ke";
 import { prisma } from "@/lib/prisma";
 
@@ -10,9 +10,13 @@ import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
 /**
  * Gom giao dịch thẻ từ DB thật (`hogikids_test`) — spec §5.5 + fixture §6 (M = 01/11/2026, đơn vị triệu).
  *
- * Thẻ A gánh META từ 01/11, đổi META → thẻ C từ 01/12; thẻ B gánh TIKTOK_ADS từ 01/11. Kiểm 3 nguồn
- * (Expense theo luật thẻ duy nhất + ADS_TOPUP nạp bằng thẻ · ví TikTok CÓ DẤU · CARD_PAY), neo mới không
- * đếm lại giao dịch đúng ngày chốt, và xem lại ngày cũ vẫn dùng neo cũ.
+ * Thẻ A gánh META từ 01/11, đổi META → thẻ C từ 01/12; thẻ B gánh TIKTOK_ADS từ 01/11. Kiểm các nguồn
+ * (Expense theo luật thẻ duy nhất + ADS_TOPUP nạp bằng thẻ · HOÁ ĐƠN TikTok thật cho TIKTOK_ADS · ví TikTok CÓ
+ * DẤU · CARD_PAY), neo mới không đếm lại giao dịch đúng ngày chốt, và xem lại ngày cũ vẫn dùng neo cũ.
+ *
+ * TIKTOK_ADS: nợ thẻ theo hoá đơn `BILL_PAYMENT|CASH` (+ `ADD_BALANCE|CASH`), KHÔNG theo `Expense` ads — fixture
+ * cố ý ghi CẢ `Expense` TikTok 33 (khác 30 của hoá đơn, như khi có tín dụng tặng) để mọi phép so B bắt được
+ * đường nào đang chạy.
  */
 
 const tr = (n: number) => Math.round(n * 1_000_000);
@@ -50,6 +54,28 @@ async function ads(nenTang: string, ngay: string, trieu: number, gio = "00:00:00
       description: `ads ${nenTang} ${ngay}`,
       source: "ADS_API",
       refId: `${nenTang}:${ngay}:test-${soRef}`,
+    },
+  });
+}
+
+let soHoaDon = 0;
+/** Hoá đơn TikTok Silver — mặc định `BILL_PAYMENT|CASH|POSITIVE` (TikTok trừ thẻ thật). */
+async function hoaDon(
+  ngay: string,
+  trieu: number,
+  { gio = "12:00:00", loai = "BILL_PAYMENT", billing = "CASH", chieu = "POSITIVE" } = {}
+) {
+  soHoaDon += 1;
+  await prisma.tiktokAdsHoaDon.create({
+    data: {
+      transactionId: `hd-${soHoaDon}|ghep-${soHoaDon}`,
+      bcId: "bc",
+      advertiserId: "adv",
+      createTime: vn(ngay, gio),
+      amount: tr(trieu),
+      transactionType: loai,
+      billingType: billing,
+      amountType: chieu,
     },
   });
 }
@@ -98,10 +124,14 @@ async function seedFixture(): Promise<The> {
   await traThe(A, "2026-11-25", 2);
   await traThe(A, "2026-11-26", 1);
 
-  // TikTok ads 30 (01–25/11) về B; ví TikTok tự trừ 18.
+  // Hoá đơn TikTok trừ thẻ 30 (01–25/11) về B; ví TikTok tự trừ 18. `Expense` ads TikTok 33 (cao hơn hoá đơn
+  // — phần tín dụng tặng) KHÔNG được về B.
   for (const [ngay, trieu] of [["2026-11-01", 10], ["2026-11-12", 10], ["2026-11-25", 10]] as const) {
-    await ads("TIKTOK_ADS", ngay, trieu);
+    await hoaDon(ngay, trieu);
+    await ads("TIKTOK_ADS", ngay, trieu + 1);
   }
+  // Hoá đơn TRƯỚC M (31/10 23:59 VN) — không có thẻ nào gánh, không được cộng vào B.
+  await hoaDon("2026-10-31", 4, { gio: "23:59:00" });
   await prisma.tiktokAdsSettlement.createMany({
     data: [
       { transactionId: "tx-1", shopId: "s", orderCreateTime: vn("2026-11-10", "12:00:00"), settlementAmount: -tr(10) },
@@ -202,10 +232,112 @@ describe("docGiaoDichThe + duNo — fixture §6", () => {
     expect(await duNoTai(A, "2026-11-06")).toBe((truoc ?? 0) + tr(5));
   });
 
-  it("M chưa bật ⇒ không Expense/ví nào về thẻ (hồ sơ chuẩn bị không đổi gì)", async () => {
-    const { A } = await seedFixture();
+  it("M chưa bật ⇒ không Expense/ví/hoá đơn nào về thẻ (hồ sơ chuẩn bị không đổi gì)", async () => {
+    const { A, B } = await seedFixture();
     await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
     const gd = await docGiaoDichThe(A, vn("2026-12-31"));
     expect(gd.filter((g) => g.loai !== "TRA")).toEqual([]);
+    expect(await docGiaoDichThe(B, vn("2026-12-31"))).toEqual([]);
+  });
+});
+
+describe("TIKTOK_ADS — nợ thẻ theo HOÁ ĐƠN thật, không theo Expense", () => {
+  it("thêm Expense ads TikTok (cardId null) ⇒ nợ B KHÔNG đổi; thêm hoá đơn BILL_PAYMENT|CASH ⇒ B tăng đúng số đó", async () => {
+    const { B } = await seedFixture();
+    const truoc = await duNoTai(B, "2026-11-30");
+    await ads("TIKTOK_ADS", "2026-11-28", 5);
+    expect(await duNoTai(B, "2026-11-30")).toBe(truoc);
+    await hoaDon("2026-11-28", 1.43);
+    expect(await duNoTai(B, "2026-11-30")).toBe((truoc ?? 0) + tr(1.43));
+  });
+
+  it("Expense ads TikTok ghi tay cardId=A ⇒ A tăng (cardId thắng, y cũ), B không", async () => {
+    const { A, B } = await seedFixture();
+    const [truocA, truocB] = [await duNoTai(A, "2026-11-06"), await duNoTai(B, "2026-11-06")];
+    await prisma.expense.create({
+      data: { date: vn("2026-11-05"), categoryId: "ads", adsSource: "TIKTOK_ADS", amount: tr(2), description: "ads tay", cardId: A },
+    });
+    expect(await duNoTai(A, "2026-11-06")).toBe((truocA ?? 0) + tr(2));
+    expect(await duNoTai(B, "2026-11-06")).toBe(truocB);
+  });
+
+  it("ADD_BALANCE|CASH tính như hoá đơn; ORDER_CREATION_PAYMENT, PROMOTION_ISSUED, BILL_PAYMENT|CREDIT bỏ qua", async () => {
+    const { B } = await seedFixture();
+    const truoc = await duNoTai(B, "2026-11-30");
+    await hoaDon("2026-11-27", 2, { loai: "ADD_BALANCE" });
+    await hoaDon("2026-11-27", 2, { loai: "ORDER_CREATION_PAYMENT", chieu: "NEGATIVE" });
+    await hoaDon("2026-11-27", 0.5, { loai: "ORDER_CREATION_PAYMENT", billing: "CREDIT", chieu: "NEGATIVE" });
+    await hoaDon("2026-11-27", 3.9, { loai: "PROMOTION_ISSUED", billing: "CREDIT" });
+    await hoaDon("2026-11-27", 0.7, { billing: "CREDIT" });
+    expect(await duNoTai(B, "2026-11-30")).toBe((truoc ?? 0) + tr(2));
+  });
+
+  it("hoá đơn BILL_PAYMENT|CASH NEGATIVE (TikTok hoàn về thẻ) ⇒ nợ B GIẢM đúng số đó, đi loại VI_TRU dương", async () => {
+    const { B } = await seedFixture();
+    const truoc = await duNoTai(B, "2026-11-30");
+    await hoaDon("2026-11-26", 1.5, { chieu: "NEGATIVE" });
+    expect(await duNoTai(B, "2026-11-30")).toBe((truoc ?? 0) - tr(1.5));
+    const gd = await docGiaoDichThe(B, vn("2026-11-30"));
+    expect(gd).toContainEqual({ ngay: vn("2026-11-26", "12:00:00"), soTien: tr(1.5), loai: "VI_TRU" });
+  });
+
+  it("hoá đơn + ví trước MỐC GẮN không về thẻ: gắn B từ 15/11 ⇒ chỉ hoá đơn 25/11 và ví 20/11 tính", async () => {
+    const { B } = await seedFixture();
+    await prisma.ganNenTangThe.updateMany({
+      where: { cardId: B, nenTang: "TIKTOK_ADS" },
+      data: { tuNgay: vn("2026-11-15") },
+    });
+    // neo 6 + hoá đơn 25/11 10 − ví 20/11 8 (hoá đơn 01/11 + 12/11 và ví 10/11 trước mốc gắn).
+    expect(await duNoTai(B, "2026-11-30")).toBe(tr(6 + 10 - 8));
+  });
+
+  it("biên ngày VN: hoá đơn 23:59 VN 30/11 thuộc 30/11, 00:01 VN 01/12 thì chưa", async () => {
+    const { B } = await seedFixture();
+    const truoc = await duNoTai(B, "2026-11-30");
+    await hoaDon("2026-11-30", 1, { gio: "23:59:00" });
+    await hoaDon("2026-12-01", 2, { gio: "00:01:00" });
+    expect(await duNoTai(B, "2026-11-30")).toBe((truoc ?? 0) + tr(1));
+    expect(await duNoTai(B, "2026-12-01")).toBe((truoc ?? 0) + tr(3));
+  });
+});
+
+describe("docHoaDonTiktokTrongNgay — lần TikTok trừ thẻ TẠO đúng ngày chốt (form chốt sao kê)", () => {
+  it("chỉ đếm BILL/ADD_BALANCE CASH POSITIVE của thẻ gánh TIKTOK_ADS, đúng ngày VN, từ M", async () => {
+    const { A, B } = await seedFixture();
+    // Cùng ngày 12/11: tín dụng tặng (CREDIT) và hoàn (NEGATIVE) KHÔNG phải lần trừ thẻ; 23:59 VN vẫn thuộc 12/11.
+    await hoaDon("2026-11-12", 1, { billing: "CREDIT" });
+    await hoaDon("2026-11-12", 2, { chieu: "NEGATIVE" });
+    await hoaDon("2026-11-12", 0.143, { gio: "23:59:00" });
+    await hoaDon("2026-11-13", 5, { gio: "00:00:30" });
+
+    expect(await docHoaDonTiktokTrongNgay(B, "2026-11-12")).toEqual({ soLan: 2, tong: tr(10) + tr(0.143), viTra: 0 });
+    // Thẻ không gánh TIKTOK_ADS ⇒ 0; ngày trước M (hoá đơn 31/10 23:59, ví 31/10 23:59) ⇒ 0.
+    expect(await docHoaDonTiktokTrongNgay(A, "2026-11-12")).toEqual({ soLan: 0, tong: 0, viTra: 0 });
+    expect(await docHoaDonTiktokTrongNgay(B, "2026-10-31")).toEqual({ soLan: 0, tong: 0, viTra: 0 });
+  });
+
+  it("bỏ phần VÍ TikTok Shop trả cùng ngày: 3 hoá đơn, 1 do ví trả ⇒ nhắc 2 lần, đúng tổng phần thẻ", async () => {
+    const { A, B } = await seedFixture();
+    // 15/11: ba lần TikTok thu — lần 10:00 do ví TikTok Shop trả (mỗi lần ví trừ ra đúng một hoá đơn cùng số, ±2 phút).
+    await hoaDon("2026-11-15", 0.143, { gio: "09:00:00" });
+    await hoaDon("2026-11-15", 0.121, { gio: "10:00:00" });
+    await hoaDon("2026-11-15", 0.143, { gio: "15:00:00" });
+    await prisma.tiktokAdsSettlement.createMany({
+      data: [
+        { transactionId: "vi-1511", shopId: "s", orderCreateTime: vn("2026-11-15", "10:01:00"), settlementAmount: -tr(0.121) },
+        // Ví trừ NGÀY KHÁC (16/11 00:00:30 VN) — không thuộc ngày chốt 15/11.
+        { transactionId: "vi-1611", shopId: "s", orderCreateTime: vn("2026-11-16", "00:00:30"), settlementAmount: -tr(0.2) },
+      ],
+    });
+
+    expect(await docHoaDonTiktokTrongNgay(B, "2026-11-15")).toEqual({
+      soLan: 2,
+      tong: tr(0.286),
+      viTra: tr(0.121),
+    });
+    // Thẻ không gánh TIKTOK_ADS ⇒ ví cũng không về thẻ đó.
+    expect(await docHoaDonTiktokTrongNgay(A, "2026-11-15")).toEqual({ soLan: 0, tong: 0, viTra: 0 });
+    // Ngày fixture có ví trừ (20/11, −8tr) mà không hoá đơn ⇒ kẹp 0, không âm.
+    expect(await docHoaDonTiktokTrongNgay(B, "2026-11-20")).toEqual({ soLan: 0, tong: 0, viTra: tr(8) });
   });
 });

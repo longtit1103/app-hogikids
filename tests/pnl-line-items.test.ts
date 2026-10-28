@@ -21,6 +21,7 @@ const EMPTY: PnlBreakdown = {
   grossProfit: 0,
   ads: 0,
   adsBySource: {},
+  adsTinDungTang: 0,
   shipping: 0,
   packaging: 0,
   returnBom: 0,

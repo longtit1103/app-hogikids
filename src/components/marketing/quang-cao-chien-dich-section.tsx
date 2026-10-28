@@ -203,7 +203,8 @@ export function QuangCaoChienDichSection({
           </p>
         )}
         <p>
-          Chi tiêu lấy từ Sổ chi phí (đã gồm VAT, khớp Lãi/Lỗ) nên CPM/CPC/CPO ở đây cao hơn số sàn báo khoảng 10%.
+          Chi tiêu lấy từ Sổ chi phí (đã gồm VAT) nên CPM/CPC/CPO ở đây cao hơn số sàn báo khoảng 10%. Đây là chi tiêu
+          sàn báo — chưa trừ tín dụng TikTok tặng (Lãi/Lỗ trừ phần đó ở dòng Quảng cáo TikTok).
         </p>
         {coDongTiktok && (
           <p>

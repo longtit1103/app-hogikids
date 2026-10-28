@@ -6,9 +6,9 @@ import { tinhChenhLechTaiM } from "@/lib/no-phai-tra/tinh-chenh-lech-tai-m";
 
 /**
  * Cảnh báo "trừ nhầm dư nợ thấu chi": chênh (hoặc phần chưa giải thích ở bước bật) rơi đúng −dư nợ ±1.000đ.
- * Số thật 15/10: ngân hàng 45.547.696, quỹ 260.908.494, thẻ 24.540.609, thấu chi 100tr.
+ * Số 15/10 (đã gột): ngân hàng 62.400.000, quỹ 357.445.000, thẻ 33.650.000, thấu chi 137tr.
  */
-const THAU_CHI = 100_000_000;
+const THAU_CHI = 137_000_000;
 
 describe("laTruNhamThauChi", () => {
   it("đúng −dư nợ ⇒ true; lệch trong ±1.000đ ⇒ true; lệch hơn ⇒ false", () => {
@@ -30,12 +30,12 @@ describe("cauChenhLech — trừ nhầm dư nợ thấu chi", () => {
   it("chênh đúng −dư nợ ⇒ câu cảnh báo, vẫn tone 'am'", () => {
     const c = cauChenhLech(-THAU_CHI, cauTruc);
     expect(c.giaiThich).toBe(CAU_TRU_NHAM_THAU_CHI);
-    expect(c.nhan).toBe("Sổ NHIỀU HƠN tiền thật 100.000.000 ₫");
+    expect(c.nhan).toBe("Sổ NHIỀU HƠN tiền thật 137.000.000 ₫");
     expect(c.tone).toBe("am");
   });
 
   it("chênh khác −dư nợ ⇒ câu cũ, không cảnh báo", () => {
-    const c = cauChenhLech(-215_360_798, cauTruc);
+    const c = cauChenhLech(-295_045_000, cauTruc);
     expect(c.giaiThich).not.toContain("dư nợ thấu chi");
     expect(c.giaiThich).toContain("Có khoản chi chưa ghi vào sổ");
   });
@@ -46,30 +46,30 @@ describe("cauChenhLech — trừ nhầm dư nợ thấu chi", () => {
 });
 
 describe("bước bật — phần chưa giải thích so với dư nợ thấu chi", () => {
-  const dau = (soDuBank: number, quyApp = 260_908_494, the = 24_540_609) => ({
+  const dau = (soDuBank: number, quyApp = 357_445_000, the = 33_650_000) => ({
     quyApp,
     soDuBank,
     tienMat: 0,
     duNoThauChi: THAU_CHI,
-    the: the === 0 ? [] : [{ khoa: "the:4826", nhan: "nợ thẻ 4826", soTien: the }],
+    the: the === 0 ? [] : [{ khoa: "the:9999", nhan: "nợ thẻ 9999", soTien: the }],
     phieuY: [],
     viAds: [],
   });
   const canhBao = (kq: ReturnType<typeof tinhChenhLechTaiM>) => laTruNhamThauChi(kq.chuaGiaiThich, kq.duNoThauChi);
 
-  it("số thật 15/10 gõ ĐÚNG số dư ngân hàng ⇒ chưa giải thích −239.901.407 ⇒ KHÔNG cảnh báo", () => {
-    const kq = tinhChenhLechTaiM(dau(45_547_696));
-    expect(kq.chuaGiaiThich).toBe(-239_901_407);
+  it("số 15/10 (đã gột) gõ ĐÚNG số dư ngân hàng ⇒ chưa giải thích −328.695.000 ⇒ KHÔNG cảnh báo", () => {
+    const kq = tinhChenhLechTaiM(dau(62_400_000));
+    expect(kq.chuaGiaiThich).toBe(-328_695_000);
     expect(canhBao(kq)).toBe(false);
   });
 
-  it("sổ đã đúng (quỹ = tiền thật) mà gõ 45.547.696 − 100tr = −54.452.304 ⇒ chênh −100tr ⇒ CÓ cảnh báo", () => {
-    const kq = tinhChenhLechTaiM(dau(-54_452_304, 45_547_696, 0));
+  it("sổ đã đúng (quỹ = tiền thật) mà gõ 62.400.000 − 137tr = −74.600.000 ⇒ chênh −137tr ⇒ CÓ cảnh báo", () => {
+    const kq = tinhChenhLechTaiM(dau(-74_600_000, 62_400_000, 0));
     expect(kq.chuaGiaiThich).toBe(-THAU_CHI);
     expect(canhBao(kq)).toBe(true);
   });
 
   it("gõ đúng khi sổ đúng ⇒ chưa giải thích 0 ⇒ không cảnh báo", () => {
-    expect(canhBao(tinhChenhLechTaiM(dau(45_547_696, 45_547_696, 0)))).toBe(false);
+    expect(canhBao(tinhChenhLechTaiM(dau(62_400_000, 62_400_000, 0)))).toBe(false);
   });
 });

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 import {
   DropdownMenu,
@@ -12,6 +13,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { logout } from "@/lib/actions/auth";
 import { cn } from "@/lib/utils";
+import { chayDangXuat } from "./chay-dang-xuat";
 import {
   NAV_ITEMS,
   QUAN_TRI_NAV_ITEM,
@@ -107,9 +109,14 @@ function SidebarNavContent({
   const tenNguoiDung = nguoiDung.tenHienThi.trim() || nguoiDung.email;
 
   async function handleLogout() {
-    await logout();
-    router.push("/dang-nhap");
-    router.refresh();
+    await chayDangXuat({
+      logout,
+      dieuHuong: () => {
+        router.push("/dang-nhap");
+        router.refresh();
+      },
+      baoLoi: (thongDiep) => toast.error(thongDiep),
+    });
   }
 
   return (

@@ -110,19 +110,21 @@ describe("landRaw — TikTok Shop", () => {
 
   // Bản 202501 để mảng ở `data.transactions` (bản 202309 là `data.statement_transactions`, và KHÔNG
   // có `type`). Phải bám 202501 vì `type` là cách duy nhất nhận ra tiền quảng cáo GMV Pay.
-  it("record thiếu id → bị bỏ nhưng ĐƯỢC ĐẾM, không im lặng", async () => {
-    const r = await landRaw(
-      "tiktok/statement_transactions",
-      SHOP_TIKTOK_SHOP,
-      tts(
-        "transactions",
-        `{"id":"7659815619889563399","type":"ORDER","order_id":"583746432390628764"},{"type":"ORDER"}`
+  // Stream TIỀN (khoản ads trừ ví nằm trong đây): record thiếu id chưa từng vào Bronze nên dựng lại
+  // không cứu được ⇒ TỪ CHỐI cả trang thay vì land phần còn lại (cửa sổ kéo lại land đủ khi API sửa).
+  it("record thiếu id → TỪ CHỐI cả trang (stream tiền), không land phần còn lại", async () => {
+    await expect(
+      landRaw(
+        "tiktok/statement_transactions",
+        SHOP_TIKTOK_SHOP,
+        tts(
+          "transactions",
+          `{"id":"7659815619889563399","type":"ORDER","order_id":"583746432390628764"},{"type":"ORDER"}`
+        )
       )
-    );
+    ).rejects.toThrow(/1 record thiếu khoá/);
 
-    expect(r.landed).toBe(1);
-    expect(r.skippedNoId).toBe(1);
-    expect(await prisma.rawTiktokShopTransaction.count()).toBe(1);
+    expect(await prisma.rawTiktokShopTransaction.count()).toBe(0);
   });
 
   // GMV Pay = TikTok Ads trừ tiền quảng cáo vào số dư shop khi chi tiêu chạm NGƯỠNG. Ngưỡng thay đổi

@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, unlink, writeFile } from "node:fs/promises";
+import { readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
 import { format } from "date-fns";
 
+import { chuanBiThuMucRiengTu, ghiFileRiengTu } from "@/lib/backup/ghi-file-rieng-tu";
 import {
   dangPhucHoi,
   giaHanKhoaPhucHoi,
@@ -392,13 +393,14 @@ async function phucHoi(request: Request, vet: VetPhucHoi): Promise<Response> {
     try {
       const preRestore = await runPgDump();
       const thuMuc = thuMucBackup();
-      await mkdir(thuMuc, { recursive: true });
+      // 0700 kể cả thư mục bind-mount ĐÃ có sẵn 0755 (xem `ghi-file-rieng-tu.ts`).
+      await chuanBiThuMucRiengTu(thuMuc);
       // Giây + hậu tố ngẫu nhiên: mốc giây một mình KHÔNG đủ tách hai lượt phục hồi
       // (khoá bảo trì cho phép lượt sau chạy ngay khi lượt trước xong, vẫn có thể rơi
       // vào cùng giây) — trùng tên là ghi đè mất đúng điểm rollback vừa tạo. Tên vẫn
       // giữ tiền tố thời gian nên sort lexicographic vẫn ra thứ tự thời gian.
       const preName = `pre-restore-${format(new Date(), "yyyyMMdd-HHmmss")}-${randomBytes(3).toString("hex")}.dump`;
-      await writeFile(join(thuMuc, preName), preRestore);
+      await ghiFileRiengTu(join(thuMuc, preName), preRestore); // 0600, wx
       await prunePreRestoreBackups(thuMuc);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Không tạo được bản lùi trước khi phục hồi.";

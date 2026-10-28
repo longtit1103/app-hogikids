@@ -16,8 +16,9 @@ describe("parseSignedAmountInput", () => {
     expect(parseSignedAmountInput("-")).toBe(0);
   });
 
-  it("kẹp trần 2 tỷ ở CẢ HAI chiều", () => {
-    expect(parseSignedAmountInput("9999999999")).toBe(MAX_AMOUNT_INPUT);
-    expect(parseSignedAmountInput("-9999999999")).toBe(-MAX_AMOUNT_INPUT);
+  it("KHÔNG kẹp im lặng ở CẢ HAI chiều: giữ số gõ, cờ vượt trần do người gọi soi", () => {
+    expect(parseSignedAmountInput("9999999999")).toBe(9_999_999_999);
+    expect(parseSignedAmountInput("-9999999999")).toBe(-9_999_999_999);
+    expect(Math.abs(parseSignedAmountInput("-9999999999"))).toBeGreaterThan(MAX_AMOUNT_INPUT);
   });
 });

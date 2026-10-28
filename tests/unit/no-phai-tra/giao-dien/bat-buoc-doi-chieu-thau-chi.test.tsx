@@ -14,23 +14,23 @@ afterEach(cleanup);
 
 const ketQua = {
   ...tinhChenhLechTaiM({
-    quyApp: 260_908_494,
-    soDuBank: 45_547_696,
+    quyApp: 357_445_000,
+    soDuBank: 62_400_000,
     tienMat: 0,
-    duNoThauChi: 100_000_000,
-    the: [{ khoa: "the:4826", nhan: "nợ thẻ 4826", soTien: 24_540_609 }],
+    duNoThauChi: 137_000_000,
+    the: [{ khoa: "the:9999", nhan: "nợ thẻ 9999", soTien: 33_650_000 }],
     phieuY: [],
     viAds: [],
   }),
   ngayTruocM: "2026-10-14",
   tienDangGui: 0,
-  vanTay: { quyApp: 260_908_494, duNoThauChi: 100_000_000, tongPhieuY: 0 },
+  vanTay: { quyApp: 357_445_000, duNoThauChi: 137_000_000, tongPhieuY: 0 },
 };
 
 function veBuoc2(kq: typeof ketQua = ketQua) {
   return render(
     <BuocDoiChieu
-      bankRaw="45.547.696"
+      bankRaw="62.400.000"
       onBankRaw={() => {}}
       tienMat={0}
       onTienMat={() => {}}
@@ -53,10 +53,10 @@ describe("bước 2 đối chiếu — thấu chi giải ngân vào tài khoản
     const bang = screen.getByTestId("bat-bang-chenh-lech");
     const chu = bang.textContent ?? "";
     // `formatVnd` in dấu trừ dài (U+2212).
-    expect(chu).toMatch(/Chênh lệch \(dương = tiền thật nhiều hơn sổ\)−215\.360\.798/);
-    expect(screen.getByTestId("bat-dong-chua-giai-thich").textContent).toMatch(/−239\.901\.407/);
+    expect(chu).toMatch(/Chênh lệch \(dương = tiền thật nhiều hơn sổ\)−295\.045\.000/);
+    expect(screen.getByTestId("bat-dong-chua-giai-thich").textContent).toMatch(/−328\.695\.000/);
     expect(screen.getByTestId("bat-du-no-thau-chi-tham-khao").textContent).toMatch(
-      /^Dư nợ thấu chi \(theo dõi riêng, không cộng vào đối chiếu\)100\.000\.000/
+      /^Dư nợ thấu chi \(theo dõi riêng, không cộng vào đối chiếu\)137\.000\.000/
     );
     expect(chu).not.toContain("Cộng dư nợ thấu chi");
   });
@@ -68,7 +68,7 @@ describe("bước 2 đối chiếu — thấu chi giải ngân vào tài khoản
     expect(chu).not.toContain("đang thấu chi thì gõ số âm");
   });
 
-  it("số thật 15/10 (chưa giải thích −239.901.407) ⇒ KHÔNG hiện cảnh báo trừ nhầm thấu chi", () => {
+  it("số 15/10 (đã gột) (chưa giải thích −328.695.000) ⇒ KHÔNG hiện cảnh báo trừ nhầm thấu chi", () => {
     veBuoc2();
     expect(screen.queryByTestId("bat-canh-bao-tru-nham-thau-chi")).toBeNull();
   });
@@ -76,17 +76,17 @@ describe("bước 2 đối chiếu — thấu chi giải ngân vào tài khoản
   it("chưa giải thích đúng −dư nợ thấu chi ⇒ hiện cảnh báo nhắc nhập số dư THẬT", () => {
     const kq = {
       ...tinhChenhLechTaiM({
-        quyApp: 45_547_696,
-        soDuBank: -54_452_304,
+        quyApp: 62_400_000,
+        soDuBank: -74_600_000,
         tienMat: 0,
-        duNoThauChi: 100_000_000,
+        duNoThauChi: 137_000_000,
         the: [],
         phieuY: [],
         viAds: [],
       }),
       ngayTruocM: "2026-10-14",
       tienDangGui: 0,
-      vanTay: { quyApp: 45_547_696, duNoThauChi: 100_000_000, tongPhieuY: 0 },
+      vanTay: { quyApp: 62_400_000, duNoThauChi: 137_000_000, tongPhieuY: 0 },
     };
     veBuoc2(kq);
     expect(screen.getByTestId("bat-canh-bao-tru-nham-thau-chi").textContent).toBe(

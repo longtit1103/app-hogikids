@@ -28,6 +28,8 @@ const neo = (ngayChot: string, soDuTrieu: number): KyNeo => ({
   hanTra: null,
   daTraTruocMoSo: 0,
   laNeoMoSo: true,
+  nghiaVu: null,
+  saoKeTraChuaLen: null,
 });
 const chi = (ngay: string, trieu: number): GiaoDichThe => ({ ngay: vn(ngay), soTien: tr(trieu), loai: "CHI" });
 const tra = (ngay: string, trieu: number): GiaoDichThe => ({ ngay: vn(ngay), soTien: tr(trieu), loai: "TRA" });

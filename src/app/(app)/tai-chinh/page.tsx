@@ -1,3 +1,4 @@
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { endOfMonth, format, startOfMonth, subMonths } from "date-fns";
@@ -20,6 +21,10 @@ import { doiSoatTienVe } from "@/lib/reports/doi-soat-tien-ve";
 import { doiSoatTienVeShopee } from "@/lib/reports/doi-soat-tien-ve-shopee";
 import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
 import type { Quyen } from "@/lib/quyen/danh-muc-quyen";
+import {
+  cauCanhBaoTinDungTiktokTre,
+  docCanhBaoTinDungTiktokTre,
+} from "@/lib/no-phai-tra/canh-bao-tin-dung-tiktok-tre";
 import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docKhoiNoPhaiTra } from "@/lib/no-phai-tra/doc-khoi-no-phai-tra";
 import { docLuaChonDongTienNo } from "@/lib/no-phai-tra/lua-chon-dong-tien-no";
@@ -91,10 +96,10 @@ function laThangHienTai(monthStart: Date): boolean {
   return monthStart.getFullYear() === now.getFullYear() && monthStart.getMonth() === now.getMonth();
 }
 
-export default async function TaiChinhPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function TaiChinhPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SearchParams>> }) {
   const nd = await yeuCauQuyenTrang("/tai-chinh", MOI_QUYEN_TAB);
 
-  const sp = await searchParams;
+  const sp = chuanHoaSearchParams(await searchParams);
   const coDongTien = coQuyen(nd, "tai-chinh-dong-tien:xem");
   const coQuy = coQuyen(nd, "tai-chinh-so-quy:xem");
   // Tab mặc định = tab đầu tiên người xem có quyền RIÊNG (không cứng Lãi/Lỗ).
@@ -146,6 +151,9 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
     // feeComponents/voucher = chi tiết dòng "Phí sàn" và "Voucher" (diễn giải,
     // KHÔNG đổi tổng — xem platform-fee-breakdown.ts, voucher-breakdown.ts).
     // Tính cho cả tháng trước để dòng con cũng có cột so sánh.
+    // Độ tươi ảnh chụp tín dụng TikTok tặng chỉ nói về 3 ngày gần nhất ⇒ chỉ hỏi khi tháng đang xem chạm tới đó
+    // (tháng cũ đã có ảnh chụp đủ, báo ở đó là nhiễu). Lỗi đọc KHÔNG kéo sập tab: `.catch` ⇒ không hiện chú thích.
+    const xetTinDungTre = monthRange.to.getTime() >= Date.now() - 3 * 24 * 3600 * 1000;
     const [
       monthPnl,
       prevMonthPnl,
@@ -156,6 +164,7 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
       prevVoucher,
       backfilledFee,
       prevBackfilledFee,
+      canhBaoTinDung,
     ] = await Promise.all([
       calcPnl(monthRange),
       calcPnl(prevMonthRange),
@@ -166,6 +175,12 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
       computeVoucherBreakdown(prevMonthRange),
       computeBackfilledPlatformFee(monthRange),
       computeBackfilledPlatformFee(prevMonthRange),
+      xetTinDungTre
+        ? docCanhBaoTinDungTiktokTre().catch((e: unknown) => {
+            console.error("[tai-chinh] docCanhBaoTinDungTiktokTre lỗi — tab Lãi/Lỗ vẫn hiện, chỉ ẩn chú thích độ tươi", e);
+            return null;
+          })
+        : Promise.resolve(null),
     ]);
     const printPeriodLabel = `Tháng ${monthRange.from.getMonth() + 1}/${monthRange.from.getFullYear()}`;
     // Cổng bật nút Xuất Excel / In. Hỏi THẲNG `isPnlMonthEmpty` chứ không chép lại phép cộng
@@ -198,6 +213,7 @@ export default async function TaiChinhPage({ searchParams }: { searchParams: Pro
           backfilledFee={backfilledFee}
           prevBackfilledFee={prevBackfilledFee}
           choPhepDongBo={coQuyen(nd, "cai-dat:sua")}
+          canhBaoTinDungTiktok={canhBaoTinDung ? cauCanhBaoTinDungTiktokTre(canhBaoTinDung) : null}
         />
       </div>
     );

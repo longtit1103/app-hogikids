@@ -44,6 +44,7 @@ function KpiCard({
   previousText,
   direction = "higher-better",
   compareOn,
+  ghiChu,
 }: {
   label: string;
   valueText: string;
@@ -53,11 +54,14 @@ function KpiCard({
   previousText: string;
   direction?: "higher-better" | "lower-better";
   compareOn: boolean;
+  /** Chú thích nhỏ dưới số (vd "đã trừ tín dụng TikTok tặng X"). */
+  ghiChu?: string;
 }) {
   return (
     <div className="rounded-xl bg-surface-card p-4">
       <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
       <p className={cn("mt-1 font-serif text-2xl text-ink", valueClassName)}>{valueText}</p>
+      {ghiChu && <p className="mt-0.5 text-[11px] text-muted-foreground">{ghiChu}</p>}
       {compareOn && (
         <div className="mt-1 flex flex-col gap-0.5">
           <DeltaLine current={current} previous={previous} direction={direction} dark={false} />
@@ -74,8 +78,11 @@ export type KpiKenhDuLieu = KetQuaChe<
   { current: PnlChe; previous: PnlChe }
 >;
 
-export function ChannelKpiCards({ du }: { du: KpiKenhDuLieu }) {
+export function ChannelKpiCards({ du, adsTinDungTang = 0 }: { du: KpiKenhDuLieu; adsTinDungTang?: number }) {
   const { current, previous } = du;
+  // Chi phí ads + ROAS đọc `calcPnl` (ĐÃ trừ tín dụng TikTok tặng) — nói ra để khớp được bằng mắt với biểu đồ/bảng
+  // ads bên dưới (chi tiêu sàn báo, chưa trừ). Không đổi số.
+  const ghiChuTinDung = adsTinDungTang > 0 ? `đã trừ tín dụng TikTok tặng ${formatVnd(adsTinDungTang)}` : undefined;
   const searchParams = useSearchParams();
   // Khởi tạo từ `?so_sanh=` (link từ /kenh mang theo "0"/"1") — mặc định bật
   // khi param vắng mặt (điều hướng thẳng), khớp mặc định Task 6.
@@ -126,6 +133,7 @@ export function ChannelKpiCards({ du }: { du: KpiKenhDuLieu }) {
           previousText={formatVnd(previous.ads)}
           direction="lower-better"
           compareOn={compareOn}
+          ghiChu={ghiChuTinDung}
         />
         <KpiCard
           label="Phí sàn (từ đơn) 🔗"
@@ -167,6 +175,7 @@ export function ChannelKpiCards({ du }: { du: KpiKenhDuLieu }) {
           previous={prevR.roas}
           previousText={prevR.roas === null ? "—" : formatRoas(prevR.roas)}
           compareOn={compareOn}
+          ghiChu={ghiChuTinDung}
         />
       </div>
     </div>

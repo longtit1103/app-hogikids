@@ -20,6 +20,11 @@ import { congAction } from "@/lib/quyen/cong-action";
 import { laXungDotGhi } from "@/lib/prisma-loi-adapter";
 import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 import {
+  laMoTaMauNhanGocTatToan,
+  LOI_SO_TAT_TOAN_TRUOC_BAN_VA,
+  moTaNhanGocTatToan,
+} from "@/lib/tiet-kiem/dong-nhan-goc-tat-toan";
+import {
   chanSoDuTietKiemAm,
   khoaSoTietKiem,
   soDuDangGui,
@@ -177,17 +182,22 @@ export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ 
           );
         }
 
-        // `conGui === 0` (đã nhận lại hết bằng dòng ghi tay) ⇒ KHÔNG đẻ dòng 0đ, chỉ ghi phần lãi.
+        // `conGui === 0` (đã nhận lại hết bằng dòng ghi tay) ⇒ KHÔNG đẻ dòng 0đ, chỉ ghi phần lãi — sổ
+        // không trỏ dòng nào (`dongNhanGoc` NULL) nên Mở lại sau này không đụng dòng tay.
+        // Id dòng vừa sinh được ghi lên sổ ở BƯỚC 6, cùng câu đóng sổ: đó là dấu DUY NHẤT Mở lại dùng để xoá.
+        let dongNhanGoc: string | null = null;
         if (conGui > 0) {
-          await tx.cashMovement.create({
-          data: {
-            date: ngay,
-            kind: "SAVINGS_IN",
-            amount: conGui,
-            savingsId: id,
-            description: `Nhận lại gốc tiết kiệm ${so.name} — tất toán ${format(ngay, "dd/MM/yyyy")}`,
-          },
+          const nhan = await tx.cashMovement.create({
+            data: {
+              date: ngay,
+              kind: "SAVINGS_IN",
+              amount: conGui,
+              savingsId: id,
+              description: moTaNhanGocTatToan(so.name, ngay),
+            },
+            select: { id: true },
           });
+          dongNhanGoc = nhan.id;
         }
 
         // BƯỚC 4 — LÃI, đường riêng. `lai === 0` ⇒ KHÔNG tạo bản ghi nào: không có thu nhập 0đ trong
@@ -229,10 +239,10 @@ export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ 
         });
 
         // BƯỚC 6 — ĐÓNG SỔ, BƯỚC CUỐI CÙNG (lý do ở khối chú thích trên hàm). Fencing: điều kiện
-        // `closedAt: null` nằm TRONG câu UPDATE.
+        // `closedAt: null` nằm TRONG câu UPDATE. Id dòng nhận gốc ghi CÙNG câu để `closedAt` vẫn là câu cuối.
         const dong = await tx.soTietKiem.updateMany({
           where: { id, closedAt: null },
-          data: { closedAt: ngay },
+          data: { closedAt: ngay, dongNhanGocTatToanId: dongNhanGoc },
         });
         if (dong.count === 0) throw new LoiHopDong("Sổ này đã tất toán");
       }, OPT_TX_DONG_TIEN)
@@ -255,11 +265,13 @@ export async function tatToanSoTietKiem(input: unknown): Promise<ActionResult<{ 
  * MỞ LẠI sổ đã tất toán — đường DUY NHẤT xoá `closedAt`. Tất toán nhầm mà không mở lại được thì chủ
  * shop phải tạo sổ mới, lịch sử tách đôi và quỹ đếm hai lần số gốc.
  *
- * Chỉ gỡ ĐÚNG các dòng DO APP SINH, nhận diện bằng hai dấu (§7.3):
- *   - `ThuNhap` theo `refId = TIETKIEM:{id}` — dấu này app tự đóng, chủ shop không gõ được;
- *   - dòng `SAVINGS_IN` DUY NHẤT của sổ.
- * Sổ có nhiều hơn một dòng `SAVINGS_IN` (chủ shop ghi tay thêm) ⇒ TỪ CHỐI, chỉ đường xoá tay trước.
- * App KHÔNG đoán xoá dòng nào: đoán sai là xoá một dòng tiền THẬT.
+ * Chỉ gỡ ĐÚNG các dòng DO APP SINH, nhận diện bằng hai dấu app tự đóng, chủ shop không gõ được:
+ *   - `ThuNhap` theo `refId = TIETKIEM:{id}`;
+ *   - dòng `CashMovement` có id = `SoTietKiem.dongNhanGocTatToanId` (lượt tất toán ghi; NULL khi lượt đó chỉ
+ *     ghi lãi vì gốc đã nhận hết bằng dòng tay).
+ * Dòng `SAVINGS_IN` ghi tay giữ NGUYÊN, bao nhiêu dòng cũng được. KHÔNG nhận diện bằng số lượng hay mô tả:
+ * đếm "đúng một dòng nhận" từng xoá mất dòng tay 100tr của sổ tất toán chỉ-lãi. Sổ tất toán trước khi có
+ * cột mà còn dòng mang mẫu mô tả app sinh ⇒ TỪ CHỐI (`LOI_SO_TAT_TOAN_TRUOC_BAN_VA`) tới khi gán dấu.
  *
  * ⚠️ THỨ TỰ NGƯỢC với tất toán, và đó là CỐ Ý: ở đây MỞ SỔ TRƯỚC rồi mới xoá. Cùng một lý do —
  * cổng `kiemSoTietKiemConHieuLuc` chặn mọi thao tác dòng tiền trên sổ đã đóng, nên mở trước thì mọi
@@ -281,41 +293,61 @@ export async function moLaiSoTietKiem(input: unknown): Promise<ActionResult<{ id
       prisma.$transaction(async (tx) => {
         await khoaChiaSeBatNoPhaiTra(tx);
         await khoaSoTietKiem(tx, id);
-        const so = await tx.soTietKiem.findUnique({ where: { id }, select: { closedAt: true } });
+        const so = await tx.soTietKiem.findUnique({
+          where: { id },
+          select: { closedAt: true, dongNhanGocTatToanId: true },
+        });
         if (!so) throw new LoiHopDong("Không tìm thấy sổ tiết kiệm");
         if (so.closedAt === null) throw new LoiHopDong("Sổ này đang gửi — không cần mở lại");
 
-        const soDongNhan = await tx.cashMovement.count({
-          where: { savingsId: id, kind: "SAVINGS_IN" },
-        });
-        if (soDongNhan > 1) {
-          throw new LoiHopDong(
-            "Sổ này có nhiều hơn một dòng nhận lại gốc — xoá dòng ghi tay ở bảng Khoản tiền khác " +
-              "(tab Dòng tiền) trước, rồi mở lại sổ"
-          );
+        // Dòng nhận gốc SẼ XOÁ = đúng dòng sổ đang trỏ (do lượt tất toán ghi), và chỉ khi nó còn là dòng
+        // SAVINGS_IN của chính sổ này. Không trỏ dòng nào ⇒ không xoá dòng tiền nào: mọi dòng nhận còn lại
+        // là dòng GHI TAY (ngân hàng đã trả gốc), xoá là quỹ mất dấu tiền thật.
+        let dongNhanXoa: { id: string; date: Date } | null = null;
+        if (so.dongNhanGocTatToanId !== null) {
+          dongNhanXoa = await tx.cashMovement.findFirst({
+            where: { id: so.dongNhanGocTatToanId, savingsId: id, kind: "SAVINGS_IN" },
+            select: { id: true, date: true },
+          });
+        } else {
+          // Sổ tất toán TRƯỚC khi có cột trỏ dòng: còn dòng mang mẫu mô tả app sinh thì KHÔNG đoán (đoán sai
+          // là xoá dòng tay) — từ chối tới khi chủ shop duyệt và gán dấu bằng script. Mô tả ở đây chỉ dùng để
+          // TỪ CHỐI, không bao giờ để chọn dòng xoá.
+          const cacDongNhan = await tx.cashMovement.findMany({
+            where: { savingsId: id, kind: "SAVINGS_IN" },
+            select: { description: true },
+          });
+          if (cacDongNhan.some((d) => laMoTaMauNhanGocTatToan(d.description))) {
+            throw new LoiHopDong(LOI_SO_TAT_TOAN_TRUOC_BAN_VA);
+          }
         }
 
         // Đã bật nợ phải trả: mở lại = xoá dòng nhận gốc + lãi của lượt tất toán ⇒ dòng nào ngày < M thì từ chối.
-        // Đọc ĐÚNG các dòng sắp xoá (cùng điều kiện hai câu `deleteMany` bên dưới), sau khoá.
-        const [dongNhan, dongLai] = await Promise.all([
-          tx.cashMovement.findMany({ where: { savingsId: id, kind: "SAVINGS_IN" }, select: { date: true } }),
-          tx.thuNhap.findMany({ where: { refId: `${REF_LAI_PREFIX}${id}` }, select: { date: true } }),
-        ]);
+        // Đọc ĐÚNG các dòng sắp xoá (cùng điều kiện hai câu xoá bên dưới), sau khoá.
+        const dongLai = await tx.thuNhap.findMany({
+          where: { refId: `${REF_LAI_PREFIX}${id}` },
+          select: { date: true },
+        });
         await chanDongTienTruocM(tx, {
           loai: "XOA",
-          ngay: [...dongNhan.map((m) => m.date), ...dongLai.map((t) => t.date)],
+          ngay: [...(dongNhanXoa ? [dongNhanXoa.date] : []), ...dongLai.map((t) => t.date)],
         });
 
         // FENCING: điều kiện `closedAt` khác null nằm TRONG câu UPDATE. Hai tab cùng bấm Mở lại thì
-        // chỉ MỘT câu đổi được dòng; câu thua ném và rollback trước khi kịp xoá gì.
+        // chỉ MỘT câu đổi được dòng; câu thua ném và rollback trước khi kịp xoá gì. Gỡ dấu cùng câu:
+        // sổ đang gửi không bao giờ trỏ dòng nhận.
         const dong = await tx.soTietKiem.updateMany({
           where: { id, closedAt: { not: null } },
-          data: { closedAt: null },
+          data: { closedAt: null, dongNhanGocTatToanId: null },
         });
         if (dong.count === 0) throw new LoiHopDong("Sổ này đang gửi — không cần mở lại");
 
         await tx.thuNhap.deleteMany({ where: { refId: `${REF_LAI_PREFIX}${id}` } });
-        await tx.cashMovement.deleteMany({ where: { savingsId: id, kind: "SAVINGS_IN" } });
+        if (dongNhanXoa) {
+          await tx.cashMovement.deleteMany({
+            where: { id: dongNhanXoa.id, savingsId: id, kind: "SAVINGS_IN" },
+          });
+        }
 
         // Sau khi gỡ dòng nhận lại, số đang gửi quay về đúng Σ đã gửi — vẫn kiểm cho nhất quán luật
         // "vị từ chạy SAU MỌI lượt ghi" (§8): sổ có dòng ghi tay lệch phải chặn ngay tại đây.

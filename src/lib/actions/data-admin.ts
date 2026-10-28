@@ -114,6 +114,8 @@ export async function deleteAllData(shopNameConfirm: string): Promise<ActionResu
       // NỢ PHẢI TRẢ — SAU `expense.deleteMany()` (Expense.cardId) và `cashMovement.deleteMany()`
       // (cardId/phieuNhapId/viAdsId), cùng FK Restrict: con trước cha. `Expense` đã xoá TRỌN ở trên nên
       // không cần bước gỡ `cardId` về NULL. Thẻ là cha của kỳ sao kê + gắn nền tảng ⇒ xoá SAU hai bảng đó.
+      // Dòng sao kê PDF là con của kỳ sao kê (FK Cascade) — xoá tường minh TRƯỚC kỳ, con trước cha.
+      await tx.dongSaoKeThe.deleteMany();
       await tx.kySaoKeThe.deleteMany();
       await tx.ganNenTangThe.deleteMany();
       await tx.phieuNhapNo.deleteMany();
@@ -141,6 +143,11 @@ export async function deleteAllData(shopNameConfirm: string): Promise<ActionResu
       await tx.tiktokAdsSettlement.deleteMany();
       await tx.tiktokPayment.deleteMany();
       await tx.shopeeSettlement.deleteMany();
+      // 2 bảng Silver quảng cáo TikTok dựng từ kho thô: hoá đơn (nguồn dư nợ thẻ) + tín dụng tặng theo ngày (P&L trừ
+      // khỏi Quảng cáo TikTok). Không FK. Bỏ sót `TiktokAdsTinDung` thì Sổ vừa xoá sạch mà P&L vẫn trừ tín dụng cũ
+      // (lãi ròng âm giả nếu kỳ đó không còn chi phí ads). Kho thô giữ nguyên ⇒ nút dựng lại tái tạo y hệt.
+      await tx.tiktokAdsHoaDon.deleteMany();
+      await tx.tiktokAdsTinDung.deleteMany();
 
       // Chốt kho thô SAU CÙNG — vẫn trong cùng transaction nên vẫn "hoặc tất cả hoặc không", mà
       // thứ tự chạm bảng thì khớp đường transform. Dòng còn dở PHẢI được chốt là "đã xoá tay":
@@ -208,6 +215,8 @@ export async function coDuLieuGiaoDich(): Promise<boolean> {
     prisma.tiktokAdsSettlement.count(),
     prisma.tiktokPayment.count(),
     prisma.shopeeSettlement.count(),
+    prisma.tiktokAdsHoaDon.count(),
+    prisma.tiktokAdsTinDung.count(),
   ]);
   return dem.some((n) => n > 0);
 }
@@ -375,6 +384,10 @@ export type KetQuaDungLai = {
   shopeeUpserted: number;
   /** Số dòng chi tiêu quảng cáo (`Expense` source=ADS_API) dựng lại từ báo cáo trong kho thô. */
   adsExpensesUpserted: number;
+  /** Số hoá đơn quảng cáo TikTok (`TiktokAdsHoaDon` — nguồn dư nợ thẻ) dựng lại từ kho thô. */
+  hoaDonAdsUpserted: number;
+  /** Số dòng tín dụng TikTok tặng theo ngày (`TiktokAdsTinDung` — P&L trừ khỏi Quảng cáo TikTok) dựng lại từ kho thô. */
+  tinDungAdsUpserted: number;
   /** Tổng số cảnh báo của lượt dựng lại (danh sách đầy đủ nằm trong nhật ký đồng bộ). */
   soCanhBao: number;
   /** Vài cảnh báo đầu để hiện toast — danh sách đầy đủ có thể rất dài. */
@@ -476,6 +489,8 @@ export async function dungLaiTuKhoTho(): Promise<ActionResult<KetQuaDungLai>> {
         paymentsUpserted: body.stats.paymentsUpserted,
         shopeeUpserted: body.stats.shopeeUpserted,
         adsExpensesUpserted: body.stats.adsExpensesUpserted,
+        hoaDonAdsUpserted: body.stats.hoaDonAdsUpserted,
+        tinDungAdsUpserted: body.stats.tinDungAdsUpserted,
         soCanhBao: canhBao.length,
         canhBao: canhBao.slice(0, SO_CANH_BAO_HIEN),
       },

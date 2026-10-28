@@ -26,7 +26,6 @@ export function ChannelNotFoundToast() {
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // Intentionally mount-only (deps: []) — chỉ xử lý param có trên URL lúc landing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return null;

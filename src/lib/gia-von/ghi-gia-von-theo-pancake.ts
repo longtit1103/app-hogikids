@@ -166,7 +166,7 @@ export function tenFileBackupGiaVon(moc: Date, cheDo: string, duoi: string): str
  */
 export function ghiBackupVaXacMinh(duongDan: string, noiDung: NoiDungBackup): void {
   try {
-    writeFileSync(duongDan, JSON.stringify(noiDung, null, 2), { encoding: "utf8", flag: "wx" });
+    writeFileSync(duongDan, JSON.stringify(noiDung, null, 2), { encoding: "utf8", flag: "wx", mode: 0o600 });
   } catch (e) {
     throw new Error(
       `Không ghi được backup giá vốn vào "${duongDan}" — TỪ CHỐI ghi DB. ` +

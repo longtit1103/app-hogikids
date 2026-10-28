@@ -40,8 +40,8 @@ describe("tinhChenhLechChot — (bank + tiền mặt) − cuối kỳ, KHÔNG c�
     });
   });
 
-  it("số thật 14/10: tiền thật 45.547.696, quỹ 260.908.494 (gồm thấu chi 100tr) ⇒ −215.360.798", () => {
-    expect(tinhChenhLechChot({ soDuBank: 45_547_696, tienMat: 0 }, 260_908_494).chenhLech).toBe(-215_360_798);
+  it("số 14/10 (đã gột): tiền thật 62.400.000, quỹ 357.445.000 (gồm thấu chi 137tr) ⇒ −295.045.000", () => {
+    expect(tinhChenhLechChot({ soDuBank: 62_400_000, tienMat: 0 }, 357_445_000).chenhLech).toBe(-295_045_000);
   });
 
   it("bank ÂM (tài khoản âm thật) giữ nguyên dấu, không lấy trị tuyệt đối", () => {

@@ -2,7 +2,7 @@ import { formatVnd } from "@/lib/format";
 import type { TheDongConNo } from "@/lib/no-phai-tra/the-da-dong-con-no";
 
 /**
- * Chỉ báo thẻ ĐÃ ĐÓNG còn dư nợ ước tính ≠ 0 (thường do chi tiêu ads chốt lại muộn, gán về thẻ theo đúng
+ * Chỉ báo thẻ ĐÃ ĐÓNG còn dư nợ ước tính ≠ 0 (thường do hoá đơn TikTok trừ thẻ về muộn, gán về thẻ theo đúng
  * ngày thẻ còn gánh nền tảng). CHỈ ĐỌC — app không tự chuyển nợ sang thẻ khác. Dương ⇒ gợi ý ghi "Trả thẻ"
  * (cổng server cho `CARD_PAY` vào thẻ đóng còn nợ, KHÔNG có trần — trả vượt số nợ được phép); âm ⇒ trả thừa
  * so với ước tính, chỉ nhắc đối chiếu sao kê. Danh sách rỗng ⇒ không render gì.
@@ -20,7 +20,7 @@ export function CanhBaoTheDongConNo({ the }: { the: readonly TheDongConNo[] }) {
         {the.map((t) => (
           <li key={t.id}>
             {t.duNo > 0
-              ? `${t.ten}: còn nợ ${formatVnd(t.duNo)} — thường do chi tiêu ads về muộn. Ghi "Trả thẻ" (Nhập quỹ / rút quỹ) đúng số ngân hàng đã trừ để tất toán.`
+              ? `${t.ten}: còn nợ ${formatVnd(t.duNo)} — thường do hoá đơn TikTok trừ thẻ về muộn. Ghi "Trả thẻ" (Nhập quỹ / rút quỹ) đúng số ngân hàng đã trừ để tất toán.`
               : `${t.ten}: trả thừa ${formatVnd(-t.duNo)} so với ước tính — đối chiếu sao kê ngân hàng.`}
           </li>
         ))}

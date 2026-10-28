@@ -20,11 +20,11 @@ import { Input } from "@/components/ui/input";
 import { ghiChiPhiNhapHang } from "@/lib/actions/chi-phi-nhap-hang";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
-import { parseAmountInput } from "@/lib/format-amount-input";
+import { MAX_AMOUNT_INPUT, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 import type { PhieuNhapDeXuat, PhieuNhapDeXuatChe } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
 
-/** Trần giống hệt form chi phí: Prisma `Int` (int32) chết ở 2.147.483.647. */
-const TRAN_TIEN = 2_000_000_000;
+/** Trần giống hệt form chi phí (và zod ở action): Prisma `Int` (int32) chết ở 2.147.483.647. */
+const TRAN_TIEN = MAX_AMOUNT_INPUT;
 
 /**
  * Bảng duyệt phiếu nhập + khối "Ảnh hưởng nếu ghi" + nút ghi.
@@ -206,7 +206,9 @@ export function DuyetChiPhiNhapHang({
                         }
                       />
                       {oSai && (
-                        <p className="mt-1 text-xs text-error">Số nguyên dương, tối đa 2 tỷ</p>
+                        <p className="mt-1 text-xs text-error">
+                          {loiVuotTranAmount(docSoTien(tien[d.uuid])) ?? "Nhập số nguyên dương"}
+                        </p>
                       )}
                     </td>
                   </tr>
@@ -289,8 +291,9 @@ export function DuyetChiPhiNhapHang({
 
 /**
  * Lọc input gõ tay về chuỗi số sạch bằng `parseAmountInput` dùng chung (bỏ mọi ký tự không phải chữ số,
- * kẹp trần 2 tỷ ngay lúc gõ để không có cửa vượt `TRAN_TIEN` giữa chừng). Khác parser chung đúng một
- * điểm: trả về "" khi không còn chữ số nào (ô trống hợp lệ để gõ lại) thay vì 0.
+ * KHÔNG kẹp trần: số vượt `TRAN_TIEN` được giữ nguyên để `soTienHopLe` báo đỏ và khoá nút ghi, thay vì
+ * lặng lẽ đổi số chủ shop gõ). Khác parser chung đúng một điểm: trả về "" khi không còn chữ số nào
+ * (ô trống hợp lệ để gõ lại) thay vì 0.
  */
 function locSoTuChuoiNhap(raw: string): string {
   if (!/\d/.test(raw)) return "";

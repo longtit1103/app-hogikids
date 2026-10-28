@@ -267,6 +267,8 @@ describe("landRaw — hai cổng chặn khoá hỏng câm", () => {
     expect(khaiCo.map(([ten]) => ten).sort()).toEqual([
       "tiktok/analytics_products",
       "tiktok/analytics_videos",
+      // Ảnh chụp chi phí theo tài khoản TikTok Business — mỗi dòng Bronze là MỘT ngày (endpoint trả tổng của khoảng hỏi).
+      "tiktokbusiness/cost",
     ]);
     for (const [ten, def] of khaiCo) {
       expect(def.idExpr, `stream "${ten}" khai chapNhanNgay mà idExpr không ghép '_ngay'`).toContain(

@@ -76,7 +76,7 @@ export async function transformProducts(
   warnings: string[],
   opts: TransformOptions,
 ): Promise<void> {
-  const { externalIds, checkpoint } = opts;
+  const { externalIds, checkpoint, mocApiTonKho } = opts;
   // Id shop kho từ cấu hình `Setting` (transform chạy NGOÀI transaction land nên tự resolve được).
   const { kho } = await layCauHinhShop();
   let iP = 0;
@@ -93,7 +93,13 @@ export async function transformProducts(
       );
       continue;
     }
-    await upsertOneProduct(parsed.data, stats, warnings);
+    // Mốc tồn = muộn hơn giữa `fetchedAt` của dòng Bronze và lần API đi nhìn (lý do ở
+    // `TransformOptions.mocApiTonKho`). Không có mốc lượt vá ⇒ ghi tồn như cũ.
+    const mocTon =
+      mocApiTonKho === undefined
+        ? undefined
+        : new Date(Math.max(row.fetchedAt?.getTime() ?? 0, mocApiTonKho.getTime()));
+    await upsertOneProduct(parsed.data, stats, warnings, mocTon);
   }
 }
 

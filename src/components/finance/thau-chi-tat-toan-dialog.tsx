@@ -96,7 +96,7 @@ export function ThauChiTatToanDialog({
     const homNayMoi = formatNgayVn(new Date(), "yyyy-MM-dd");
     setNgay(homNayMoi);
     tinhLai(homNayMoi);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Chủ ý chỉ nạp lại khi mở hộp thoại / đổi bản ghi — không chạy theo các state còn lại.
   }, [open, loan.id]);
 
   async function xacNhan() {

@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/action-result";
 import { kiemQuyenXemGiaVon } from "@/lib/actions/cong-gia-von";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { kiemKhongPhucHoiTrongTx, LoiDangPhucHoiTrongTx } from "@/lib/backup/kiem-khong-phuc-hoi-trong-tx";
 import type { CostImportRow } from "@/lib/import/cost-excel";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
@@ -45,6 +46,8 @@ function revalidateViews(): void {
  * Module-private (file "use server" chỉ được export async function).
  */
 function loiSuaBienThe(e: unknown, tenAction: string, cauLoiHeThong: string): ActionResult {
+  // Lượt phục hồi bắt đầu giữa transaction (đã cuộn lại) — câu "đang phục hồi", không phải lỗi hệ thống.
+  if (e instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
   if ((e as { code?: string })?.code === "P2025") return { ok: false, error: "Không tìm thấy biến thể" };
   console.error(`${tenAction} failed`, e);
   return { ok: false, error: cauLoiHeThong };
@@ -61,11 +64,13 @@ export async function updateVariantCost(variantId: string, costPrice: number): P
   try {
     await prisma.$transaction(async (tx) => {
       await tx.variant.update({ where: { id: variantId }, data: { costPrice: parsed.data } });
+      kiemKhongPhucHoiTrongTx(); // sau khoá dòng (UPDATE) — cờ bật giữa chừng ⇒ cuộn lại
       await ghiNhatKy(tx, {
         actor: cong.nguoiDung,
         hanhDong: HANH_DONG.GIA_VON_SUA,
         doiTuong: { loai: "Variant", id: variantId },
       });
+      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
     });
     revalidateViews();
     return { ok: true, data: undefined };
@@ -117,6 +122,7 @@ export async function updateProductCost(
   try {
     const count = await prisma.$transaction(async (tx) => {
       const { count: n } = await tx.variant.updateMany({ where: { productId }, data: { costPrice: parsed.data } });
+      kiemKhongPhucHoiTrongTx(); // sau lượt ghi (đã khoá dòng) — cờ phục hồi bật giữa chừng ⇒ cuộn lại
       // Không dòng nào đổi ⇒ không có thao tác nào để ghi nhật ký.
       if (n > 0) {
         await ghiNhatKy(tx, {
@@ -126,6 +132,7 @@ export async function updateProductCost(
           ghiChu: { soDong: n },
         });
       }
+      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
       return n;
     });
     // count=0 = sản phẩm không có biến thể nào (vd đã bị gỡ khi đồng bộ) → báo lỗi, tránh "thành công ảo".
@@ -133,6 +140,7 @@ export async function updateProductCost(
     revalidateViews();
     return { ok: true, data: { updated: count } };
   } catch (e) {
+    if (e instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
     console.error("updateProductCost failed", e);
     return { ok: false, error: "Không áp được giá vốn" };
   }
@@ -181,7 +189,8 @@ export async function previewCostImport(rows: CostImportRow[]): Promise<ActionRe
   if (!cong.ok) return cong;
   const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
   if (!giaVon.ok) return giaVon;
-  const parsed = z.array(importRowSchema).safeParse(rows);
+  // Trần phòng cạn bộ nhớ khi validate mảng lớn (zod < 4.6.6); file giá vốn lớn nhất đã import < 1000 dòng.
+  const parsed = z.array(importRowSchema).max(5000).safeParse(rows);
   if (!parsed.success) return { ok: false, error: "Dữ liệu import không hợp lệ" };
   const clean = parsed.data;
 
@@ -224,7 +233,8 @@ export async function importCostPrices(
   const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
   if (!giaVon.ok) return giaVon;
   if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  const parsed = z.array(importRowSchema).safeParse(rows);
+  // Trần phòng cạn bộ nhớ khi validate mảng lớn (zod < 4.6.6); file giá vốn lớn nhất đã import < 1000 dòng.
+  const parsed = z.array(importRowSchema).max(5000).safeParse(rows);
   if (!parsed.success) return { ok: false, error: "Dữ liệu import không hợp lệ" };
   const clean = parsed.data;
 
@@ -237,6 +247,7 @@ export async function importCostPrices(
         const data: { costPrice: number; lowStockThreshold?: number } = { costPrice: r.costPrice };
         if (r.lowStockThreshold !== null) data.lowStockThreshold = r.lowStockThreshold; // null = giữ nguyên ngưỡng
         const { count } = await tx.variant.updateMany({ where: { sku: r.sku }, data });
+        kiemKhongPhucHoiTrongTx(); // sau lượt ghi đầu (và mọi lượt sau) — cờ bật giữa chừng ⇒ cuộn lại cả lượt
         if (count === 0) notFound.push(r.sku);
         else {
           updatedVariants += count;
@@ -248,11 +259,13 @@ export async function importCostPrices(
         hanhDong: HANH_DONG.GIA_VON_IMPORT,
         ghiChu: { soDong: updatedVariants },
       });
+      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
       return { updatedVariants, multiSkus, notFound };
     });
     revalidateViews();
     return { ok: true, data: out };
-  } catch {
+  } catch (e) {
+    if (e instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
     return { ok: false, error: "Lỗi khi áp giá vốn" };
   }
 }

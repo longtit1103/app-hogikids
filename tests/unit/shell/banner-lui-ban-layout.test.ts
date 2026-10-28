@@ -32,7 +32,7 @@ vi.mock("@/lib/queries/variants", () => ({
 }));
 vi.mock("@/lib/queries/sync-health", () => ({ getRecentDataErrorKinds: async () => [] }));
 vi.mock("@/lib/bronze/bronze-only", () => ({ hasBronzeBacklog: async () => false }));
-vi.mock("@/lib/backup/doc-trang-thai-sao-luu", () => ({ docTrangThaiSaoLuu: async () => ({ muc: "tot" }) }));
+vi.mock("@/lib/backup/doc-trang-thai-sao-luu", () => ({ docTrangThaiSaoLuu: async () => ({ muc: "ok" }) }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { setting: { findMany: async () => [], findUnique: nguon.settingFindUnique } },
 }));

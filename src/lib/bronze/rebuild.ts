@@ -97,6 +97,15 @@ export async function rebuildFromRaw(
   await checkpoint?.();
   const sh = await transformFromRaw("shopee/wallet", warnings, { checkpoint });
 
+  // Hoá đơn quảng cáo TikTok → Silver `TiktokAdsHoaDon` (nguồn dư nợ thẻ). Dòng tiền đối chiếu, không chạm
+  // P&L/quỹ, không chạm bảng app sở hữu ⇒ không cần cờ `rebuild`, không cắt tại M (dư nợ thẻ tự lọc ≥ M).
+  await checkpoint?.();
+  const hd = await transformFromRaw("tiktokbusiness/invoice", warnings, { checkpoint });
+  // Tín dụng TikTok tặng theo ngày → Silver `TiktokAdsTinDung` (P&L trừ khỏi Quảng cáo TikTok). Không chạm bảng app
+  // sở hữu ⇒ không cần cờ `rebuild`, không cắt tại M (chủ shop chốt áp toàn bộ lịch sử).
+  await checkpoint?.();
+  const td = await transformFromRaw("tiktokbusiness/cost", warnings, { checkpoint });
+
   // Chi tiêu quảng cáo → `Expense` source=ADS_API (CHỈ dòng ads, xem `upsertOneAdsExpense`). Cờ
   // `rebuild` là điều kiện BẮT BUỘC: thiếu nó nhánh ads đứng yên (xem `TransformOptions.rebuild`).
   //
@@ -126,6 +135,8 @@ export async function rebuildFromRaw(
     ad.skipped +
     pay.skipped +
     sh.skipped +
+    hd.skipped +
+    td.skipped +
     meta.skipped +
     ttAds.skipped;
 
@@ -187,6 +198,8 @@ export async function rebuildFromRaw(
       ad.boQuaCoChuDich +
       pay.boQuaCoChuDich +
       sh.boQuaCoChuDich +
+      hd.boQuaCoChuDich +
+      td.boQuaCoChuDich +
       meta.boQuaCoChuDich +
       ttAds.boQuaCoChuDich,
     unknownStatusOrders: o.unknownStatusOrders, // chỉ orders sinh mã trạng thái lạ
@@ -197,6 +210,8 @@ export async function rebuildFromRaw(
     adsExpensesUpserted: meta.adsExpensesUpserted + ttAds.adsExpensesUpserted,
     // Bỏ CỐ Ý (ngày < mốc Nợ phải trả) — KHÔNG cộng vào `skipped` ở trên, nên không giữ cờ backlog.
     skippedTruocM: meta.skippedTruocM + ttAds.skippedTruocM,
+    hoaDonAdsUpserted: hd.hoaDonAdsUpserted,
+    tinDungAdsUpserted: td.tinDungAdsUpserted,
   };
 }
 
@@ -265,6 +280,12 @@ export async function dungLaiGiaoDichTuKhoTho(
   });
   await checkpoint?.();
   const sh = await transformFromRaw("shopee/wallet", warnings, { checkpoint });
+  // Hoá đơn quảng cáo TikTok → Silver `TiktokAdsHoaDon` — cùng luật với `rebuildFromRaw` (xem ở đó).
+  await checkpoint?.();
+  const hd = await transformFromRaw("tiktokbusiness/invoice", warnings, { checkpoint });
+  // Tín dụng TikTok tặng theo ngày → Silver `TiktokAdsTinDung` — cùng luật với `rebuildFromRaw` (xem ở đó).
+  await checkpoint?.();
+  const td = await transformFromRaw("tiktokbusiness/cost", warnings, { checkpoint });
 
   // Chi tiêu quảng cáo Meta + TikTok: kho thô giữ bản gốc báo cáo nên dựng lại được. CHỈ chạm dòng
   // `Expense` source=ADS_API — chi phí chủ shop nhập tay không có nguồn nào để dựng lại, đụng vào
@@ -291,6 +312,8 @@ export async function dungLaiGiaoDichTuKhoTho(
     ad.skipped +
     pay.skipped +
     sh.skipped +
+    hd.skipped +
+    td.skipped +
     meta.skipped +
     ttAds.skipped;
 
@@ -335,6 +358,8 @@ export async function dungLaiGiaoDichTuKhoTho(
       ad.boQuaCoChuDich +
       pay.boQuaCoChuDich +
       sh.boQuaCoChuDich +
+      hd.boQuaCoChuDich +
+      td.boQuaCoChuDich +
       meta.boQuaCoChuDich +
       ttAds.boQuaCoChuDich,
     unknownStatusOrders: o.unknownStatusOrders,
@@ -345,6 +370,8 @@ export async function dungLaiGiaoDichTuKhoTho(
     adsExpensesUpserted: meta.adsExpensesUpserted + ttAds.adsExpensesUpserted,
     // Bỏ CỐ Ý (ngày < mốc Nợ phải trả) — KHÔNG cộng vào `skipped` ở trên, nên không giữ cờ backlog.
     skippedTruocM: meta.skippedTruocM + ttAds.skippedTruocM,
+    hoaDonAdsUpserted: hd.hoaDonAdsUpserted,
+    tinDungAdsUpserted: td.tinDungAdsUpserted,
   };
 }
 

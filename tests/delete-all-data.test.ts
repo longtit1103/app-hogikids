@@ -243,6 +243,29 @@ async function seedFullDataset(): Promise<void> {
       settlementAmount: -100000,
     },
   });
+  // 2 bảng Silver quảng cáo TikTok dựng từ kho thô (hoá đơn → nợ thẻ, tín dụng tặng → P&L).
+  await prisma.tiktokAdsHoaDon.create({
+    data: {
+      transactionId: "hd-del-1",
+      bcId: "7129545797879726081",
+      createTime: new Date("2026-07-05T10:00:00+07:00"),
+      amount: 143_000,
+      transactionType: "BILL_PAYMENT",
+      billingType: "CASH",
+      amountType: "POSITIVE",
+    },
+  });
+  await prisma.tiktokAdsTinDung.create({
+    data: {
+      advertiserId: "7129548444015902722",
+      ngay: new Date("2026-07-05T00:00:00+07:00"),
+      bcId: "7129545797879726081",
+      grantExVat: 10_000,
+      cashExVat: 120_000,
+      amountExVat: 130_000,
+      grantGomVat: 11_000,
+    },
+  });
   await prisma.tiktokPayment.create({
     data: {
       paymentId: "pay-del-1",
@@ -344,10 +367,13 @@ async function clearAll(): Promise<void> {
   await prisma.rawMetaAdsReport.deleteMany();
   await prisma.rawTiktokBusinessReport.deleteMany();
   await prisma.rawTiktokBusinessInvoice.deleteMany();
+  await prisma.rawTiktokBusinessCost.deleteMany();
   await prisma.tiktokSettlement.deleteMany();
   await prisma.tiktokAdsSettlement.deleteMany();
   await prisma.tiktokPayment.deleteMany();
   await prisma.shopeeSettlement.deleteMany();
+  await prisma.tiktokAdsHoaDon.deleteMany();
+  await prisma.tiktokAdsTinDung.deleteMany();
   await prisma.setting.deleteMany();
   await prisma.user.deleteMany();
   // Vừa xoá TRỌN Setting ⇒ mất luôn shop id mà đường transform/rebuild đọc từ cấu hình
@@ -395,6 +421,8 @@ describe("deleteAllData", () => {
     expect(await prisma.tiktokAdsSettlement.count()).toBe(1);
     expect(await prisma.tiktokPayment.count()).toBe(1);
     expect(await prisma.shopeeSettlement.count()).toBe(1);
+    expect(await prisma.tiktokAdsHoaDon.count()).toBe(1);
+    expect(await prisma.tiktokAdsTinDung.count()).toBe(1);
     expect(await prisma.rawPancakeOrder.count()).toBe(1);
     // So trước/sau thay vì số cứng: seed toàn cục (tests/setup.ts + clearAll) còn thêm các key
     // shop id cấu hình — ý định của assert là "Setting không bị đụng", không phải đếm đúng N.
@@ -428,6 +456,9 @@ describe("deleteAllData", () => {
     expect(await prisma.tiktokAdsSettlement.count()).toBe(0);
     expect(await prisma.tiktokPayment.count()).toBe(0);
     expect(await prisma.shopeeSettlement.count()).toBe(0);
+    // Silver quảng cáo TikTok dựng từ kho thô — sót `TiktokAdsTinDung` là P&L vẫn trừ tín dụng của Sổ đã xoá.
+    expect(await prisma.tiktokAdsHoaDon.count()).toBe(0);
+    expect(await prisma.tiktokAdsTinDung.count()).toBe(0);
 
     // Cấu hình giữ nguyên.
     expect(await prisma.user.count()).toBe(1);
@@ -680,6 +711,8 @@ async function xoaHetGiaoDich(): Promise<void> {
   await prisma.tiktokAdsSettlement.deleteMany();
   await prisma.tiktokPayment.deleteMany();
   await prisma.shopeeSettlement.deleteMany();
+  await prisma.tiktokAdsHoaDon.deleteMany();
+  await prisma.tiktokAdsTinDung.deleteMany();
 }
 
 describe("coDuLieuGiaoDich", () => {

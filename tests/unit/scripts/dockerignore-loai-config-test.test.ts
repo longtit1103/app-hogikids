@@ -38,4 +38,13 @@ describe(".dockerignore loại mọi config test ở gốc repo", () => {
     expect(["playwright.config.ts"].some((m) => khopMau(m, "playwright.prod.config.ts"))).toBe(false);
     expect(["playwright*.config.ts"].some((m) => khopMau(m, "playwright.prod.config.ts"))).toBe(true);
   });
+
+  // Thư mục gốc chứa secret/artifact local: gitignore chặn khỏi repo nhưng không chặn build context.
+  it.each([".secrets", "review-du-an", ".codex", ".agents", "plans", ".claude"])(
+    "thư mục gốc %s có dòng tương ứng trong .dockerignore",
+    (thuMuc) => {
+      const dong = mauLoai.map((m) => m.replace(/\/+$/, ""));
+      expect(dong).toContain(thuMuc);
+    },
+  );
 });

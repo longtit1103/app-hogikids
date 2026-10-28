@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatVnd } from "@/lib/format";
+import type { CanhBaoHoaDonTiktok } from "@/lib/no-phai-tra/canh-bao-hoa-don-tiktok-tre";
 import type { GoiYChotSaoKe } from "@/lib/no-phai-tra/doc-khoi-no-phai-tra";
 import type { PhanPhaiTra } from "@/lib/no-phai-tra/ky-sao-ke";
 import { locTheDongConNo } from "@/lib/no-phai-tra/the-da-dong-con-no";
@@ -10,8 +11,15 @@ import type { TheKemTrangThai } from "@/lib/no-phai-tra/the-tin-dung-queries";
 
 import { CanhBaoTheDongConNo } from "./canh-bao-the-dong-con-no";
 import { MocGanNenTang } from "./moc-gan-nen-tang";
+import { NhapSaoKeTheButton } from "./nhap-sao-ke-the-button";
 import { TheTinDungAddButton } from "./the-tin-dung-add-button";
 import { TheTinDungRowActions } from "./the-tin-dung-row-actions";
+
+/** Khoá ngày `yyyy-MM-dd` ⇒ `dd/MM` (không qua `Date` — khỏi lệch múi giờ khi render). */
+function nhanNgay(khoa: string): string {
+  const [, thang, ngay] = khoa.split("-");
+  return `${ngay}/${thang}`;
+}
 
 /** Một phần của kỳ phải trả: số tiền · hạn, kèm nhãn đỏ "quá hạn từ dd/MM" / "đến hạn hôm nay". */
 function PhanKy({ phan }: { phan: PhanPhaiTra }) {
@@ -27,14 +35,17 @@ function PhanKy({ phan }: { phan: PhanPhaiTra }) {
   );
 }
 
+const GIAI_THICH_PHAI_TRA = "Phải trả = số sao kê ngân hàng; dư nợ ước tính còn gồm bill ghi sổ trễ";
+
 function KyGanNhat({ the }: { the: TheKemTrangThai }) {
   const p = the.phaiTra;
   if (p === null) return <span className="text-xs text-muted-foreground">Chưa có kỳ sao kê</span>;
   if (p.nghiaVuKy === 0) return <span className="text-xs text-muted-foreground">Đã trả đủ kỳ gần nhất</span>;
   return (
     <div className="flex flex-col gap-0.5">
-      <p className="text-xs text-muted-foreground">
-        Phải trả <strong className="tabular-nums text-ink">{formatVnd(p.nghiaVuKy)}</strong>
+      {/* Nghĩa vụ kỳ = số ngân hàng in trên sao kê; neo dư nợ có thể cao hơn vì gồm bill ghi sổ trễ (ngân hàng xếp kỳ sau). */}
+      <p className="text-xs text-muted-foreground" title={GIAI_THICH_PHAI_TRA}>
+        Phải trả <strong className="tabular-nums text-ink">{formatVnd(p.nghiaVuKy)}</strong> theo sao kê
       </p>
       {p.phanTruoc && <PhanKy phan={p.phanTruoc} />}
       {p.phanMoi && <PhanKy phan={p.phanMoi} />}
@@ -54,6 +65,7 @@ export function TheTinDungSection({
   goiYChot,
   choPhepSua = false,
   laChuShop = false,
+  canhBaoHoaDonTiktok = null,
 }: {
   the: readonly TheKemTrangThai[];
   mocM: string | null;
@@ -61,18 +73,33 @@ export function TheTinDungSection({
   choPhepSua?: boolean;
   /** Chốt sao kê chỉ chủ shop. */
   laChuShop?: boolean;
+  /** Hoá đơn TikTok trừ thẻ ngừng về (`docCanhBaoHoaDonTiktok`) — `null` = ổn. */
+  canhBaoHoaDonTiktok?: CanhBaoHoaDonTiktok | null;
 }) {
+  // Nhập sao kê PDF = chốt sao kê ⇒ cùng điều kiện với mục "Chốt sao kê" ở menu từng thẻ: chủ shop, đã bật, thẻ còn mở.
+  const theMo = laChuShop && mocM !== null ? the.filter((t) => t.closedAt === null).map((t) => ({ id: t.id, ten: t.ten })) : [];
   return (
     <div id="the-tin-dung" className="scroll-mt-20 rounded-xl border border-hairline p-4">
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm text-muted-foreground">Thẻ tín dụng</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            dư nợ ƯỚC TÍNH từ sao kê gần nhất + chi tiêu − tiền đã trả; quỹ chỉ giảm khi bạn trả thẻ thật
+            dư nợ ƯỚC TÍNH = sao kê gần nhất + các lần TikTok trừ thẻ thật (hoá đơn, gồm VAT) + chi tay − tiền đã trả; lệch ngân hàng ± khoảng 1 ngày hoá đơn theo HAI chiều: app thiếu hoá đơn TikTok về trễ (app thấp hơn) / ngân hàng ghi sổ trễ lần TikTok trừ (app cao hơn); quỹ chỉ giảm khi bạn trả thẻ thật
           </p>
         </div>
-        {choPhepSua && <TheTinDungAddButton mocM={mocM} />}
+        {(choPhepSua || theMo.length > 0) && (
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            {theMo.length > 0 && <NhapSaoKeTheButton the={theMo} />}
+            {choPhepSua && <TheTinDungAddButton mocM={mocM} />}
+          </div>
+        )}
       </div>
+      {canhBaoHoaDonTiktok !== null && (
+        <p className="mt-2 text-xs font-medium text-warning" data-testid="the-canh-bao-hoa-don-tiktok">
+          Chưa có hoá đơn TikTok trừ thẻ từ {nhanNgay(canhBaoHoaDonTiktok.tuNgay)} — dư nợ ước tính đang THIẾU (kiểm quyền
+          finance BC / chạy dựng lại Silver hoá đơn)
+        </p>
+      )}
       <CanhBaoTheDongConNo the={locTheDongConNo(the)} />
 
       {the.length === 0 ? (

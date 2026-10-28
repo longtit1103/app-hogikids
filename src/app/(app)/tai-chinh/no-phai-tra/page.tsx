@@ -1,3 +1,4 @@
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import { format } from "date-fns";
 import Link from "next/link";
 
@@ -41,9 +42,9 @@ type SearchParams = { tab?: string; m?: string };
  * hiện mốc + chỉ báo trôi quỹ trước ngày bật + chỉ báo thẻ đã đóng còn dư nợ + các dòng điều chỉnh đã ghi + hồ sơ
  * ví (ví mới vẫn tạo được).
  */
-export default async function NoPhaiTraPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function NoPhaiTraPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SearchParams>> }) {
   await yeuCauChuShopTrang("/tai-chinh/no-phai-tra");
-  const sp = await searchParams;
+  const sp = chuanHoaSearchParams(await searchParams);
   const daBat = await docMocM();
 
   if (daBat !== null) {
@@ -110,7 +111,14 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
             {phieuChoGhi.length === 0 ? (
               <p className="text-sm text-muted-foreground">Không có phiếu nhập Pancake nào chờ ghi nhận.</p>
             ) : (
-              <GhiNhanPhieuVaoSoNo phieu={phieuChoGhi} mocM={mocM} laChuShop choPhepSua choPhepTraNgay={false} />
+              <GhiNhanPhieuVaoSoNo
+                key={phieuChoGhi.map((p) => p.uuid).join("|")}
+                phieu={phieuChoGhi}
+                mocM={mocM}
+                laChuShop
+                choPhepSua
+                choPhepTraNgay={false}
+              />
             )}
           </section>
         </>

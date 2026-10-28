@@ -1,5 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 
+import { mauTimKiemIlike } from "@/lib/escape-ilike";
 import { prisma } from "@/lib/prisma";
 
 import type { KetQuaChe, QuyenGiaVon } from "./che-gia-von-types";
@@ -77,7 +78,7 @@ function buildWhere(
 ): Prisma.Sql {
   const conds: Prisma.Sql[] = [];
   if (p.q && p.q.trim()) {
-    const like = `%${p.q.trim()}%`;
+    const like = mauTimKiemIlike(p.q);
     conds.push(Prisma.sql`(v.sku ILIKE ${like} OR p.name ILIKE ${like} OR v.label ILIKE ${like})`);
   }
   if (quyen.coQuyenGiaVon && p.missingCost) conds.push(Prisma.sql`v."costPrice" = 0`);

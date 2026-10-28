@@ -43,6 +43,7 @@ export function ChannelAdsExpensesTab({
   channels,
   roas,
   choPhepSua,
+  adsTinDungTang = 0,
 }: {
   rows: ExpenseRow[];
   categories: { id: string; name: string }[];
@@ -50,6 +51,8 @@ export function ChannelAdsExpensesTab({
   roas: number | null;
   /** `chi-phi:sua` — thiếu thì không nút sửa/xoá (action cũng tự từ chối). */
   choPhepSua: boolean;
+  /** Tín dụng TikTok tặng Lãi/Lỗ đã trừ trong kỳ — > 0 thì nói rõ bảng này là chi tiêu sàn báo, chưa trừ. */
+  adsTinDungTang?: number;
 }) {
   const [editingRow, setEditingRow] = useState<ExpenseRow | null>(null);
   const [deletingRow, setDeletingRow] = useState<ExpenseRow | null>(null);
@@ -145,6 +148,12 @@ export function ChannelAdsExpensesTab({
             <span>Tổng ads: {formatVnd(totalAds)}</span>
             <span>ROAS kỳ: {roas === null ? "—" : formatRoas(roas)}</span>
           </div>
+          {adsTinDungTang > 0 && (
+            <p className="border-t border-hairline px-4 py-2 text-xs text-muted-foreground" data-testid="bang-ads-chua-tru-tin-dung">
+              Bảng = chi tiêu sàn báo — chưa trừ tín dụng TikTok tặng ({formatVnd(adsTinDungTang)} trong kỳ). ROAS kỳ tính
+              trên chi phí ads của Lãi/Lỗ (đã trừ khoản đó).
+            </p>
+          )}
         </div>
       )}
 

@@ -21,7 +21,7 @@ export type BronzeStream =
   | "tiktok/statements" | "tiktok/statement_transactions" | "tiktok/payments" | "tiktok/orders"
   | "tiktok/analytics_shop" | "tiktok/analytics_products" | "tiktok/analytics_videos"
   | "tiktok/analytics_lives" | "tiktok/affiliate_orders"
-  | "tiktokbusiness/report" | "tiktokbusiness/invoice" | "tiktokbusiness/gmvmax_item"
+  | "tiktokbusiness/report" | "tiktokbusiness/invoice" | "tiktokbusiness/cost" | "tiktokbusiness/gmvmax_item"
   | "meta/report"
   | "shopee/wallet";
 
@@ -59,6 +59,20 @@ export type BronzeStreamDef = {
    * land (Bronze append-only) — không bao giờ làm.
    */
   chapNhanNgay?: true;
+  /**
+   * Stream mang TIỀN THẬT (Sổ quỹ, dư nợ thẻ, tín dụng TikTok tặng trừ ở Lãi/Lỗ, "Tiền đã về").
+   *
+   * Khác stream thường ở ca trang có MỘT PHẦN record thiếu khoá: `landRaw` TỪ CHỐI cả trang (ném
+   * `LoiThieuKhoaStreamTien`, route ghi SyncLog ERROR) thay vì land phần còn lại + đếm `skippedNoId`.
+   * Record thiếu khoá chưa từng vào Bronze nên "dựng lại từ kho thô" không cứu được, còn cổng đỏ sau
+   * transform chỉ soi record ĐÃ land ⇒ land một phần là mất tiền với SyncLog OK. Cửa sổ kéo lại của
+   * n8n land lại đủ trang khi nhà cung cấp sửa. Cũng là danh sách stream mà route báo ERROR khi
+   * transform bỏ record (`skipped > 0`).
+   *
+   * KHÔNG khai cho báo cáo chi tiêu ads (`meta/report`, `tiktokbusiness/report`): chi phí vào sổ qua
+   * `POST /api/ingest/ads`, Bronze ở đây chỉ phục vụ dựng lại — land một phần + đếm là hành vi đúng.
+   */
+  laStreamTien?: true;
 };
 
 /**
@@ -78,6 +92,7 @@ export const BRONZE_STREAMS: Record<BronzeStream, BronzeStreamDef> = {
   // TikTok Shop Open API — envelope {code, message, request_id, data:{<mảng>, next_page_token}}.
   "tiktok/statements": {
     table: "RawTiktokShopStatement", shops: TIKTOK_SHOP, arrayPath: ["data", "statements"],
+    laStreamTien: true,
   },
   /**
    * BẢN 202501, KHÔNG phải 202309 — chỉ bản này trả `type` (`ORDER` | `GMV_PAYMENT_FOR_TIKTOK_ADS` | …)
@@ -89,10 +104,14 @@ export const BRONZE_STREAMS: Record<BronzeStream, BronzeStreamDef> = {
    * bằng số tiền.
    */
   "tiktok/statement_transactions": {
+    // Tiền: khoản ads TikTok trừ ví (`TiktokAdsSettlement`) được cộng lại vào Sổ quỹ.
     table: "RawTiktokShopTransaction", shops: TIKTOK_SHOP, arrayPath: ["data", "transactions"],
+    laStreamTien: true,
   },
   "tiktok/payments": {
+    // Tiền: lệnh rút PAID là dòng TikTok về bank của Sổ quỹ.
     table: "RawTiktokShopPayment", shops: TIKTOK_SHOP, arrayPath: ["data", "payments"],
+    laStreamTien: true,
   },
   /**
    * CỐ Ý KHÔNG KÉO (RawTiktokShopOrder = 0 dòng là ĐÚNG, không phải chết thầm): `tiktokshop-nightly`
@@ -220,6 +239,49 @@ export const BRONZE_STREAMS: Record<BronzeStream, BronzeStreamDef> = {
     // Hoá đơn KHÔNG có field `id` — khoá là `transaction_id`. Quên khai `idExpr` thì mặc định
     // `elem->>'id'` = NULL ⇒ land 0 dòng mà KHÔNG báo lỗi (chỉ đếm vào skippedNoId).
     idExpr: `elem->>'transaction_id'`,
+    laStreamTien: true,
+  },
+
+  /**
+   * CHI PHÍ quảng cáo theo tài khoản của Business Center (`/bc/account/cost/get/`, `bc_id` +
+   * `filtering{start_date = end_date = ngày}`, `page_size` trần 50) — nguồn DUY NHẤT của phần ads trả
+   * bằng TÍN DỤNG TIKTOK TẶNG (`grant_amount`, chưa VAT, SỐ ÂM = chi phí) theo NGÀY chi tiêu. Silver
+   * `TiktokAdsTinDung`; P&L trừ phần đó khỏi dòng Quảng cáo TikTok (chủ shop chốt 23/10). KHÔNG chạm
+   * `Expense`/quỹ/nợ thẻ.
+   *
+   * VÌ SAO LAND CẢ NGÀY THÀNH MỘT DÒNG (ảnh chụp ngày) thay vì từng phần tử `cost_list`:
+   *  - phần tử KHÔNG mang ngày (endpoint trả TỔNG của khoảng hỏi) ⇒ ngày phải bơm vào (`chapNhanNgay`);
+   *  - CÙNG advertiser có thể tách NHIỀU dòng trong một lần hỏi (đo 24/10) ⇒ khoá `<ngày>:<advertiser>`
+   *    TRÙNG nhau, `DISTINCT ON` khi dựng Silver chọn 1 vứt 1 ⇒ tín dụng thiếu mà không log nào đỏ;
+   *    khoá kèm số tiền thì TikTok chỉnh hồi tố là đẻ khoá mới, bản cũ vẫn sống ⇒ cộng 2 lần;
+   *  - ngày TikTok chỉnh về 0 / bỏ advertiser khỏi danh sách: chỉ ẢNH CHỤP TRỌN NGÀY mới nói được "ngày
+   *    này nay không còn gì" (land từng phần tử thì mảng rỗng là land 0 dòng, bản cũ ở Bronze vẫn thắng).
+   * ⇒ n8n/script kéo MỌI trang của ngày rồi BỌC text thô bằng NỐI CHUỖI
+   * `{"ban_chup":[{"trang":[` + trang 1 + `,` + trang 2 … + `]}]}` (không `JSON.parse` rồi `stringify` lại
+   * — bất biến int64, xem `bocAnhChupChiPhiTiktok`), Postgres tự `::jsonb`. `shopId` = bc_id,
+   * `externalId` = `_ngay`. Bản mới nhất theo `fetchedAt` thắng; mapping kiểm đủ `total_page` trang rồi
+   * cộng mọi dòng cùng advertiser.
+   *
+   * KHOÁ CHỈ RÚT KHI trang đầu là kết quả THÀNH CÔNG (`code = 0` và có object `data`): body lỗi bọc vào
+   * mảng vẫn là "mảng có 1 record" — không chặn thì nó land thành ảnh chụp MỚI NHẤT của ngày và đè ảnh
+   * thật (tín dụng ngày đó về 0, chi phí P&L phồng lên). Khoá NULL ⇒ `landRaw` ném "rút được 0 khoá",
+   * không land gì. Trang sau trang đầu: người land đã soi `code` từng trang; mapping soi lại (trang nào
+   * không thành công ⇒ bỏ CẢ ảnh chụp + báo đỏ, số cũ giữ nguyên).
+   *
+   * ĐÁNH ĐỔI biết trước: hash băm cả envelope (gồm `request_id` TikTok đổi mỗi lần gọi) ⇒ mỗi lượt kéo
+   * lại cùng ngày land thêm một dòng dù số không đổi (~7 dòng/BC/đêm, vài KB). Chấp nhận để không phải
+   * nới hợp đồng băm chung của `landRaw` cho một stream; Silver vẫn idempotent (upsert theo khoá).
+   */
+  "tiktokbusiness/cost": {
+    table: "RawTiktokBusinessCost",
+    shops: null, // bc_id — danh sách MỞ như `tiktokbusiness/invoice`
+    arrayPath: ["ban_chup"],
+    // `->0` trên giá trị không phải mảng trả NULL (không ném) ⇒ envelope sai hình cũng ra khoá NULL.
+    idExpr:
+      `(case when elem->'trang'->0->>'code' = '0' and jsonb_typeof(elem->'trang'->0->'data') = 'object' ` +
+      `then (elem->>'_ngay') end)`,
+    chapNhanNgay: true,
+    laStreamTien: true,
   },
 
   /**
@@ -277,6 +339,7 @@ export const BRONZE_STREAMS: Record<BronzeStream, BronzeStreamDef> = {
     idExpr:
       `(elem->>'txnTime')||'|'||(elem->>'type')||'|'||coalesce(elem->>'orderCode','-')||'|'||(elem->>'amount')` +
       `||coalesce('|'||(elem->>'khoaPhu'),'')`,
+    laStreamTien: true,
   },
 };
 

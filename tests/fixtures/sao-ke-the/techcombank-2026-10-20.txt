@@ -1,0 +1,1830 @@
+SAO KÊ TÀI KHOẢN THẺ TÍN DỤNG
+Credit Card Account Statement
+Ông/Bà:
+Mr/Mrs
+NGUYEN VAN A
+Địa chỉ:
+Address
+SO 1 DUONG X, P. Y, Q. Z, TP.HA NOI
+Ngày sao kê:
+Statement date
+20/10/2026
+Số tài khoản thẻ tín dụng:
+Credit card account number
+19700000000000
+Hạn mức tín dụng (VND):
+Credit limit
+50,000,000
+Lãi suất thẻ:
+Annual Interest rate
+30.00%/năm
+1. Tóm tắt sao kê trong kỳ (chi tiết mục A) Statement Summary (Details in Section A)
+Dư nợ kỳ trước
+(VND)
+Previous Balance
+-9,459,000
+Tổng ghi nợ trong kỳ
+(VND)
+Total Debit in Period
+67,546,000
+Tổng ghi có trong kỳ
+(VND)
+Total Credit in Period
+44,530,000
+Dư nợ cuối kỳ (VND)
+Statement Balance
+-32,475,000
+Mức trả nợ tối thiểu
+(VND)
+Minimum Payment
+1,623,750
+Thời hạn thanh toán
+trước
+Payment due date
+17:00 05/11/2026
+A. Thông tin chi tiết Statement details
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+17/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/09/2026 19/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+1
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+19/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+20/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+20/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+20/09/2026 21/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+20/09/2026 22/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+20/09/2026 22/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+20/09/2026 22/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 22/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 22/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 22/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 22/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 22/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+2
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+21/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+21/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+22/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+23/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+23/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+23/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+23/09/2026 24/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+23/09/2026 25/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+23/09/2026 25/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 25/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 25/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 25/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 25/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+3
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+24/09/2026 25/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+24/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+25/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+25/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+25/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+25/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+25/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+25/09/2026 26/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+26/09/2026 26/09/2026 978,000.00 VND 978,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+DICH VU B *GOI THUE BAO DICHVUB.COM
+US
+26/09/2026 978,000.00 VND 14,000
+PHI GIAO DICH NOI TE O NUOC NGOAI -
+Số Thẻ/Card No: 0000...9999
+DICH VU B *GOI THUE BAO DICHVUB.COM
+US
+25/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+25/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+25/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+25/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+26/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+26/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+4
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+26/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+26/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+26/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+26/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+26/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+26/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+26/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+27/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+27/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+27/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+27/09/2026 28/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+27/09/2026 29/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+27/09/2026 29/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+27/09/2026 29/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+28/09/2026 29/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+28/09/2026 29/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+28/09/2026 30/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+28/09/2026 30/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+28/09/2026 30/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+28/09/2026 30/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+28/09/2026 30/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+29/09/2026 30/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+5
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+29/09/2026 30/09/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+29/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+29/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+29/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+29/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+29/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+29/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+29/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 01/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+02/10/2026 02/10/2026 9,459,000.00 VND 9,459,000 Thanh toan no the tin dung - Sotien
+9459000 VND - Ngay 02/10/2026
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+6
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+30/09/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 02/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+01/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+02/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+02/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+02/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+02/10/2026 03/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+02/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+7
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+02/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+02/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 05/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 06/10/2026 6,850,000.00 VND 6,850,000 Thanh toan no the tin dung - Sotien
+6850000 VND - Ngay 06/10/2026
+03/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+03/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+8
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+04/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 06/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+05/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 07/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+9
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+06/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+06/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 08/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 09/10/2026 6,850,000.00 VND 6,850,000 Thanh toan no the tin dung - Sotien
+6850000 VND - Ngay 08/10/2026
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+07/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 09/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+08/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 10/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 12/10/2026 6,850,000.00 VND 6,850,000 Thanh toan no the tin dung - Sotien
+6850000 VND - Ngay 11/10/2026
+11
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+09/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+09/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+10/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 12/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+13/10/2026 13/10/2026 6,850,000.00 VND 6,850,000 Thanh toan no the tin dung - Sotien
+6850000 VND - Ngay 13/10/2026
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+11/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 13/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+12/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 189,000.00 VND 189,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 196,000.00 VND 196,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+13/10/2026 15/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 168,000.00 VND 168,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+13/10/2026 15/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14/10/2026 15/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14/10/2026 15/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14/10/2026 15/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14/10/2026 15/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14/10/2026 16/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14/10/2026 16/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14/10/2026 16/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14/10/2026 16/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+14/10/2026 16/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+15/10/2026 16/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+15/10/2026 16/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+15/10/2026 16/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/10/2026 17/10/2026 6,850,000.00 VND 6,850,000 Thanh toan no the tin dung - Sotien
+6850000 VND - Ngay 17/10/2026
+15/10/2026 17/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+15/10/2026 17/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+15
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+15/10/2026 17/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+15/10/2026 17/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+15/10/2026 17/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+15/10/2026 17/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 17/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 17/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 17/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 19/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 19/10/2026 168,000.00 VND 168,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 19/10/2026 168,000.00 VND 168,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 19/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 19/10/2026 165,000.00 VND 165,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 19/10/2026 168,000.00 VND 168,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 19/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 19/10/2026 165,000.00 VND 165,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16/10/2026 19/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/10/2026 19/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/10/2026 19/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/10/2026 19/10/2026 168,000.00 VND 168,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/10/2026 19/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/10/2026 19/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/10/2026 19/10/2026 165,000.00 VND 165,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+16
+TC191
+Ngày giao dịch
+Transaction date
+Ngày cập nhật hệ thống
+Post date
+Số tiền giao dịch gốc
+Original amount
+Ghi nợ (VND)
+Debit
+Ghi có (VND)
+Credit
+Diễn giải giao dịch
+Transaction description
+19/10/2026 821,000 Hoan phi thuong nien nam 01 the
+...9999 theo uu dai chi tieu
+17/10/2026 20/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+17/10/2026 20/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/10/2026 20/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/10/2026 20/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/10/2026 20/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/10/2026 20/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/10/2026 20/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/10/2026 20/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+18/10/2026 20/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/10/2026 20/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/10/2026 20/10/2026 167,000.00 VND 167,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+19/10/2026 20/10/2026 166,000.00 VND 166,000
+Giao dịch thanh toán/Purchase - Số
+Thẻ/Card No: 0000...9999
+9PAY*TikTok Ads HA NOI VN
+Tổng ghi nợ trong kỳ Total Debit in Period: 67,546,000
+Tổng ghi có trong kỳ Total Credit in Period: 44,530,000
+Số dư cần thanh toán Outstanding Balance: -32,475,000
+Quý khách không phải thanh toán nếu trước Số dư cần thanh toán không có dấu (-) No payment is required if the Outstanding Balance is not preceded by a
+minus sign (-)
+Kết Thúc Sao Kê End Of Statement
+Please refer to the next page for details on how to read and understand your Credit Card Statement
+Quý khách vui lòng đọc trang tiếp theo để xem chi tiết về cách đọc và hiểu sao kê
+17
+TC191
+CÁCH ĐỌC VÀ HIỂU SAO KÊ
+Chú thích
+• Ngày sao kê:
+Lưu ý quan trọng
+• Chủ thẻ có trách nhiệm kiểm tra và thanh toán Dư nợ cuối kỳ, mức ít nhất là Mức trả
+nợ tối thiểu vào trước 17:00 của Ngày đến hạn thanh toán.
+• Nếu Chủ thẻ không thanh toán hoặc thanh toán số tiền nhỏ hơn Mức trả nợ tối thiểu
+muộn nhất vào Ngày đến hạn thanh toán của kỳ sao kê liền sau kỳ sao kê chưa thanh
+toán, Techcombank được quyền khóa thẻ tạm thời.
+• Nếu Chủ thẻ không thanh toán hoặc thanh toán số tiền nhỏ hơn Mức trả nợ tối thiểu
+muộn nhất vào Ngày đến hạn thanh toán của kỳ sao kê thứ hai liền sau kỳ sao kê
+chưa thanh toán, Techcombank được quyền khóa thẻ vĩnh viễn, chấm dứt việc cung
+cấp dịch vụ thẻ.
+• Các giao dịch bằng đồng ngoại tệ sẽ được chuyển đổi sang đồng Việt Nam (VND)
+theo tỷ giá của Tổ chức thẻ quốc tế và/hoặc Techcombank vào ngày giao dịch
+và/hoặc ngày xử lý giao dịch của Tổ chức thẻ quốc tế.
+LIÊN HỆ
+Dịch vụ khách hàng 24/7: 1800588823 (trong nước, miễn phí) / 84-24-39449626
+(quốc tế)
+Email: call_center@techcombank.com.vn
+18
+INTERPRETATION AND UNDERSTANDING OF A STATEMENT
+Glossary
+CONTACT
+TC191
+Là ngày Techcombank lập sao kê và do Techcombank quy định.
+Là Số tiền Chủ thẻ đang nợ Techcombank tính đến hết Ngày sao kê.• Dư nợ cuối kỳ:
+• Mức trả nợ tối thiểu: Là khoản tiền tối thiểu Chủ thẻ phải thanh toán cho
+Techcombank trong mỗi kỳ sao kê theo quy định của Techcombank. Chủ thẻ nên
+thanh toán khoản tiền tối thiểu để tránh phát sinh phí chậm thanh toán và đảm bảo
+tình trạng thẻ.
+Là ngày cuối cùng mà• Ngày đến hạn thanh toán
+Chủ thẻ phải thanh toán cho Techcombank các khoản chi tiêu cùng phí và lãi phát
+sinh trong kỳ sao kê theo quy định của Techcombank.
+• Ngày giao dịch: Là ngày giao dịch được thực hiện.
+• Ngày cập nhật hệ thống: Là ngày giao dịch được ghi vào tài khoản thẻ tín dụng.
+• Statement Date: the date that your monthly statement is generated and
+stipulated by Techcombank.
+• Statement Balance: full amount that the cardholder owes Techcombank by the
+statement date.
+• Minimum Payment Due: minimum amount that is required to be repaid as per
+statement period according to Techcombank's regulations. The cardholder needs to
+repay this amount in order to avoid late payment fees and secure card status.
+the date by which your payment (at least the Minimum• Payment Due Date:
+ Payment Due) must be made to avoid charges.
+• Transaction Date: the date on which the transaction is made.
+ the date on which the transaction is posted to a credit card account.• Post Date:
+Important notes
+• The cardholder is responsible for checking and paying Statement Balance or
+Minimum Payment Due before 17:00 on Payment Due Date.
+• If the cardholder does not repay or pay any amount smaller than the Minimum
+Payment Due by the Payment Due Date of the upcoming statement period,
+Techcombank has the right to lock the card temporarily.
+• If the cardholder does not repay or pay any amount smaller than the Minimum
+Payment Due by the Payment Due Date of the second upcoming statement period,
+Techcombank has the right to lock the card permanently and stop providing card
+services.
+• All foreign currency transactions shall be converted into Vietnam dong (VND) at the
+exchange rates specified by international card organizations and/or Techcombank on
+the date of transaction and/or the date of transaction processed by such
+organizations.
+CÁCH THỨC THANH TOÁN DƯ NỢ SAO KÊ
+• Đăng ký trích nợ tự động từ tài khoản thanh toán mở tại Techcombank. Chủ thẻ cần
+đảm bảo số dư tài khoản đã đăng ký trích nợ tự động.
+• Nộp tiền mặt vào tài khoản thẻ tín dụng tại CN/PGD
+• Chuyển tiền từ tài khoản thanh toán qua ATM, Internet banking hoặc tại CN/PGD
+• Chuyển tiền từ ngân hàng khác với các thông tin như sau:
+- Tên đơn vị nhận tiền: Họ và tên chủ thẻ chính
+- Số tài khoản: Số tài khoản thẻ tín dụng trên sao kê
+- Ngân hàng thụ hưởng: Ngân hàng thương mại cổ phần kỹ thương Việt Nam
+(Techcombank)
+- Chi nhánh: Chi nhánh phát hành thẻ
+• Auto-debit from a current account opened at Techcombank. The cardholder must
+ensure the sufficiency of the account balance.
+• Deposit cash to your credit card account at branches/TSOs
+• Transfer funds from the current account through following channels: ATM, Internet
+banking or at branches/TSOs
+• Transfer funds from other banks, with required information:
+- Name of beneficiary: Full name of the main cardholder
+- Number of account: Number of the credit card account printed on the statement
+- Beneficiary bank: Vietnam Technological and Commercial Joint Stock Bank
+(Techcombank)
+- Branch: Name of card issuing branch
+HOW TO PAY OUTSTANDING BALANCE ON YOUR CARD
+LÃI VÀ PHÍ CHẬM THANH TOÁN
+• Lãi
+Đối với các giao dịch thanh toán hàng hóa/dịch vụ, giao dịch thu phí, giao dịch thu lãi;
+khi đến hạn thanh toán:
+- Chủ thẻ thanh toán toàn bộ số dư nợ cuối kỳ thì sẽ được Techcombank ưu đãi miễn
+lãi cho toàn bộ giao dịch trong kỳ.
+- Chủ thẻ không thanh toán hoặc thanh toán một phần dư nợ cuối kỳ thì sẽ bị tính lãi
+tất cả giao dịch trong kỳ sao kê kể từ ngày phát sinh giao dịch đến ngày chủ thẻ trả
+nợ.
+Đối với giao dịch rút/ứng tiền mặt: lãi sẽ được tính kể từ ngày phát sinh giao dịch đến
+ngày chủ thẻ thanh toán toàn bộ số tiền giao dịch (không phụ thuộc ngày sao kê và
+ngày đến hạn).
+• Phí chậm thanh toán:
+Là khoản phí Chủ thẻ phải trả khi không thanh toán hoặc thanh toán số tiền nhỏ hơn
+Mức trả nợ tối thiểu trước 17:00 của Ngày đến hạn. Khoản phí này được tính trên phần
+giá trị tối thiểu chưa được thanh toán. Quý khách vui lòng tham khảo tại
+https://www.techcombank.com.vn để biết thêm chi tiết về biểu phí và lãi của thẻ tín
+dụng.
+INTEREST AND LATE PAYMENT FEE
+• Interest
+For every goods/service payment and interest and fee collection, upon the Payment
+Due Date:
+- If the cardholder repays Statement Balance in full, interest will be waived.
+- If the cardholder does not repay any amount or partial amount of Statement
+Balance, interest will be applied to all transactions in a statement period, from the
+date when the transaction occurs, until the date when Statement Balance is paid.
+For cash withdrawal/ cash advances, interest will be charged right from the date when
+the transaction occurs, until the date when Statement Balance is paid in full
+(regardless of the Statement Date or Payment Due Date).
+• Late payment fee:
+This fee is calculated on the unpaid amount of Minimum Payment Due and must be
+paid if the cardholder does not repay or pay any amount smaller than the Minimum
+Payment Due before 17:00 on Payment Due Date
+Please visit https://www.techcombank.com.vn for our credit card interest and fee
+policy.
+Customer Services 24/7: 1800588823 (in Vietnam, toll-free) or 84-24-39449626
+(overseas)
+Email: call_center@techcombank.com.vn
+("Thời hạn thanh toán trước") :

@@ -95,11 +95,19 @@ const now = () => new Date();
  *   UPDATE TUYỆT ĐỐI KHÔNG đụng `costPrice`/`lowStockThreshold` (APP-OWNED — chủ shop sửa tay).
  * - Product + variants trong CÙNG `$transaction` → chạy lại không nhân đôi.
  * - Lỗi 1 product chỉ `skipped++` + warning, KHÔNG giết batch.
+ * - `mocApiTonKho` (tuỳ chọn): lúc API ĐI NHÌN Pancake mà ảnh này phản ánh. Có ⇒ `stock` CHỈ ghi khi
+ *   webhook chưa ghi gì mới hơn mốc đó (`stockUpdatedAt IS NULL OR <= mốc`) — điều kiện nằm TRONG câu
+ *   ghi, sau khoá dòng của chính transaction, nên webhook commit chen vào khe "chụp danh sách → ghi"
+ *   của lượt vá tồn không bị ảnh API cũ hơn đè. Không truyền ⇒ ghi tồn vô điều kiện như cũ (lượt
+ *   dựng lại từ kho thô cố ý trả quyền cho API rồi xoá mốc webhook).
+ *   CHỈ cột `stock` có điều kiện; `syncedAt` vẫn đặt như cũ và KHÔNG đụng `stockUpdatedAt` (mốc đó
+ *   thuộc webhook — guard thứ tự của `webhook-stock.ts` cần nó làm điểm tựa).
  */
 export async function upsertOneProduct(
   raw: PancakeProduct,
   stats: UpsertStats,
-  warnings: string[]
+  warnings: string[],
+  mocApiTonKho?: Date
 ): Promise<void> {
   const mp = mapPancakeProduct(raw);
   try {
@@ -138,16 +146,28 @@ export async function upsertOneProduct(
             costPrice: v.costPrice,
             syncedAt: now(),
           },
-          // UPDATE: TUYỆT ĐỐI KHÔNG đụng costPrice / lowStockThreshold (APP-OWNED).
+          // UPDATE: TUYỆT ĐỐI KHÔNG đụng costPrice / lowStockThreshold (APP-OWNED). Có mốc API ⇒
+          // `stock` tách ra câu có điều kiện ngay dưới.
           update: {
             productId: product.id,
             sku: v.sku,
             label: v.label,
             sellPrice: v.sellPrice,
-            stock: v.stock,
+            ...(mocApiTonKho === undefined ? { stock: v.stock } : {}),
             syncedAt: now(),
           },
         });
+        if (mocApiTonKho !== undefined) {
+          // Dòng đã bị upsert ở trên khoá tới hết transaction ⇒ webhook không chen được giữa hai câu;
+          // webhook commit TRƯỚC thì READ COMMITTED cho câu này thấy mốc mới của nó và bỏ qua.
+          await tx.variant.updateMany({
+            where: {
+              pancakeId: v.pancakeId,
+              OR: [{ stockUpdatedAt: null }, { stockUpdatedAt: { lte: mocApiTonKho } }],
+            },
+            data: { stock: v.stock },
+          });
+        }
         stats.variantsUpserted++;
       }
     });

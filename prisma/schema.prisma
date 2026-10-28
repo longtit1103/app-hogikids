@@ -408,6 +408,11 @@ model SoTietKiem {
   closedAt     DateTime?
   note         String         @default("")
   createdAt    DateTime       @default(now())
+  /// Id dòng `CashMovement` `SAVINGS_IN` do CHÍNH lượt tất toán sinh — `moLaiSoTietKiem` chỉ xoá ĐÚNG dòng
+  /// này, dòng nhận gốc ghi tay còn nguyên. NULL khi sổ đang gửi, hoặc tất toán chỉ ghi lãi (gốc đã nhận
+  /// hết bằng dòng tay). Ghi cùng câu đặt `closedAt`, gỡ cùng câu xoá `closedAt`. KHÔNG FK: mở lại tự kiểm
+  /// dòng còn tồn tại. Sổ tất toán trước khi có cột: gán bằng `scripts/danh-dau-dong-nhan-goc-tat-toan.ts`.
+  dongNhanGocTatToanId String? @unique
   movements    CashMovement[]
   thuNhap      ThuNhap[]
 
@@ -505,8 +510,43 @@ model KySaoKeThe {
   uocTinhLucChot Int?
   note           String     @default("")
   createdAt      DateTime   @default(now())
+  /// Đường ghi: "TAY" (gõ số / neo mở sổ) | "SAO_KE_PDF" (nhập file sao kê, CHECK `KySaoKeThe_nguon`).
+  nguon          String     @default("TAY")
+  /// Chỉ khi `nguon = SAO_KE_PDF`: dư nợ cuối kỳ IN TRÊN sao kê (trước khi cộng bill ghi sổ trễ) — để soi lại.
+  saoKeSoDu      Int?
+  /// Chỉ khi `nguon = SAO_KE_PDF`: Σ bill TikTok ngày ≤ ngày chốt mà ngân hàng ghi sổ SAU ngày chốt (đã cộng vào `soDu`).
+  saoKeTongBillGhiSoTre Int?
+  /// Chỉ kỳ `SAO_KE_PDF`: Σ lần trả thẻ (`CARD_PAY`) ngày ≤ ngày chốt mà ngân hàng ghi sổ SAU ngày chốt (đã trừ khỏi
+  /// `soDu`). Số sao kê vẫn gồm phần này nên nghĩa vụ kỳ = `saoKeSoDu − saoKeTraChuaLen`. NULL = kỳ chốt trước khi có
+  /// cột (nghĩa vụ như cũ) hoặc kỳ gõ tay. Không CHECK: ảnh cũ ghi kỳ PDF không biết cột này.
+  saoKeTraChuaLen Int?
+  /// sha256 nội dung file PDF — unique có điều kiện tay `(cardId, saoKeHash) WHERE saoKeHash IS NOT NULL`
+  /// (`KySaoKeThe_mot_sao_ke_pdf_moi_the`): một file sao kê chỉ nhập một lần cho một thẻ.
+  saoKeHash      String?
+  dongSaoKe      DongSaoKeThe[]
 
   @@unique([cardId, ngayChot])
+}
+
+/// Dòng giao dịch tách từ file sao kê PDF của MỘT kỳ (`KySaoKeThe.nguon = SAO_KE_PDF`) — chỉ để soi lại/đối chiếu,
+/// KHÔNG tham gia tính dư nợ (dư nợ chỉ đọc `KySaoKeThe.soDu` + giao dịch app). Xoá kỳ ⇒ xoá theo (Cascade).
+model DongSaoKeThe {
+  id           String     @id @default(cuid())
+  kyId         String
+  ky           KySaoKeThe @relation(fields: [kyId], references: [id], onDelete: Cascade)
+  /// 00:00 VN của ngày giao dịch (dòng chỉ có ngày ghi sổ ⇒ = ngày ghi sổ).
+  ngayGiaoDich DateTime
+  /// 00:00 VN của ngày ngân hàng ghi sổ.
+  ngayGhiSo    DateTime
+  /// Tiền ghi nợ / ghi có, VND không dấu (CHECK `DongSaoKeThe_tien_khong_am`).
+  ghiNo        Int
+  ghiCo        Int
+  dienGiai     String
+  laTiktok     Boolean
+  /// `TiktokAdsHoaDon.id` ghép được lúc nhập (không FK: bảng hoá đơn dựng lại được từ kho thô).
+  hoaDonId     String?
+
+  @@index([kyId])
 }
 
 /// Nền tảng ads → thẻ trả, hiệu lực từ `tuNgay` (thực tế từ `max(M, tuNgay)`). Đổi thẻ = THÊM dòng,
@@ -915,6 +955,71 @@ model TiktokPayment {
   @@index([paidTime])
 }
 
+// ===== Silver — Hoá đơn quảng cáo TikTok (Business Center) =====
+// Nguồn: Bronze `RawTiktokBusinessInvoice` (stream `tiktokbusiness/invoice`, `/bc/account/transaction/get/`).
+// Land MỌI loại giao dịch (BILL_PAYMENT, ADD_BALANCE, ORDER_CREATION_PAYMENT, PROMOTION_ISSUED, …) —
+// người đọc tự lọc loại mình cần.
+//
+// DÒNG TIỀN ĐỐI CHIẾU / NGHĨA VỤ — TUYỆT ĐỐI KHÔNG vào P&L (chi phí ads vẫn là `Expense` từ báo cáo),
+// KHÔNG vào quỹ (Sổ quỹ không import bảng này — lưới `tests/unit/so-quy/khong-dung-tien-du-kien.test.ts`).
+// Người đọc DUY NHẤT hôm nay: dư nợ thẻ tín dụng (`src/lib/no-phai-tra/du-no-the.ts`) — TikTok trừ thẻ
+// bao nhiêu thì nợ thẻ tăng bấy nhiêu, kể cả phần ads trả bằng tín dụng tặng KHÔNG phát sinh hoá đơn tiền mặt.
+//
+// Tiền = Int VND KHÔNG DẤU (`amount` ≥ 0); chiều tiền nằm ở `amountType` (POSITIVE | NEGATIVE).
+// `createTime` = instant thật, dựng từ `create_time` ("YYYY-MM-DD HH:MM:SS" giờ ad account) + `timezone`
+// ("UTC+07:00"). Mọi id đọc bằng `->>` từ jsonb ⇒ lossless (int64 không bị JSON.parse làm tròn).
+model TiktokAdsHoaDon {
+  id                 String   @id @default(cuid())
+  transactionId      String   @unique // = externalId Bronze (`transaction_id`) — có dạng ghép "A|B", giữ NGUYÊN chuỗi
+  bcId               String // Business Center (`bc_id`; thiếu ⇒ shopId của dòng Bronze, cũng là bc_id)
+  advertiserId       String? // `account_id` — nullable để không bỏ dòng loại lạ thiếu tài khoản
+  invoiceId          String? // `invoice_id` — có hoá đơn thật không mang (đo 06/10)
+  createTime         DateTime
+  amount             Int // GỒM VAT, không dấu
+  subtotal           Int? // chưa VAT; NULL = payload không có (KHÔNG ép 0)
+  taxAmount          Int? // VAT; NULL = payload không có
+  transactionType    String // BILL_PAYMENT | ADD_BALANCE | ORDER_CREATION_PAYMENT | PROMOTION_ISSUED | …
+  billingType        String // CASH | CREDIT | …
+  amountType         String // POSITIVE | NEGATIVE (CHECK ở migration)
+  paymentPortfolioId String? // chỉ lưu — KHÔNG dùng làm khoá thẻ (có cả trên hoá đơn ví TikTok Shop trả)
+  raw                Json?
+  syncedAt           DateTime @default(now())
+
+  @@index([createTime])
+  @@index([advertiserId, createTime])
+}
+
+// ===== Silver — Ads TikTok trả bằng TÍN DỤNG TẶNG, theo ngày chi tiêu =====
+// Nguồn: Bronze `RawTiktokBusinessCost` (stream `tiktokbusiness/cost`, `/bc/account/cost/get/` mỗi ngày).
+// Một dòng = (tài khoản quảng cáo, ngày VN) — đã CỘNG mọi dòng `cost_list` cùng advertiser trong ảnh chụp ngày.
+//
+// NGƯỜI ĐỌC DUY NHẤT: P&L (`src/lib/reports/pnl.ts`) trừ Σ `grantGomVat` khỏi dòng Quảng cáo TikTok — chủ shop
+// chốt 23/10: ads trả bằng tín dụng tặng KHÔNG phải chi phí; áp TOÀN BỘ LỊCH SỬ. Sổ chi phí (`Expense`) vẫn ghi
+// đủ chi tiêu theo báo cáo; KHÔNG vào quỹ, KHÔNG vào nợ thẻ (thẻ đọc hoá đơn `TiktokAdsHoaDon`).
+//
+// Tiền = Int VND theo nghĩa CHI PHÍ: endpoint báo chi phí bằng SỐ ÂM (đo 24/10: `grant_amount -244756`) ⇒ cột
+// = −giá trị API (dương = đã tiêu). TikTok hoàn/điều chỉnh (API dương) ⇒ cột ÂM — được phép, KHÔNG có CHECK ≥ 0;
+// P&L cộng theo ngày rồi kẹp [0, ads TikTok ngày đó]. Ba cột `*ExVat` CHƯA VAT. `grantGomVat` = round(grant × (1 +
+// VAT tháng đo từ hoá đơn — `buildVatByMonth`, tháng không đo được ⇒ `VAT_MAC_DINH`)) — cùng hàm VAT của lượt dựng
+// lại `Expense` ads (đêm thường `Expense` dùng VAT cửa sổ n8n, lệch vài đồng).
+// `ngay` = 00:00 giờ VN của ngày chi tiêu (cùng neo `Expense.date` ads).
+model TiktokAdsTinDung {
+  id           String   @id @default(cuid())
+  advertiserId String
+  ngay         DateTime
+  bcId         String // Business Center của ảnh chụp đã ghi dòng này (để gỡ advertiser biến khỏi ảnh chụp sau)
+  grantExVat   Int // phần trả bằng tín dụng tặng, CHƯA VAT
+  cashExVat    Int // phần trả bằng tiền, CHƯA VAT
+  amountExVat  Int // tổng chi tiêu (≈ grant + cash), CHƯA VAT
+  grantGomVat  Int // phần P&L trừ ra
+  raw          Json?
+  syncedAt     DateTime @default(now())
+
+  @@unique([advertiserId, ngay])
+  @@index([ngay])
+  @@index([bcId, ngay])
+}
+
 // ===== Bronze + Silver — Tiền đã về Shopee (import file ví THỦ CÔNG, Phase 3) =====
 // Shopee KHÔNG có API → chủ shop tải TAY file ví "Transaction Report" (my_balance_transaction)
 // mỗi kỳ → upload UI → land Bronze RawShopeeWalletTxn → transform Silver ShopeeSettlement.
@@ -979,6 +1084,26 @@ model RawTiktokBusinessReport {
 /// Kiểm chứng 2026-07-14: report 130.000 → hoá đơn 143.000 → statement TikTok Shop trừ đúng −143.000.
 /// `shopId` = bc_id (Business Center). `externalId` = transaction_id.
 model RawTiktokBusinessInvoice {
+  id          String   @id @default(cuid())
+  shopId      String
+  externalId  String
+  payloadHash String
+  payload     Json
+  fetchedAt   DateTime @default(now())
+  syncLogId   String?
+
+  @@unique([shopId, externalId, payloadHash])
+  @@index([shopId, externalId, fetchedAt])
+  @@index([fetchedAt])
+}
+
+/// Bronze — CHI PHÍ quảng cáo theo tài khoản của Business Center (`/bc/account/cost/get/`, gọi TỪNG NGÀY
+/// `start_date = end_date`): `cost_list[{advertiser_id, amount, cash_amount, grant_amount, tax_amount}]`.
+/// Nguồn DUY NHẤT của phần ads trả bằng TÍN DỤNG TIKTOK TẶNG (`grant_amount`, chưa VAT) theo NGÀY chi tiêu.
+/// MỖI DÒNG = ẢNH CHỤP NGUYÊN ENVELOPE của một ngày (n8n bọc text thô vào mảng `ban_chup`, app bơm `_ngay`):
+/// phần tử `cost_list` không mang ngày và CÙNG advertiser có thể tách nhiều dòng ⇒ khoá theo phần tử sẽ
+/// trùng nhau. `shopId` = bc_id. `externalId` = `_ngay` ("YYYY-MM-DD" giờ VN). Silver: `TiktokAdsTinDung`.
+model RawTiktokBusinessCost {
   id          String   @id @default(cuid())
   shopId      String
   externalId  String

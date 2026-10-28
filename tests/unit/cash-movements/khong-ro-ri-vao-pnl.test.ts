@@ -13,8 +13,11 @@ import { describe, expect, it } from "vitest";
  * được chạm vào Lãi/Lỗ. Riêng LÃI vay thì có — nhưng đi đường `Expense` danh mục `interest`, không
  * qua hai module trên, nên chữ "Lãi vay" (có dấu) ở `pnl-line-items.ts` cố ý KHÔNG bị bắt.
  *
- * CỐ Ý KHÔNG cấm `src/lib/reports/cash-flow.ts` (đúng chỗ dùng — trục dòng tiền) và
- * `src/app/(app)/tai-chinh/page.tsx` (render tab Dòng tiền).
+ * `src/lib/reports/cash-flow.ts` (+ `cash-flow-theo-quyen.ts`) và `src/app/(app)/tai-chinh/page.tsx`
+ * (render tab Dòng tiền) CỐ Ý nằm NGOÀI danh sách file bị canh (đúng chỗ dùng — trục dòng tiền); nhưng
+ * module đó, qua `lib/no-phai-tra`, là cầu nối sang số quỹ — nên chính đường import tới nó bị cấm ở mọi
+ * file bị canh (token `reports/cash-flow`, xem `CAM`). Lưới KHÔNG dựng đồ thị import đệ quy: chỉ canh
+ * CHỮ ở danh sách file P&L, rẻ và đủ cho lỗ hổng thật (chỉ một module dòng tiền nằm cạnh các module P&L).
  */
 const GOC = path.resolve(__dirname, "../../..");
 
@@ -54,7 +57,17 @@ const CAM =
   //
   // `LAI_NHAP_GOC` (10/2026): lãi thấu chi ngân hàng cộng vào dư nợ — vế DÒNG TIỀN của cặp lãi kỳ. Lãi vào
   // P&L ĐÚNG MỘT LẦN qua `Expense` danh mục `interest`; đọc thêm dòng này ở P&L là lãi tính 2 lần.
-  /LAI_NHAP_GOC|cash-movements|cashMovement|so-quy|khoan-vay|prisma\.loan\b|DEPOSIT_OUT|DEPOSIT_IN|SAVINGS_OUT|SAVINGS_IN|lib\/tiet-kiem|prisma\.soTietKiem\b|soDuChot|prisma\.soDuChotThang\b|paidAtShop|\.(theTinDung|kySaoKeThe|ganNenTangThe|phieuNhapNo|yeuCauGhi|viAdsTraTruoc)\b|\bcardId\b|CARD_PAY|SUPPLIER_|CUTOVER_|ADS_TOPUP|lib\/no-phai-tra/i;
+  //
+  // `tiktokAdsHoaDon` (10/2026): hoá đơn TikTok trừ thẻ là nguồn DƯ NỢ THẺ (dòng tiền) — chi phí ads vào P&L ĐÚNG
+  // MỘT LẦN qua `Expense`; đọc thêm hoá đơn ở P&L là đếm 2 lần. (CỜ `i` ⇒ bắt cả tên model `TiktokAdsHoaDon`.)
+  // Tín dụng TikTok tặng (`TiktokAdsTinDung`) CỐ Ý KHÔNG cấm: đó là đường hợp lệ duy nhất trừ phần ads trả bằng tín
+  // dụng khỏi Lãi/Lỗ (`pnl.ts`).
+  //
+  // `reports\/cash-flow` + `"./cash-flow` (10/2026): module dòng tiền `src/lib/reports/cash-flow.ts` (và
+  // `cash-flow-theo-quyen.ts`) kéo `lib/no-phai-tra` — một file P&L import nó là rò rỉ gián tiếp mà các token trên
+  // không thấy (import qua một lớp). Có tiền tố thư mục / dấu nháy mở cố ý: chữ trần `cash-flow` khớp chú thích
+  // có sẵn trong `pnl.ts` ("như cash-flow.ts") và lưới đỏ oan.
+  /tiktokAdsHoaDon|LAI_NHAP_GOC|reports\/cash-flow|["']\.\/cash-flow|cash-movements|cashMovement|so-quy|khoan-vay|prisma\.loan\b|DEPOSIT_OUT|DEPOSIT_IN|SAVINGS_OUT|SAVINGS_IN|lib\/tiet-kiem|prisma\.soTietKiem\b|soDuChot|prisma\.soDuChotThang\b|paidAtShop|\.(theTinDung|kySaoKeThe|ganNenTangThe|phieuNhapNo|yeuCauGhi|viAdsTraTruoc)\b|\bcardId\b|CARD_PAY|SUPPLIER_|CUTOVER_|ADS_TOPUP|lib\/no-phai-tra/i;
 
 const FILE_CAM = [
   "src/lib/reports/pnl.ts",
@@ -82,13 +95,26 @@ const FILE_CAM = [
   // Phân quyền (10/2026): DTO che lãi/COGS chiếu từ `PnlBreakdown` + sheet Excel dựng ở server.
   "src/lib/reports/pnl-che.ts",
   "src/lib/reports/bao-cao-sheet-rows.ts",
+  // Thêm 10/2026: thẻ/bảng so sánh kênh HIỂN THỊ số P&L (`netProfit`/`PnlBreakdown`) mà trước đó nằm ngoài vòng
+  // canh; route xuất Excel báo cáo dựng sheet P&L ở server.
+  "src/components/kenh/channel-card-grid.tsx",
+  "src/components/kenh/channel-card-metric.tsx",
+  "src/components/kenh/channel-compare-table.tsx",
+  "src/components/kenh/channel-kpi-cards.tsx",
+  "src/app/api/export/bao-cao/route.ts",
 ];
 
 /**
  * Thư mục nơi MỌI file chạm số P&L phải sống — dùng cho ca DẪN XUẤT ở cuối file. Không gồm
  * `src/lib/so-quy`/`src/components/finance` (trục dòng tiền, đọc `cash-movements` là đúng việc).
  */
-const THU_MUC_PNL = ["src/lib/reports", "src/components/bao-cao", "src/components/dashboard"];
+const THU_MUC_PNL = [
+  "src/lib/reports",
+  "src/components/bao-cao",
+  "src/components/dashboard",
+  "src/components/kenh",
+  "src/app/api/export/bao-cao",
+];
 
 /** Dấu hiệu "file này chạm số P&L" — bốn tên có thật trong `PnlBreakdown`/API dựng dòng. */
 const DAU_HIEU_PNL = /PnlBreakdown|netProfit|financialIncome|buildPnlLineItems/;
@@ -127,6 +153,15 @@ describe("khoản tiền khác (CashMovement) không rò rỉ vào P&L", () => {
     expect("// chốt số ở đây rồi in ra").not.toMatch(CAM);
     expect("const cashOut = 1; // tiền chi thật").not.toMatch(CAM);
     expect("// quy tắc lọc đơn hợp lệ").not.toMatch(CAM);
+  });
+
+  // Module dòng tiền `reports/cash-flow` kéo `lib/no-phai-tra`: import nó từ file P&L phải bị bắt (cả alias `@/`
+  // lẫn relative cùng thư mục), còn chữ "cash-flow.ts" trong chú thích (có sẵn ở `pnl.ts`) thì KHÔNG.
+  it("regex CAM bắt import module dòng tiền reports/cash-flow, không bắt chú thích nhắc tên file", () => {
+    expect('import { computeCashFlow } from "@/lib/reports/cash-flow";').toMatch(CAM);
+    expect('import type { CashFlow } from "@/lib/reports/cash-flow-theo-quyen";').toMatch(CAM);
+    expect('import { computeCashFlow } from "./cash-flow";').toMatch(CAM);
+    expect("// (object literal — như cash-flow.ts); caller gom opts động").not.toMatch(CAM);
   });
 
   // Tiền gửi tiết kiệm bắt buộc (bất biến #1): dòng nào NHẮC TỚI hai kind này trong file cấm cũng
@@ -173,6 +208,13 @@ describe("khoản tiền khác (CashMovement) không rò rỉ vào P&L", () => {
     expect("financialIncome: incomes.reduce((s, i) => s + i.amount, 0),").not.toMatch(CAM);
   });
 
+  it("regex CAM bắt hoá đơn TikTok (nguồn nợ thẻ), KHÔNG bắt tín dụng TikTok tặng (đường hợp lệ vào P&L)", () => {
+    expect("await prisma.tiktokAdsHoaDon.findMany({})").toMatch(CAM);
+    expect('FROM "TiktokAdsHoaDon"').toMatch(CAM);
+    expect("await prisma.tiktokAdsTinDung.findMany({ where: { ngay: khoang } })").not.toMatch(CAM);
+    expect("// Σ TiktokAdsTinDung.grantGomVat").not.toMatch(CAM);
+  });
+
   // Nợ phải trả: đọc thẳng hồ sơ qua delegate, nhắc literal kind mới, hay import module đều phải bị bắt.
   it("regex CAM bắt đường rò rỉ nợ phải trả (delegate, kind mới, lib/no-phai-tra)", () => {
     for (const ca of [
@@ -206,18 +248,18 @@ describe("khoản tiền khác (CashMovement) không rò rỉ vào P&L", () => {
   // thì Phase sau tách `pnl.ts` thành hai file, quên khai, và lưới im lặng bỏ trống đúng chỗ nhạy
   // nhất (khuôn "lỗ #3" ở tests/unit/marketing/khong-ro-ri-vao-pnl.test.ts).
   //
-  // CỐ Ý VẮNG `src/app/(app)/tai-chinh/page.tsx` và `src/lib/reports/cash-flow.ts`: hai file đó là
+  // CỐ Ý VẮNG `src/app/(app)/tai-chinh/page.tsx` và `src/lib/reports/cash-flow.ts` khỏi FILE_CAM: hai file đó là
   // trục DÒNG TIỀN, đọc `so-quy`/`cash-movements` là đúng việc. Thêm vào = lưới đỏ do thiết kế.
   /**
    * Ca DẪN XUẤT — thay cho ca cũ liệt kê tay (review đối kháng 17/09 chỉ ra nó là khẳng định ĐỒNG
    * NGHĨA: `phaiCo` là bản sao của `FILE_CAM` nên chỉ bắt được việc XOÁ một entry, còn THÊM một file
    * P&L mới mà quên khai thì vẫn xanh — đúng lỗ hổng mà chú thích của chính ca đó viện dẫn).
    *
-   * Ở đây tập file bị canh được SUY RA từ nội dung thật của repo: quét ba thư mục P&L, lọc file có
+   * Ở đây tập file bị canh được SUY RA từ nội dung thật của repo: quét các thư mục P&L (`THU_MUC_PNL`), lọc file có
    * nhắc `PnlBreakdown|netProfit|financialIncome|buildPnlLineItems`, rồi đòi tập đó ⊆ `FILE_CAM`.
    * Tách `pnl.ts` thành hai file, hoặc thêm một loader P&L mới, mà quên khai ⇒ ca này ĐỎ ngay.
    */
-  it("mọi file chạm số P&L trong 3 thư mục báo cáo đều nằm trong FILE_CAM (lưới tự mở rộng)", () => {
+  it("mọi file chạm số P&L trong các thư mục báo cáo đều nằm trong FILE_CAM (lưới tự mở rộng)", () => {
     const chamPnl = THU_MUC_PNL.flatMap(docTatCa)
       .filter((f) => DAU_HIEU_PNL.test(f.noiDung))
       .map((f) => f.file);

@@ -63,6 +63,7 @@ async function cleanup(): Promise<void> {
   await prisma.rawMetaAdsReport.deleteMany();
   await prisma.rawTiktokBusinessReport.deleteMany();
   await prisma.rawTiktokBusinessInvoice.deleteMany();
+  await prisma.rawTiktokBusinessCost.deleteMany();
   await prisma.rawPancakeOrder.deleteMany();
   await prisma.rawPancakeProduct.deleteMany();
   await prisma.rawTiktokShopStatement.deleteMany();

@@ -18,6 +18,7 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/action-result";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { kiemKhongPhucHoiTrongTx, LoiDangPhucHoiTrongTx } from "@/lib/backup/kiem-khong-phuc-hoi-trong-tx";
 import { chuanHoaEmail } from "@/lib/chuan-hoa-email";
 import { ghiNhatKy, ghiNhatKyLoi, type ActorNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG, type HanhDong } from "@/lib/nhat-ky/hanh-dong";
@@ -124,11 +125,15 @@ export async function taoTaiKhoan(formData: FormData): Promise<ActionResult<{ id
         },
         select: { id: true },
       });
+      kiemKhongPhucHoiTrongTx(); // sau câu ghi đầu — lượt phục hồi bắt đầu giữa chừng ⇒ cuộn lại
       await ghiNhatKy(tx, { actor, hanhDong: HANH_DONG.TAI_KHOAN_TAO, doiTuong: { loai: "User", id, moTa: email } });
+      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
       return id;
     });
     return { ok: true, data: { id, matKhauTam } };
   } catch (loi) {
+    // Đã cuộn lại vì lượt phục hồi: không ghi nhật ký lỗi (sẽ rơi vào schema sắp bị thay), không lộ mật khẩu tạm.
+    if (loi instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
     return xuLyLoi(actor, HANH_DONG.TAI_KHOAN_TAO, loi, { moTa: email });
   }
 }
@@ -173,12 +178,15 @@ async function capNhatTaiKhoanDich<T>(
   try {
     const data = await prisma.$transaction(async (tx) => {
       const dong = await khoaDongDich(tx, id);
+      kiemKhongPhucHoiTrongTx(); // ngay sau khoá dòng đích — lượt phục hồi bắt đầu giữa chừng ⇒ cuộn lại
       const kq = await mutation(tx, dong);
       await ghiNhatKy(tx, { actor, hanhDong, doiTuong: { loai: "User", id: dong.id, moTa: dong.email } });
+      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
       return kq;
     });
     return { ok: true, data };
   } catch (loi) {
+    if (loi instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
     return xuLyLoi(actor, hanhDong, loi, { id });
   }
 }

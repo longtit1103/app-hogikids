@@ -7,6 +7,7 @@ import {
   type AdsExpenseStats,
 } from "@/lib/ingest/ads-expense-upsert";
 import { ingestAdsBodySchema } from "@/lib/ingest/ads-schema";
+import { docBodyCoTran } from "@/lib/ingest/doc-body-co-tran";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
 import { withSyncLog } from "@/lib/ingest/sync-log";
@@ -23,6 +24,16 @@ import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
  * phí mà lượt kia (hoặc chính chủ shop) vừa quyết.
  * Idempotent theo `refId` → ingest lại chỉ cập nhật amount.
  */
+
+/**
+ * Trần thân request theo BYTE UTF-8, áp TRƯỚC `JSON.parse` + zod. `.max(2000)` của schema chỉ chạy
+ * SAU khi zod đã duyệt cả mảng, nên không chặn được body rác lớn (GHSA-mrhx-c7xc-m3w5 của zod: mảng
+ * lớn dựng hàng trăm MB heap — đo body 3 MB ⇒ ~710 MB). 1.000.000 byte đủ cho lô hợp lệ lớn nhất
+ * (2000 dòng × ~300 byte, tên chiến dịch tiếng Việt dài) mà nhỏ hơn nhiều mức đã đo gây phình heap.
+ * KHÔNG dùng trần 10 MB của `/api/ingest/raw` (trang Pancake thô) — gấp 3 lần body đã đo ra 710 MB.
+ */
+const TRAN_BODY_ADS_BYTE = 1_000_000;
+
 export async function POST(req: Request): Promise<Response> {
   const unauthorized = requireIngestSecret(req);
   if (unauthorized) return unauthorized;
@@ -30,9 +41,24 @@ export async function POST(req: Request): Promise<Response> {
   const dangPhucHoi = chanRouteKhiDangPhucHoi();
   if (dangPhucHoi) return dangPhucHoi;
 
+  // Lỗi đọc luồng (client ngắt giữa chừng) rơi về đúng nhánh 400 mà `req.json()` cũ trả cho cùng ca.
+  const doc = await docBodyCoTran(req, TRAN_BODY_ADS_BYTE).catch(() => null);
+  if (doc === null) {
+    return Response.json({ ok: false, error: "invalid json" }, { status: 400 });
+  }
+  if (!doc.ok) {
+    return Response.json(
+      {
+        ok: false,
+        error: `body ${doc.bytes} byte vượt trần ${TRAN_BODY_ADS_BYTE} byte — tách lô chi tiêu ads (tối đa 2000 dòng)`,
+      },
+      { status: 413 }
+    );
+  }
+
   let body: unknown;
   try {
-    body = await req.json();
+    body = JSON.parse(doc.text);
   } catch {
     return Response.json({ ok: false, error: "invalid json" }, { status: 400 });
   }

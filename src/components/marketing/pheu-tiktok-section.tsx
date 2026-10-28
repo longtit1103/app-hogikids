@@ -286,6 +286,7 @@ export function PheuTiktokSection({
   donPancake,
   doanhThuGopPancake,
   chiQuangCao,
+  tinDungTang = 0,
   donTheoNgayPancake,
   chuThichPheu,
   chuThichNguon,
@@ -294,7 +295,10 @@ export function PheuTiktokSection({
   nguon: NguonDoanhSoTiktok;
   donPancake: number;
   doanhThuGopPancake: number;
+  /** Chi quảng cáo kênh TikTok theo Lãi/Lỗ (`calcPnl`) — ĐÃ trừ `tinDungTang`. */
   chiQuangCao: number;
+  /** Tín dụng TikTok tặng đã trừ khỏi `chiQuangCao` trong kỳ (chỉ để chú thích, không đổi số). */
+  tinDungTang?: number;
   donTheoNgayPancake: { date: string; orderCount: number }[];
   /** Câu chú thích ĐỘ TƯƠI của khối "Phễu TikTok" — tính SẴN ở `page.tsx` bằng `tinhChuThichDoTuoi`
    *  (đọc `SyncLog` stream `tiktok/analytics_shop`, ruling P2-R35 + P2-R40). Component "use client"
@@ -336,7 +340,11 @@ export function PheuTiktokSection({
             giaTri={formatVnd(doanhThuGopPancake)}
             href="/kenh/tiktok"
           />
-          <OChiSo nhan="Chi quảng cáo (sổ, gồm VAT)" giaTri={formatVnd(chiQuangCao)} />
+          <OChiSo
+            nhan="Chi quảng cáo (Lãi/Lỗ, gồm VAT)"
+            giaTri={formatVnd(chiQuangCao)}
+            phu={tinDungTang > 0 ? `đã trừ tín dụng TikTok tặng ${formatVnd(tinDungTang)}` : undefined}
+          />
           {pheu.soNgayCoDoanhSo > 0 && (
             <OChiSo
               nhan="Tỉ trọng doanh số từ GMV Max (sàn)"

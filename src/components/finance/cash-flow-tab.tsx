@@ -265,6 +265,7 @@ function KhoiQuy({ quy, isCurrentMonth, viTiktok }: { quy: NhomQuy; isCurrentMon
         goiYChot={noPhaiTra.goiYChot}
         choPhepSua={choPhepSua}
         laChuShop={laChuShop}
+        canhBaoHoaDonTiktok={noPhaiTra.canhBaoHoaDonTiktok}
       />
 
       {/* Phiếu nợ chỉ hiện khi đã bật HOẶC đã ghi nhận phiếu nào (hồ sơ ghi được trước khi bật). */}

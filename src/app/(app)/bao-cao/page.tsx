@@ -1,3 +1,4 @@
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { format, startOfMonth, subMonths } from "date-fns";
@@ -37,14 +38,14 @@ type SearchParams = { tu?: string; den?: string; range?: string; tab?: string; s
  * `?tab=pnl` cũ redirect sang đó (KHÔNG giữ tu/den/range — về tháng mặc định).
  * Mỗi tab dữ liệu khác nhau nên chỉ fetch đúng tab đang mở.
  */
-export default async function BaoCaoPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function BaoCaoPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SearchParams>> }) {
   const nd = await yeuCauQuyenTrang("/bao-cao", "bao-cao:xem");
   // Thiếu `gia-von-loi-nhuan:xem`: hai tab nhận DTO che từ server (không COGS/lãi/biên). File Excel dựng
   // ở route `/api/export/bao-cao` (cùng cổng + che); thiếu `xuat-du-lieu` thì không có nút xuất.
   const quyen = quyenGiaVonCua(nd);
   const choPhepXuat = coQuyen(nd, "xuat-du-lieu");
 
-  const sp = await searchParams;
+  const sp = chuanHoaSearchParams(await searchParams);
   // P&L cũ đã dời về hub — bookmark/link cũ `?tab=pnl` không rơi nhầm tab Sản phẩm.
   if (sp.tab === "pnl") {
     redirect("/tai-chinh?tab=loi-lo");

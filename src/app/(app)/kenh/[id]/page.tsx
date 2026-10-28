@@ -191,9 +191,9 @@ export default async function KenhChiTietPage({
         )}
       </div>
 
-      <ChannelKpiCards du={kpiKenh} />
+      <ChannelKpiCards du={kpiKenh} adsTinDungTang={current.adsTinDungTang} />
 
-      <ChannelRevenueAdsChart points={series} channelColor={channel.color} />
+      <ChannelRevenueAdsChart points={series} channelColor={channel.color} adsTinDungTang={current.adsTinDungTang} />
 
       <SanPhamBanChayKenh
         bang={topSanPhamCat}
@@ -238,6 +238,7 @@ export default async function KenhChiTietPage({
             channels={activeChannels}
             roas={roas}
             choPhepSua={suaChiPhi}
+            adsTinDungTang={current.adsTinDungTang}
           />
         )}
       </div>

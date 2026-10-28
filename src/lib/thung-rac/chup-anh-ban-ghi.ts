@@ -78,6 +78,9 @@ export const TRUONG_CHUP: Record<BangDung, readonly string[]> = {
   SoTietKiem: [
     "id", "name", "bank", "principal", "startDate", "termMonths", "maturityDate",
     "annualRateBp", "loanId", "closedAt", "note", "createdAt",
+    // Chỉ sổ ĐANG GỬI xoá được (đã tất toán phải mở lại trước) ⇒ cột này trong ảnh luôn NULL; ảnh chụp trước khi
+    // có cột không mang khoá ⇒ khôi phục ra NULL (đúng).
+    "dongNhanGocTatToanId",
   ],
   PhieuNhapNo: [
     "id", "refId", "shopId", "maPhieu", "ngayPhieu", "tongTien", "daTraTruoc", "daHuy",
@@ -87,6 +90,11 @@ export const TRUONG_CHUP: Record<BangDung, readonly string[]> = {
   KySaoKeThe: [
     "id", "cardId", "ngayChot", "soDu", "hanTra", "daTraTruocMoSo", "laNeoMoSo", "uocTinhLucChot",
     "note", "createdAt",
+    // Nguồn + số in trên sao kê PDF. Ảnh chụp trước khi có cột không mang khoá ⇒ khôi phục ra "TAY"/NULL (đúng:
+    // chỉ neo xoá cùng thẻ, kỳ sao kê thật — kể cả kỳ nhập từ PDF — chặn xoá thẻ). Dòng sao kê con KHÔNG chụp.
+    "nguon", "saoKeSoDu", "saoKeTongBillGhiSoTre", "saoKeHash",
+    // Trả chưa lên sao kê của kỳ PDF. Ảnh chụp trước khi có cột ⇒ khôi phục ra NULL (nghĩa vụ kỳ như cũ — đúng).
+    "saoKeTraChuaLen",
   ],
   ViAdsTraTruoc: ["id", "nenTang", "soDuNeo", "ngayNeo", "nguonNap", "note", "createdAt"],
 };

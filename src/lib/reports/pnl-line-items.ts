@@ -311,6 +311,54 @@ function buildOpexGroup(b: PnlBreakdown, adsChildren: PnlLineItem[]): PnlLineIte
   ];
 }
 
+/** Id dòng con tín dụng TikTok tặng — đứng ngay dưới dòng Quảng cáo TikTok, cùng cha "Quảng cáo". */
+export const ID_DONG_TIN_DUNG_TIKTOK = "ads:TIKTOK_ADS:tin-dung";
+
+/**
+ * Dòng con của "Quảng cáo" — mỗi nguồn ads một dòng, ĐỘNG theo mọi key của `adsBySource`.
+ *
+ * Kỳ có tín dụng TikTok tặng (`adsTinDungTang > 0`): dòng "TikTok Ads" hiện SỐ GỐC của Sổ chi phí
+ * (`adsBySource.TIKTOK_ADS + adsTinDungTang` — khớp Sổ chi phí từng đồng), ngay dưới là dòng
+ * "Tín dụng TikTok tặng (trả thay)" mang `value` ÂM (dòng trừ ⇒ hiển thị DƯƠNG, tức cộng lại). Σ con
+ * (theo `value`, cũng như theo `displayValue`) = `ads` của pnl.ts, không tự cộng lại tiền ở đây.
+ * Kỳ không có tín dụng ⇒ y hệt trước: không dòng mới, số TikTok không đổi.
+ */
+function buildAdsChildren(b: PnlBreakdown): PnlLineItem[] {
+  const tinDung = b.adsTinDungTang;
+  const children: PnlLineItem[] = [];
+  const theoNguon = Object.entries(b.adsBySource).map(([key, amount]): [string, number] => [
+    key,
+    key === "TIKTOK_ADS" ? amount + tinDung : amount,
+  ]);
+  // pnl.ts luôn có key TIKTOK_ADS khi có tín dụng (kẹp ≤ chi tiêu TikTok) — vế này chỉ giữ Σ con = cha cho
+  // breakdown dựng tay thiếu key, không bao giờ để dòng tín dụng mồ côi.
+  if (tinDung > 0 && b.adsBySource.TIKTOK_ADS === undefined) theoNguon.push(["TIKTOK_ADS", tinDung]);
+  for (const [key, amount] of theoNguon.sort(([, a], [, x]) => x - a)) {
+    children.push({
+      id: `ads:${key}`,
+      label: adsSourceLabel(key),
+      value: amount,
+      isDeduction: true,
+      kind: "line",
+      depth: 2,
+      parentId: "ads",
+    });
+    if (key === "TIKTOK_ADS" && tinDung > 0) {
+      children.push({
+        id: ID_DONG_TIN_DUNG_TIKTOK,
+        label: "Tín dụng TikTok tặng (trả thay)",
+        value: -tinDung,
+        isDeduction: true,
+        kind: "line",
+        depth: 2,
+        parentId: "ads",
+        note: "Phần quảng cáo TikTok trả bằng tín dụng TikTok tặng — shop không mất tiền nên trừ ra khỏi chi phí. Sổ chi phí vẫn ghi đủ chi tiêu theo báo cáo TikTok.",
+      });
+    }
+  }
+  return children;
+}
+
 /**
  * Nguồn DUY NHẤT cho thứ tự + nhãn dòng P&L.
  *
@@ -363,17 +411,7 @@ export function buildPnlLineItems(
   voucher?: VoucherBreakdown,
   backfilledFee = 0
 ): PnlLineItem[] {
-  const adsChildren: PnlLineItem[] = Object.entries(b.adsBySource)
-    .sort(([, a], [, x]) => x - a)
-    .map(([key, amount]) => ({
-      id: `ads:${key}`,
-      label: adsSourceLabel(key),
-      value: amount,
-      isDeduction: true,
-      kind: "line",
-      depth: 2,
-      parentId: "ads",
-    }));
+  const adsChildren = buildAdsChildren(b);
 
   const platformFeeChildren = buildPlatformFeeChildren(b.platformFee, feeComponents, backfilledFee);
 
@@ -477,13 +515,15 @@ export function displayValue(item: Pick<PnlLineItem, "value" | "isDeduction">): 
  * Tháng trống = không đơn (kể cả hoàn/hủy) VÀ không khoản chi nào VÀ không khoản thu ngoài bán
  * hàng nào phát sinh — hiện empty card thay vì bảng toàn số 0. Thiếu vế `financialIncome` thì
  * tháng chỉ tất toán sổ tiết kiệm (không bán đơn nào) sẽ bị nuốt trọn: cả bảng lẫn nút Xuất Excel.
+ * `ads` đã TRỪ tín dụng TikTok tặng ⇒ cộng lại `adsTinDungTang` (= chi tiêu gốc của Sổ): tháng chỉ có ads trả trọn
+ * bằng tín dụng vẫn có chi tiêu thật trong Sổ, không được coi là tháng trống.
  */
 export function isPnlMonthEmpty(b: PnlBreakdown): boolean {
   return (
     b.orderCount === 0 &&
     b.returnBomOrderCount === 0 &&
     b.financialIncome === 0 &&
-    b.ads + b.shipping + b.packaging + b.returnBom + b.fixed + b.interest + b.other === 0
+    b.ads + b.adsTinDungTang + b.shipping + b.packaging + b.returnBom + b.fixed + b.interest + b.other === 0
   );
 }
 

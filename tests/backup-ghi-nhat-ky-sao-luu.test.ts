@@ -131,7 +131,7 @@ describe("POST /api/backup — ghi nhật ký sao lưu", () => {
     expect(logs[0].finishedAt).toBeInstanceOf(Date);
     expect(logs[0].error).toBeNull();
     // `sizeBytes` là thứ màn Cài đặt in ra ("21,89 MB") — thiếu nó thì dòng trạng thái cụt.
-    expect(logs[0].stats).toMatchObject({ sizeBytes: DUMP.length });
+    expect(logs[0].stats).toMatchObject({ sizeBytes: DUMP.length, artifact: "MANUAL_DOWNLOAD" });
   });
 
   it("dump LỖI → 500, và vẫn sinh dòng SyncLog BACKUP status ERROR kèm nội dung lỗi", async () => {
@@ -146,6 +146,9 @@ describe("POST /api/backup — ghi nhật ký sao lưu", () => {
     expect(logs).toHaveLength(1);
     expect(logs[0].status).toBe("ERROR");
     expect(logs[0].error).toBe("pg_dump: connection to server failed");
+    // Lượt tải tay lỗi mang nhãn riêng — KHÔNG được xếp vào hai artifact bắt buộc (fail-closed của
+    // log ERROR "không rõ nguồn" chỉ dành cho log cũ).
+    expect(logs[0].stats).toMatchObject({ artifact: "MANUAL_DOWNLOAD" });
   });
 
   /**
@@ -228,13 +231,17 @@ describe("docTrangThaiSaoLuu", () => {
     expect((await docTrangThaiSaoLuu()).muc).toBe("chua-co");
   });
 
-  it("bấm Sao lưu ngay xong → màn Cài đặt thấy 'ok' kèm dung lượng file (vòng ghi→đọc khép kín)", async () => {
+  it("bấm Sao lưu ngay xong → dòng 'bản tải tay' thấy 'ok' kèm dung lượng (vòng ghi→đọc khép kín), KHÔNG làm xanh hai artifact bắt buộc", async () => {
     expect((await POST(req())).status).toBe(200);
 
     const trangThai = await docTrangThaiSaoLuu();
-    expect(trangThai.muc).toBe("ok");
-    expect(trangThai.fileSizeBytes).toBe(DUMP.length);
-    expect(trangThai.finishedAt).toBeInstanceOf(Date);
+    expect(trangThai.thuCong.muc).toBe("ok");
+    expect(trangThai.thuCong.fileSizeBytes).toBe(DUMP.length);
+    expect(trangThai.thuCong.finishedAt).toBeInstanceOf(Date);
+    // Bản tải tay không đẩy Drive ⇒ không thay được dump app/tarball: tổng vẫn "chưa có".
+    expect(trangThai.appDump.muc).toBe("chua-co");
+    expect(trangThai.fullServer.muc).toBe("chua-co");
+    expect(trangThai.muc).toBe("chua-co");
   });
 
   it("lấy dòng BACKUP mới nhất, KHÔNG bị log kind khác (chạy dày hơn) che mất", async () => {
@@ -243,13 +250,20 @@ describe("docTrangThaiSaoLuu", () => {
     const demQua = new Date(Date.now() - 2 * 3_600_000);
     await prisma.syncLog.createMany({
       data: [
-        { kind: "BACKUP", status: "ERROR", startedAt: demTruoc, finishedAt: demTruoc, error: "disk full" },
+        {
+          kind: "BACKUP",
+          status: "ERROR",
+          startedAt: demTruoc,
+          finishedAt: demTruoc,
+          error: "backup-app-dump.sh: disk full",
+          stats: { artifact: "APP_DUMP_REMOTE" },
+        },
         {
           kind: "BACKUP",
           status: "OK",
           startedAt: demQua,
           finishedAt: demQua,
-          stats: { file: "hogikids-dem-qua.dump", sizeBytes: 22_958_125 },
+          stats: { artifact: "APP_DUMP_REMOTE", file: "hogikids-dem-qua.dump.age", sizeBytes: 22_958_125, drivePath: "cloud:backups/hogikids-dem-qua.dump.age" },
         },
       ],
     });
@@ -261,10 +275,10 @@ describe("docTrangThaiSaoLuu", () => {
 
     try {
       const trangThai = await docTrangThaiSaoLuu();
-      expect(trangThai.muc).toBe("ok"); // KHÔNG phải "loi" của dòng ERROR đêm trước
-      expect(trangThai.fileSizeBytes).toBe(22_958_125);
-      expect(trangThai.finishedAt).toEqual(demQua);
-      expect(trangThai.error).toBeNull();
+      expect(trangThai.appDump.muc).toBe("ok"); // KHÔNG phải "loi" của dòng ERROR đêm trước
+      expect(trangThai.appDump.fileSizeBytes).toBe(22_958_125);
+      expect(trangThai.appDump.finishedAt).toEqual(demQua);
+      expect(trangThai.appDump.error).toBeNull();
     } finally {
       await prisma.syncLog.delete({ where: { id: logKhac.id } });
     }

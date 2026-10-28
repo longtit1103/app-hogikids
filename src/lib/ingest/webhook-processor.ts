@@ -176,11 +176,13 @@ async function xuLyTonKhoRealtime(shopId: string, payload: string): Promise<KetQ
 }
 
 /**
- * Field mapping mà `mapPancakeOrder` thật sự đọc. Webhook thiếu bất kỳ field nào trong đây MÀ bản
- * API đang có ⇒ nhường API (xem `soVoiBanApi`). KHÔNG liệt kê `is_abandoned_order`: đo thật cho
- * thấy webhook luôn thiếu nó, và app không dùng — đưa vào đây là chặn nhầm mọi sự kiện.
+ * Field mapping mà `mapPancakeOrder` thật sự đọc, soi trên MỌI đơn. Webhook thiếu bất kỳ field nào
+ * trong đây MÀ bản API đang có ⇒ nhường API (xem `laSuKienCuHon`). KHÔNG liệt kê `is_abandoned_order`:
+ * đo thật cho thấy webhook luôn thiếu nó, và app không dùng — đưa vào đây là chặn nhầm mọi sự kiện.
+ * Lưới `tests/ingest/guard-webhook-phu-mapping.test.ts` đối chiếu danh sách này (cùng hai nhóm dưới)
+ * với tập khoá mapping đọc — thêm field vào mapping mà quên guard thì lưới đỏ.
  */
-const FIELD_MAPPING_DON = [
+export const FIELD_MAPPING_DON = [
   "system_id",
   "status",
   "status_name",
@@ -208,7 +210,31 @@ const FIELD_MAPPING_DON = [
  * `jsonb_object_keys` chỉ thấy khoá mức 1 — có `advanced_platform_fee` không có nghĩa là có đủ ruột.
  * Thiếu `marketplace_voucher` mà bản API đang có ⇒ doanh thu đơn tụt lại đúng bằng phần sàn tài trợ.
  */
-const FIELD_TIEN_LONG = ["returned_fee", "marketplace_voucher"];
+export const FIELD_TIEN_LONG = ["returned_fee", "marketplace_voucher"];
+
+/**
+ * Field quyết định kênh BÁN TRỰC TIẾP và tiền khách đã trả tại quầy — CHỈ soi khi bản đứng đầu có
+ * `received_at_shop = true` (đơn nhận tại shop).
+ *
+ * Bất biến #2: kênh `direct` = nguồn rỗng + không `marketplace_id` + `received_at_shop = true`
+ * (`mapChannel`); `Order.paidAtShop` = Σ năm khoản thanh toán (`tinhTienDaTraTaiShop`) và Sổ quỹ đọc
+ * thẳng cột đó (`src/lib/so-quy/tien-ban-truc-tiep.ts`). Webhook mới hơn vắng `received_at_shop` ⇒ đơn
+ * về `website` + `paidAtShop = 0`; vắng một khoản thanh toán ⇒ tiền quầy hụt đúng khoản đó. Tổng doanh
+ * thu toàn shop không đổi nên kiểm P&L tổng không bắt được, và lượt API sau trùng hash nên không tự lành.
+ *
+ * KHÔNG gộp vào `FIELD_MAPPING_DON`: đơn sàn không dùng các khoá này, mà nếu webhook vắng chúng có hệ
+ * thống thì soi trên mọi đơn là nhường mọi sự kiện Shopee/TikTok ⇒ đơn hoàn/hủy chỉ vào Silver qua
+ * lượt API hằng ngày, doanh thu tính thừa tới ~24h. Đơn quầy bị nhường chỉ trễ tới lượt API — tiền
+ * quầy đúng quan trọng hơn tươi.
+ */
+export const FIELD_BAN_TRUC_TIEP = [
+  "received_at_shop",
+  "transfer_money",
+  "cash",
+  "charged_by_card",
+  "charged_by_momo",
+  "charged_by_qrpay",
+];
 
 /** Kết quả đối chiếu sự kiện với bản API mới nhất — rút bằng POSTGRES (id có thể là int64). */
 type SoSanhBanApi = {
@@ -220,7 +246,10 @@ type SoSanhBanApi = {
   externalId: string | null;
   updatedAtMoi: string | null;
   updatedAtCu: string | null;
-  /** Field mapping bản cũ CÓ mà sự kiện này KHÔNG có. */
+  /**
+   * Field mapping bản cũ CÓ mà sự kiện này KHÔNG có: `FIELD_MAPPING_DON` trên mọi đơn, cộng
+   * `FIELD_BAN_TRUC_TIEP` khi bản cũ là đơn nhận tại shop.
+   */
   thieuField: string[] | null;
   /** Field trong `FIELD_TIEN_LONG` mà bản cũ CÓ còn sự kiện này KHÔNG (tiền — soi riêng vì lồng). */
   matFieldLong: string[] | null;
@@ -276,7 +305,14 @@ async function laSuKienCuHon(
       (SELECT o->>'updated_at' FROM moi) AS "updatedAtMoi",
       (SELECT payload->>'updated_at' FROM cu) AS "updatedAtCu",
       (SELECT array_agg(k) FROM jsonb_object_keys((SELECT payload FROM cu)) AS k
-        WHERE k = ANY($3::text[]) AND NOT ((SELECT o FROM moi) ? k)) AS "thieuField",
+        WHERE (k = ANY($3::text[]) AND NOT ((SELECT o FROM moi) ? k))
+            -- Nhóm bán trực tiếp chỉ soi khi bản đứng đầu là đơn nhận tại shop (so jsonb: chỉ đúng
+            -- boolean true, không khớp chuỗi "true" hay null) — xem FIELD_BAN_TRUC_TIEP. Với nhóm này
+            -- khoá mang JSON null cũng coi như VẮNG: mapping đọc null ⇒ kênh về website, tiền quầy 0
+            -- (nhóm $3 KHÔNG áp luật null vì marketplace_id/order_sources_name null là giá trị hợp lệ).
+            OR (k = ANY($5::text[]) AND (SELECT payload->'received_at_shop' FROM cu) = 'true'::jsonb
+                AND (NOT ((SELECT o FROM moi) ? k) OR (SELECT o->k FROM moi) = 'null'::jsonb))
+        ) AS "thieuField",
       (SELECT array_agg(k) FROM unnest($4::text[]) AS k
         WHERE (SELECT o->'advanced_platform_fee'->>k FROM moi) IS NULL
           AND (SELECT payload->'advanced_platform_fee'->>k FROM cu) IS NOT NULL
@@ -288,6 +324,7 @@ async function laSuKienCuHon(
     shopId,
     FIELD_MAPPING_DON,
     FIELD_TIEN_LONG,
+    FIELD_BAN_TRUC_TIEP,
   );
 
   // Chưa có bản nào trong Bronze → sự kiện này là bản đầu tiên, cứ land.

@@ -39,6 +39,7 @@ const m = vi.hoisted(() => {
     ghepDoiChieuSoDuChot: vi.fn().mockReturnValue({}),
     docDuBaoQuy: khong(),
     docSoQuyDongChay: khong(),
+    docCanhBaoTinDungTiktokTre: khong(),
   };
 });
 
@@ -68,6 +69,10 @@ vi.mock("@/lib/so-quy/doi-chieu-so-du-chot", () => ({
 }));
 vi.mock("@/lib/so-quy/du-bao-quy-queries", () => ({ docDuBaoQuy: m.docDuBaoQuy }));
 vi.mock("@/lib/so-quy/dong-chay-so-quy-queries", () => ({ docSoQuyDongChay: m.docSoQuyDongChay }));
+vi.mock("@/lib/no-phai-tra/canh-bao-tin-dung-tiktok-tre", async (goc) => ({
+  ...(await goc<typeof import("@/lib/no-phai-tra/canh-bao-tin-dung-tiktok-tre")>()),
+  docCanhBaoTinDungTiktokTre: m.docCanhBaoTinDungTiktokTre,
+}));
 vi.mock("@/lib/expenses/ensure-recurring-expenses", () => ({
   ensureRecurringExpensesForMonths: async () => undefined,
 }));
@@ -119,6 +124,7 @@ beforeEach(() => {
   m.listSoTietKiem.mockResolvedValue([]);
   m.tongLaiDaNhanTrongKy.mockResolvedValue(0);
   m.ghepDoiChieuSoDuChot.mockReturnValue({});
+  m.docCanhBaoTinDungTiktokTre.mockResolvedValue(null);
 });
 
 describe("/tai-chinh theo quyền", () => {
@@ -186,6 +192,26 @@ describe("/tai-chinh theo quyền", () => {
     expect(m.computeCashFlow).toHaveBeenCalledTimes(1);
     expect(m.tinhSoQuyThang).toHaveBeenCalledTimes(1);
     expect(m.docSoDuChot).toHaveBeenCalledTimes(2);
+  });
+
+  it("Lãi/Lỗ tháng này: ảnh chụp tín dụng TikTok ngừng về ⇒ PnlTab nhận câu chú thích dựng sẵn", async () => {
+    dat("OWNER");
+    m.docCanhBaoTinDungTiktokTre.mockResolvedValue({ tuNgay: "2026-11-17" });
+    const el = await dungTrang("loi-lo");
+    expect(m.docCanhBaoTinDungTiktokTre).toHaveBeenCalledTimes(1);
+    expect(tim(el, "PnlTab")?.props.canhBaoTinDungTiktok).toContain("Ảnh chụp tín dụng TikTok chưa về từ 17/11");
+  });
+
+  it("đọc độ tươi tín dụng LỖI ⇒ tab Lãi/Lỗ vẫn dựng, chỉ không có chú thích", async () => {
+    dat("OWNER");
+    m.docCanhBaoTinDungTiktokTre.mockRejectedValue(new Error("DB chập"));
+    const loiConsole = vi.spyOn(console, "error").mockImplementation(() => {});
+    const el = await dungTrang("loi-lo");
+    expect(m.calcPnl).toHaveBeenCalled();
+    const tab = tim(el, "PnlTab");
+    expect(tab).not.toBeNull();
+    expect(tab?.props.canhBaoTinDungTiktok).toBeNull();
+    loiConsole.mockRestore();
   });
 
   it("không quyền tài chính nào ⇒ /khong-co-quyen từ cổng trang", async () => {

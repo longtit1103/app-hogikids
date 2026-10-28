@@ -31,6 +31,10 @@ const CAU_CHA_DA_MAT: Record<ChaDaMat, string> = {
   viAds: "Ví quảng cáo gốc đã bị xoá — khôi phục cái đó trước",
 };
 
+/**
+ * `the`: khoản chi trừ thẻ / nạp ví bằng thẻ / dòng khác vào thẻ đã đóng. Lần TRẢ thẻ (`CARD_PAY`) KHÔNG đi câu này —
+ * thẻ đóng còn nợ nhận được lần trả, cổng hồ sơ nợ (`viPhamNoPhaiTra`) nói lý do khi không nhận.
+ */
 const CAU_CHA_DA_TAT_TOAN: Record<ChaDaTatToan, string> = {
   loan: "Khoản vay đã tất toán — mở lại khoản vay trước khi khôi phục mục này",
   savings: "Sổ tiết kiệm đã tất toán — mở lại sổ trước khi khôi phục mục này",

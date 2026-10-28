@@ -2,7 +2,7 @@
 
 
 import type { AdsMoCoi, ChiPhiKhongDungLai, DonMoCoi } from "@/lib/actions/data-admin";
-import type { TrangThaiSaoLuu } from "@/lib/backup/trang-thai-sao-luu";
+import type { TrangThaiMotArtifact, TrangThaiSaoLuu } from "@/lib/backup/trang-thai-sao-luu";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { BackupButton } from "./backup-button";
 import { DeleteAllDialog } from "./delete-all-dialog";
@@ -20,14 +20,14 @@ function formatDungLuong(bytes: number | null): string | null {
 }
 
 /**
- * Dòng trạng thái "Sao lưu" — 1 trong 4 mức từ `tinhTrangSaoLuu` (`lib/backup/trang-thai-sao-luu.ts`):
- * chưa từng backup / còn tươi (không cảnh báo) / quá hạn (không lượt mới nhưng lượt cuối không lỗi)
- * / lỗi (lượt gần nhất thất bại) — 2 mức sau đều là cảnh báo nhưng nói RÕ nguyên nhân khác nhau,
- * không gộp chung một câu mơ hồ.
+ * Một dòng trạng thái của MỘT artifact — 1 trong 4 mức từ `tinhTrangMotArtifact`
+ * (`lib/backup/trang-thai-sao-luu.ts`): chưa từng chạy / còn tươi / quá hạn (không lượt mới nhưng lượt
+ * cuối không lỗi) / lỗi (lượt gần nhất thất bại). Hai mức cảnh báo nói RÕ nguyên nhân khác nhau, không
+ * gộp một câu mơ hồ. `nhan` cho chủ shop biết đang nói về bản nào (dump app hay tarball toàn server).
  */
-function TrangThaiSaoLuuText({ trangThai }: { trangThai: TrangThaiSaoLuu }) {
+function DongTrangThaiArtifact({ nhan, trangThai }: { nhan: string; trangThai: TrangThaiMotArtifact }) {
   if (trangThai.muc === "chua-co") {
-    return <p className="text-sm text-warning">Chưa sao lưu lần nào</p>;
+    return <p className="text-sm text-warning">{nhan}: chưa có bản nào</p>;
   }
 
   const moc = trangThai.finishedAt ? formatNgayVn(trangThai.finishedAt, "dd/MM/yyyy HH:mm") : null;
@@ -35,8 +35,8 @@ function TrangThaiSaoLuuText({ trangThai }: { trangThai: TrangThaiSaoLuu }) {
   if (trangThai.muc === "loi") {
     return (
       <p className="text-sm text-error">
-        Bản sao lưu gần nhất lỗi{moc ? ` (lúc ${moc})` : ""}
-        {trangThai.error ? `: ${trangThai.error}` : ""}
+        {nhan}: lần gần nhất lỗi{moc ? ` (lúc ${moc})` : ""}
+        {trangThai.error ? ` — ${trangThai.error}` : ""}
       </p>
     );
   }
@@ -45,7 +45,7 @@ function TrangThaiSaoLuuText({ trangThai }: { trangThai: TrangThaiSaoLuu }) {
     const soGio = trangThai.gioTruoc !== null ? Math.floor(trangThai.gioTruoc) : null;
     return (
       <p className="text-sm text-warning">
-        Đã {soGio ?? "?"} giờ chưa có bản sao lưu mới{moc ? ` (gần nhất: ${moc})` : ""} — kiểm cron
+        {nhan}: đã {soGio ?? "?"} giờ chưa có bản mới{moc ? ` (gần nhất: ${moc})` : ""} — kiểm cron
         backup đêm trên host.
       </p>
     );
@@ -54,9 +54,31 @@ function TrangThaiSaoLuuText({ trangThai }: { trangThai: TrangThaiSaoLuu }) {
   const dungLuong = formatDungLuong(trangThai.fileSizeBytes);
   return (
     <p className="text-sm text-muted-foreground">
-      Sao lưu gần nhất: {moc}
+      {nhan}: {moc}
       {dungLuong ? ` (${dungLuong})` : ""}
     </p>
+  );
+}
+
+/**
+ * Khối trạng thái "Sao lưu": HAI dòng cho hai artifact BẮT BUỘC (dump app lên Drive · tarball toàn
+ * server lên Drive) + một dòng phụ cho bản tải tay. Bản tải tay không đẩy Drive nên không thay được hai
+ * bản kia — nó chỉ hiện để chủ shop biết mình vừa tải gì, không làm xanh/đỏ phần còn lại.
+ */
+function TrangThaiSaoLuuText({ trangThai }: { trangThai: TrangThaiSaoLuu }) {
+  const thuCong = trangThai.thuCong;
+  const mocThuCong = thuCong.finishedAt ? formatNgayVn(thuCong.finishedAt, "dd/MM/yyyy HH:mm") : null;
+  return (
+    <div className="flex flex-col gap-1">
+      <DongTrangThaiArtifact nhan="Dump dữ liệu app (Google Drive)" trangThai={trangThai.appDump} />
+      <DongTrangThaiArtifact nhan="Tarball toàn server (Google Drive)" trangThai={trangThai.fullServer} />
+      {thuCong.muc !== "chua-co" && (
+        <p className="text-xs text-muted-foreground">
+          Bản tải tay gần nhất{mocThuCong ? `: ${mocThuCong}` : ""}
+          {thuCong.muc === "loi" ? " — lỗi" : ""} (không lên Drive, không thay hai bản trên)
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -101,10 +123,12 @@ export function DataSection({
           <BackupButton />
         </div>
         <p className="text-xs text-muted-foreground">
-          Backup tự động mỗi đêm qua host cron <code>full-backup.sh</code> (4am): bản{" "}
-          <code>hogikids-*.dump</code> (<code>pg_dump -Fc</code>, schema <code>app</code> của DB{" "}
-          <code>postgres</code>) → <code>cloud:backups/</code> giữ 30 bản — tách khỏi
-          tarball toàn-server 7 ngày ở <code>cloud:full-backups</code>.
+          Backup tự động qua host cron: <code>full-backup.sh</code> (4am mỗi đêm) đẩy tarball
+          toàn-server (mã hoá) lên <code>cloud:full-backups</code> giữ 7 ngày;{" "}
+          <code>backup-app-dump.sh</code> (4am + 1pm) đẩy bản <code>hogikids-*.dump.age</code> (
+          <code>pg_dump -Fc</code>, schema <code>app</code> của DB <code>postgres</code>) lên{" "}
+          <code>cloud:backups/</code> giữ 60 bản. Mỗi bản có hạn báo động riêng 36 giờ —
+          dòng nào đỏ/vàng ở trên là bản đó có vấn đề, dù bản kia vẫn chạy tốt.
         </p>
       </div>
 

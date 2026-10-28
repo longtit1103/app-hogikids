@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { PnlLineLabel } from "@/components/bao-cao/pnl-line-label";
 import { PnlMonthPicker } from "@/components/bao-cao/pnl-month-picker";
@@ -12,6 +12,7 @@ import {
   buildPnlLineItems,
   computePnlLineDelta,
   displayValue,
+  ID_DONG_TIN_DUNG_TIKTOK,
   isPnlMonthEmpty,
   type PnlLineDelta,
   type PnlLineItem,
@@ -103,6 +104,7 @@ export function PnlTab({
   backfilledFee = 0,
   prevBackfilledFee = 0,
   choPhepDongBo = false,
+  canhBaoTinDungTiktok = null,
 }: {
   monthPnl: PnlBreakdown;
   prevMonthPnl: PnlBreakdown;
@@ -121,6 +123,12 @@ export function PnlTab({
   prevBackfilledFee?: number;
   /** `cai-dat:sua` (server tính) — thiếu thì tháng trống không hiện nút "Đồng bộ ngay". */
   choPhepDongBo?: boolean;
+  /**
+   * Câu cảnh báo ảnh chụp tín dụng TikTok tặng ngừng về (server tính sẵn) — `null` = ổn. In ngay dưới dòng "Tín dụng
+   * TikTok tặng"; kỳ đó không có dòng tín dụng (vì ảnh chụp ngừng về nên P&L không trừ gì) thì dưới dòng "TikTok Ads";
+   * cả hai đều đang ẩn/vắng thì ở khối chú thích cuối bảng — không bao giờ nuốt mất cảnh báo.
+   */
+  canhBaoTinDungTiktok?: string | null;
 }) {
   // Quy ước href drill-down nằm ở `pnl-drill-href.ts` — tóm tắt: đích nào đọc
   // range toàn cục (/tai-chinh, /bao-cao) thì được neo ĐÚNG tháng đang hiển thị
@@ -141,6 +149,10 @@ export function PnlTab({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const expanded = new Set([...parentsWithChildren].filter((id) => !collapsed.has(id)));
   const items = visiblePnlItems(allItems, expanded);
+  const idNeoCanhBaoTinDung =
+    canhBaoTinDungTiktok === null
+      ? null
+      : ([ID_DONG_TIN_DUNG_TIKTOK, "ads:TIKTOK_ADS"].find((id) => items.some((i) => i.id === id)) ?? null);
 
   function toggle(id: string) {
     setCollapsed((prev) => {
@@ -227,61 +239,70 @@ export function PnlTab({
               const clickable = item.kind !== "total" && Boolean(item.href);
 
               return (
-                <TableRow key={item.id} className={rowBandClass(item, monthPnl.netProfit < 0)}>
-                  {/* `print:whitespace-normal`: bản in bổ sung chú thích vào cạnh nhãn
-                      (xem PnlLineLabel), để nowrap thì dòng dài tràn khỏi khổ giấy. */}
-                  <TableCell
-                    className={cn(
-                      rowTypeClass(item),
-                      // Dưới md nhãn dài xuống dòng (bảng không tràn ngang); máy tính giữ một dòng.
-                      "min-w-0 whitespace-normal md:whitespace-nowrap print:whitespace-normal",
-                    )}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <PnlLineLabel
-                        item={item}
-                        expandable={parentsWithChildren.has(item.id)}
-                        expanded={expanded.has(item.id)}
-                        onToggle={() => toggle(item.id)}
-                        href={clickable ? drillHref(item.href!) : undefined}
-                      />
-                      {item.id === "netProfit" && (
-                        <Badge className="border-none bg-on-dark/15 text-on-dark">tạm tính</Badge>
+                <Fragment key={item.id}>
+                  <TableRow className={rowBandClass(item, monthPnl.netProfit < 0)}>
+                    {/* `print:whitespace-normal`: bản in bổ sung chú thích vào cạnh nhãn
+                        (xem PnlLineLabel), để nowrap thì dòng dài tràn khỏi khổ giấy. */}
+                    <TableCell
+                      className={cn(
+                        rowTypeClass(item),
+                        // Dưới md nhãn dài xuống dòng (bảng không tràn ngang); máy tính giữ một dòng.
+                        "min-w-0 whitespace-normal md:whitespace-nowrap print:whitespace-normal",
                       )}
-                    </div>
-                  </TableCell>
-                  {/* Dòng `aside` ("Sàn trợ giá thêm") nằm TRONG khối Doanh thu và vẽ y hệt anh em
-                      cùng bậc, nhưng KHÔNG góp vào tổng nhóm — nhìn cột số mà cộng tay là ra thừa
-                      đúng khoản sàn chịu. Số tiền bọc ngoặc + màu phụ theo quy ước kế toán quen
-                      thuộc cho dòng ghi chú: mắt nhận ra ngay "số này không nằm trong mạch cộng
-                      trừ" mà không phải đọc chú thích. Chỉ đổi CÁCH BÀY — bậc, vạch dọc, phép
-                      tính và `summableChildren` giữ nguyên. */}
-                  <TableCell
-                    className={cn(
-                      "text-right tabular-nums",
-                      rowTypeClass(item),
-                      item.aside && "text-muted-foreground",
-                    )}
-                  >
-                    {item.aside ? `(${formatVnd(amount)})` : formatVnd(amount)}
-                    {/* Dưới md: % doanh thu + so tháng trước xuống dòng phụ thay 2 cột bị cắt (ảnh
-                        iPhone 26/09). `opacity-80` thay màu cố định — dòng LN ròng nền tối vẫn đọc được. */}
-                    <div
-                      data-slot="pnl-dong-phu"
-                      className="mt-0.5 text-xs font-normal opacity-80 md:hidden print:hidden"
                     >
-                      <span className="sr-only">Phần trăm doanh thu: </span>
+                      <div className="flex items-center gap-1.5">
+                        <PnlLineLabel
+                          item={item}
+                          expandable={parentsWithChildren.has(item.id)}
+                          expanded={expanded.has(item.id)}
+                          onToggle={() => toggle(item.id)}
+                          href={clickable ? drillHref(item.href!) : undefined}
+                        />
+                        {item.id === "netProfit" && (
+                          <Badge className="border-none bg-on-dark/15 text-on-dark">tạm tính</Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    {/* Dòng `aside` ("Sàn trợ giá thêm") nằm TRONG khối Doanh thu và vẽ y hệt anh em
+                        cùng bậc, nhưng KHÔNG góp vào tổng nhóm — nhìn cột số mà cộng tay là ra thừa
+                        đúng khoản sàn chịu. Số tiền bọc ngoặc + màu phụ theo quy ước kế toán quen
+                        thuộc cho dòng ghi chú: mắt nhận ra ngay "số này không nằm trong mạch cộng
+                        trừ" mà không phải đọc chú thích. Chỉ đổi CÁCH BÀY — bậc, vạch dọc, phép
+                        tính và `summableChildren` giữ nguyên. */}
+                    <TableCell
+                      className={cn(
+                        "text-right tabular-nums",
+                        rowTypeClass(item),
+                        item.aside && "text-muted-foreground",
+                      )}
+                    >
+                      {item.aside ? `(${formatVnd(amount)})` : formatVnd(amount)}
+                      {/* Dưới md: % doanh thu + so tháng trước xuống dòng phụ thay 2 cột bị cắt (ảnh
+                          iPhone 26/09). `opacity-80` thay màu cố định — dòng LN ròng nền tối vẫn đọc được. */}
+                      <div
+                        data-slot="pnl-dong-phu"
+                        className="mt-0.5 text-xs font-normal opacity-80 md:hidden print:hidden"
+                      >
+                        <span className="sr-only">Phần trăm doanh thu: </span>
+                        {formatPct(pct)}
+                        <span aria-hidden="true"> · </span>
+                        <span className="sr-only">. So tháng trước: </span>
+                        <DeltaText delta={delta} />
+                      </div>
+                    </TableCell>
+                    <TableCell className="hidden text-right tabular-nums text-xs opacity-80 md:table-cell print:table-cell">
                       {formatPct(pct)}
-                      <span aria-hidden="true"> · </span>
-                      <span className="sr-only">. So tháng trước: </span>
-                      <DeltaText delta={delta} />
-                    </div>
-                  </TableCell>
-                  <TableCell className="hidden text-right tabular-nums text-xs opacity-80 md:table-cell print:table-cell">
-                    {formatPct(pct)}
-                  </TableCell>
-                  <DeltaCell delta={delta} />
-                </TableRow>
+                    </TableCell>
+                    <DeltaCell delta={delta} />
+                  </TableRow>
+                  {item.id === idNeoCanhBaoTinDung && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="whitespace-normal py-1 text-xs text-warning">
+                        <p data-testid="pnl-canh-bao-tin-dung-tiktok">{canhBaoTinDungTiktok}</p>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               );
             })}
           </TableBody>
@@ -289,6 +310,11 @@ export function PnlTab({
       </div>
 
       <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+        {canhBaoTinDungTiktok !== null && idNeoCanhBaoTinDung === null && (
+          <p className="text-warning" data-testid="pnl-canh-bao-tin-dung-tiktok">
+            {canhBaoTinDungTiktok}
+          </p>
+        )}
         <p>Phí sàn là số thực tế Pancake trả về trên đơn hợp lệ — chưa phải số đối soát cuối kỳ của sàn</p>
         <p>P&amp;L trừ COGS theo đơn bán, không trừ chi phí &quot;Nhập hàng&quot; (dòng tiền)</p>
       </div>

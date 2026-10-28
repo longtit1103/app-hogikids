@@ -68,7 +68,16 @@ function RevenueAdsTooltip({
   );
 }
 
-export function ChannelRevenueAdsChart({ points, channelColor }: { points: Point[]; channelColor: string }) {
+export function ChannelRevenueAdsChart({
+  points,
+  channelColor,
+  adsTinDungTang = 0,
+}: {
+  points: Point[];
+  channelColor: string;
+  /** Tín dụng TikTok tặng Lãi/Lỗ đã trừ trong kỳ — > 0 thì nói rõ đường "Chi phí ads" ở đây CHƯA trừ khoản đó. */
+  adsTinDungTang?: number;
+}) {
   const groupedByWeek = points.length > WEEK_GROUP_THRESHOLD_DAYS;
   const data = groupedByWeek ? groupByWeek(points, ["revenue", "ads"]) : points;
 
@@ -78,6 +87,12 @@ export function ChannelRevenueAdsChart({ points, channelColor }: { points: Point
         <h3 className="font-serif text-lg text-ink">Doanh thu vs Chi phí ads theo ngày</h3>
         {groupedByWeek && <p className="text-xs text-muted-foreground">Gộp theo tuần</p>}
       </div>
+      {adsTinDungTang > 0 && (
+        <p className="mt-1 text-xs text-muted-foreground" data-testid="bieu-do-ads-chua-tru-tin-dung">
+          Chi phí ads = chi tiêu sàn báo — chưa trừ tín dụng TikTok tặng ({formatVnd(adsTinDungTang)} trong kỳ, Lãi/Lỗ
+          đã trừ).
+        </p>
+      )}
 
       <div className="mt-4 h-72 w-full">
         <ResponsiveContainer width="100%" height="100%">

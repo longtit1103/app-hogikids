@@ -19,6 +19,7 @@ import { deleteExpense } from "@/lib/actions/expenses";
 import { xoaPhieu } from "@/lib/actions/phieu-nhap-no";
 import { taoThe, xoaThe } from "@/lib/actions/the-tin-dung";
 import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { docDuNoCacThe } from "@/lib/no-phai-tra/du-no-the";
 import { docPhieuTheoId } from "@/lib/no-phai-tra/phieu-nhap-no-queries";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
@@ -530,5 +531,105 @@ describe("dòng tiền / thu nhập TRƯỚC M và thấu chi trước M — kh�
     expect(ms).toBeGreaterThanOrEqual(700);
     expect(r).toMatchObject({ ok: false, lyDo: expect.stringMatching(CAU_TRUOC_M) });
     expect(await prisma.cashMovement.count()).toBe(0);
+  });
+});
+
+/**
+ * Thẻ ĐÃ ĐÓNG còn nợ (ads về muộn gán thẻ theo đúng lịch sử mốc gắn): lối DUY NHẤT tất toán phần nợ đó là `CARD_PAY`
+ * vào chính thẻ — nhập tay đã cho (nợ > 0, ngày sau neo đang dùng). Khôi phục thùng rác là cùng một đường ghi tiền
+ * nên phải theo đúng luật ấy: cổng tổng quát "cha đã tất toán" KHÔNG được chặn trước `CARD_PAY`, còn khoản chi trừ
+ * thẻ / nạp ví bằng thẻ vào thẻ đóng thì vẫn chặn. M = 01/11, hôm nay 26/11; thẻ neo 01/11 = 0, chi 500.000 ngày
+ * 10/11, đóng 20/11.
+ */
+describe("khôi phục trả thẻ vào thẻ ĐÃ ĐÓNG còn nợ", () => {
+  const NO = 500_000;
+
+  async function theDongConNo(): Promise<string> {
+    await datM("2026-11-01");
+    const tao = await taoThe({ ten: "Thẻ Đ", ngayChotSaoKe: 25, ngayHanTra: 10, neoBanDau: { ngayChot: "2026-11-01", soDu: 0 } });
+    const cardId = (tao as { data: { id: string } }).data.id;
+    await prisma.expense.create({
+      data: { date: vn("2026-11-10"), categoryId: "other", amount: NO, description: "ads về muộn", source: "MANUAL", cardId },
+    });
+    await prisma.theTinDung.update({ where: { id: cardId }, data: { closedAt: vn("2026-11-20") } });
+    return cardId;
+  }
+  const duNoThe = async (cardId: string) => (await docDuNoCacThe(vn("2026-11-26"))).find((d) => d.cardId === cardId)?.duNo;
+
+  /** Trả 500.000 vào thẻ đóng (được phép) rồi xoá ⇒ mục thùng rác. */
+  async function traRoiXoa(cardId: string, ngay = "2026-11-22"): Promise<string> {
+    expect(await createCashMovement({ date: vn(ngay), kind: "CARD_PAY", amount: NO, description: "", cardId })).toEqual({
+      ok: true,
+      data: undefined,
+    });
+    expect(await duNoThe(cardId)).toBe(0);
+    const dong = await prisma.cashMovement.findFirstOrThrow({ where: { cardId, kind: "CARD_PAY" } });
+    expect(await deleteCashMovement(dong.id)).toEqual({ ok: true, data: undefined });
+    expect(await duNoThe(cardId)).toBe(NO);
+    return (await mucThungRac("CashMovement")).id;
+  }
+
+  it("còn nợ 500.000, ngày trả sau neo ⇒ cột trạng thái 'khôi phục được', khôi phục OK, dư nợ về 0", async () => {
+    const cardId = await theDongConNo();
+    const mucId = await traRoiXoa(cardId);
+    const { rows } = await listThungRac(phamViThungRac(CHU));
+    expect(rows.find((r) => r.id === mucId)?.lyDo).toBeNull();
+    expect(await khoiPhucBanGhiDaXoa(mucId, CHU)).toEqual({ ok: true, canhBao: null });
+    expect(await prisma.cashMovement.count({ where: { cardId, kind: "CARD_PAY" } })).toBe(1);
+    expect(await duNoThe(cardId)).toBe(0);
+  });
+
+  it("thẻ đóng đã hết nợ (lần trả khác đã ghi) ⇒ vẫn từ chối, không ghi", async () => {
+    const cardId = await theDongConNo();
+    const mucId = await traRoiXoa(cardId);
+    await createCashMovement({ date: vn("2026-11-23"), kind: "CARD_PAY", amount: NO, description: "", cardId });
+    expect(await duNoThe(cardId)).toBe(0);
+    const r = await khoiPhucBanGhiDaXoa(mucId, CHU);
+    expect(r).toMatchObject({ ok: false, lyDo: expect.stringMatching(/đã đóng và không còn nợ/) });
+    expect(await prisma.cashMovement.count({ where: { cardId, kind: "CARD_PAY" } })).toBe(1);
+    expect((await prisma.banGhiDaXoa.findUniqueOrThrow({ where: { id: mucId } })).khoiPhucLuc).toBeNull();
+  });
+
+  it("ngày trả ≤ ngày chốt sao kê đang dùng (sao kê 25/11 chốt sau khi xoá) ⇒ từ chối", async () => {
+    const cardId = await theDongConNo();
+    const mucId = await traRoiXoa(cardId, "2026-11-22");
+    await prisma.kySaoKeThe.create({ data: { cardId, ngayChot: vn("2026-11-25"), soDu: NO, hanTra: vn("2026-12-10") } });
+    const r = await khoiPhucBanGhiDaXoa(mucId, CHU);
+    expect(r).toMatchObject({ ok: false, lyDo: expect.stringMatching(/ngày trả phải sau ngày chốt sao kê gần nhất/) });
+    expect(await prisma.cashMovement.count({ where: { cardId, kind: "CARD_PAY" } })).toBe(0);
+  });
+
+  it("khoản chi trừ thẻ / nạp ví bằng thẻ vào thẻ đóng ⇒ vẫn chặn 'thẻ đã đóng'", async () => {
+    const cardId = await theDongConNo();
+    const e = await prisma.expense.create({
+      data: { date: vn("2026-11-12"), categoryId: "other", amount: 100_000, description: "", source: "MANUAL", cardId },
+    });
+    await prisma.$transaction(async (tx) => {
+      await chupVaoThungRac(tx, { bang: "Expense", banGhi: e, tenDanhMuc: "Khác" });
+      await tx.expense.delete({ where: { id: e.id } });
+    });
+    const mucChi = await mucThungRac("Expense");
+    expect(await khoiPhucBanGhiDaXoa(mucChi.id, CHU)).toMatchObject({
+      ok: false,
+      lyDo: "Thẻ tín dụng đã đóng — không khôi phục dòng tiền / khoản chi vào thẻ đã đóng",
+    });
+
+    const viAdsId = (
+      await prisma.viAdsTraTruoc.create({ data: { nenTang: "SHOPEE_ADS", soDuNeo: 0, ngayNeo: vn("2026-11-01", "23:59:59") } })
+    ).id;
+    const nap = await prisma.cashMovement.create({
+      data: { date: vn("2026-11-05"), kind: "ADS_TOPUP", amount: 200_000, description: "", viAdsId, cardId },
+    });
+    await prisma.$transaction(async (tx) => {
+      await chupVaoThungRac(tx, { bang: "CashMovement", banGhi: nap });
+      await tx.cashMovement.delete({ where: { id: nap.id } });
+    });
+    const mucNap = await mucThungRac("CashMovement");
+    expect(await khoiPhucBanGhiDaXoa(mucNap.id, CHU)).toMatchObject({
+      ok: false,
+      lyDo: "Thẻ tín dụng đã đóng — không khôi phục dòng tiền / khoản chi vào thẻ đã đóng",
+    });
+    expect(await prisma.expense.count({ where: { id: e.id } })).toBe(0);
+    expect(await prisma.cashMovement.count({ where: { kind: "ADS_TOPUP" } })).toBe(0);
   });
 });

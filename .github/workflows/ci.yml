@@ -48,6 +48,8 @@ jobs:
   typecheck:
     name: Typecheck (tsc --noEmit)
     runs-on: ubuntu-latest
+    # Trần thời gian: bước treo im lặng không được đốt hạn mức Actions tới mặc định 6 giờ.
+    timeout-minutes: 30
     env:
       # Chỉ cần biến TỒN TẠI cho prisma generate / tsc — KHÔNG kết nối thật.
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=app
@@ -128,6 +130,8 @@ jobs:
   unit:
     name: Unit tests (Vitest)
     runs-on: ubuntu-latest
+    # Trần thời gian: bước treo im lặng không được đốt hạn mức Actions tới mặc định 6 giờ.
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:15
@@ -179,6 +183,8 @@ jobs:
   e2e:
     name: E2E tests (Playwright)
     runs-on: ubuntu-latest
+    # Trần thời gian: bước treo im lặng không được đốt hạn mức Actions tới mặc định 6 giờ.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:15
@@ -231,6 +237,23 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  audit:
+    name: Audit phụ thuộc (npm audit, không chặn)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Chỉ BÁO: advisory mới lộ ra không được làm đỏ PR không liên quan tới nó; người đọc log quyết định.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
 
   docker:
     name: Dựng ảnh Docker

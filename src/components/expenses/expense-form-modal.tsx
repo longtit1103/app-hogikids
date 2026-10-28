@@ -14,7 +14,7 @@ import { createExpense, stopRecurring, updateExpense } from "@/lib/actions/expen
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { DINH_KY_TRUNG_MAU_DANG_CHAY as MA_DINH_KY_TRUNG } from "@/lib/expenses/mau-dinh-ky-trung";
 import { formatVnd } from "@/lib/format";
-import { parseAmountInput } from "@/lib/format-amount-input";
+import { loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 
 const NONE = "__none__"; // sentinel: Select không nhận value="" cho "Không gắn kênh"
 // Danh mục Lãi vay — server (`src/lib/actions/expenses.ts`) chặn MỌI dòng danh mục này mang kênh.
@@ -170,7 +170,7 @@ export function ExpenseFormModal({
     setFieldErrors({});
     setCanhBaoDaNhan(null);
     initialSnapshotRef.current = JSON.stringify(initial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Chủ ý chỉ nạp lại khi mở hộp thoại / đổi bản ghi — không chạy theo các state còn lại.
   }, [open, expense?.id]);
 
   // Xác nhận chỉ có giá trị cho đúng nội dung đã được cảnh báo: sửa BẤT KỲ ô nào (kể cả trong lúc
@@ -314,8 +314,15 @@ export function ExpenseFormModal({
   // thành null và server coerce ra 01/01/1970: dòng ghi xong không hiện ở tháng nào mà toast vẫn xanh
   // (lúc SỬA thì dời luôn dòng thật về 1970). Server đã chặn bằng schema; đây là lớp UI, cùng điều kiện
   // `Boolean(date)` với cash-movement-form-modal.
+  // Gõ quá trần KHÔNG bị kẹp im lặng: ô giữ số gõ, báo lỗi và khoá nút Lưu.
+  const loiTran = loiVuotTranAmount(amount);
   const canSave =
-    Boolean(date) && Boolean(categoryId) && amount > 0 && (categoryId !== "ads" || Boolean(adsSource)) && !saving;
+    Boolean(date) &&
+    Boolean(categoryId) &&
+    amount > 0 &&
+    !loiTran &&
+    (categoryId !== "ads" || Boolean(adsSource)) &&
+    !saving;
   const showRecurringToggle = !isEdit && categoryId !== "ads";
   const showStopRecurring = isEdit && Boolean(expense?.recurringId);
 
@@ -403,7 +410,7 @@ export function ExpenseFormModal({
             </p>
           )}
 
-          <Field label="Số tiền" error={fieldErrors.amount}>
+          <Field label="Số tiền" error={fieldErrors.amount ?? loiTran ?? undefined}>
             <div className="relative">
               <Input
                 inputMode="numeric"

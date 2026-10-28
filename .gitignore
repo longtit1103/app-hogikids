@@ -38,6 +38,8 @@ yarn-error.log*
 
 # Pancake raw API dumps (chứa PII — KHÔNG commit; chỉ fixtures đã ẩn danh mới commit)
 tests/fixtures/pancake/_raw/
+# PDF sao kê thẻ THẬT (tên, địa chỉ, số tài khoản) — chỉ text đã ẩn danh mới commit
+tests/fixtures/sao-ke-the/*.pdf
 
 # vercel
 .vercel

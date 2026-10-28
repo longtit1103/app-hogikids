@@ -100,7 +100,9 @@ export async function truncateBusinessTables(): Promise<void> {
   await prisma.soTietKiem.deleteMany(); // sổ tiết kiệm — xoá SAU ThuNhap + CashMovement (FK Restrict)
   await prisma.loan.deleteMany(); // hồ sơ khoản vay — xoá SAU CashMovement (FK Restrict)
   // Nợ phải trả — SAU Expense + CashMovement (FK Restrict cardId/phieuNhapId/viAdsId); kỳ sao kê +
-  // gắn nền tảng TRƯỚC thẻ (con trước cha).
+  // gắn nền tảng TRƯỚC thẻ (con trước cha). Dòng sao kê PDF là con của kỳ sao kê (Cascade) — xoá tường minh
+  // trước kỳ để thứ tự đọc được, không dựa vào cascade.
+  await prisma.dongSaoKeThe.deleteMany();
   await prisma.kySaoKeThe.deleteMany();
   await prisma.ganNenTangThe.deleteMany();
   await prisma.phieuNhapNo.deleteMany();
@@ -120,4 +122,10 @@ export async function truncateBusinessTables(): Promise<void> {
   await prisma.tiktokAdsSettlement.deleteMany();
   await prisma.tiktokPayment.deleteMany();
   await prisma.shopeeSettlement.deleteMany();
+  // Silver hoá đơn quảng cáo TikTok (nguồn dư nợ thẻ) — không FK, xoá độc lập. Sót là hoá đơn của suite
+  // trước cộng vào nợ thẻ của suite sau.
+  await prisma.tiktokAdsHoaDon.deleteMany();
+  // Silver tín dụng TikTok tặng (P&L trừ khỏi Quảng cáo TikTok) — không FK. Sót là tín dụng của suite trước trừ
+  // vào chi phí ads của suite sau (lãi ròng lệch đúng số đó).
+  await prisma.tiktokAdsTinDung.deleteMany();
 }

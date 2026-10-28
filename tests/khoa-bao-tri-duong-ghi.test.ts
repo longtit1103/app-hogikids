@@ -105,6 +105,7 @@ import {
 } from "@/lib/actions/phieu-nhap-no";
 import { traTienHangGop } from "@/lib/actions/tra-tien-hang";
 import { chotSaoKe } from "@/lib/actions/chot-sao-ke";
+import { chotSaoKeTuPdf } from "@/lib/actions/sao-ke-the";
 import { dongThe, ganNenTang, suaThe, taoThe, xoaGanNenTang, xoaThe } from "@/lib/actions/the-tin-dung";
 import { suaViAds, taoViAds, xoaViAds } from "@/lib/actions/vi-ads";
 import { xacNhanBatNoPhaiTra } from "@/lib/actions/bat-no-phai-tra";
@@ -232,6 +233,8 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["the-tin-dung.ganNenTang", () => ganNenTang({})],
   ["the-tin-dung.xoaGanNenTang", () => xoaGanNenTang("id-gia")],
   ["chot-sao-ke.chotSaoKe", () => chotSaoKe({})],
+  // Chốt sao kê từ file PDF: cùng diện chốt gõ tay (kỳ sao kê + dòng sao kê là neo dư nợ).
+  ["sao-ke-the.chotSaoKeTuPdf", () => chotSaoKeTuPdf(new FormData())],
   // Nợ phải trả — hồ sơ ví ads trả trước + bước xác nhận bật: bước bật ghi Setting M + neo + điều chỉnh
   // quỹ một lần; lùi mất giữa lượt phục hồi là quỹ quay về công thức cũ trong khi hồ sơ đã ghi đè.
   ["vi-ads.taoViAds", () => taoViAds({})],
@@ -319,6 +322,7 @@ const CHI_DOC: Record<string, string> = {
   "auth.logout": "xoá phiên (cookie); nhật ký đăng xuất best-effort, TỰ BỎ QUA khi dangPhucHoi()",
   "cost-price.previewCostImport": "đọc file + đối chiếu, không ghi",
   "uoc-tinh-sao-ke.docUocTinhSaoKe": "chỉ đọc dư nợ ước tính của thẻ tại một ngày (form chốt sao kê), không ghi",
+  "sao-ke-the.xemTruocSaoKeThe": "chỉ tách file sao kê PDF + đối chiếu với hoá đơn TikTok (bước xem trước), không ghi",
   "bat-no-phai-tra.docChenhLechTaiM": "chỉ đọc chênh lệch quỹ ↔ tiền thật tại ngày bật nợ phải trả, không ghi",
   "cong-gia-von.kiemQuyenXemGiaVon":
     "KHÔNG phải Server Action (file không \"use server\") — bước hai của cổng giá vốn, chỉ ghi dòng TU_CHOI_QUYEN qua ghiNhatKyLoi (tự bỏ qua lúc phục hồi)",

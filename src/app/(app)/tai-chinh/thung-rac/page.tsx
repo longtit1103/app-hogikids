@@ -1,3 +1,4 @@
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import Link from "next/link";
 
 import { ThungRacTable } from "@/components/thung-rac/thung-rac-table";
@@ -17,10 +18,10 @@ type SearchParams = { trang?: string };
  * có Dòng tiền không thấy dòng tiền gắn khoản vay/sổ tiết kiệm. Action khôi phục/xoá vĩnh viễn vẫn tự
  * kiểm lại theo loại + ảnh chụp đọc từ DB.
  */
-export default async function ThungRacPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function ThungRacPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SearchParams>> }) {
   const nd = await yeuCauQuyenTrang("/tai-chinh/thung-rac", QUYEN_VAO_THUNG_RAC);
 
-  const sp = await searchParams;
+  const sp = chuanHoaSearchParams(await searchParams);
   const page = docSoTrang(sp.trang);
   const { rows, total } = await listThungRac({ ...phamViThungRac(nd), page });
 

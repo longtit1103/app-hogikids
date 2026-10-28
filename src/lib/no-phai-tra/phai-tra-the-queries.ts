@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 
-import { phaiTra, type GiaoDichThe, type PhaiTra } from "@/lib/no-phai-tra/ky-sao-ke";
+import { COT_KY_NEO, kyNeoTuDong, phaiTra, type GiaoDichThe, type PhaiTra } from "@/lib/no-phai-tra/ky-sao-ke";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -26,7 +26,7 @@ export async function docPhaiTraCacThe(t: Date, db: DbDoc = prisma): Promise<Pha
   const [kys, tra] = await Promise.all([
     db.kySaoKeThe.findMany({
       where: { cardId: { in: ids } },
-      select: { cardId: true, ngayChot: true, soDu: true, hanTra: true, daTraTruocMoSo: true, laNeoMoSo: true },
+      select: { cardId: true, ...COT_KY_NEO },
       orderBy: { ngayChot: "asc" },
     }),
     db.cashMovement.findMany({
@@ -38,7 +38,9 @@ export async function docPhaiTraCacThe(t: Date, db: DbDoc = prisma): Promise<Pha
     const gd: GiaoDichThe[] = tra
       .filter((m) => m.cardId === id)
       .map((m) => ({ ngay: m.date, soTien: m.amount, loai: "TRA" as const }));
-    const kyCuaThe = kys.filter((k) => k.cardId === id).map(({ cardId: _bo, ...k }) => k);
+    // Nghĩa vụ kỳ = số in trên sao kê (`saoKeSoDu`) trừ phần đã trả mà sao kê chưa in (`saoKeTraChuaLen`), không
+    // phải neo dư nợ `soDu` (gồm bill ghi sổ trễ) — CÙNG bộ cột + bộ đổi với `docKyNeoThe`.
+    const kyCuaThe = kys.filter((k) => k.cardId === id).map(kyNeoTuDong);
     return { cardId: id, ten, phaiTra: phaiTra(kyCuaThe, gd, t) };
   });
 }

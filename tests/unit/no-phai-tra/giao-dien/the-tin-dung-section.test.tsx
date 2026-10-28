@@ -12,6 +12,7 @@ vi.mock("@/lib/actions/the-tin-dung", () => ({
 }));
 vi.mock("@/lib/actions/chot-sao-ke", () => ({ chotSaoKe: vi.fn() }));
 vi.mock("@/lib/actions/uoc-tinh-sao-ke", () => ({ docUocTinhSaoKe: vi.fn() }));
+vi.mock("@/lib/actions/sao-ke-the", () => ({ xemTruocSaoKeThe: vi.fn(), chotSaoKeTuPdf: vi.fn() }));
 
 import { TheTinDungSection } from "@/components/no-phai-tra/the-tin-dung-section";
 import type { MocGanThe, TheKemTrangThai } from "@/lib/no-phai-tra/the-tin-dung-queries";
@@ -64,11 +65,34 @@ describe("TheTinDungSection", () => {
     expect(quaHan).toMatch(/quá hạn từ \d{2}\/\d{2}/);
     expect(quaHan).toContain("text-error");
     expect(quaHan).toContain("đến hạn hôm nay");
+    // Phải trả là số ngân hàng in trên sao kê, không phải dư nợ ước tính — chú thích ngay ở nhãn.
+    expect(quaHan).toContain("theo sao kê");
+    expect(quaHan).toContain("Phải trả = số sao kê ngân hàng; dư nợ ước tính còn gồm bill ghi sổ trễ");
+  });
+
+  it("đã trả hết kỳ ⇒ KHÔNG in 'Phải trả 0'", () => {
+    const html = render(the({ phaiTra: { nghiaVuKy: 0, phanTruoc: null, phanMoi: null } }));
+    expect(html).not.toContain("Phải trả");
   });
 
   it("kỳ đã trả đủ / chưa có kỳ", () => {
     expect(render(the({ phaiTra: { nghiaVuKy: 0, phanTruoc: null, phanMoi: null } }))).toContain("Đã trả đủ kỳ gần nhất");
     expect(render(the({}))).toContain("Chưa có kỳ sao kê");
+  });
+
+  it("cảnh báo hoá đơn TikTok ngừng về: hiện mốc dd/MM + hướng xử lý; không có cảnh báo ⇒ không hiện", () => {
+    const html = render(the({}), { canhBaoHoaDonTiktok: { tuNgay: "2026-11-17" } });
+    expect(html).toContain('data-testid="the-canh-bao-hoa-don-tiktok"');
+    expect(html).toContain("Chưa có hoá đơn TikTok trừ thẻ từ 17/11");
+    expect(html).toContain("dư nợ ước tính đang THIẾU");
+    expect(render(the({}))).not.toContain("the-canh-bao-hoa-don-tiktok");
+    expect(render(the({}), { canhBaoHoaDonTiktok: null })).not.toContain("the-canh-bao-hoa-don-tiktok");
+  });
+
+  it("lời giải thích độ trễ nói HAI chiều (app thiếu hoá đơn về trễ / ngân hàng ghi sổ trễ)", () => {
+    const html = render(the({}));
+    expect(html).toContain("app thiếu hoá đơn TikTok về trễ");
+    expect(html).toContain("ngân hàng ghi sổ trễ");
   });
 
   it("nhắc chưa chốt sao kê chỉ khi cờ bật", () => {
@@ -124,6 +148,13 @@ describe("TheTinDungSection", () => {
     const html = render(the({}), { choPhepSua: false });
     expect(html).not.toContain("Thêm thẻ");
     expect(html).not.toContain("Thao tác");
+  });
+
+  it("nút 'Nhập sao kê PDF' chỉ khi chủ shop + đã bật + còn thẻ mở", () => {
+    expect(render(the({}), { laChuShop: true })).toContain("Nhập sao kê PDF");
+    expect(render(the({}))).not.toContain("Nhập sao kê PDF");
+    expect(render(the({}), { laChuShop: true, mocM: null })).not.toContain("Nhập sao kê PDF");
+    expect(render(the({ closedAt: ngay(2) }), { laChuShop: true })).not.toContain("Nhập sao kê PDF");
   });
 
   it("thẻ đã đóng có nhãn", () => {

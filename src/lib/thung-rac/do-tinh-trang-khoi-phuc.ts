@@ -183,7 +183,7 @@ export function chaCanKhoa(canDung: BanGhiCanDung[]): {
   };
 }
 
-/** Ba trạng thái của một dòng cha. `da_tat_toan` chỉ có ở `Loan`/`SoTietKiem` (cột `closedAt`). */
+/** Ba trạng thái của một dòng cha. `da_tat_toan` chỉ có ở `Loan`/`SoTietKiem`/`TheTinDung` (cột `closedAt`). */
 type TrangThaiCha = "khong_co" | "da_tat_toan" | "con_hieu_luc";
 
 async function trangThaiCha(
@@ -479,8 +479,15 @@ export async function doTinhTrang(
       ) {
         chaDaTatToan ??= cha.loai;
       }
-      // Thẻ đã đóng có dư nợ 0: dựng lại trả thẻ / khoản chi trừ thẻ vào nó là làm dư nợ khác 0.
-      else if (tt === "da_tat_toan" && cha.loai === "the") {
+      // Thẻ đã đóng: dựng lại khoản chi trừ thẻ / nạp ví bằng thẻ / neo vào nó là làm dư nợ khác 0 ⇒ chặn chung.
+      // NGOẠI LỆ `CARD_PAY`: thẻ đóng còn nợ (ads về muộn) nhận lần trả MỚI khi nợ > 0 và ngày sau neo đang dùng —
+      // lối DUY NHẤT tất toán phần nợ đó, nhập tay đang cho. Khôi phục là cùng đường ghi tiền nên giao ĐÚNG cổng ấy
+      // (`viPhamNoPhaiTraKhiKhoiPhuc` → `kiemHoSoNo` → `xetTraVaoTheDaDong`): nợ ≤ 0 / ngày ≤ neo vẫn bị từ chối ở đó.
+      else if (
+        tt === "da_tat_toan" &&
+        cha.loai === "the" &&
+        !(banGhi.bang === "CashMovement" && banGhi.data.kind === "CARD_PAY")
+      ) {
         chaDaTatToan ??= "the";
       }
     }

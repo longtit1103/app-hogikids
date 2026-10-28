@@ -1,3 +1,4 @@
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import Link from "next/link";
 
 import { ChannelComparisonSection, type SoSanhKenhDuLieu } from "@/components/kenh/channel-comparison-section";
@@ -51,13 +52,13 @@ function zeroChannelPnl(c: ChannelRow): ChannelPnl {
   };
 }
 
-export default async function KenhPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function KenhPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SearchParams>> }) {
   const nd = await yeuCauQuyenTrang("/kenh", "kenh:xem");
   // `computeChannelPnl` tính đủ (ngoại lệ chốt 30/09, spec phân quyền §4.1); thiếu quyền giá vốn thì
   // chiếu DTO che (`boChannelPnlTheoQuyen`) TRƯỚC khi vào props client bên dưới.
   const quyen = quyenGiaVonCua(nd);
 
-  const sp = await searchParams;
+  const sp = chuanHoaSearchParams(await searchParams);
   const now = new Date();
   // Giống /chi-phi, /bao-cao: provider chỉ ghi ?tu=&den= khi chọn "Tùy chọn" —
   // preset khác không có trong URL nên mặc định "this_month". Kẹp biên phải về

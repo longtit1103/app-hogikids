@@ -38,6 +38,16 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
 
   /**
+   * Gói KHÔNG đóng gói vào bundle server — chạy thẳng từ `node_modules` bằng `require`/`import` của Node.
+   *  - `unpdf` (đọc PDF sao kê thẻ, `src/lib/sao-ke-the/doc-text-pdf.ts`): bản pdfjs "serverless" ~MB, tự
+   *    `import.meta.resolve("pdfjs-dist/package.json")` để tìm font/cmap — đóng gói lại qua Turbopack thì đường
+   *    dẫn đó và import động bên trong dễ gãy mà KHÔNG test nào chạm tới (Vitest chạy unpdf từ node_modules).
+   *    Để ngoài bundle thì prod chạy y như Vitest đã chạy. Gói nằm ở `dependencies` nên `npm prune --omit=dev`
+   *    trong Dockerfile giữ nó trong ảnh.
+   */
+  serverExternalPackages: ["unpdf"],
+
+  /**
    * Security header toàn cục. App là bảng điều khiển tài chính phơi công khai qua Cloudflare
    * Tunnel, trước bản vá này KHÔNG có một header phòng thủ nào (chỉ `nosniff` đặt tay ở 3 route
    * phục vụ bytes).

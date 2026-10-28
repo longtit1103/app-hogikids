@@ -58,7 +58,7 @@ export function KhoanVayFormModal({
     setF(trangThaiBanDau(loan));
     setLoi({});
     setHoiTruocD0(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Chủ ý chỉ nạp lại khi mở hộp thoại / đổi bản ghi — không chạy theo các state còn lại.
   }, [open, loan?.id]);
 
   // Công tắc "Đã rút trước ngày mở sổ" (thấu chi) đổi ngay cặp field "ngày nền" giống đổi radio chế

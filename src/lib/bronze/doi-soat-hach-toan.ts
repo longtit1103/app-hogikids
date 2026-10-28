@@ -92,3 +92,29 @@ export function coTheDoiSoat(
       return false;
   }
 }
+
+/**
+ * Stream mà MỘT record bị bỏ (`skipped > 0`) ở đường ingest thường ngày là SAI TIỀN âm thầm ⇒ route phải báo ĐỎ
+ * (SyncLog ERROR + bật cờ backlog, HTTP vẫn 200 để n8n không thử lại), không được chỉ để lại cảnh báo trong một
+ * dòng nhật ký OK mà không ai đọc.
+ *
+ * Hai stream này nằm NGOÀI `coTheDoiSoat` (danh sách bc_id MỞ, route không resolve cấu hình shop) nên cổng đối soát
+ * "đã land vs đã hạch toán" không bao giờ soi tới chúng:
+ *  - `tiktokbusiness/invoice`: hoá đơn TikTok trừ thẻ là nguồn DƯ NỢ THẺ ⇒ bỏ hoá đơn = nợ thẻ thấp hơn ngân hàng.
+ *  - `tiktokbusiness/cost`: ảnh chụp ngày là nguồn tín dụng TikTok tặng ⇒ bỏ ảnh chụp = Lãi/Lỗ tính cả phần tín
+ *    dụng vào chi phí.
+ */
+export const STREAM_BO_DONG_PHAI_BAO_DO: readonly BronzeStream[] = ["tiktokbusiness/invoice", "tiktokbusiness/cost"];
+
+/** Câu lỗi cho SyncLog khi stream trong `STREAM_BO_DONG_PHAI_BAO_DO` có record bị bỏ; `null` = không có gì phải báo. */
+export function loiBoDongPhaiBaoDo(stream: BronzeStream, skipped: number): string | null {
+  if (skipped <= 0 || !STREAM_BO_DONG_PHAI_BAO_DO.includes(stream)) return null;
+  const hauQua =
+    stream === "tiktokbusiness/invoice"
+      ? "dư nợ thẻ tín dụng đang THIẾU các lần TikTok trừ thẻ này"
+      : "Lãi/Lỗ đang CHƯA trừ tín dụng TikTok tặng của các ngày này";
+  return (
+    `Stream "${stream}": ${skipped} record đã vào kho thô nhưng KHÔNG dựng được Silver (xem cảnh báo) — ${hauQua}. ` +
+    "Sửa mapping rồi dựng lại từ kho thô."
+  );
+}

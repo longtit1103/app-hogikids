@@ -62,13 +62,27 @@ describe("sao lưu lỗi KHÔNG bật banner 'số liệu có thể thiếu'", (
     const luotOk = gioTruoc(2);
     await prisma.syncLog.createMany({
       data: [
-        { kind: "BACKUP", status: "ERROR", startedAt: luotLoi, finishedAt: luotLoi, error: "disk full" },
+        {
+          kind: "BACKUP",
+          status: "ERROR",
+          startedAt: luotLoi,
+          finishedAt: luotLoi,
+          error: "backup-app-dump.sh: disk full",
+          stats: { artifact: "APP_DUMP_REMOTE" },
+        },
         {
           kind: "BACKUP",
           status: "OK",
           startedAt: luotOk,
           finishedAt: luotOk,
-          stats: { file: "hogikids-dem-nay.dump", sizeBytes: 22_958_125 },
+          stats: { artifact: "APP_DUMP_REMOTE", file: "hogikids-dem-nay.dump.age", sizeBytes: 22_958_125, drivePath: "cloud:backups/hogikids-dem-nay.dump.age" },
+        },
+        {
+          kind: "BACKUP",
+          status: "OK",
+          startedAt: luotOk,
+          finishedAt: luotOk,
+          stats: { artifact: "FULL_SERVER_REMOTE", file: "hogikids-full-dem-nay.tar.gz.age", sizeBytes: 90_000_000, drivePath: "cloud:full-backups/hogikids-full-dem-nay.tar.gz.age" },
         },
       ],
     });
@@ -79,7 +93,7 @@ describe("sao lưu lỗi KHÔNG bật banner 'số liệu có thể thiếu'", (
     // Thẻ Sao lưu: bám lượt mới nhất (OK) — KHÔNG kẹt ở lượt lỗi hôm trước.
     const trangThai = await docTrangThaiSaoLuu();
     expect(trangThai.muc).toBe("ok");
-    expect(trangThai.fileSizeBytes).toBe(22_958_125);
+    expect(trangThai.appDump.fileSizeBytes).toBe(22_958_125);
   });
 
   it("chỉ có MỘT lượt BACKUP ERROR → banner vẫn tắt, nhưng thẻ Sao lưu kêu đỏ kèm nguyên văn lỗi", async () => {

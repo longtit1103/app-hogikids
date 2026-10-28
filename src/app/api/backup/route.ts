@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { chanRouteKhiDangPhucHoi, dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { giuKhoaViecNang, traKhoaViecNang } from "@/lib/backup/khoa-viec-nang";
 import { runPgDump } from "@/lib/backup/run-pg-dump";
+import type { ArtifactSaoLuu } from "@/lib/backup/trang-thai-sao-luu";
 import { chanRequestKhacOrigin } from "@/lib/chan-request-khac-origin";
 import { ghiNhatKy, ghiNhatKyLoi, type ActorNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
@@ -98,7 +99,8 @@ export async function POST(request: Request): Promise<Response> {
 
     // Nguồn trạng thái DUY NHẤT cho `lib/backup/trang-thai-sao-luu.ts` (màn Cài đặt) — CÙNG kind
     // BACKUP với cron đêm `api/ingest/backup-log`, không tạo nguồn thứ hai để rồi trôi nhau như
-    // `Setting.lastBackupAt` cũ (đã bỏ). Không có `drivePath` — bản tay không đẩy Google Drive.
+    // `Setting.lastBackupAt` cũ (đã bỏ). Không có `drivePath` — bản tay không đẩy Google Drive, nên
+    // gắn nhãn `MANUAL_DOWNLOAD` (xem `ghiLogSaoLuu`): không thay được dump app/tarball toàn server.
     await ghiLogSaoLuu({ status: "OK", finishedAt, stats: { file: filename, sizeBytes: dump.length } });
 
     // Buffer (node) không khớp BodyInit của DOM lib → bọc Uint8Array-view.
@@ -184,7 +186,10 @@ async function ghiLogSaoLuu(data: {
   if (dangPhucHoi()) return;
 
   try {
-    await prisma.syncLog.create({ data: { kind: "BACKUP", ...data } });
+    // Nhãn artifact LUÔN có (cả lượt lỗi): bản tải tay không lên Drive nên không được tính vào hai
+    // artifact bắt buộc — lượt lỗi không nhãn sẽ bị coi là "không rõ nguồn" và làm đỏ cả hai.
+    const stats = { ...data.stats, artifact: "MANUAL_DOWNLOAD" satisfies ArtifactSaoLuu };
+    await prisma.syncLog.create({ data: { kind: "BACKUP", ...data, stats } });
   } catch (err) {
     console.error("Ghi SyncLog kind BACKUP thất bại:", err);
   }

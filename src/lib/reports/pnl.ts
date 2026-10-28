@@ -1,6 +1,7 @@
 import { endOfDay } from "date-fns";
 
 import { type DateRange } from "@/lib/date-range";
+import { adsChannelId } from "@/lib/ingest/ads-expense-row";
 import { prisma } from "@/lib/prisma";
 import { pnlPercentBase } from "@/lib/reports/pnl-percent-base";
 
@@ -26,6 +27,11 @@ export interface PnlExpenseInput {
   adsSource: string | null;
   channelId: string | null;
   amount: number;
+  /**
+   * Khoá ngày VN `yyyy-MM-dd` của `Expense.date` (`khoaNgayPnl`) — CHỈ để kẹp tín dụng TikTok tặng THEO NGÀY
+   * (`tinhTinDungTruTheoNgay`). Tuỳ chọn để fixture cũ không vỡ; loader `calcPnl` luôn điền.
+   */
+  ngay?: string;
 }
 
 /**
@@ -42,6 +48,62 @@ export interface PnlIncomeInput {
   amount: number;
 }
 
+/**
+ * Phần quảng cáo TikTok trả bằng TÍN DỤNG TIKTOK TẶNG trong kỳ (bảng `TiktokAdsTinDung`, cột `grantGomVat` — đã
+ * nhân VAT như `Expense` ads). Chủ shop chốt 23/10: khoản này KHÔNG phải chi phí (shop không mất tiền), áp toàn bộ
+ * lịch sử. `Expense` (Sổ chi phí) vẫn ghi đủ chi tiêu theo báo cáo — CHỈ Lãi/Lỗ trừ ra, nên phép trừ nằm ở đây.
+ *
+ * `channelId` = kênh của dòng `Expense` ads TikTok (`adsChannelId("TIKTOK_ADS")`) ⇒ lăng kính kênh trừ đúng kênh đó,
+ * KHÔNG ép về 0 như chi phí chung (`fixed`/`interest`).
+ */
+export interface PnlTinDungInput {
+  channelId: string;
+  amount: number;
+  /** Khoá ngày VN `yyyy-MM-dd` của ngày chi tiêu (`khoaNgayPnl`) — kẹp theo ngày, xem `tinhTinDungTruTheoNgay`. */
+  ngay?: string;
+}
+
+/**
+ * Khoá ngày `yyyy-MM-dd` theo giờ VN, KHÔNG lệ thuộc TZ máy chạy: VN = UTC+7 cố định (không DST) nên cộng 7 giờ
+ * rồi lấy phần ngày của ISO là đúng biên ngày VN (bất biến #3). `Expense.date` ads và `TiktokAdsTinDung.ngay` cùng
+ * neo 00:00 giờ VN ⇒ cùng khoá.
+ */
+export function khoaNgayPnl(d: Date): string {
+  return new Date(d.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * Phần tín dụng TikTok tặng được TRỪ khỏi Quảng cáo TikTok = Σ_ngày max(0, min(tín dụng ngày, chi tiêu TikTok ngày đó))
+ * — HÀM THUẦN, nguồn DUY NHẤT của phép kẹp cho cả bảng Lãi/Lỗ (`calcPnl`) lẫn chuỗi theo ngày (`computeDailySeries`)
+ * ⇒ Σ các ngày = cả kỳ, tuyệt đối.
+ *
+ * Vì sao kẹp THEO NGÀY chứ không theo cả kỳ: ngày có tín dụng mà Sổ chưa có chi tiêu TikTok (backfill tín dụng sớm
+ * hơn ngày chi tiêu đầu tiên; đêm nhánh chi phí lỗi mà nhánh tín dụng chạy) thì kẹp cả kỳ vẫn đem tín dụng ngày đó
+ * trừ vào chi tiêu NGÀY KHÁC — lãi kỳ cao ảo, biểu đồ theo ngày lệch bảng Lãi/Lỗ. Tín dụng ngày ÂM (TikTok hoàn) kẹp
+ * về 0 của chính ngày đó — không bao giờ cộng thêm chi phí.
+ *
+ * Chỉ kẹp theo ngày khi MỌI dòng (tín dụng lẫn chi tiêu TikTok) mang `ngay`; thiếu ở bất kỳ dòng nào ⇒ kẹp cả tập
+ * như một ngày (fixture thuần cũ, hoặc người gọi đã tự bucket một ngày — `computeDailySeries`). Không bao giờ ra số
+ * lớn hơn kẹp cả kỳ.
+ */
+export function tinhTinDungTruTheoNgay(
+  tinDung: readonly { amount: number; ngay?: string }[],
+  adsTiktok: readonly { amount: number; ngay?: string }[]
+): number {
+  if (tinDung.length === 0) return 0;
+  const theoNgay = tinDung.every((t) => t.ngay !== undefined) && adsTiktok.every((a) => a.ngay !== undefined);
+  const khoa = (x: { ngay?: string }) => (theoNgay ? (x.ngay as string) : "");
+  const g = new Map<string, number>();
+  for (const t of tinDung) g.set(khoa(t), (g.get(khoa(t)) ?? 0) + t.amount);
+  const a = new Map<string, number>();
+  for (const e of adsTiktok) a.set(khoa(e), (a.get(khoa(e)) ?? 0) + e.amount);
+  let tong = 0;
+  for (const [ngay, tinDungNgay] of g) {
+    tong += Math.max(0, Math.min(tinDungNgay, a.get(ngay) ?? 0));
+  }
+  return tong;
+}
+
 export interface PnlBreakdown {
   revenue: number;
   platformFee: number;
@@ -50,8 +112,15 @@ export interface PnlBreakdown {
   netRevenue: number;
   cogs: number;
   grossProfit: number;
-  ads: number;
-  adsBySource: Record<string, number>; // key = adsSource thực (META/TIKTOK_ADS/SHOPEE_ADS/…), null → "KHAC"; tab P&L render MỌI key, không bỏ sót
+  ads: number; // ĐÃ trừ `adsTinDungTang`
+  adsBySource: Record<string, number>; // key = adsSource thực (META/TIKTOK_ADS/SHOPEE_ADS/…), null → "KHAC"; tab P&L render MỌI key, không bỏ sót. `TIKTOK_ADS` ĐÃ trừ `adsTinDungTang`
+  /**
+   * Quảng cáo TikTok trả bằng tín dụng TikTok tặng trong kỳ (Σ `TiktokAdsTinDung.grantGomVat`) — ĐÃ trừ khỏi `ads`
+   * và `adsBySource.TIKTOK_ADS`, kẹp trong [0, chi tiêu TikTok trong Sổ] (không bao giờ đẩy dòng ads âm). Field
+   * riêng để cây Lãi/Lỗ + Excel in dòng con "Tín dụng TikTok tặng" mà Σ con vẫn = cha. 0 khi kỳ không có tín dụng
+   * ⇒ mọi số y hệt trước khi có khoản này.
+   */
+  adsTinDungTang: number;
   shipping: number;
   packaging: number;
   returnBom: number;
@@ -147,7 +216,7 @@ export function laDonHopLe(status: OrderStatus): boolean {
 export function calcPnlCore(
   orders: PnlOrderInput[],
   expenses: PnlExpenseInput[],
-  opts?: { channelId?: string; incomes?: PnlIncomeInput[] }
+  opts?: { channelId?: string; incomes?: PnlIncomeInput[]; tinDungTang?: PnlTinDungInput[] }
 ): PnlBreakdown;
 export function calcPnlCore(
   orders: PnlOrderInput[],
@@ -157,7 +226,12 @@ export function calcPnlCore(
 export function calcPnlCore(
   orders: PnlOrderInput[],
   expenses: PnlExpenseInput[],
-  opts?: { channelId?: string; statusIn?: OrderStatus[]; incomes?: PnlIncomeInput[] }
+  opts?: {
+    channelId?: string;
+    statusIn?: OrderStatus[];
+    incomes?: PnlIncomeInput[];
+    tinDungTang?: PnlTinDungInput[];
+  }
 ): PnlBreakdown {
   const ord = opts?.channelId ? orders.filter((o) => o.channelId === opts.channelId) : orders;
   // `statusIn` (ADDITIVE — lăng kính Dòng tiền): khi truyền, CHỈ tính đơn có
@@ -207,7 +281,20 @@ export function calcPnlCore(
       const k = e.adsSource ?? "KHAC";
       adsBySource[k] = (adsBySource[k] ?? 0) + e.amount;
     }
-  const ads = byCat("ads");
+  // TÍN DỤNG TIKTOK TẶNG — trừ khỏi CHÍNH dòng Quảng cáo TikTok (không phải dòng thu nhập riêng): ads trả bằng
+  // tín dụng là chi phí shop không bỏ tiền. Lọc theo kênh y như chi phí (`exp` đã lọc kênh ở trên) ⇒ lăng kính kênh
+  // `tiktok` trừ đủ, kênh khác trừ 0. KẸP THEO NGÀY trong [0, chi tiêu TikTok của Sổ cùng ngày, cùng lăng kính]
+  // (`tinhTinDungTruTheoNgay`): tín dụng về trước chi tiêu (lệch lượt kéo), tín dụng âm hay số rác không bao giờ được
+  // biến dòng ads thành âm — tức thành "thu nhập" quảng cáo — hay trừ vào chi tiêu của ngày khác.
+  // Trừ vào `ads` ⇒ `netProfit` tự đúng và `buildOpexGroup` (lấy HIỆU `grossProfit − netProfit`) tự khớp, không
+  // cần cộng bù như `financialIncome`.
+  const adsTiktokGoc = adsBySource.TIKTOK_ADS ?? 0;
+  const adsTinDungTang = tinhTinDungTruTheoNgay(
+    (opts?.tinDungTang ?? []).filter((t) => !opts?.channelId || t.channelId === opts.channelId),
+    exp.filter((e) => e.categoryId === "ads" && e.adsSource === "TIKTOK_ADS")
+  );
+  if (adsTinDungTang > 0) adsBySource.TIKTOK_ADS = adsTiktokGoc - adsTinDungTang;
+  const ads = byCat("ads") - adsTinDungTang;
   // Thêm id vào KNOWN mà QUÊN trừ ở netProfit ⇒ danh mục đó biến mất khỏi lợi nhuận trong khi MỌI test
   // hiện có vẫn xanh — tests/pnl.test.ts "Lãi vay 5tr ⇒ netProfit −5tr" canh đúng ca này.
   const KNOWN = ["purchase", "ads", "shipping", "packaging", "return_bom", "fixed", "interest"];
@@ -260,6 +347,7 @@ export function calcPnlCore(
     grossProfit,
     ads,
     adsBySource,
+    adsTinDungTang,
     shipping: byCat("shipping"),
     packaging: byCat("packaging"),
     returnBom: byCat("return_bom"),
@@ -327,7 +415,7 @@ export function toPnlOrderInput(o: PnlOrderRow): PnlOrderInput {
  */
 export async function calcPnl(range: DateRange, opts?: { channelId?: string }): Promise<PnlBreakdown> {
   const to = endOfDay(range.to);
-  const [orders, expenses, incomes] = await Promise.all([
+  const [orders, expenses, incomes, tinDungTang] = await Promise.all([
     prisma.order.findMany({
       where: {
         orderedAt: { gte: range.from, lte: to },
@@ -337,7 +425,7 @@ export async function calcPnl(range: DateRange, opts?: { channelId?: string }): 
     }),
     prisma.expense.findMany({
       where: { date: { gte: range.from, lte: to } },
-      select: { categoryId: true, adsSource: true, channelId: true, amount: true },
+      select: { categoryId: true, adsSource: true, channelId: true, amount: true, date: true },
     }),
     // Thu nhập ngoài bán hàng (lãi sổ tiết kiệm đã nhận). KHÔNG lọc/bỏ theo `channelId` ở đây:
     // `calcPnlCore` ép về 0 dưới lăng kính kênh — giữ MỘT chỗ logic kênh. Query vẫn chạy khi có
@@ -347,9 +435,36 @@ export async function calcPnl(range: DateRange, opts?: { channelId?: string }): 
       where: { date: { gte: range.from, lte: to } },
       select: { amount: true },
     }),
+    // Tín dụng TikTok tặng — KHÔNG lọc kênh ở query (core lọc, giữ MỘT chỗ logic kênh).
+    docTinDungTang(range.from, to),
   ]);
 
-  return calcPnlCore(orders.map(toPnlOrderInput), expenses, { ...opts, incomes });
+  // `ngay` theo khoá VN để tín dụng TikTok tặng kẹp THEO NGÀY (cùng hàm thuần chuỗi ngày dùng) — tháng = Σ ngày.
+  const chiPhi: PnlExpenseInput[] = expenses.map((e) => ({
+    categoryId: e.categoryId,
+    adsSource: e.adsSource,
+    channelId: e.channelId,
+    amount: e.amount,
+    ngay: khoaNgayPnl(e.date),
+  }));
+  return calcPnlCore(orders.map(toPnlOrderInput), chiPhi, { ...opts, incomes, tinDungTang });
+}
+
+/**
+ * Tín dụng TikTok tặng theo NGÀY chi tiêu trong [from, to] — `ngay` neo 00:00 giờ VN như `Expense.date` ads nên
+ * dùng CHUNG biên kỳ với query chi phí (người gọi truyền `endOfDay(range.to)`). Trả kèm `ngay` để chuỗi theo ngày
+ * (`daily-series.ts`) bucket được — Σ netProfit từng ngày phải bằng netProfit cả kỳ.
+ */
+export async function docTinDungTang(
+  from: Date,
+  to: Date
+): Promise<Array<PnlTinDungInput & { ngay: string; ngayLuc: Date }>> {
+  const rows = await prisma.tiktokAdsTinDung.findMany({
+    where: { ngay: { gte: from, lte: to } },
+    select: { ngay: true, grantGomVat: true },
+  });
+  const kenh = adsChannelId("TIKTOK_ADS");
+  return rows.map((r) => ({ ngay: khoaNgayPnl(r.ngay), ngayLuc: r.ngay, channelId: kenh, amount: r.grantGomVat }));
 }
 
 /**

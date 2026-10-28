@@ -10,8 +10,18 @@ import { NOI_MOC_PHIEN_BAN_DON_SQL, THU_TU_PHIEN_BAN_DON_SQL } from "./thu-tu-ph
  * `transform-ads-expense.ts`). TÁCH khỏi `skipped` vì `skipped` là điều kiện HẠ CỜ backlog ("dòng kẹt, phải sửa
  * mapping"), còn đây là kết cục ĐÚNG — gộp vào thì sau ngày bật mọi lượt dựng lại đều giữ cờ dính vĩnh viễn (cùng
  * tinh thần `boQuaCoChuDich`). Không nằm trong `UpsertStats` vì đường ingest thường ngày không bao giờ cắt tại M.
+ *
+ * `hoaDonAdsUpserted`: số hoá đơn quảng cáo TikTok đã ghi Silver `TiktokAdsHoaDon`. Nằm ở đây chứ không ở
+ * `UpsertStats` vì không cổng đối soát "đã land vs đã hạch toán" nào soi stream này (danh sách advertiser/BC mở —
+ * `coTheDoiSoat` loại mọi stream `shops: null`).
+ *
+ * `tinDungAdsUpserted`: số dòng (advertiser × ngày) đã ghi Silver `TiktokAdsTinDung` — cùng lý do nằm ngoài `UpsertStats`.
  */
-export type TransformStats = UpsertStats & { skippedTruocM: number };
+export type TransformStats = UpsertStats & {
+  skippedTruocM: number;
+  hoaDonAdsUpserted: number;
+  tinDungAdsUpserted: number;
+};
 
 export const empty = (): TransformStats => ({
   ordersUpserted: 0,
@@ -29,6 +39,8 @@ export const empty = (): TransformStats => ({
   shopeeUpserted: 0,
   adsExpensesUpserted: 0,
   skippedTruocM: 0,
+  hoaDonAdsUpserted: 0,
+  tinDungAdsUpserted: 0,
 });
 
 export type TransformOptions = {
@@ -42,9 +54,11 @@ export type TransformOptions = {
    * Lọc raw `orders` theo đúng shop đang ingest → dùng index `[shopId, externalId, fetchedAt]`
    * (thay vì `externalId = ANY(...)` toàn bảng, seq scan lớn dần theo raw history) VÀ tránh
    * over-transform khi hai shop lỡ có `externalId` trùng. Route ingest LUÔN truyền; bỏ trống ⇒
-   * quét mọi shop = rebuild (giữ nguyên hành vi dựng lại toàn bảng). CHỈ nhánh `orders` đọc field
-   * này — `products`/`tiktok/*` neo shop cố định theo nghiệp vụ (vai kho / tiktokShop, id resolve
-   * từ cấu hình `Setting` — xem cau-hinh-shop.ts).
+   * quét mọi shop = rebuild (giữ nguyên hành vi dựng lại toàn bảng). CHỈ nhánh `orders`, hoá đơn
+   * quảng cáo TikTok (`tiktokbusiness/invoice`) và ảnh chụp chi phí TikTok (`tiktokbusiness/cost`) — hai nhánh
+   * sau shopId = bc_id — đọc field này — `products`/`tiktok/*`
+   * neo shop cố định theo nghiệp vụ (vai kho / tiktokShop, id resolve từ cấu hình `Setting` — xem
+   * cau-hinh-shop.ts).
    */
   shopId?: string;
   /**
@@ -87,6 +101,19 @@ export type TransformOptions = {
    * truyền — nó ngắn và không giữ khoá việc nặng nào.
    */
   checkpoint?: () => Promise<void>;
+  /**
+   * CHỈ nhánh `products`: lúc API ĐI NHÌN Pancake của lượt kéo products gần nhất (lượt vá tồn đêm
+   * `/api/ingest/resync-products` truyền mốc SyncLog). Có ⇒ mỗi biến thể chỉ bị ghi `stock` khi
+   * webhook chưa ghi gì mới hơn `max(fetchedAt của dòng Bronze, mốc này)` — xem `upsertOneProduct`.
+   * Bỏ trống ⇒ ghi tồn vô điều kiện như cũ (trang ingest thường ngày, lượt dựng lại).
+   *
+   * Vì sao không dùng riêng `fetchedAt`: Bronze dedupe theo hash nên `fetchedAt` chỉ nhích khi
+   * payload ĐỔI — sản phẩm yên ả có dòng Bronze già nhiều giờ/ngày dù API vừa xác nhận lại đúng nội
+   * dung đó. Lấy `fetchedAt` thuần thì mọi mốc webhook sau ảnh già (kể cả sự kiện trùng
+   * `remain_quantity`) thắng API mãi, lượt vá đêm mất quyền sửa tồn. Mốc SyncLog cho biết lần API
+   * nhìn gần nhất; `fetchedAt` giữ cho ca dòng vừa land muộn hơn mốc đó.
+   */
+  mocApiTonKho?: Date;
 };
 
 /** type TikTok Shop cho khoản trừ tiền quảng cáo (bất biến #2 — nhận diện DUY NHẤT bằng type). */

@@ -4,10 +4,12 @@ import { type DateRange } from "@/lib/date-range";
 import { prisma } from "@/lib/prisma";
 import {
   calcPnlCore,
+  docTinDungTang,
   pnlOrderSelect,
   toPnlOrderInput,
   type PnlExpenseInput,
   type PnlIncomeInput,
+  type PnlTinDungInput,
 } from "@/lib/reports/pnl";
 
 import type { OrderStatus } from "@/generated/prisma/client";
@@ -48,7 +50,7 @@ export interface DailyPoint {
  */
 export async function computeDailySeries(range: DateRange): Promise<DailyPoint[]> {
   const to = endOfDay(range.to);
-  const [orders, expenses, incomes] = await Promise.all([
+  const [orders, expenses, incomes, tinDung] = await Promise.all([
     prisma.order.findMany({
       where: { orderedAt: { gte: range.from, lte: to } },
       select: { orderedAt: true, ...pnlOrderSelect },
@@ -61,6 +63,7 @@ export async function computeDailySeries(range: DateRange): Promise<DailyPoint[]
       where: { date: { gte: range.from, lte: to } },
       select: { date: true, amount: true },
     }),
+    docTinDungTang(range.from, to),
   ]);
 
   const ordersByDay = new Map<string, ReturnType<typeof toPnlOrderInput>[]>();
@@ -90,9 +93,22 @@ export async function computeDailySeries(range: DateRange): Promise<DailyPoint[]
     incomesByDay.set(key, bucket);
   }
 
+  // Tín dụng TikTok tặng: CÙNG luật bucket theo ngày như thu nhập tài chính ở trên — bỏ qua thì Σ netProfit từng
+  // ngày thấp hơn bảng Lãi/Lỗ đúng bằng phần tín dụng. Mỗi bucket là MỘT ngày nên `calcPnlCore` kẹp cả bucket bằng
+  // CÙNG hàm thuần `tinhTinDungTruTheoNgay` mà `calcPnl` kẹp theo từng ngày ⇒ Σ các ngày = bảng Lãi/Lỗ cả kỳ, kể cả
+  // ngày có tín dụng mà Sổ chưa có chi tiêu TikTok (cả hai bên cùng trừ 0 cho ngày đó).
+  const tinDungByDay = new Map<string, PnlTinDungInput[]>();
+  for (const t of tinDung) {
+    const key = format(t.ngayLuc, DAY_KEY);
+    const bucket = tinDungByDay.get(key) ?? [];
+    bucket.push({ channelId: t.channelId, amount: t.amount });
+    tinDungByDay.set(key, bucket);
+  }
+
   return enumerateDayKeys(range).map((date) => {
     const b = calcPnlCore(ordersByDay.get(date) ?? [], expensesByDay.get(date) ?? [], {
       incomes: incomesByDay.get(date) ?? [],
+      tinDungTang: tinDungByDay.get(date) ?? [],
     });
     return { date, revenue: b.revenue, netProfit: b.netProfit };
   });

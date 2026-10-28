@@ -67,25 +67,25 @@ describe("tinhChenhLechTaiM", () => {
     expect(tacDongDieuChinh(goiYDieuChinh(kq, "toan-bo", "01/11/2026"))).toBe(tr(15));
   });
 
-  it("số thật 14/10: quỹ 260.908.494 (gồm thấu chi 100tr), tiền thật 45.547.696, thẻ 24.540.609", () => {
+  it("số 14/10 (đã gột): quỹ 357.445.000 (gồm thấu chi 137tr), tiền thật 62.400.000, thẻ 33.650.000", () => {
     const kq = tinhChenhLechTaiM({
-      quyApp: 260_908_494,
-      soDuBank: 45_547_696,
+      quyApp: 357_445_000,
+      soDuBank: 62_400_000,
       tienMat: 0,
-      duNoThauChi: 100_000_000,
-      the: [{ khoa: "the:4826", nhan: "nợ thẻ 4826", soTien: 24_540_609 }],
+      duNoThauChi: 137_000_000,
+      the: [{ khoa: "the:9999", nhan: "nợ thẻ 9999", soTien: 33_650_000 }],
       phieuY: [],
       viAds: [],
     });
-    expect(kq.chenh).toBe(-215_360_798);
-    expect(kq.chuaGiaiThich).toBe(-239_901_407);
-    // "Toàn bộ chênh lệch" ⇒ quỹ sau điều chỉnh = đúng tiền thật trên tài khoản, không lệch 100tr dư nợ.
+    expect(kq.chenh).toBe(-295_045_000);
+    expect(kq.chuaGiaiThich).toBe(-328_695_000);
+    // "Toàn bộ chênh lệch" ⇒ quỹ sau điều chỉnh = đúng tiền thật trên tài khoản, không lệch 137tr dư nợ.
     const toanBo = goiYDieuChinh(kq, "toan-bo", "15/10/2026");
     expect(toanBo.map((d) => [d.chieu, d.soTien])).toEqual([
-      ["IN", 24_540_609],
-      ["OUT", 239_901_407],
+      ["IN", 33_650_000],
+      ["OUT", 328_695_000],
     ]);
-    expect(260_908_494 + tacDongDieuChinh(toanBo)).toBe(45_547_696);
+    expect(357_445_000 + tacDongDieuChinh(toanBo)).toBe(62_400_000);
   });
 
   it("ví ads trả trước neo 3 (đã nạp, chưa chạy, sổ chưa trừ) ⇒ giải thích thêm −3", () => {

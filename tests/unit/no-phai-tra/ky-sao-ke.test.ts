@@ -35,6 +35,8 @@ const ky = (
   hanTra: hanTra ? vn(hanTra) : null,
   daTraTruocMoSo: tr(daTraTrieu),
   laNeoMoSo,
+  nghiaVu: null,
+  saoKeTraChuaLen: null,
 });
 
 const chi = (ngay: string, trieu: number): GiaoDichThe => ({ ngay: vn(ngay), soTien: tr(trieu), loai: "CHI" });
@@ -198,6 +200,139 @@ describe("phần phải trả FIFO + KẸP", () => {
       phanTruoc: null,
       phanMoi: null,
     });
+  });
+});
+
+/**
+ * Kỳ nhập từ PDF: neo `soDu` = dư nợ in sao kê + bill ghi sổ trễ (để dư nợ đúng), nhưng ngân hàng chỉ đòi số in sao
+ * kê (`nghiaVu`). Số kỳ 20/10/2026 thẻ đuôi 9999 (đã gột): sao kê 32.475.000, bill ghi sổ trễ 2.364.000 ⇒ neo 34.839.000.
+ */
+describe("nghĩa vụ kỳ = số sao kê, tách khỏi neo dư nợ", () => {
+  const vnd = (ngay: string, soTien: number, loai: GiaoDichThe["loai"]): GiaoDichThe => ({ ngay: vn(ngay), soTien, loai });
+  const kyPdf = (nghiaVu: number | null): KyNeo => ({
+    ngayChot: vn("2026-10-20"),
+    soDu: 34_839_000,
+    hanTra: vn("2026-11-05"),
+    daTraTruocMoSo: 0,
+    laNeoMoSo: false,
+    nghiaVu,
+    saoKeTraChuaLen: nghiaVu === null ? null : 0,
+  });
+  const gd = [vnd("2026-10-23", 32_475_000, "TRA"), vnd("2026-10-24", 10_727_000, "CHI")];
+
+  it("trả đúng số sao kê ⇒ nghiaVuKy 0, không còn 'phải trả' phần bill ghi sổ trễ", () => {
+    expect(phaiTra([kyPdf(32_475_000)], gd, vn("2026-10-25"))).toEqual({ nghiaVuKy: 0, phanTruoc: null, phanMoi: null });
+  });
+
+  it("chưa trả ⇒ phải trả đúng số sao kê, KHÔNG phải neo", () => {
+    const p = phaiTra([kyPdf(32_475_000)], [], vn("2026-10-21"));
+    expect(p?.nghiaVuKy).toBe(32_475_000);
+    expect(p?.phanMoi?.soTien).toBe(32_475_000);
+  });
+
+  it("duNo vẫn từ neo soDu: 34.839.000 + CHI 10.727.000 − TRA 32.475.000 = 13.091.000", () => {
+    expect(duNo([kyPdf(32_475_000)], gd, vn("2026-10-25"))).toBe(13_091_000);
+    expect(duNo([kyPdf(null)], gd, vn("2026-10-25"))).toBe(13_091_000);
+  });
+
+  it("kỳ gõ tay (nghiaVu null) ⇒ trần = soDu như cũ: còn đúng phần chênh 2.364.000", () => {
+    expect(phaiTra([kyPdf(null)], gd, vn("2026-10-25"))?.nghiaVuKy).toBe(2_364_000);
+  });
+
+  it("số sao kê LỚN hơn neo (chủ shop sửa số chốt xuống, có ghi chú) ⇒ nghĩa vụ kẹp tại neo, không đòi hơn", () => {
+    const ky: KyNeo = { ...kyPdf(32_475_000), soDu: 20_000_000 };
+    expect(phaiTra([ky], [], vn("2026-10-21"))?.nghiaVuKy).toBe(20_000_000);
+    expect(duNo([ky], [], vn("2026-10-21"))).toBe(20_000_000);
+  });
+
+  it("kỳ trước nhập PDF đã trả đủ số sao kê ⇒ kỳ sau không còn phần kỳ trước", () => {
+    const kySau: KyNeo = { ...kyPdf(null), ngayChot: vn("2026-11-20"), soDu: 9_000_000, hanTra: vn("2026-12-05") };
+    const p = phaiTra([kyPdf(32_475_000), kySau], gd, vn("2026-11-21"));
+    expect(p?.nghiaVuKy).toBe(9_000_000);
+    expect(p?.phanTruoc).toBeNull();
+    expect(p?.phanMoi?.soTien).toBe(9_000_000);
+  });
+});
+
+/**
+ * Kỳ PDF có lần TRẢ THẺ ngày ≤ ngày chốt mà ngân hàng ghi sổ SAU ngày chốt (P, "trả chưa lên sao kê"): neo đã trừ P
+ * (`soDu = S + B − P`, B = bill ghi sổ trễ) và lõi không đếm lại P (ngày ≤ chốt), nhưng số sao kê S vẫn GỒM phần P đã
+ * trả ⇒ ngân hàng chỉ còn đòi S − P. Cột `saoKeTraChuaLen` mang P; NULL (kỳ ghi trước khi có cột / kỳ gõ tay) ⇒ như cũ.
+ * Số: S = 10.000.000, B = 1.000.000, P = 3.000.000 ⇒ neo 8.000.000, nghĩa vụ 7.000.000.
+ */
+describe("nghĩa vụ kỳ PDF trừ phần trả chưa lên sao kê", () => {
+  const S = 10_000_000;
+  const B = 1_000_000;
+  const P = 3_000_000;
+  const kyPdf = (o: { b?: number; p?: number; saoKeTraChuaLen?: number | null }): KyNeo => {
+    const b = o.b ?? 0;
+    const p = o.p ?? 0;
+    return {
+      ngayChot: vn("2026-10-20"),
+      soDu: S + b - p,
+      hanTra: vn("2026-11-05"),
+      daTraTruocMoSo: 0,
+      laNeoMoSo: false,
+      nghiaVu: S,
+      saoKeTraChuaLen: o.saoKeTraChuaLen === undefined ? p : o.saoKeTraChuaLen,
+    };
+  };
+  const vnd = (ngay: string, soTien: number, loai: GiaoDichThe["loai"]): GiaoDichThe => ({ ngay: vn(ngay), soTien, loai });
+  /** Lần trả P ngày 20/10 (= ngày chốt): app đã có `CARD_PAY`, sao kê chưa in. */
+  const traP = vnd("2026-10-20", P, "TRA");
+
+  it("S/B/P đồng thời: nghĩa vụ = S − P = 7.000.000; neo dư nợ vẫn 8.000.000 (P không trừ lần hai)", () => {
+    const ky = kyPdf({ b: B, p: P });
+    const p = phaiTra([ky], [traP], vn("2026-10-27"));
+    expect(p?.nghiaVuKy).toBe(7_000_000);
+    expect(p?.phanMoi?.soTien).toBe(7_000_000);
+    expect(duNo([ky], [traP], vn("2026-10-27"))).toBe(8_000_000);
+  });
+
+  it("chỉ bill ghi sổ trễ (P = 0): nghĩa vụ = S, neo S + B", () => {
+    const ky = kyPdf({ b: B });
+    expect(phaiTra([ky], [], vn("2026-10-27"))?.nghiaVuKy).toBe(S);
+    expect(duNo([ky], [], vn("2026-10-27"))).toBe(S + B);
+  });
+
+  it("chỉ trả chưa lên sao kê (B = 0): nghĩa vụ = neo = S − P", () => {
+    const ky = kyPdf({ p: P });
+    expect(phaiTra([ky], [traP], vn("2026-10-27"))?.nghiaVuKy).toBe(7_000_000);
+    expect(duNo([ky], [traP], vn("2026-10-27"))).toBe(7_000_000);
+  });
+
+  it("thêm lần trả SAU ngày chốt 2.000.000 ⇒ còn 5.000.000 (trả sau chốt trừ một lần, P không trừ lại)", () => {
+    const ky = kyPdf({ b: B, p: P });
+    const p = phaiTra([ky], [traP, vnd("2026-10-25", 2_000_000, "TRA")], vn("2026-10-27"));
+    expect(p?.nghiaVuKy).toBe(5_000_000);
+  });
+
+  it("kỳ ghi trước khi có cột (NULL) ⇒ như cũ: kẹp tại neo 8.000.000", () => {
+    const ky = kyPdf({ b: B, p: P, saoKeTraChuaLen: null });
+    expect(phaiTra([ky], [traP], vn("2026-10-27"))?.nghiaVuKy).toBe(8_000_000);
+  });
+
+  it("P lớn hơn số sao kê (dữ liệu lạ) ⇒ nghĩa vụ kẹp 0, không âm", () => {
+    const ky: KyNeo = { ...kyPdf({ p: P }), soDu: 0, saoKeTraChuaLen: 12_000_000 };
+    expect(phaiTra([ky], [], vn("2026-10-27"))).toEqual({ nghiaVuKy: 0, phanTruoc: null, phanMoi: null });
+  });
+
+  it("kỳ sau gõ tay: phần kỳ PDF trước còn treo cũng tính theo S − P", () => {
+    // Kỳ 20/10 (S/B/P) chưa trả gì thêm; kỳ 20/11 gõ tay 9.000.000 hạn 05/12. Phần kỳ cũ còn treo = 7.000.000
+    // (không phải 8.000.000), kẹp ≤ nghĩa vụ kỳ mới.
+    const kySau: KyNeo = {
+      ngayChot: vn("2026-11-20"),
+      soDu: 9_000_000,
+      hanTra: vn("2026-12-05"),
+      daTraTruocMoSo: 0,
+      laNeoMoSo: false,
+      nghiaVu: null,
+      saoKeTraChuaLen: null,
+    };
+    const p = phaiTra([kyPdf({ b: B, p: P }), kySau], [traP], vn("2026-11-21"));
+    expect(p?.nghiaVuKy).toBe(9_000_000);
+    expect(p?.phanTruoc?.soTien).toBe(7_000_000);
+    expect(p?.phanMoi?.soTien).toBe(2_000_000);
   });
 });
 

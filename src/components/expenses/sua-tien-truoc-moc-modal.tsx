@@ -11,7 +11,7 @@ import { suaSoTienTruocMoc } from "@/lib/actions/sua-tien-truoc-moc";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { formatVnd } from "@/lib/format";
-import { parseAmountInput } from "@/lib/format-amount-input";
+import { loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 import type { KetQuaSuaTienTruocMoc } from "@/lib/no-phai-tra/sua-tien-truoc-moc";
 
 const TRAN_LY_DO = 120; // khớp trần server (`lyDo` trim 1..120)
@@ -71,13 +71,15 @@ export function SuaTienTruocMocModal({ open, onOpenChange, expense, mocM }: SuaT
     setAmountMoi(expense?.amount ?? 0);
     setLyDo("");
     setFieldErrors({});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Chủ ý chỉ nạp lại khi mở hộp thoại / đổi bản ghi — không chạy theo các state còn lại.
   }, [open, expense?.id]);
 
   if (!expense) return null;
 
   const khongDoi = amountMoi === expense.amount;
-  const hopLe = amountMoi > 0 && !khongDoi && lyDo.trim() !== "" && !saving;
+  // Gõ quá trần KHÔNG bị kẹp im lặng: ô giữ số gõ, báo lỗi và khoá nút Lưu.
+  const loiTran = loiVuotTranAmount(amountMoi);
+  const hopLe = amountMoi > 0 && !loiTran && !khongDoi && lyDo.trim() !== "" && !saving;
 
   async function handleSave() {
     if (!expense || !hopLe) return;
@@ -130,7 +132,7 @@ export function SuaTienTruocMocModal({ open, onOpenChange, expense, mocM }: SuaT
           </p>
         )}
 
-        <Field id={idSoTien} label="Số tiền mới" error={fieldErrors.amountMoi}>
+        <Field id={idSoTien} label="Số tiền mới" error={fieldErrors.amountMoi ?? loiTran ?? undefined}>
           <div className="relative">
             <Input
               id={idSoTien}

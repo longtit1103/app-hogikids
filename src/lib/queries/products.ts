@@ -1,5 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 
+import { mauTimKiemIlike } from "@/lib/escape-ilike";
 import { prisma } from "@/lib/prisma";
 
 import type { KetQuaChe, QuyenGiaVon } from "./che-gia-von-types";
@@ -109,7 +110,7 @@ function buildProductWhere(
 ): Prisma.Sql {
   const conds: Prisma.Sql[] = [];
   if (p.q && p.q.trim()) {
-    const like = `%${p.q.trim()}%`;
+    const like = mauTimKiemIlike(p.q);
     conds.push(Prisma.sql`(p.name ILIKE ${like} OR EXISTS(
       SELECT 1 FROM "Variant" vq WHERE vq."productId" = p.id AND (vq.sku ILIKE ${like} OR vq.label ILIKE ${like})
     ))`);

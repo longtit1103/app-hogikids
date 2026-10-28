@@ -2,10 +2,10 @@ import type { SyncKind } from "@/generated/prisma/client";
 
 import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { hasBronzeBacklog, isBronzeOnly, markBronzeBacklog } from "@/lib/bronze/bronze-only";
-import { coTheDoiSoat, demDaHachToan } from "@/lib/bronze/doi-soat-hach-toan";
+import { coTheDoiSoat, demDaHachToan, loiBoDongPhaiBaoDo } from "@/lib/bronze/doi-soat-hach-toan";
 import { locDonChuaDongDau } from "@/lib/bronze/ket-cuc-silver";
 import { giuKhoaLandDon } from "@/lib/bronze/khoa-land-don";
-import { landRaw } from "@/lib/bronze/land-raw";
+import { landRaw, LoiThieuKhoaStreamTien } from "@/lib/bronze/land-raw";
 import { BRONZE_STREAMS, isBronzeStream } from "@/lib/bronze/streams";
 import { transformFromRaw, type TransformStats } from "@/lib/bronze/transform-from-raw";
 import { docBodyCoTran } from "@/lib/ingest/doc-body-co-tran";
@@ -149,16 +149,35 @@ export async function POST(req: Request): Promise<Response> {
     // webhook giữ (`khoa-land-don.ts`). Không có bước này thì guard bên webhook vẫn hở: nó đọc
     // xong, trang API chen vào land bản mới, rồi webhook mới land bản cũ đè lên. Stream khác
     // KHÔNG có guard đọc-rồi-ghi nào nên giữ nguyên đường cũ (một INSERT tự nó đã nguyên tử).
-    const { landed, skippedNoId, landedIds, seenIds } =
-      stream === "orders"
-        ? await prisma.$transaction(
-            async (tx) => {
-              await giuKhoaLandDon(tx);
-              return landRaw(stream, shopId, payload, syncLogId, tx, shopIdsHopLe);
-            },
-            { timeout: TIMEOUT_LAND_TRANG_MS }
-          )
-        : await landRaw(stream, shopId, payload, syncLogId, undefined, shopIdsHopLe, ngay);
+    let ketQuaLand: Awaited<ReturnType<typeof landRaw>>;
+    try {
+      ketQuaLand =
+        stream === "orders"
+          ? await prisma.$transaction(
+              async (tx) => {
+                await giuKhoaLandDon(tx);
+                return landRaw(stream, shopId, payload, syncLogId, tx, shopIdsHopLe);
+              },
+              { timeout: TIMEOUT_LAND_TRANG_MS }
+            )
+          : await landRaw(stream, shopId, payload, syncLogId, undefined, shopIdsHopLe, ngay);
+    } catch (err) {
+      // Stream TIỀN có record thiếu khoá ⇒ landRaw đã từ chối CẢ trang (0 dòng Bronze). Báo ERROR mà
+      // vẫn HTTP 200: ném tiếp thành 500 thì n8n thử lại cùng trang rồi dừng mọi trang sau của lượt.
+      // KHÔNG bật cờ backlog: không có gì nằm trong kho thô để dựng lại — lượt kéo lại mới cứu được.
+      if (!(err instanceof LoiThieuKhoaStreamTien)) throw err;
+      warnings.push(err.message);
+      return {
+        stream,
+        shopId,
+        landed: 0,
+        skippedNoId: err.soThieuKhoa,
+        seen: 0,
+        mode: "tu-choi-thieu-khoa" as const,
+        loiSauKhiGhi: err.message,
+      };
+    }
+    const { landed, skippedNoId, landedIds, seenIds } = ketQuaLand;
     if (skippedNoId > 0) warnings.push(`${skippedNoId} record thiếu 'id' → không land được`);
 
     // Chế độ chỉ-land: dừng ngay sau Bronze. Ghi warning để SyncLog nói rõ vì sao Silver không đổi —
@@ -244,6 +263,28 @@ export async function POST(req: Request): Promise<Response> {
       );
       await markBronzeBacklog();
     }
-    return { stream, shopId, landed, skippedNoId, seen: seenIds.length, mode: "land+transform" as const, ...t };
+    // Hoá đơn / ảnh chụp chi phí TikTok Business: một record bỏ là sai tiền (nợ thẻ / tín dụng tặng) mà cổng đối
+    // soát ở trên không soi được (danh sách bc_id mở) ⇒ báo ĐỎ: cờ backlog + SyncLog ERROR, HTTP vẫn 200 (`withSyncLog`
+    // — n8n không thử lại, các trang sau vẫn được gửi).
+    // Stream tiền còn lại (TikTok Shop sao kê / giao dịch / lệnh rút): record đã land mà transform bỏ
+    // (vd tiền không đọc được — mapper từ chối để KHÔNG ghi 0 đè số đúng) cũng là sai tiền ⇒ cùng
+    // luật đỏ. Câu riêng của hai stream TikTok Business (nói rõ hậu quả nợ thẻ / tín dụng) đi trước.
+    const loiBoDong =
+      loiBoDongPhaiBaoDo(stream, t.skipped) ??
+      (BRONZE_STREAMS[stream].laStreamTien && t.skipped > 0
+        ? `Stream "${stream}": ${t.skipped} record đã vào kho thô nhưng KHÔNG dựng được Silver (xem cảnh báo) — ` +
+          "số tiền cũ trong Silver được giữ nguyên, bản mới bị bỏ. Sửa mapping rồi dựng lại từ kho thô."
+        : null);
+    if (loiBoDong !== null) await markBronzeBacklog();
+    return {
+      stream,
+      shopId,
+      landed,
+      skippedNoId,
+      seen: seenIds.length,
+      mode: "land+transform" as const,
+      ...t,
+      ...(loiBoDong !== null ? { loiSauKhiGhi: loiBoDong } : {}),
+    };
   });
 }

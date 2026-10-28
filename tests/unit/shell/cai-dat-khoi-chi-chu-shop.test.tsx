@@ -127,7 +127,7 @@ function dat(role: "OWNER" | "STAFF", ...q: Quyen[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  chiChu.docTrangThaiSaoLuu.mockResolvedValue({ muc: "tot" });
+  chiChu.docTrangThaiSaoLuu.mockResolvedValue({ muc: "ok" });
   chiChu.coDuLieuGiaoDich.mockResolvedValue(true);
   chiChu.demDonMoCoi.mockResolvedValue({ tong: 0 });
   chiChu.demChiPhiKhongDungLai.mockResolvedValue({ tong: 0 });

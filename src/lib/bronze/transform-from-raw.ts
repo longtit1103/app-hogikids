@@ -4,6 +4,8 @@ import {
   transformTiktokAdsReport,
 } from "./transform-ads-expense";
 import { transformOrders, transformProducts } from "./transform-pancake-orders";
+import { transformTiktokAdsHoaDon } from "./transform-tiktok-ads-hoa-don";
+import { transformTiktokAdsTinDung } from "./transform-tiktok-ads-tin-dung";
 import {
   empty,
   type TransformOptions,
@@ -19,11 +21,11 @@ import {
 export type { TransformOptions, TransformStats };
 
 /**
- * Stream CỐ Ý không có Silver (land-only): 6 stream Pancake phụ + `tiktok/orders` (cố ý không kéo)
- * + hoá đơn quảng cáo TikTok. 3 stream TikTok settlement (statements/statement_transactions/payments)
- * NAY CÓ Silver (Phase 2), 2 stream báo cáo ads (`meta/report`, `tiktokbusiness/report`) NAY dựng lại
- * `Expense` ở lượt dựng lại — đều đã gỡ. Liệt kê TƯỜNG MINH để stream mới thêm vào registry mà quên quyết định
- * transform sẽ THROW ở đây, thay vì lặng lẽ trả stats rỗng và bị đọc nhầm là "đã dựng Silver xong,
+ * Stream CỐ Ý không có Silver (land-only): 6 stream Pancake phụ + `tiktok/orders` (cố ý không kéo).
+ * 3 stream TikTok settlement (statements/statement_transactions/payments) NAY CÓ Silver (Phase 2), 2 stream
+ * báo cáo ads (`meta/report`, `tiktokbusiness/report`) NAY dựng lại `Expense` ở lượt dựng lại, hoá đơn quảng
+ * cáo TikTok (`tiktokbusiness/invoice`) NAY CÓ Silver `TiktokAdsHoaDon` (nguồn dư nợ thẻ) — đều đã gỡ.
+ * Liệt kê TƯỜNG MINH để stream mới thêm vào registry mà quên quyết định transform sẽ THROW ở đây, thay vì lặng lẽ trả stats rỗng và bị đọc nhầm là "đã dựng Silver xong,
  * không có gì để dựng".
  */
 const LAND_ONLY: readonly BronzeStream[] = [
@@ -36,9 +38,6 @@ const LAND_ONLY: readonly BronzeStream[] = [
   // tiktok/statements + statement_transactions + payments: nay CÓ transform Silver
   // (TiktokSettlement/AdsSettlement/Payment — "Tiền đã về", Phase 2) → gỡ khỏi land-only.
   "tiktok/orders",
-  // Hoá đơn quảng cáo TikTok: KHÔNG có bảng Silver riêng — nó là NGUỒN ĐO VAT mà nhánh
-  // `tiktokbusiness/report` đọc thẳng từ kho thô (xem `buildVatByMonth`), không phải sổ sách.
-  "tiktokbusiness/invoice",
   // 4 stream analytics + GMV Max cấp item: SỐ SÀN, cố ý KHÔNG có bảng Silver (spec §3 — "bảng Silver
   // cho analytics" nằm ngoài phạm vi). Reader `src/lib/reports/marketing/*` đọc thẳng Bronze bằng
   // DISTINCT ON, đúng khuôn `quang-cao-chien-dich.ts`. Quên khai ở đây ⇒ `transformFromRaw` không tìm
@@ -82,6 +81,14 @@ const NHANH = new Map<BronzeStream, NhanhTransform>([
   // Chi tiêu quảng cáo: 2 nhánh này TỰ đứng yên khi không phải lượt dựng lại (xem module).
   ["meta/report", transformMetaAdsReport],
   ["tiktokbusiness/report", transformTiktokAdsReport],
+  // Hoá đơn quảng cáo TikTok → Silver `TiktokAdsHoaDon`: số TikTok THẬT trừ thẻ — dư nợ thẻ tín dụng đọc nó.
+  // Dòng tiền đối chiếu, KHÔNG P&L, KHÔNG quỹ. Chạy cả trang ingest thường ngày lẫn lượt dựng lại (khác 2 nhánh
+  // ads trên: không chạm bảng app sở hữu nên không cần cờ `rebuild`). Nhánh `tiktokbusiness/report` VẪN đọc
+  // thẳng kho thô hoá đơn để đo VAT (`buildVatByMonth`).
+  ["tiktokbusiness/invoice", transformTiktokAdsHoaDon],
+  // Ảnh chụp chi phí theo tài khoản → Silver `TiktokAdsTinDung`: phần ads trả bằng tín dụng TikTok tặng theo ngày —
+  // P&L trừ khỏi dòng Quảng cáo TikTok. Không chạm `Expense` ⇒ chạy cả trang ingest thường ngày lẫn lượt dựng lại.
+  ["tiktokbusiness/cost", transformTiktokAdsTinDung],
 ]);
 
 /**

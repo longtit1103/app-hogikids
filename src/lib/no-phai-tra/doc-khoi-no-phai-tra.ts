@@ -1,5 +1,6 @@
 import { format } from "date-fns";
 
+import { docCanhBaoHoaDonTiktok, type CanhBaoHoaDonTiktok } from "@/lib/no-phai-tra/canh-bao-hoa-don-tiktok-tre";
 import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docPhieuConNo, vanTayPhieuConNo, type PhieuConNo } from "@/lib/no-phai-tra/phieu-nhap-no-queries";
 import { ngayTrongThang } from "@/lib/no-phai-tra/ky-sao-ke";
@@ -25,6 +26,8 @@ export type KhoiNoPhaiTra = {
   vanTay: string;
   /** Có hồ sơ ví quảng cáo trả trước — để thẻ chốt số dư gợi ý đọc chênh âm. */
   coHoSoViAds: boolean;
+  /** Hoá đơn TikTok trừ thẻ ngừng về trong khi chi tiêu ads vẫn về — dư nợ ước tính đang THIẾU (`null` = ổn). */
+  canhBaoHoaDonTiktok: CanhBaoHoaDonTiktok | null;
 };
 
 /** Hạn trả gợi ý: ngày hạn của thẻ trong tháng của ngày chốt nếu còn sau ngày chốt, không thì tháng kế. */
@@ -36,11 +39,12 @@ export function hanTraGoiY(ngayChot: string, ngayHanTra: number): string {
 }
 
 export async function docKhoiNoPhaiTra(): Promise<KhoiNoPhaiTra> {
-  const [moc, the, phieu, soVi] = await Promise.all([
+  const [moc, the, phieu, soVi, canhBaoHoaDonTiktok] = await Promise.all([
     docMocM(),
     docTheKemTrangThai(),
     docPhieuConNo(),
     prisma.viAdsTraTruoc.count(),
+    docCanhBaoHoaDonTiktok(),
   ]);
   const mocMStr = moc === null ? null : format(moc, "yyyy-MM-dd");
   const homNay = new Date();
@@ -58,5 +62,6 @@ export async function docKhoiNoPhaiTra(): Promise<KhoiNoPhaiTra> {
     phieu,
     vanTay: vanTayPhieuConNo(phieu),
     coHoSoViAds: soVi > 0,
+    canhBaoHoaDonTiktok,
   };
 }

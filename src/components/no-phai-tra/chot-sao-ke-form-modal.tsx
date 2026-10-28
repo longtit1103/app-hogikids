@@ -11,19 +11,64 @@ import { chotSaoKe } from "@/lib/actions/chot-sao-ke";
 import { docUocTinhSaoKe } from "@/lib/actions/uoc-tinh-sao-ke";
 import { formatVnd } from "@/lib/format";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { ngayHoaDonTiktokDuVe } from "@/lib/sao-ke-the/cong-chot-sao-ke";
 
 import { OCoNhan } from "./o-nhap-co-nhan";
 
 /** `undefined` = đang tính · `null` = app chưa có neo ≤ ngày đó · `"loi"` = không tính được. */
 type Uoc = number | null | undefined | "loi";
 
-/** Câu nói chênh lệch sao kê ↔ ước tính của app (dương = sao kê cao hơn app tính). */
+/**
+ * Các lần TikTok trừ THẺ THẬT tạo ĐÚNG ngày chốt (server đếm, đã bỏ phần ví TikTok Shop trả — `viTra`) — `null` khi
+ * đang tính / không tính được.
+ */
+type HoaDonNgayChot = { soLan: number; tong: number; viTra?: number } | null;
+
+/** Khoá ngày `yyyy-MM-dd` giờ VN (UTC+7 cố định, không DST) — không lệ thuộc múi giờ trình duyệt. */
+function khoaNgayVn(d: Date): string {
+  return new Date(d.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * Cảnh báo CHỐT SỚM: hoá đơn TikTok tạo chiều/tối ngày chốt D chỉ về app ở lượt kéo đêm D+2 (API hoá đơn trễ 6–11h).
+ * Chốt trước D+2 thì các lần đó chưa có trong app, rồi khi về chúng mang ngày ≤ D ⇒ lõi coi là đã nằm trong neo ⇒ bỏ
+ * tới kỳ chốt sau. Chỉ CẢNH BÁO, không chặn (chủ shop tự gõ số) — đường nhập PDF thì CHẶN (`lyDoHoaDonTiktokChuaVe`, cùng
+ * mốc D+2). `homNay` = khoá ngày VN. `null` = đã đủ muộn.
+ */
+export function canhBaoChotSom(ngayChot: string, homNay: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ngayChot)) return null;
+  const tuNgay = ngayHoaDonTiktokDuVe(ngayChot);
+  if (homNay >= tuNgay) return null;
+  const [, thang, ngay] = tuNgay.split("-");
+  return (
+    "Hoá đơn TikTok chiều/tối ngày chốt thường về app sau 2 đêm — chốt sớm có thể làm app bỏ sót chúng tới kỳ sau; " +
+    `nên chốt từ ${ngay}/${thang}.`
+  );
+}
+
+/**
+ * Câu nói chênh lệch sao kê ↔ ước tính của app (dương = sao kê cao hơn app tính). Độ trễ có HAI chiều: hoá đơn
+ * TikTok về app trễ 6–11h (app THẤP hơn ngân hàng) và ngân hàng ghi sổ lần TikTok trừ trễ ~1 ngày (app CAO hơn).
+ */
 export function cauChenhSaoKe(soDu: number, uoc: number): string {
   const chenh = soDu - uoc;
   if (chenh === 0) return "Khớp ước tính của app.";
   return chenh > 0
-    ? `Sao kê CAO hơn app tính ${formatVnd(chenh)} — có khoản chi/phí/lãi chưa ghi vào app?`
-    : `Sao kê THẤP hơn app tính ${formatVnd(-chenh)} — có khoản trả/hoàn chưa ghi vào app?`;
+    ? `Sao kê CAO hơn app tính ${formatVnd(chenh)} — chênh nhỏ thường do hoá đơn TikTok chưa kéo về app (TikTok báo trễ); lớn thì có khoản chi/phí/lãi chưa ghi vào app?`
+    : `Sao kê THẤP hơn app tính ${formatVnd(-chenh)} — chênh nhỏ thường do ngân hàng ghi sổ trễ các lần TikTok trừ; lớn thì có lần trả thẻ chưa ghi hoặc ghi trùng?`;
+}
+
+/**
+ * Câu nhắc khi ngày chốt có lần TikTok trừ thẻ — sao kê ngân hàng thường chưa gồm chúng (ghi sổ trễ ~1 ngày). CHỈ nêu
+ * phần trừ THẺ THẬT (server đã bỏ phần ví TikTok Shop trả — không bao giờ lên sao kê, cộng vào là neo thừa).
+ */
+export function cauHoaDonNgayChot(h: { soLan: number; tong: number; viTra?: number }): string {
+  const vi = (h.viTra ?? 0) > 0 ? ` Đã bỏ ${formatVnd(h.viTra ?? 0)} ví TikTok Shop trả (không lên sao kê ngân hàng).` : "";
+  return (
+    `Sao kê ngân hàng thường CHƯA gồm ${h.soLan} lần TikTok trừ thẻ trong ngày chốt (tổng ${formatVnd(h.tong)}). ` +
+    `Nếu sao kê không có chúng, gõ số sao kê + ${formatVnd(h.tong)}; có rồi thì gõ đúng số sao kê.` +
+    vi
+  );
 }
 
 /**
@@ -57,6 +102,7 @@ export function ChotSaoKeFormModal({
   const [soDu, setSoDu] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [uoc, setUoc] = useState<Uoc>(undefined);
+  const [hoaDonNgayChot, setHoaDonNgayChot] = useState<HoaDonNgayChot>(null);
   const [loi, setLoi] = useState<Record<string, string>>({});
   const [dangLuu, setDangLuu] = useState(false);
 
@@ -76,9 +122,12 @@ export function ChotSaoKeFormModal({
     if (!open || ngayChot === "") return;
     let huy = false;
     setUoc(undefined);
+    setHoaDonNgayChot(null);
     docUocTinhSaoKe({ cardId: the.id, ngay: ngayChot })
       .then((res) => {
-        if (!huy) setUoc(res.ok ? res.data.uocTinh : "loi");
+        if (huy) return;
+        setUoc(res.ok ? res.data.uocTinh : "loi");
+        setHoaDonNgayChot(res.ok ? (res.data.hoaDonNgayChot ?? null) : null);
       })
       .catch(() => {
         if (!huy) setUoc("loi");
@@ -89,6 +138,7 @@ export function ChotSaoKeFormModal({
   }, [open, the.id, ngayChot]);
 
   const hanSauChot = hanTra !== "" && ngayChot !== "" && hanTra > ngayChot;
+  const chotSom = ngayChot === "" ? null : canhBaoChotSom(ngayChot, khoaNgayVn(new Date()));
   const hopLe = yeuCauId !== "" && ngayChot !== "" && ngayChot >= mocM && soDu !== null && hanSauChot && !dangLuu;
 
   async function luu(e: React.FormEvent) {
@@ -146,12 +196,17 @@ export function ChotSaoKeFormModal({
             </OCoNhan>
           </div>
           {hanTra !== "" && !hanSauChot && <p className="text-xs text-error">Hạn trả phải sau ngày chốt.</p>}
+          {chotSom !== null && (
+            <p className="text-xs text-warning" data-testid="sao-ke-canh-bao-chot-som">
+              {chotSom}
+            </p>
+          )}
 
           <OCoNhan
             id="sao-ke-so-du"
             nhan="Số dư trên sao kê (dư nợ cuối ngày chốt)"
             loi={loi.soDu}
-            ghiChu="Gõ đúng số trên sao kê ngân hàng, kể cả khi bạn đã trả một phần."
+            ghiChu="Gõ dư nợ trên sao kê ngân hàng cuối ngày chốt (kể cả khi đã trả một phần) — xem nhắc về các lần TikTok trừ trong ngày chốt bên dưới."
           >
             <Input
               id="sao-ke-so-du"
@@ -178,6 +233,11 @@ export function ChotSaoKeFormModal({
                 </p>
                 {soDu !== null && <p className="mt-1 text-xs text-muted-foreground">{cauChenhSaoKe(soDu, uoc)}</p>}
               </>
+            )}
+            {hoaDonNgayChot !== null && hoaDonNgayChot.soLan > 0 && hoaDonNgayChot.tong > 0 && (
+              <p className="mt-1 text-xs text-warning" data-testid="sao-ke-hoa-don-ngay-chot">
+                {cauHoaDonNgayChot(hoaDonNgayChot)}
+              </p>
             )}
           </div>
 

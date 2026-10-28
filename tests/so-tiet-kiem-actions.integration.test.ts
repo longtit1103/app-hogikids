@@ -492,13 +492,13 @@ describe("moLaiSoTietKiem", () => {
     expect(await prisma.cashMovement.count({ where: { savingsId: id, kind: "SAVINGS_IN" } })).toBe(1);
   });
 
-  it("sổ có HAI dòng SAVINGS_IN → TỪ CHỐI mở lại, không xoá gì (app không đoán xoá dòng nào)", async () => {
+  it("sổ có thêm dòng SAVINGS_IN ghi tay → mở lại CHỈ xoá dòng lượt tất toán sinh, giữ dòng tay", async () => {
     const id = await taoSo();
     expect((await tatToanSoTietKiem({ id, ngayTatToan: "2027-03-05", lai: LAI_DAO_HAN })).ok).toBe(
       true
     );
-    // Dòng nhận lại ghi tay thêm của chủ shop.
-    await prisma.cashMovement.create({
+    // Dòng nhận lại ghi tay thêm của chủ shop (nạp thẳng DB — UI chặn ghi vào sổ đã đóng).
+    const tay = await prisma.cashMovement.create({
       data: {
         date: ngayVn("2027-03-06"),
         kind: "SAVINGS_IN",
@@ -509,13 +509,13 @@ describe("moLaiSoTietKiem", () => {
     });
 
     const res = await moLaiSoTietKiem({ id });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toContain("nhiều hơn một dòng nhận lại gốc");
+    expect(res.ok).toBe(true);
 
-    // KHÔNG xoá gì: cả hai dòng nhận lại và bản ghi lãi còn nguyên, sổ vẫn đóng.
-    expect(await prisma.cashMovement.count({ where: { savingsId: id, kind: "SAVINGS_IN" } })).toBe(2);
-    expect(await prisma.thuNhap.count()).toBe(1);
-    expect((await prisma.soTietKiem.findUniqueOrThrow({ where: { id } })).closedAt).not.toBeNull();
+    // Dòng tay còn NGUYÊN (id, số); dòng 200tr do tất toán sinh đã gỡ; lãi gỡ theo refId.
+    const nhan = await prisma.cashMovement.findMany({ where: { savingsId: id, kind: "SAVINGS_IN" } });
+    expect(nhan.map((d) => ({ id: d.id, amount: d.amount }))).toEqual([{ id: tay.id, amount: 10_000_000 }]);
+    expect(await prisma.thuNhap.count()).toBe(0);
+    expect((await prisma.soTietKiem.findUniqueOrThrow({ where: { id } })).closedAt).toBeNull();
   });
 
   it("sổ đang gửi → 'Sổ này đang gửi — không cần mở lại', dòng gửi còn nguyên", async () => {
@@ -525,6 +525,177 @@ describe("moLaiSoTietKiem", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe("Sổ này đang gửi — không cần mở lại");
     expect(await prisma.cashMovement.count({ where: { savingsId: id } })).toBe(1);
+  });
+});
+
+/**
+ * Vòng đời nhiều bước có dòng nhận gốc GHI TAY. Mở lại phải nhận diện dòng do CHÍNH lượt tất toán sinh
+ * bằng id lưu trên sổ (`dongNhanGocTatToanId`), KHÔNG bằng số lượng dòng hay mô tả: đoán theo số lượng
+ * từng xoá mất dòng tay 100tr (ngân hàng đã trả gốc) khi sổ chỉ có đúng một dòng nhận.
+ *
+ * Số literal tính tay: sổ 100.000.000, lãi 1.000.000.
+ */
+describe("moLaiSoTietKiem — chỉ gỡ đúng dòng lượt tất toán sinh", () => {
+  const GOC = 100_000_000;
+  const LAI = 1_000_000;
+
+  /** Tác động lên quỹ của các dòng sổ = Σ SAVINGS_IN − Σ SAVINGS_OUT (dương = tiền đã về). */
+  async function tacDongQuy(id: string): Promise<number> {
+    const dong = await prisma.cashMovement.findMany({ where: { savingsId: id } });
+    return dong.reduce((s, d) => s + (d.kind === "SAVINGS_IN" ? d.amount : -d.amount), 0);
+  }
+
+  async function dongNhan(id: string) {
+    const dong = await prisma.cashMovement.findMany({
+      where: { savingsId: id, kind: "SAVINGS_IN" },
+      orderBy: { date: "asc" },
+    });
+    return dong.map((d) => ({ id: d.id, amount: d.amount }));
+  }
+
+  async function ghiTayNhan(id: string, amount: number, ngay: string) {
+    return prisma.cashMovement.create({
+      data: {
+        date: ngayVn(ngay),
+        kind: "SAVINGS_IN",
+        amount,
+        savingsId: id,
+        description: "Ngân hàng trả gốc, ghi tay",
+      },
+    });
+  }
+
+  it("nhận tay 100tr → tất toán chỉ ghi lãi → mở lại: dòng tay CÒN, quỹ không đổi, lãi gỡ", async () => {
+    const id = await taoSo({ principal: GOC });
+    const tay = await ghiTayNhan(id, GOC, "2027-03-01");
+    expect((await tatToanSoTietKiem({ id, ngayTatToan: "2027-03-05", lai: LAI })).ok).toBe(true);
+    // Gốc đã về bằng dòng tay ⇒ tất toán không sinh dòng nhận ⇒ sổ không trỏ dòng nào.
+    expect((await prisma.soTietKiem.findUniqueOrThrow({ where: { id } })).dongNhanGocTatToanId).toBeNull();
+    expect(await tacDongQuy(id)).toBe(0);
+
+    const res = await moLaiSoTietKiem({ id });
+    expect(res.ok).toBe(true);
+
+    // Dòng tay 100tr còn nguyên: xoá nó là quỹ mất dấu 100tr THẬT đã về tài khoản.
+    expect(await dongNhan(id)).toEqual([{ id: tay.id, amount: GOC }]);
+    expect(await tacDongQuy(id)).toBe(0);
+    // Đang gửi = 100tr gửi − 100tr đã nhận tay = 0 (ngân hàng đã trả gốc).
+    expect(await prisma.cashMovement.count({ where: { savingsId: id } })).toBe(2);
+    expect(await prisma.thuNhap.count()).toBe(0);
+    const so = await prisma.soTietKiem.findUniqueOrThrow({ where: { id } });
+    expect(so.closedAt).toBeNull();
+    expect(so.dongNhanGocTatToanId).toBeNull();
+  });
+
+  it("nhận tay 40tr → tất toán sinh 60tr + lãi → mở lại: xoá ĐÚNG dòng 60tr, giữ 40tr", async () => {
+    const id = await taoSo({ principal: GOC });
+    const tay = await ghiTayNhan(id, 40_000_000, "2027-01-10");
+    expect((await tatToanSoTietKiem({ id, ngayTatToan: "2027-03-05", lai: LAI })).ok).toBe(true);
+
+    const nhanSauTatToan = await dongNhan(id);
+    expect(nhanSauTatToan).toHaveLength(2);
+    const dongTatToan = nhanSauTatToan.find((d) => d.id !== tay.id);
+    expect(dongTatToan?.amount).toBe(60_000_000);
+    expect((await prisma.soTietKiem.findUniqueOrThrow({ where: { id } })).dongNhanGocTatToanId).toBe(
+      dongTatToan?.id
+    );
+
+    const res = await moLaiSoTietKiem({ id });
+    expect(res.ok).toBe(true);
+
+    expect(await dongNhan(id)).toEqual([{ id: tay.id, amount: 40_000_000 }]);
+    // Quỹ: −100tr gửi + 40tr nhận tay = −60tr (đúng 60tr còn đang gửi).
+    expect(await tacDongQuy(id)).toBe(-60_000_000);
+    expect(await prisma.thuNhap.count()).toBe(0);
+    const so = await prisma.soTietKiem.findUniqueOrThrow({ where: { id } });
+    expect(so.closedAt).toBeNull();
+    expect(so.dongNhanGocTatToanId).toBeNull();
+  });
+
+  it("tất toán → mở lại → tất toán lại: đúng 1 ThuNhap, 1 dòng nhận, sổ trỏ ĐÚNG dòng mới", async () => {
+    const id = await taoSo({ principal: GOC });
+    expect((await tatToanSoTietKiem({ id, ngayTatToan: "2027-03-05", lai: LAI })).ok).toBe(true);
+    const lan1 = await dongNhan(id);
+    expect(lan1).toEqual([{ id: expect.any(String), amount: GOC }]);
+    expect((await prisma.soTietKiem.findUniqueOrThrow({ where: { id } })).dongNhanGocTatToanId).toBe(lan1[0].id);
+
+    expect((await moLaiSoTietKiem({ id })).ok).toBe(true);
+    expect(await dongNhan(id)).toEqual([]);
+
+    expect((await tatToanSoTietKiem({ id, ngayTatToan: "2027-03-06", lai: 1_200_000 })).ok).toBe(true);
+    const lan2 = await dongNhan(id);
+    expect(lan2).toEqual([{ id: expect.any(String), amount: GOC }]);
+    expect(lan2[0].id).not.toBe(lan1[0].id);
+    expect(await prisma.thuNhap.count()).toBe(1);
+    expect((await prisma.thuNhap.findFirstOrThrow()).amount).toBe(1_200_000);
+    const so = await prisma.soTietKiem.findUniqueOrThrow({ where: { id } });
+    expect(so.dongNhanGocTatToanId).toBe(lan2[0].id);
+    expect(so.closedAt).toEqual(ngayVn("2027-03-06"));
+  });
+
+  /** Sổ tất toán bởi bản cũ: đóng, cột trỏ dòng NULL, các dòng nạp thẳng DB đúng như bản cũ để lại. */
+  async function taoSoDongTruocBanVa(dongIn: { amount: number; description: string }[]): Promise<string> {
+    const so = await prisma.soTietKiem.create({
+      data: {
+        name: "Sổ cũ BIDV",
+        principal: GOC,
+        startDate: ngayVn("2026-09-05"),
+        termMonths: 6,
+        maturityDate: ngayVn("2027-03-05"),
+        annualRateBp: 520,
+        closedAt: ngayVn("2027-03-05"),
+      },
+    });
+    await prisma.cashMovement.create({
+      data: { date: ngayVn("2026-09-05"), kind: "SAVINGS_OUT", amount: GOC, savingsId: so.id, description: "Gửi tiết kiệm Sổ cũ BIDV" },
+    });
+    for (const d of dongIn) {
+      await prisma.cashMovement.create({
+        data: { date: ngayVn("2027-03-05"), kind: "SAVINGS_IN", amount: d.amount, savingsId: so.id, description: d.description },
+      });
+    }
+    await prisma.thuNhap.create({
+      data: {
+        date: ngayVn("2027-03-05"),
+        kind: "LAI_TIET_KIEM",
+        amount: LAI,
+        savingsId: so.id,
+        refId: `TIETKIEM:${so.id}`,
+        description: "Lãi sổ tiết kiệm Sổ cũ BIDV — tất toán 05/03/2027",
+      },
+    });
+    return so.id;
+  }
+
+  it("sổ tất toán TRƯỚC bản vá còn dòng nhận gốc mang mẫu app sinh, chưa gán dấu → TỪ CHỐI, không xoá gì", async () => {
+    const id = await taoSoDongTruocBanVa([
+      { amount: GOC, description: "Nhận lại gốc tiết kiệm Sổ cũ BIDV — tất toán 05/03/2027" },
+    ]);
+
+    const res = await moLaiSoTietKiem({ id });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe(
+        "Sổ này tất toán trước bản vá — chủ shop chạy script gán dấu dòng nhận gốc rồi mở lại"
+      );
+    }
+    // App KHÔNG đoán: dòng nhận, lãi, trạng thái đóng còn nguyên.
+    expect(await dongNhan(id)).toEqual([{ id: expect.any(String), amount: GOC }]);
+    expect(await prisma.thuNhap.count()).toBe(1);
+    expect((await prisma.soTietKiem.findUniqueOrThrow({ where: { id } })).closedAt).not.toBeNull();
+  });
+
+  it("sổ tất toán TRƯỚC bản vá chỉ có dòng nhận GHI TAY (bản cũ chỉ ghi lãi) → mở lại được, giữ dòng tay", async () => {
+    const id = await taoSoDongTruocBanVa([{ amount: GOC, description: "Ngân hàng trả gốc, ghi tay" }]);
+    const truoc = await dongNhan(id);
+
+    const res = await moLaiSoTietKiem({ id });
+    expect(res.ok).toBe(true);
+
+    expect(await dongNhan(id)).toEqual(truoc);
+    expect(await tacDongQuy(id)).toBe(0);
+    expect(await prisma.thuNhap.count()).toBe(0);
+    expect((await prisma.soTietKiem.findUniqueOrThrow({ where: { id } })).closedAt).toBeNull();
   });
 });
 

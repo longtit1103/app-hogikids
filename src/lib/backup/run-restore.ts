@@ -299,7 +299,10 @@ async function runPgClient(
   }
 }
 
-/** Đường dẫn file tạm ngẫu nhiên trong os.tmpdir(). */
+/**
+ * Đường dẫn file tạm ngẫu nhiên trong os.tmpdir(). Mọi chỗ ghi vào đây PHẢI kèm `mode: 0o600`: file
+ * chứa nguyên bản dump (hash mật khẩu, kho token) trong thư mục dùng chung — mặc định theo umask sẽ là 0644.
+ */
 function tempPath(suffix: string): string {
   return join(tmpdir(), `hogikids-restore-${randomBytes(8).toString("hex")}${suffix}`);
 }
@@ -514,7 +517,7 @@ export async function kiemDumCoM1(fileBuf: Buffer, format: RestoreFormat): Promi
     const { env } = restoreArgsFromUrl(dbUrl, format);
     const dumpPath = tempPath(".dump");
     try {
-      await writeFile(dumpPath, fileBuf);
+      await writeFile(dumpPath, fileBuf, { mode: 0o600 });
       await kiemFileDumpCustom(dumpPath, schema, env);
     } finally {
       await unlink(dumpPath).catch(() => {});
@@ -590,7 +593,7 @@ export async function runRestore(
   if (format === "custom") {
     const dumpPath = tempPath(".dump");
     try {
-      await writeFile(dumpPath, fileBuf);
+      await writeFile(dumpPath, fileBuf, { mode: 0o600 });
       // Mục lục + assertDumpOnlySchema, rồi cổng M1 (dump đời trước phân quyền nạp vào là mất cột
       // vai trò/quyền ⇒ `LoiBackupTruocPhanQuyen`, route trả 422). Chỉ đọc FILE — throw ở đây = KHÔNG
       // đụng DB. Route đã chạy SỚM đúng các guard này bằng `kiemDumCoM1` trước khi giành khoá/chụp
@@ -627,7 +630,7 @@ export async function runRestore(
     // Ghi file tạm TRƯỚC `DROP SCHEMA`, không phải sau: `writeFile` không có hạn ở tầng Node, để nó
     // nằm giữa lệnh xoá và lệnh nạp nghĩa là một cú treo đĩa sẽ dừng đúng giữa chuỗi phá huỷ —
     // schema đã sạch mà dữ liệu chưa vào. Nay mọi việc không-đụng-dữ-liệu đều xong trước chốt.
-    await writeFile(sqlPath, unzipped);
+    await writeFile(sqlPath, unzipped, { mode: 0o600 });
 
     // Chốt cuối trước lệnh phá huỷ (xem `truocKhiPhaHuy`). Đặt trước `donSchemaChoDumpPlain` chứ
     // không phải trong nó: hàm đó mở đầu bằng một câu SELECT hỏi quyền rồi mới `DROP SCHEMA`, mà

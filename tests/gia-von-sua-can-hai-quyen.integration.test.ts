@@ -134,6 +134,15 @@ describe("đủ cả hai quyền ⇒ sửa + nhật ký đúng mã", () => {
     expect(await nhatKy("GIA_VON_IMPORT")).toEqual([expect.objectContaining({ ketQua: "OK", ghiChu: { soDong: 1 } })]);
   });
 
+  it("mảng import vượt trần 5000 dòng ⇒ báo lỗi validate, không ghi gì", async () => {
+    const quaTran = Array.from({ length: 5001 }, (_, i) => ({ sku: `SKU-TRAN-${i}`, costPrice: 1_000, lowStockThreshold: null }));
+
+    expect(await previewCostImport(quaTran)).toMatchObject({ ok: false, error: "Dữ liệu import không hợp lệ" });
+    expect(await importCostPrices(quaTran)).toMatchObject({ ok: false, error: "Dữ liệu import không hợp lệ" });
+    expect((await bienThe()).costPrice).toBe(GIA_GOC);
+    expect(await nhatKy("GIA_VON_IMPORT")).toEqual([]);
+  });
+
   it("áp cho sản phẩm không còn biến thể ⇒ báo lỗi, KHÔNG có dòng nhật ký 'đã sửa'", async () => {
     expect((await updateProductCost("khong-ton-tai", 1_000)).ok).toBe(false);
     expect(await nhatKy("GIA_VON_SUA")).toEqual([]);
