@@ -105,7 +105,10 @@ describe("POST /api/ingest/resync-products — webhook chen giữa chụp và gh
 
     const webhook = { luc: new Date(0) };
     moc.truocTransform = async () => {
-      webhook.luc = new Date(); // muộn hơn lúc route chụp ⇒ không nằm trong danh sách giữ lại
+      // Muộn hơn lúc route chụp ⇒ không nằm trong danh sách giữ lại. Đặt +1s thay vì `new Date()`: trên
+      // runner CI nhanh, mốc webhook có thể TRÙNG mili-giây với mốc chụp của route ⇒ bước dọn mốc
+      // (`stockUpdatedAt <= lúc chụp`) xoá marker dù tồn 29 vẫn giữ — đỏ giả (CI public 28/10).
+      webhook.luc = new Date(Date.now() + 1_000);
       await webhookGhi(29, webhook.luc);
     };
     const res = await post();
