@@ -12,7 +12,7 @@ import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
 import { withSyncLog } from "@/lib/ingest/sync-log";
 import { prisma } from "@/lib/prisma";
-import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
 
 /**
  * POST /api/ingest/ads — n8n đẩy CHI TIÊU ads mỗi đêm (Meta / TikTok ad-account).
@@ -38,9 +38,11 @@ export async function POST(req: Request): Promise<Response> {
   const unauthorized = requireIngestSecret(req);
   if (unauthorized) return unauthorized;
 
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  return routeQuaCua(() => xuLyPost(req));
+}
 
+/** Thân POST sau cửa ghi (đếm suốt request — lượt phục hồi chờ nó xong). */
+async function xuLyPost(req: Request): Promise<Response> {
   // Lỗi đọc luồng (client ngắt giữa chừng) rơi về đúng nhánh 400 mà `req.json()` cũ trả cho cùng ca.
   const doc = await docBodyCoTran(req, TRAN_BODY_ADS_BYTE).catch(() => null);
   if (doc === null) {

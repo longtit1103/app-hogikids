@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ganNenTang } from "@/lib/actions/the-tin-dung";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 
 import { NEN_TANG_CHON } from "./nen-tang-gan-the";
 import { OCoNhan } from "./o-nhap-co-nhan";
@@ -32,7 +32,7 @@ export function GanNenTangForm({
   daBat: boolean;
 }) {
   const router = useRouter();
-  const homNay = format(new Date(), "yyyy-MM-dd");
+  const homNay = formatNgayVn(new Date(), "yyyy-MM-dd");
   const [nenTang, setNenTang] = useState("");
   const [tuNgay, setTuNgay] = useState(homNay);
   const [loi, setLoi] = useState<Record<string, string>>({});
@@ -41,7 +41,7 @@ export function GanNenTangForm({
   useEffect(() => {
     if (!open) return;
     setNenTang("");
-    setTuNgay(format(new Date(), "yyyy-MM-dd"));
+    setTuNgay(formatNgayVn(new Date(), "yyyy-MM-dd"));
     setLoi({});
   }, [open]);
 

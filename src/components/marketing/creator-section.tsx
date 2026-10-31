@@ -2,10 +2,9 @@ import Link from "next/link";
 
 import { DONG_MOI_TRANG_MARKETING, PhanTrangMarketing } from "@/components/marketing/phan-trang-marketing";
 import { SoSanBao } from "@/components/marketing/so-san-bao";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatSoDem as soGon, formatVnd } from "@/lib/format";
 import type { CreatorTiktok } from "@/lib/reports/marketing/creator-tiktok";
 
-import { formatPct1 } from "@/components/kenh/channel-format";
 
 /**
  * BẢNG CREATOR (tab `creator`, spec §5.3) — đơn affiliate cấp DÒNG SKU do TikTok quy công cho từng
@@ -28,17 +27,13 @@ import { formatPct1 } from "@/components/kenh/channel-format";
  * INELIGIBLE/hoàn; Pancake chỉ ghi khi thật sự bị trừ hoa hồng).
  */
 
-function soGon(n: number): string {
-  return new Intl.NumberFormat("vi-VN").format(n);
-}
-
 /** "—" khi sàn không báo; giữ 0 ₫ khi sàn báo 0 TƯỜNG MINH. */
 function tienSan(n: number | null): React.ReactNode {
   return n === null ? "—" : <SoSanBao>{formatVnd(n)}</SoSanBao>;
 }
 
 function pctSan(n: number | null): string {
-  return n === null ? "—" : formatPct1(n * 100);
+  return n === null ? "—" : formatPercent(n * 100);
 }
 
 /** Giữ nguyên mọi tham số trên URL (tab, kỳ, trang…), chỉ đặt `creator` để mở drawer. */

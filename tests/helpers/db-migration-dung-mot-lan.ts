@@ -76,7 +76,7 @@ export async function moDbMigration(): Promise<DbMigration> {
   if (!url) {
     throw new Error(
       "Thiếu TEST_DATABASE_URL_MIGRATION — test migration cần DB dùng-một-lần riêng " +
-        "(…/hogikids_migration_test?schema=app, xem .env.example).",
+        "(…/hogikids_migration_test?schema=app, xem .env.operator.example).",
     );
   }
   kiemUrlMigration(url);

@@ -1,5 +1,5 @@
 import { SoSanBao } from "@/components/marketing/so-san-bao";
-import { formatVnd } from "@/lib/format";
+import { formatSoDem as soGon, formatVnd } from "@/lib/format";
 import type { BangItemChienDich } from "@/lib/reports/marketing/gmv-max-theo-san-pham";
 
 /**
@@ -7,10 +7,6 @@ import type { BangItemChienDich } from "@/lib/reports/marketing/gmv-max-theo-san
  * task-8-brief Step 4). Chi (gồm VAT) là số ĐÃ quy đổi từ sổ (`gmvMaxTheoSanPham` đã tính, KHÔNG bọc
  * `<SoSanBao>` — đúng tiền, không phải claim của sàn); Đơn/GMV sàn là số TikTok TỰ NHẬN CÔNG ⇒ bọc.
  */
-
-function soGon(n: number): string {
-  return new Intl.NumberFormat("vi-VN").format(n);
-}
 
 export function ItemGmvMaxBangCon({ bang }: { bang: BangItemChienDich }) {
   return (

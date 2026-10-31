@@ -25,7 +25,10 @@ export function DeltaLine({
   direction?: MetricDirection;
   dark: boolean;
 }) {
+  // Thẻ nền tối PHẢI dùng token chữ `*-on-dark` — token nền be chỉ còn ~2,5:1 trên `surface-dark`.
   const mutedClass = dark ? "text-on-dark/70" : "text-muted-foreground";
+  const tot = dark ? "text-success-on-dark" : "text-success";
+  const xau = dark ? "text-error-on-dark" : "text-error";
 
   if (current === null) return null;
   if (previous === null || previous === 0) {
@@ -41,7 +44,7 @@ export function DeltaLine({
   const up = pct > 0;
   const good = direction === "higher-better" ? up : !up;
   return (
-    <span className={cn("text-[11px]", good ? "text-success" : "text-error")}>
+    <span className={cn("text-[11px]", good ? tot : xau)}>
       {up ? "▲" : "▼"} {Math.round(Math.abs(pct))}%
     </span>
   );

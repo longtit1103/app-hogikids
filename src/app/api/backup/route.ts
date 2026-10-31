@@ -1,6 +1,7 @@
 import { format } from "date-fns";
 
-import { chanRouteKhiDangPhucHoi, dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
+import { dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { giuKhoaViecNang, traKhoaViecNang } from "@/lib/backup/khoa-viec-nang";
 import { runPgDump } from "@/lib/backup/run-pg-dump";
 import type { ArtifactSaoLuu } from "@/lib/backup/trang-thai-sao-luu";
@@ -47,11 +48,13 @@ export async function POST(request: Request): Promise<Response> {
   // còn lại và trả một file đúng tên, đúng giờ, THIẾU dữ liệu — một bản sao lưu sai nằm chờ ngày
   // được nạp. Ngược chiều: pg_dump giữ ACCESS SHARE trên mọi bảng, xung đột ACCESS EXCLUSIVE mà
   // DROP cần ⇒ hai bên chặn nhau và lượt phục hồi treo.
-  // Tên biến KHÔNG trùng `dangPhucHoi` đã import: `ghiLogSaoLuu` bên dưới gọi lại đúng hàm đó, che
-  // nó bằng một `Response | null` ở đây chỉ tổ gây đọc nhầm.
-  const chanPhucHoi = chanRouteKhiDangPhucHoi();
-  if (chanPhucHoi) return chanPhucHoi;
+  // Cửa ghi có ĐẾM: lượt sao lưu tay đã qua cửa được lượt phục hồi CHỜ xong (drain) rồi mới bắt đầu
+  // phá huỷ — không chỉ kiểm cờ một lần ở đây.
+  return routeQuaCua(() => xuLyPost(actor));
+}
 
+/** Thân POST sau cửa ghi (đếm suốt request). */
+async function xuLyPost(actor: ActorNhatKy): Promise<Response> {
   // Giành khoá việc nặng TRƯỚC `runPgDump()` — thiếu cổng này thì bấm liên tiếp (hoặc double-click)
   // xếp chồng nhiều `pg_dump` cùng lúc, mỗi lượt tốn tài nguyên như nhau. Dùng CHUNG khoá với
   // `/api/restore`/`rebuild-from-raw`/script ghi giá vốn — một lượt sao lưu tay đang chạy cũng phải

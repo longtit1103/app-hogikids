@@ -11,6 +11,9 @@ const VND_SYMBOL = "₫";
 // (e.g. "−3.400.000 ₫"), distinct from the ASCII hyphen-minus "-".
 const MINUS_SIGN = "−";
 
+/** Chữ thay cho số không tính được (tỷ lệ/số đếm không hữu hạn). */
+const KHONG_CO_SO = "—";
+
 function assertFiniteAmount(n: number, fnName: string): void {
   if (!Number.isFinite(n)) {
     throw new RangeError(`${fnName}: expected a finite number of đồng, got ${n}`);
@@ -60,4 +63,28 @@ export function formatVndShort(n: number): string {
   const sign = isNegative && numberPart !== "0" ? MINUS_SIGN : "";
 
   return `${sign}${numberPart}tr ${VND_SYMBOL}`;
+}
+
+/**
+ * Tỷ lệ phần trăm kiểu Việt: tối đa 1 chữ số thập phân, bỏ ",0" thừa: `12%`, `12,5%` (không `12,0%`).
+ * MỘT kiểu duy nhất cho mọi bảng/thẻ trong app (Lãi/Lỗ, kênh, dashboard, báo cáo SP); thay cho các bản
+ * `toFixed(1)` và `toLocaleString` rải ở từng component. Không dùng cho tiền (tiền chỉ `formatVnd`).
+ */
+export function formatPercent(n: number): string {
+  // Không hữu hạn (0/0, chia cho 0) thì in "—" thay vì ném: hàm này gọi ở ~30 nơi hiển thị, một ô tỷ lệ hỏng
+  // không được làm sập cả tab. Chỉ hàm TIỀN mới ném — in sai một con số tiền còn tệ hơn là lỗi to.
+  if (!Number.isFinite(n)) return KHONG_CO_SO;
+  return `${n.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
+}
+
+// Dựng một lần: `Intl.NumberFormat` khá đắt mà bảng gọi hàng trăm lần mỗi lần render.
+const boDinhDangSoDem = new Intl.NumberFormat("vi-VN");
+
+/**
+ * Số ĐẾM (lượt xem, click, số đơn, số khách…) có dấu chấm ngăn nghìn kiểu Việt: `12.345`. KHÔNG dùng
+ * cho tiền — tiền chỉ đi qua `formatVnd` để giữ ký hiệu `₫` và dấu trừ thống nhất.
+ */
+export function formatSoDem(n: number): string {
+  if (!Number.isFinite(n)) return KHONG_CO_SO;
+  return boDinhDangSoDem.format(n);
 }

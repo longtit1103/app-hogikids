@@ -1,11 +1,10 @@
 import { format, parseISO } from "date-fns";
 
-import { formatPct1 } from "@/components/kenh/channel-format";
 import { CHUA_KET_NOI_ANALYTICS, KhuTrongMarketing } from "@/components/marketing/khu-trong-marketing";
 import { ChuThichDoTuoiVaThieu } from "@/components/marketing/canh-bao-do-tuoi-du-lieu";
 import { DONG_MOI_TRANG_MARKETING, PhanTrangMarketing } from "@/components/marketing/phan-trang-marketing";
 import { SoSanBao } from "@/components/marketing/so-san-bao";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatSoDem as soGon, formatVnd } from "@/lib/format";
 import type { ChuThichDoTuoi } from "@/lib/reports/marketing/cau-do-tuoi-du-lieu";
 import type { LiveTiktok, PhienLive } from "@/lib/reports/marketing/live-tiktok";
 import type { LoaiTaiKhoanVideo, VideoSan, VideoTiktok } from "@/lib/reports/marketing/video-tiktok";
@@ -31,10 +30,6 @@ import type { LoaiTaiKhoanVideo, VideoSan, VideoTiktok } from "@/lib/reports/mar
  * đổi trang; hẹp lại thành `KyTrenUrl` sẽ làm nút "trang sau" rụng mất bộ lọc đang chọn.
  */
 type SpDayDu = Record<string, string | undefined>;
-
-function soGon(n: number): string {
-  return new Intl.NumberFormat("vi-VN").format(n);
-}
 
 const GIOI_HAN_TIEU_DE = 60;
 
@@ -216,7 +211,7 @@ function BangVideo({
                       {v.luotXem === null ? "—" : <SoSanBao>{soGon(v.luotXem)}</SoSanBao>}
                     </td>
                     <td className="py-1.5 pr-2 text-right tabular-nums text-muted-foreground">
-                      {v.ctr === null ? "—" : <SoSanBao>{formatPct1(v.ctr * 100)}</SoSanBao>}
+                      {v.ctr === null ? "—" : <SoSanBao>{formatPercent(v.ctr * 100)}</SoSanBao>}
                     </td>
                     <td className="py-1.5 pr-2 text-right tabular-nums text-muted-foreground">
                       {v.donSku === null ? "—" : <SoSanBao>{soGon(v.donSku)}</SoSanBao>}
@@ -350,7 +345,7 @@ function BangLive({
                       {p.khach === null ? "—" : <SoSanBao>{soGon(p.khach)}</SoSanBao>}
                     </td>
                     <td className="py-1.5 pr-2 text-right tabular-nums text-muted-foreground">
-                      {p.clickSangDon === null ? "—" : <SoSanBao>{formatPct1(p.clickSangDon * 100)}</SoSanBao>}
+                      {p.clickSangDon === null ? "—" : <SoSanBao>{formatPercent(p.clickSangDon * 100)}</SoSanBao>}
                     </td>
                     <td className="py-1.5 text-right tabular-nums text-muted-foreground">
                       {p.spThemVaoLive === null ? "—" : soGon(p.spThemVaoLive)}

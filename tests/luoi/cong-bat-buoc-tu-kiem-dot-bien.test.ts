@@ -231,6 +231,10 @@ describe("mọi đuôi mã nguồn (.js/.jsx/.mjs, page.ts) nằm trong lưới"
     expect(phanLoaiFileApp("src/app/api/x/route.js")).toBe("route");
     expect(phanLoaiFileApp("src/app/api/x/route.mjs")).toBe("route");
     expect(phanLoaiFileApp("src/app/(auth)/dang-nhap/login-form.tsx")).toBe("module");
+    // Đuôi kép `.e2e.*`: bản build e2e cổng ghi phục vụ như trang/route thật ⇒ vẫn nằm trong lưới.
+    expect(phanLoaiFileApp("src/app/x/page.e2e.tsx")).toBe("trang");
+    expect(phanLoaiFileApp("src/app/api/x/route.e2e.ts")).toBe("route");
+    expect(phanLoaiFileApp("src/app/x/actions.e2e.ts")).toBe("module");
     expect(phanLoaiFileApp("src/app/globals.css")).toBeNull();
     expect(phanLoaiFileApp("src/app/favicon.ico")).toBeNull();
   });

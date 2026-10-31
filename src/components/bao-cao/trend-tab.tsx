@@ -8,10 +8,10 @@ import { TrendChart } from "@/components/bao-cao/trend-chart";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { normalizeCustomRange, serializeDateRange } from "@/lib/date-range";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatVnd } from "@/lib/format";
 import { chuThichBienRongCoThuNhap } from "@/lib/reports/chu-thich-thu-nhap-tai-chinh";
 import type { MonthlyTrend, MonthlyTrendRow } from "@/lib/reports/monthly-trend";
-import { formatPct1, monthLabel } from "@/lib/reports/trend-format";
+import { monthLabel } from "@/lib/reports/trend-format";
 
 /** Δ LN ròng so dòng tháng trước (theo %) — dòng đầu tiên trong cửa sổ hiện luôn "—". */
 function netProfitDelta(current: MonthlyTrendRow, prev: MonthlyTrendRow | undefined): React.ReactNode {
@@ -28,7 +28,7 @@ function netProfitDelta(current: MonthlyTrendRow, prev: MonthlyTrendRow | undefi
   const up = pct > 0;
   return (
     <span className={up ? "text-success" : "text-error"}>
-      {up ? "▲" : "▼"} {formatPct1(Math.abs(pct))}
+      {up ? "▲" : "▼"} {formatPercent(Math.abs(pct))}
     </span>
   );
 }
@@ -119,7 +119,7 @@ export function TrendTab({ trend }: { trend: MonthlyTrend }) {
                   {lai && <TableCell className="text-right tabular-nums">{formatVnd(lai.netProfit)}</TableCell>}
                   {lai && (
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {lai.marginPct === null ? "—" : formatPct1(lai.marginPct)}
+                      {lai.marginPct === null ? "—" : formatPercent(lai.marginPct)}
                       {lai.financialIncome > 0 && (
                         <span title={chuThichBienRongCoThuNhap(lai.financialIncome) ?? ""}> *</span>
                       )}
@@ -127,7 +127,7 @@ export function TrendTab({ trend }: { trend: MonthlyTrend }) {
                   )}
                   <TableCell className="text-right tabular-nums">{r.orderCount.toLocaleString("vi-VN")}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {formatPct1(r.returnBomRatePct)}
+                    {formatPercent(r.returnBomRatePct)}
                   </TableCell>
                   {lai && rowsLai && (
                     <TableCell className="text-right tabular-nums">{netProfitDelta(lai, rowsLai[i - 1])}</TableCell>

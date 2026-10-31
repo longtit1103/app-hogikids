@@ -7,7 +7,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { hasValidMagicBytes, LOGO_FILENAME_RE } from "@/lib/branding/logo-file";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
@@ -85,57 +85,61 @@ async function saveLogoFile(file: File): Promise<string | null> {
 export async function updateShopInfo(formData: FormData): Promise<ActionResult> {
   const cong = await congAction("cai-dat:sua");
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = shopInfoSchema.safeParse({
-    shopName: formData.get("shopName"),
-    shopPhone: formData.get("shopPhone"),
-  });
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    return { ok: false, error: issue.message, field: String(issue.path[0] ?? "shopName") };
-  }
-
-  let shopLogoPath: string | undefined;
-  const logo = formData.get("logo");
-  if (logo instanceof File && logo.size > 0) {
-    // `hasOwn` chứ không `in`: `in` khớp cả khoá kế thừa từ Object.prototype ("constructor", "toString") → ext thành hàm → 500.
-    if (!Object.hasOwn(LOGO_EXT_BY_MIME, logo.type) || logo.size > MAX_LOGO_BYTES) {
-      return { ok: false, error: INVALID_LOGO_ERROR, field: "logo" };
-    }
-    const saved = await saveLogoFile(logo);
-    if (!saved) {
-      return { ok: false, error: INVALID_LOGO_ERROR, field: "logo" };
-    }
-    shopLogoPath = saved;
-  }
-
-  // Đọc logo CŨ trước khi ghi đè DB — chỉ cần khi thật sự có logo mới (đổi tên/SĐT
-  // đơn thuần không đụng file nào). Đọc sau khi file mới đã ghi xong đĩa, để nếu
-  // có lỗi ở bước này thì cùng lắm sinh thêm 1 file mồ côi, KHÔNG mất logo cũ.
-  const oldShopLogoPath = shopLogoPath
-    ? (await docShopProfileKhongCache()).shopLogoPath
-    : null;
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await ghiShopProfile(tx, {
-        shopName: parsed.data.shopName,
-        shopPhone: parsed.data.shopPhone ?? null,
-        ...(shopLogoPath ? { shopLogoPath } : {}),
-      });
-      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_THONG_TIN_SHOP });
+    const parsed = shopInfoSchema.safeParse({
+      shopName: formData.get("shopName"),
+      shopPhone: formData.get("shopPhone"),
     });
-  } catch {
-    return { ok: false, error: "Lỗi khi lưu thông tin shop" };
-  }
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return { ok: false, error: issue.message, field: String(issue.path[0] ?? "shopName") };
+    }
 
-  // Xoá file cũ CHỈ sau khi file mới đã ghi xong đĩa VÀ DB đã cập nhật thành công —
-  // xoá sớm hơn mà một trong hai bước trên lỡ hỏng thì mất trắng logo, không có gì phục hồi.
-  if (oldShopLogoPath && oldShopLogoPath !== shopLogoPath) {
-    await deleteOldLogoFile(oldShopLogoPath);
-  }
+    let shopLogoPath: string | undefined;
+    const logo = formData.get("logo");
+    if (logo instanceof File && logo.size > 0) {
+      // `hasOwn` chứ không `in`: `in` khớp cả khoá kế thừa từ Object.prototype ("constructor", "toString") → ext thành hàm → 500.
+      if (!Object.hasOwn(LOGO_EXT_BY_MIME, logo.type) || logo.size > MAX_LOGO_BYTES) {
+        return { ok: false, error: INVALID_LOGO_ERROR, field: "logo" };
+      }
+      const saved = await saveLogoFile(logo);
+      if (!saved) {
+        return { ok: false, error: INVALID_LOGO_ERROR, field: "logo" };
+      }
+      shopLogoPath = saved;
+    }
 
-  revalidatePath("/", "layout");
-  return { ok: true, data: undefined };
+    // Đọc logo CŨ trước khi ghi đè DB — chỉ cần khi thật sự có logo mới (đổi tên/SĐT
+    // đơn thuần không đụng file nào). Đọc sau khi file mới đã ghi xong đĩa, để nếu
+    // có lỗi ở bước này thì cùng lắm sinh thêm 1 file mồ côi, KHÔNG mất logo cũ.
+    const oldShopLogoPath = shopLogoPath
+      ? (await docShopProfileKhongCache()).shopLogoPath
+      : null;
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await ghiShopProfile(tx, {
+          shopName: parsed.data.shopName,
+          shopPhone: parsed.data.shopPhone ?? null,
+          ...(shopLogoPath ? { shopLogoPath } : {}),
+        });
+        await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_THONG_TIN_SHOP });
+      });
+    } catch {
+      return { ok: false, error: "Lỗi khi lưu thông tin shop" };
+    }
+
+    // Xoá file cũ CHỈ sau khi file mới đã ghi xong đĩa VÀ DB đã cập nhật thành công —
+    // xoá sớm hơn mà một trong hai bước trên lỡ hỏng thì mất trắng logo, không có gì phục hồi.
+    if (oldShopLogoPath && oldShopLogoPath !== shopLogoPath) {
+      await deleteOldLogoFile(oldShopLogoPath);
+    }
+
+    revalidatePath("/", "layout");
+    return { ok: true, data: undefined };
+  } finally {
+    cua.ra();
+  }
 }

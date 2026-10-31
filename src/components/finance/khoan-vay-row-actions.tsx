@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
 import { MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
@@ -16,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { suaKhoanVay, tatToanKhoanVay, xoaKhoanVay } from "@/lib/actions/khoan-vay";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { lyDoKhongXoaKhoanVay } from "@/lib/so-quy/ly-do-khong-xoa-khoan-vay";
@@ -87,7 +87,7 @@ export function KhoanVayRowActions({ loan, d0 }: { loan: KhoanVayRow; d0: Date |
   const [moTatToanThauChi, setMoTatToanThauChi] = useState(false);
   // Ngày tất toán — CHỈ hỏi khi khoản đang giữ tiền gửi, vì đúng ca đó lượt bấm mới GHI TIỀN THẬT
   // (dòng hoàn `DEPOSIT_IN`): kỳ cuối đến hạn 10/05 mà bấm 03/06 thì cả số tiền gửi rơi sang tháng 6.
-  const [ngayTatToan, setNgayTatToan] = useState(() => format(new Date(), "yyyy-MM-dd"));
+  const [ngayTatToan, setNgayTatToan] = useState(() => formatNgayVn(new Date(), "yyyy-MM-dd"));
 
   const daTatToan = loan.closedAt !== null;
   const coTienGui = loan.tienGuiDangGiu > 0;
@@ -209,8 +209,8 @@ export function KhoanVayRowActions({ loan, d0 }: { loan: KhoanVayRow; d0: Date |
                 type="date"
                 aria-label="Ngày tất toán"
                 value={ngayTatToan}
-                min={format(loan.ngayTatToanSomNhat, "yyyy-MM-dd")}
-                max={format(new Date(), "yyyy-MM-dd")}
+                min={formatNgayVn(loan.ngayTatToanSomNhat, "yyyy-MM-dd")}
+                max={formatNgayVn(new Date(), "yyyy-MM-dd")}
                 onChange={(e) => setNgayTatToan(e.target.value)}
               />
             </label>

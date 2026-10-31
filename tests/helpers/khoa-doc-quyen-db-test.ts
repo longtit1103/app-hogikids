@@ -1,4 +1,6 @@
-import { taoPrismaClient } from "../../src/lib/tao-prisma-client";
+import { Client } from "pg";
+
+import { cauHinhClientKhoa } from "../../src/lib/tao-prisma-client";
 
 /**
  * KHOÁ ĐỘC QUYỀN cho một lượt chạy test trên MỘT database test.
@@ -84,19 +86,26 @@ export async function giuKhoaDocQuyenDbTest(
   khoa: number,
   ten: string,
 ): Promise<KhoaDaGiu> {
-  const db = taoPrismaClient(motKetNoi(url));
+  // `pg.Client` MỘT kết nối, KHÔNG đi qua `taoPrismaClient`: client Prisma dựng ngoài Next (runner Playwright,
+  // global setup) chạy ở chế độ CLI ⇒ câu giành khoá bị xếp là GHI ⇒ runner tự giữ KHOÁ GHI CHUNG suốt lượt,
+  // mọi lượt phục hồi thật trong e2e trả 409 "script ngoài app đang chạy". Client thuần cũng không có pool tự
+  // thay kết nối (tuổi kết nối) — khoá phiên sống đúng vòng đời kết nối này. Tên phiên KHÔNG mang tiền tố CLI
+  // để lượt phục hồi không chờ nhầm phiên giữ khoá test.
+  const db = new Client(cauHinhClientKhoa(url, "hogikids-test-khoa-doc-quyen"));
+  await db.connect();
+  let daDong = false;
+  db.once("end", () => {
+    daDong = true;
+  });
+  const truyVan = async <T>(sql: string): Promise<T> => (await db.query(sql, [khoa])).rows[0] as T;
 
-  // `$queryRaw` chứ KHÔNG `$executeRaw` ở đây — và đây KHÔNG phải phá lệ của
-  // `khoa-ghi-chi-tieu-ads.ts`. Lệ đó có vì `pg_advisory_xact_lock` trả kiểu `void`, mà `$queryRaw`
-  // cố giải mã cột kết quả nên ném "Failed to deserialize column of type 'void'".
-  // `pg_try_advisory_lock` trả BOOLEAN, và ta BẮT BUỘC phải đọc giá trị đó để biết có giành được
-  // hay không — `$executeRaw` chỉ trả số dòng nên sẽ nuốt mất câu trả lời.
-  const [{ giuDuoc }] = await db.$queryRaw<{ giuDuoc: boolean }[]>`
-    SELECT pg_try_advisory_lock(${khoa}::bigint) AS "giuDuoc"
-  `;
+  // `pg_try_advisory_lock` trả BOOLEAN — BẮT BUỘC đọc giá trị đó để biết có giành được hay không.
+  const { giuDuoc } = await truyVan<{ giuDuoc: boolean }>(
+    `SELECT pg_try_advisory_lock($1::bigint) AS "giuDuoc"`,
+  );
 
   if (!giuDuoc) {
-    await db.$disconnect();
+    await db.end();
     throw new Error(
       `Có lượt ${ten} KHÁC đang chạy trên cùng database test — TỪ CHỐI chạy chồng.\n` +
         `Hai lượt dùng chung database sẽ xoá fixture của nhau giữa chừng và đẻ ra hàng loạt test đỏ ` +
@@ -111,16 +120,18 @@ export async function giuKhoaDocQuyenDbTest(
   // Lọc `pid = pg_backend_pid()`: chỉ khoá do CHÍNH session này giữ mới tính; khoá cùng số nhưng
   // của session khác (kết nối cũ đã bị pool thay) là bằng chứng tuột, không phải bằng chứng còn.
   const conGiu = async (): Promise<boolean> => {
-    const [{ conGiu }] = await db.$queryRaw<{ conGiu: boolean }[]>`
-      SELECT EXISTS (
+    // Tay cầm đã nhả / kết nối đã đóng ⇒ session đó không còn giữ gì (pg.Client đóng thì ném, không tự mở lại).
+    if (daDong) return false;
+    const { conGiu } = await truyVan<{ conGiu: boolean }>(
+      `SELECT EXISTS (
         SELECT 1 FROM pg_locks
         WHERE locktype = 'advisory' AND granted
-          AND classid = ((${khoa}::bigint >> 32) & 4294967295)::oid
-          AND objid = (${khoa}::bigint & 4294967295)::oid
+          AND classid = (($1::bigint >> 32) & 4294967295)::oid
+          AND objid = ($1::bigint & 4294967295)::oid
           AND objsubid = 1
           AND pid = pg_backend_pid()
-      ) AS "conGiu"
-    `;
+      ) AS "conGiu"`,
+    );
     return conGiu;
   };
 
@@ -136,6 +147,7 @@ export async function giuKhoaDocQuyenDbTest(
         `bảo vệ chống chạy chồng. Nếu thấy test đỏ lạ, nghi ngay giẫm dữ liệu.`,
     );
   };
+  db.on("error", (e) => baoTuot(`kết nối giữ khoá lỗi: ${e.message.split("\n")[0]}`));
   const nhip = setInterval(() => {
     conGiu().then(
       (con) => {
@@ -154,9 +166,7 @@ export async function giuKhoaDocQuyenDbTest(
       // (kết nối bị pool thu hồi chẳng hạn) và lượt chạy vừa rồi thực ra KHÔNG được bảo vệ. Phải kêu
       // to: một chốt an toàn chết âm thầm còn tệ hơn không có chốt, vì nó tạo cảm giác đã an toàn.
       try {
-        const [{ daNha }] = await db.$queryRaw<{ daNha: boolean }[]>`
-          SELECT pg_advisory_unlock(${khoa}::bigint) AS "daNha"
-        `;
+        const { daNha } = await truyVan<{ daNha: boolean }>(`SELECT pg_advisory_unlock($1::bigint) AS "daNha"`);
         if (!daNha) {
           console.warn(
             `[khoá test] Nhả khoá ${ten} trả FALSE — khoá đã tuột giữa lượt chạy, lượt này KHÔNG ` +
@@ -164,7 +174,7 @@ export async function giuKhoaDocQuyenDbTest(
           );
         }
       } finally {
-        await db.$disconnect();
+        await db.end();
       }
     },
   };

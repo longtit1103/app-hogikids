@@ -19,7 +19,7 @@ import {
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { ngayGhiTaySchema } from "@/lib/actions/ngay-ghi-tay-schema";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { formatVnd } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
@@ -58,7 +58,7 @@ import { chanDuNoAm, khoaKhoanVay, tienGuiDangGiu } from "@/lib/so-quy/vi-tu-du-
  * Con dấu so bằng phép "<" (đơn điệu) nên sửa `firstDueDate`/`termMonths` sau này không làm kẹt.
  *
  * Mọi action ở đây PHẢI nằm trong `DUONG_GHI` của `tests/khoa-bao-tri-duong-ghi.test.ts` — phép quét
- * AST chỉ đọc THÂN HÀM export nên `dangPhucHoi()` phải gọi trực tiếp ở đây, không uỷ quyền.
+ * AST chỉ đọc THÂN HÀM export nên `vaoCuaGhi()` phải gọi trực tiếp ở đây, không uỷ quyền.
  *
  * ĐÃ BẬT NỢ PHẢI TRẢ (mốc M): tiền ngày < M đã chốt vào điều chỉnh mở sổ ⇒ mọi lượt ghi/xoá dòng tiền ngày < M
  * bị từ chối qua MỘT cổng `chanDongTienTruocM` (gồm cả `Expense` lãi vay — luôn cùng ngày với dòng gốc của kỳ);
@@ -316,62 +316,66 @@ export async function taoKhoanVay(input: unknown): Promise<ActionResult<{ id: st
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = khoanVaySchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const d = parsed.data;
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const id = await prisma.$transaction(async (tx) => {
-      await khoaChiaSeBatNoPhaiTra(tx);
-      const oNgay = d.giaiNgan > 0 ? "ngayGiaiNgan" : "startDate";
-      if (d.kind === "OVERDRAFT") {
-        // Kể cả "mang sang" (không dòng tiền nào): thấu chi có trước M đã được đối chiếu lúc bật, khai lại là lệch lúc chốt.
-        await chanDongTienTruocM(tx, { loai: "TAO", ngay: [d.startDate] }, { cau: cauThauChiTruocM, field: oNgay });
-      }
-      if (d.giaiNgan > 0) {
-        await chanDongTienTruocM(tx, { loai: "TAO", ngay: [d.startDate] }, { cau: cauGiaiNganTruocM, field: oNgay });
-      } else {
-        await chanMangSangTuM(tx, d.startDate, oNgay);
-      }
-      const loan = await tx.loan.create({
-        data: {
-          name: d.name,
-          lender: d.lender,
-          note: d.note,
-          kind: d.kind,
-          annualRateBp: d.annualRateBp,
-          startDate: d.startDate,
-          duNoMoSo: d.duNoMoSo,
-          termMonths: d.termMonths,
-          firstDueDate: d.firstDueDate,
-          laiCoDinhMoiKy: d.laiCoDinhMoiKy,
-          tienGuiBatBuocMoiKy: d.tienGuiBatBuocMoiKy,
-          laiNhapGoc: d.laiNhapGoc ?? false,
-        },
-      });
-      // BẤT BIẾN `LOAN_IN.date = startOfDay(Loan.startDate)`: dư nợ đếm theo NGÀY DÒNG TIỀN, còn
-      // `startDate` là due_0 để đếm ngày kỳ 1 — hai mốc lệch nhau là dư nợ kỳ 1 sai.
-      if (d.giaiNgan > 0) {
-        await tx.cashMovement.create({
+    const parsed = khoanVaySchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const d = parsed.data;
+
+    try {
+      const id = await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        const oNgay = d.giaiNgan > 0 ? "ngayGiaiNgan" : "startDate";
+        if (d.kind === "OVERDRAFT") {
+          // Kể cả "mang sang" (không dòng tiền nào): thấu chi có trước M đã được đối chiếu lúc bật, khai lại là lệch lúc chốt.
+          await chanDongTienTruocM(tx, { loai: "TAO", ngay: [d.startDate] }, { cau: cauThauChiTruocM, field: oNgay });
+        }
+        if (d.giaiNgan > 0) {
+          await chanDongTienTruocM(tx, { loai: "TAO", ngay: [d.startDate] }, { cau: cauGiaiNganTruocM, field: oNgay });
+        } else {
+          await chanMangSangTuM(tx, d.startDate, oNgay);
+        }
+        const loan = await tx.loan.create({
           data: {
-            date: startOfDay(loan.startDate),
-            kind: "LOAN_IN",
-            amount: d.giaiNgan,
-            loanId: loan.id,
-            description: `Giải ngân ${d.name}`,
+            name: d.name,
+            lender: d.lender,
+            note: d.note,
+            kind: d.kind,
+            annualRateBp: d.annualRateBp,
+            startDate: d.startDate,
+            duNoMoSo: d.duNoMoSo,
+            termMonths: d.termMonths,
+            firstDueDate: d.firstDueDate,
+            laiCoDinhMoiKy: d.laiCoDinhMoiKy,
+            tienGuiBatBuocMoiKy: d.tienGuiBatBuocMoiKy,
+            laiNhapGoc: d.laiNhapGoc ?? false,
           },
         });
-      }
-      await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_TAO", doiTuong: { loai: "Loan", id: loan.id } });
-      return loan.id;
-    }, OPT_TX_DONG_TIEN);
+        // BẤT BIẾN `LOAN_IN.date = startOfDay(Loan.startDate)`: dư nợ đếm theo NGÀY DÒNG TIỀN, còn
+        // `startDate` là due_0 để đếm ngày kỳ 1 — hai mốc lệch nhau là dư nợ kỳ 1 sai.
+        if (d.giaiNgan > 0) {
+          await tx.cashMovement.create({
+            data: {
+              date: startOfDay(loan.startDate),
+              kind: "LOAN_IN",
+              amount: d.giaiNgan,
+              loanId: loan.id,
+              description: `Giải ngân ${d.name}`,
+            },
+          });
+        }
+        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_TAO", doiTuong: { loai: "Loan", id: loan.id } });
+        return loan.id;
+      }, OPT_TX_DONG_TIEN);
 
-    lamMoiTrang();
-    return { ok: true, data: { id } };
-  } catch (e) {
-    return { ok: false, ...loiKhoanVay(e, "Lỗi khi ghi khoản vay") };
+      lamMoiTrang();
+      return { ok: true, data: { id } };
+    } catch (e) {
+      return { ok: false, ...loiKhoanVay(e, "Lỗi khi ghi khoản vay") };
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -386,153 +390,157 @@ export async function suaKhoanVay(id: string, input: unknown): Promise<ActionRes
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = khoanVaySchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const d = parsed.data;
-  const moLai = moLaiSchema.safeParse(input).data?.moLai === true;
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await khoaChiaSeBatNoPhaiTra(tx);
-      // Khoá dòng `Loan` TRƯỚC khi đọc: lượt này ghi cả `note` lẫn nền dư nợ, chạy chồng với một
-      // lượt duyệt kỳ hay một dòng trả gốc là mất vết / lệch dư nợ (xem `vi-tu-du-no.ts`).
-      await khoaKhoanVay(tx, id);
-      const loan = await tx.loan.findUnique({
-        where: { id },
-        select: { kind: true, startDate: true, duNoMoSo: true, lastDueHandled: true, laiNhapGoc: true },
-      });
-      if (!loan) throw new LoiHopDong("Không tìm thấy khoản vay");
+    const parsed = khoanVaySchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const d = parsed.data;
+    const moLai = moLaiSchema.safeParse(input).data?.moLai === true;
 
-      // Loại khoản vay khoá VĨNH VIỄN, cùng lý do với chế độ: TERM và OVERDRAFT tính lãi bằng hai
-      // công thức khác nhau (dư nợ đầu kỳ × số ngày · lãi theo ngày từng đoạn), nên đổi loại là
-      // viết lại ý nghĩa của những kỳ ĐÃ ghi vào Sổ chi phí. Muốn khai lại thì tạo khoản mới.
-      if (d.kind !== loan.kind) throw new LoiHopDong("Không đổi loại khoản vay sau khi tạo");
+    try {
+      await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        // Khoá dòng `Loan` TRƯỚC khi đọc: lượt này ghi cả `note` lẫn nền dư nợ, chạy chồng với một
+        // lượt duyệt kỳ hay một dòng trả gốc là mất vết / lệch dư nợ (xem `vi-tu-du-no.ts`).
+        await khoaKhoanVay(tx, id);
+        const loan = await tx.loan.findUnique({
+          where: { id },
+          select: { kind: true, startDate: true, duNoMoSo: true, lastDueHandled: true, laiNhapGoc: true },
+        });
+        if (!loan) throw new LoiHopDong("Không tìm thấy khoản vay");
 
-      // Chế độ khoá VĨNH VIỄN sau khi tạo. Đổi "moi" → "mang-sang" xoá dòng LOAN_IN — một dòng tiền
-      // THẬT đã vào tài khoản — nên quỹ tụt đúng bằng số giải ngân, im lặng. Giả định ngầm "tiền đó
-      // nằm trong số dư mở sổ" chỉ đúng khi giải ngân trước D0; muốn khai lại thì xoá rồi tạo mới.
-      // Chế độ của bản ghi suy từ `duNoMoSo` — cùng luật với form (`trangThaiBanDau`).
-      const cheDoCu = loan.duNoMoSo > 0 ? "mang-sang" : "moi";
-      if (d.cheDo !== cheDoCu) {
-        throw new LoiHopDong("Không đổi chế độ khoản vay sau khi tạo");
-      }
+        // Loại khoản vay khoá VĨNH VIỄN, cùng lý do với chế độ: TERM và OVERDRAFT tính lãi bằng hai
+        // công thức khác nhau (dư nợ đầu kỳ × số ngày · lãi theo ngày từng đoạn), nên đổi loại là
+        // viết lại ý nghĩa của những kỳ ĐÃ ghi vào Sổ chi phí. Muốn khai lại thì tạo khoản mới.
+        if (d.kind !== loan.kind) throw new LoiHopDong("Không đổi loại khoản vay sau khi tạo");
 
-      const dongGiaiNgan = await tx.cashMovement.findFirst({
-        where: { loanId: id, kind: "LOAN_IN" },
-        select: {
-          id: true,
-          amount: true,
-          date: true,
-          kind: true,
-          loanId: true,
-          savingsId: true,
-          cardId: true,
-          phieuNhapId: true,
-          viAdsId: true,
-        },
-      });
-      const soTraGoc = await tx.cashMovement.count({
-        where: { loanId: id, kind: "LOAN_REPAY" },
-      });
+        // Chế độ khoá VĨNH VIỄN sau khi tạo. Đổi "moi" → "mang-sang" xoá dòng LOAN_IN — một dòng tiền
+        // THẬT đã vào tài khoản — nên quỹ tụt đúng bằng số giải ngân, im lặng. Giả định ngầm "tiền đó
+        // nằm trong số dư mở sổ" chỉ đúng khi giải ngân trước D0; muốn khai lại thì xoá rồi tạo mới.
+        // Chế độ của bản ghi suy từ `duNoMoSo` — cùng luật với form (`trangThaiBanDau`).
+        const cheDoCu = loan.duNoMoSo > 0 ? "mang-sang" : "moi";
+        if (d.cheDo !== cheDoCu) {
+          throw new LoiHopDong("Không đổi chế độ khoản vay sau khi tạo");
+        }
 
-      const doiNenTang =
-        !cungNgay(d.startDate, loan.startDate) ||
-        d.duNoMoSo !== loan.duNoMoSo ||
-        d.giaiNgan !== (dongGiaiNgan?.amount ?? 0);
-      if (doiNenTang && (loan.lastDueHandled !== null || soTraGoc > 0)) {
-        throw new LoiHopDong(
-          "Đã ghi kỳ trả — không sửa được ngày/số tiền giải ngân, chỉ tất toán"
-        );
-      }
+        const dongGiaiNgan = await tx.cashMovement.findFirst({
+          where: { loanId: id, kind: "LOAN_IN" },
+          select: {
+            id: true,
+            amount: true,
+            date: true,
+            kind: true,
+            loanId: true,
+            savingsId: true,
+            cardId: true,
+            phieuNhapId: true,
+            viAdsId: true,
+          },
+        });
+        const soTraGoc = await tx.cashMovement.count({
+          where: { loanId: id, kind: "LOAN_REPAY" },
+        });
 
-      if (doiNenTang) {
-        // Ô nhận lỗi: ô ngày khi ngày đổi, không thì ô số tiền — theo cặp ô của chế độ đang khai.
-        const doiNgay = !cungNgay(d.startDate, loan.startDate);
-        const oNenTang =
-          d.cheDo === "moi"
-            ? doiNgay ? "ngayGiaiNgan" : "soTienGiaiNgan"
-            : doiNgay ? "startDate" : "duNoMoSo";
-        if (loan.kind === "OVERDRAFT") {
-          // Ngày rút cũ HOẶC mới < M ⇒ đổi dư nợ thấu chi tại M−1 so với lúc đã đối chiếu, dù có dòng tiền hay không.
-          await chanDongTienTruocM(
-            tx,
-            { loai: "TAO", ngay: [loan.startDate, d.startDate] },
-            { cau: cauThauChiTruocM, field: oNenTang }
+        const doiNenTang =
+          !cungNgay(d.startDate, loan.startDate) ||
+          d.duNoMoSo !== loan.duNoMoSo ||
+          d.giaiNgan !== (dongGiaiNgan?.amount ?? 0);
+        if (doiNenTang && (loan.lastDueHandled !== null || soTraGoc > 0)) {
+          throw new LoiHopDong(
+            "Đã ghi kỳ trả — không sửa được ngày/số tiền giải ngân, chỉ tất toán"
           );
         }
-        // Dời ngày bắt đầu khoản "mang sang" sang ≥ M = khai lại nó thành khoản mang sang từ M — cùng lỗ với lúc tạo.
-        // Giữ nguyên ngày (chỉ đổi dư nợ) thì qua: không biến khoản nào thành khoản mới.
-        if (d.cheDo === "mang-sang" && doiNgay) await chanMangSangTuM(tx, d.startDate, oNenTang);
-        // Dòng `LOAN_IN` sắp sửa / tạo / xoá — cùng ba nhánh ghi ngay dưới.
-        const moiLoanIn = { amount: d.giaiNgan, date: startOfDay(d.startDate) };
-        if (d.giaiNgan > 0 && dongGiaiNgan) {
-          await chanDongTienTruocM(
-            tx,
-            { loai: "SUA", cu: dongGiaiNgan, moi: { ...dongGiaiNgan, ...moiLoanIn } },
-            { field: oNenTang }
-          );
-        } else if (d.giaiNgan > 0) {
-          await chanDongTienTruocM(tx, { loai: "TAO", ngay: [moiLoanIn.date] }, { field: oNenTang });
-        } else if (dongGiaiNgan) {
-          await chanDongTienTruocM(tx, { loai: "XOA", ngay: [dongGiaiNgan.date] }, { field: oNenTang });
-        }
-      }
 
-      await tx.loan.update({
-        where: { id },
-        data: {
-          name: d.name,
-          lender: d.lender,
-          note: d.note,
-          annualRateBp: d.annualRateBp,
-          termMonths: d.termMonths,
-          firstDueDate: d.firstDueDate,
-          // Sửa được cả sau khi đã ghi kỳ, cùng luật với `annualRateBp`: hai số này chỉ nuôi ĐỀ XUẤT
-          // của kỳ SAU. Kỳ đã duyệt là dòng `Expense`/`CashMovement` có thật, sửa ở đây không đụng.
-          laiCoDinhMoiKy: d.laiCoDinhMoiKy,
-          tienGuiBatBuocMoiKy: d.tienGuiBatBuocMoiKy,
-          // "Lãi nhập gốc" sửa được CẢ sau khi đã duyệt kỳ — CỐ Ý không khoá: cờ chỉ quyết định kỳ duyệt
-          // SAU lượt này (chỉ `chayGhiKy` đọc, trong transaction sau khoá). Kỳ đã duyệt là dòng có thật và
-          // TỰ mô tả (có/không có dòng `LAI_NHAP_GOC` đi cặp); dư nợ, xoá/khôi phục kỳ đều theo DÒNG, không
-          // theo cờ ⇒ đổi cờ không viết lại quá khứ. Ngân hàng đổi cách thu lãi giữa chừng là chuyện thật.
-          laiNhapGoc: d.laiNhapGoc ?? loan.laiNhapGoc,
-          // Chỉ chạm phần nền khi thật sự đổi: ghi đè `startDate` bằng giá trị "cùng ngày nhưng
-          // khác giờ" sẽ lệch với ngày dòng LOAN_IN mà không ai thấy.
-          ...(doiNenTang ? { startDate: d.startDate, duNoMoSo: d.duNoMoSo } : {}),
-          // Đường DUY NHẤT xoá `closedAt`. Không set `closedAt` khi `moLai` tắt: một lượt sửa tên
-          // của khoản đã tất toán không được âm thầm mở lại nó.
-          ...(moLai ? { closedAt: null } : {}),
-        },
-      });
-
-      if (doiNenTang) {
-        if (d.giaiNgan > 0) {
-          const data = { amount: d.giaiNgan, date: startOfDay(d.startDate) };
-          if (dongGiaiNgan) {
-            await tx.cashMovement.update({ where: { id: dongGiaiNgan.id }, data });
-          } else {
-            await tx.cashMovement.create({
-              data: { ...data, kind: "LOAN_IN", loanId: id, description: `Giải ngân ${d.name}` },
-            });
+        if (doiNenTang) {
+          // Ô nhận lỗi: ô ngày khi ngày đổi, không thì ô số tiền — theo cặp ô của chế độ đang khai.
+          const doiNgay = !cungNgay(d.startDate, loan.startDate);
+          const oNenTang =
+            d.cheDo === "moi"
+              ? doiNgay ? "ngayGiaiNgan" : "soTienGiaiNgan"
+              : doiNgay ? "startDate" : "duNoMoSo";
+          if (loan.kind === "OVERDRAFT") {
+            // Ngày rút cũ HOẶC mới < M ⇒ đổi dư nợ thấu chi tại M−1 so với lúc đã đối chiếu, dù có dòng tiền hay không.
+            await chanDongTienTruocM(
+              tx,
+              { loai: "TAO", ngay: [loan.startDate, d.startDate] },
+              { cau: cauThauChiTruocM, field: oNenTang }
+            );
           }
-        } else if (dongGiaiNgan) {
-          // Không còn đường tới được từ UI/action (chế độ đã khoá ở trên): giữ làm hàng rào cuối cho
-          // bản ghi cũ lỡ ở trạng thái lai (duNoMoSo > 0 mà vẫn còn dòng LOAN_IN).
-          await tx.cashMovement.delete({ where: { id: dongGiaiNgan.id } });
+          // Dời ngày bắt đầu khoản "mang sang" sang ≥ M = khai lại nó thành khoản mang sang từ M — cùng lỗ với lúc tạo.
+          // Giữ nguyên ngày (chỉ đổi dư nợ) thì qua: không biến khoản nào thành khoản mới.
+          if (d.cheDo === "mang-sang" && doiNgay) await chanMangSangTuM(tx, d.startDate, oNenTang);
+          // Dòng `LOAN_IN` sắp sửa / tạo / xoá — cùng ba nhánh ghi ngay dưới.
+          const moiLoanIn = { amount: d.giaiNgan, date: startOfDay(d.startDate) };
+          if (d.giaiNgan > 0 && dongGiaiNgan) {
+            await chanDongTienTruocM(
+              tx,
+              { loai: "SUA", cu: dongGiaiNgan, moi: { ...dongGiaiNgan, ...moiLoanIn } },
+              { field: oNenTang }
+            );
+          } else if (d.giaiNgan > 0) {
+            await chanDongTienTruocM(tx, { loai: "TAO", ngay: [moiLoanIn.date] }, { field: oNenTang });
+          } else if (dongGiaiNgan) {
+            await chanDongTienTruocM(tx, { loai: "XOA", ngay: [dongGiaiNgan.date] }, { field: oNenTang });
+          }
         }
-      }
 
-      await chanDuNoAm(tx, id);
-      // Câu CUỐI, vẫn trong transaction đang giữ khoá dòng `Loan`: nhật ký ném ⇒ bản sửa rollback.
-      await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_SUA", doiTuong: { loai: "Loan", id } });
-    }, OPT_TX_DONG_TIEN);
+        await tx.loan.update({
+          where: { id },
+          data: {
+            name: d.name,
+            lender: d.lender,
+            note: d.note,
+            annualRateBp: d.annualRateBp,
+            termMonths: d.termMonths,
+            firstDueDate: d.firstDueDate,
+            // Sửa được cả sau khi đã ghi kỳ, cùng luật với `annualRateBp`: hai số này chỉ nuôi ĐỀ XUẤT
+            // của kỳ SAU. Kỳ đã duyệt là dòng `Expense`/`CashMovement` có thật, sửa ở đây không đụng.
+            laiCoDinhMoiKy: d.laiCoDinhMoiKy,
+            tienGuiBatBuocMoiKy: d.tienGuiBatBuocMoiKy,
+            // "Lãi nhập gốc" sửa được CẢ sau khi đã duyệt kỳ — CỐ Ý không khoá: cờ chỉ quyết định kỳ duyệt
+            // SAU lượt này (chỉ `chayGhiKy` đọc, trong transaction sau khoá). Kỳ đã duyệt là dòng có thật và
+            // TỰ mô tả (có/không có dòng `LAI_NHAP_GOC` đi cặp); dư nợ, xoá/khôi phục kỳ đều theo DÒNG, không
+            // theo cờ ⇒ đổi cờ không viết lại quá khứ. Ngân hàng đổi cách thu lãi giữa chừng là chuyện thật.
+            laiNhapGoc: d.laiNhapGoc ?? loan.laiNhapGoc,
+            // Chỉ chạm phần nền khi thật sự đổi: ghi đè `startDate` bằng giá trị "cùng ngày nhưng
+            // khác giờ" sẽ lệch với ngày dòng LOAN_IN mà không ai thấy.
+            ...(doiNenTang ? { startDate: d.startDate, duNoMoSo: d.duNoMoSo } : {}),
+            // Đường DUY NHẤT xoá `closedAt`. Không set `closedAt` khi `moLai` tắt: một lượt sửa tên
+            // của khoản đã tất toán không được âm thầm mở lại nó.
+            ...(moLai ? { closedAt: null } : {}),
+          },
+        });
 
-    lamMoiTrang();
-    return { ok: true, data: undefined };
-  } catch (e) {
-    return { ok: false, ...loiKhoanVay(e, "Lỗi khi sửa khoản vay") };
+        if (doiNenTang) {
+          if (d.giaiNgan > 0) {
+            const data = { amount: d.giaiNgan, date: startOfDay(d.startDate) };
+            if (dongGiaiNgan) {
+              await tx.cashMovement.update({ where: { id: dongGiaiNgan.id }, data });
+            } else {
+              await tx.cashMovement.create({
+                data: { ...data, kind: "LOAN_IN", loanId: id, description: `Giải ngân ${d.name}` },
+              });
+            }
+          } else if (dongGiaiNgan) {
+            // Không còn đường tới được từ UI/action (chế độ đã khoá ở trên): giữ làm hàng rào cuối cho
+            // bản ghi cũ lỡ ở trạng thái lai (duNoMoSo > 0 mà vẫn còn dòng LOAN_IN).
+            await tx.cashMovement.delete({ where: { id: dongGiaiNgan.id } });
+          }
+        }
+
+        await chanDuNoAm(tx, id);
+        // Câu CUỐI, vẫn trong transaction đang giữ khoá dòng `Loan`: nhật ký ném ⇒ bản sửa rollback.
+        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_SUA", doiTuong: { loai: "Loan", id } });
+      }, OPT_TX_DONG_TIEN);
+
+      lamMoiTrang();
+      return { ok: true, data: undefined };
+    } catch (e) {
+      return { ok: false, ...loiKhoanVay(e, "Lỗi khi sửa khoản vay") };
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -540,79 +548,83 @@ export async function xoaKhoanVay(id: string): Promise<ActionResult> {
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await khoaChiaSeBatNoPhaiTra(tx);
-      await khoaKhoanVay(tx, id);
-      const loan = await tx.loan.findUnique({
-        where: { id },
-        select: { lastDueHandled: true, duNoMoSo: true, kind: true, startDate: true },
-      });
-      if (!loan) throw new LoiHopDong("Không tìm thấy khoản vay");
+    try {
+      await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        await khoaKhoanVay(tx, id);
+        const loan = await tx.loan.findUnique({
+          where: { id },
+          select: { lastDueHandled: true, duNoMoSo: true, kind: true, startDate: true },
+        });
+        if (!loan) throw new LoiHopDong("Không tìm thấy khoản vay");
 
-      const soTraGoc = await tx.cashMovement.count({
-        where: { loanId: id, kind: "LOAN_REPAY" },
-      });
-      // Luật chặn KHÔNG đổi một chữ (con dấu kỳ hoặc dòng trả gốc ⇒ không xoá). Chỉ câu nói đổi:
-      // bản cũ nói "Đã ghi kỳ trả" cho CẢ ca khoản trả gốc cuối kỳ mới duyệt đúng một kỳ lãi — chưa
-      // trả đồng gốc nào — rồi chỉ sang "chỉ tất toán", mà tất toán lại đòi dư nợ về 0. Hai câu vòng
-      // vào nhau. `lyDoKhongXoaKhoanVay` nói đúng trạng thái và chỉ đúng đường gỡ (hoặc nói thẳng là
-      // không có), dùng chung với menu ⋯ ở client nên hai nơi không thể lệch nhau.
-      // Tiền gửi tiết kiệm ghi TAY (không qua kỳ nên không có con dấu `lastDueHandled`) vẫn là tiền
-      // THẬT đã rời tài khoản. Không chặn thì `deleteMany` bên dưới xoá luôn nó và quỹ nhảy lên đúng
-      // bằng số ngân hàng đang giữ, im lặng. Đếm DÒNG chứ không cộng tiền: khoản đã gửi rồi nhận lại
-      // hết có Σ = 0 mà dòng vẫn còn.
-      //
-      // Cổng này đi CHUNG vị từ với hai cổng trên thay vì giữ câu riêng: menu ⋯ ở client đọc cùng vị
-      // từ, tách ra là hộp hứa "xoá được" rồi server mới ném toast đỏ cho đúng khoản đó.
-      const soTienGui = await tx.cashMovement.count({
-        where: { loanId: id, kind: { in: ["DEPOSIT_OUT", "DEPOSIT_IN"] } },
-      });
-      const lyDo = lyDoKhongXoaKhoanVay({
-        coTraGoc: soTraGoc > 0,
-        daDuyetKy: loan.lastDueHandled !== null,
-        mangSang: loan.duNoMoSo > 0,
-        coTienGui: soTienGui > 0,
-      });
-      if (lyDo !== null) throw new LoiHopDong(lyDo);
+        const soTraGoc = await tx.cashMovement.count({
+          where: { loanId: id, kind: "LOAN_REPAY" },
+        });
+        // Luật chặn KHÔNG đổi một chữ (con dấu kỳ hoặc dòng trả gốc ⇒ không xoá). Chỉ câu nói đổi:
+        // bản cũ nói "Đã ghi kỳ trả" cho CẢ ca khoản trả gốc cuối kỳ mới duyệt đúng một kỳ lãi — chưa
+        // trả đồng gốc nào — rồi chỉ sang "chỉ tất toán", mà tất toán lại đòi dư nợ về 0. Hai câu vòng
+        // vào nhau. `lyDoKhongXoaKhoanVay` nói đúng trạng thái và chỉ đúng đường gỡ (hoặc nói thẳng là
+        // không có), dùng chung với menu ⋯ ở client nên hai nơi không thể lệch nhau.
+        // Tiền gửi tiết kiệm ghi TAY (không qua kỳ nên không có con dấu `lastDueHandled`) vẫn là tiền
+        // THẬT đã rời tài khoản. Không chặn thì `deleteMany` bên dưới xoá luôn nó và quỹ nhảy lên đúng
+        // bằng số ngân hàng đang giữ, im lặng. Đếm DÒNG chứ không cộng tiền: khoản đã gửi rồi nhận lại
+        // hết có Σ = 0 mà dòng vẫn còn.
+        //
+        // Cổng này đi CHUNG vị từ với hai cổng trên thay vì giữ câu riêng: menu ⋯ ở client đọc cùng vị
+        // từ, tách ra là hộp hứa "xoá được" rồi server mới ném toast đỏ cho đúng khoản đó.
+        const soTienGui = await tx.cashMovement.count({
+          where: { loanId: id, kind: { in: ["DEPOSIT_OUT", "DEPOSIT_IN"] } },
+        });
+        const lyDo = lyDoKhongXoaKhoanVay({
+          coTraGoc: soTraGoc > 0,
+          daDuyetKy: loan.lastDueHandled !== null,
+          mangSang: loan.duNoMoSo > 0,
+          coTienGui: soTienGui > 0,
+        });
+        if (lyDo !== null) throw new LoiHopDong(lyDo);
 
-      // THÙNG RÁC — chụp CẢ CỤM sau khi mọi cổng đã qua, trước câu xoá đầu tiên.
-      //
-      // `SoTietKiem.loanId` là FK `SetNull`: xoá khoản vay làm liên kết sổ↔vay biến mất VĨNH VIỄN
-      // và không bảng nào giữ lại dấu vết — phải chụp danh sách sổ đang trỏ tới TRƯỚC, nếu không
-      // khôi phục sẽ trả về một khoản vay không còn sổ nào nhận là nguồn tiền của nó.
-      const banGhi = await tx.loan.findUniqueOrThrow({ where: { id } });
-      const dongTien = await tx.cashMovement.findMany({ where: { loanId: id } });
-      // Đã bật nợ phải trả: không xoá thấu chi có ngày rút < M (đã đối chiếu lúc bật), không
-      // xoá dòng tiền nào ngày < M (thực tế chỉ còn `LOAN_IN` — trả gốc / tiền gửi đã chặn ở trên). Kiểm TRƯỚC
-      // câu chụp thùng rác: bị từ chối thì thùng rác cũng không có bản chụp nào.
-      if (loan.kind === "OVERDRAFT") {
-        await chanDongTienTruocM(tx, { loai: "XOA", ngay: [loan.startDate] }, { cau: cauThauChiTruocM });
-      }
-      await chanDongTienTruocM(tx, { loai: "XOA", ngay: dongTien.map((m) => m.date) });
-      const soTietKiemIds = (
-        await tx.soTietKiem.findMany({ where: { loanId: id }, select: { id: true } })
-      ).map((s) => s.id);
-      await chupVaoThungRac(tx, {
-        bang: "Loan",
-        banGhi,
-        cashMovements: dongTien,
-        ghiChu: { soTietKiemIds },
-      });
+        // THÙNG RÁC — chụp CẢ CỤM sau khi mọi cổng đã qua, trước câu xoá đầu tiên.
+        //
+        // `SoTietKiem.loanId` là FK `SetNull`: xoá khoản vay làm liên kết sổ↔vay biến mất VĨNH VIỄN
+        // và không bảng nào giữ lại dấu vết — phải chụp danh sách sổ đang trỏ tới TRƯỚC, nếu không
+        // khôi phục sẽ trả về một khoản vay không còn sổ nào nhận là nguồn tiền của nó.
+        const banGhi = await tx.loan.findUniqueOrThrow({ where: { id } });
+        const dongTien = await tx.cashMovement.findMany({ where: { loanId: id } });
+        // Đã bật nợ phải trả: không xoá thấu chi có ngày rút < M (đã đối chiếu lúc bật), không
+        // xoá dòng tiền nào ngày < M (thực tế chỉ còn `LOAN_IN` — trả gốc / tiền gửi đã chặn ở trên). Kiểm TRƯỚC
+        // câu chụp thùng rác: bị từ chối thì thùng rác cũng không có bản chụp nào.
+        if (loan.kind === "OVERDRAFT") {
+          await chanDongTienTruocM(tx, { loai: "XOA", ngay: [loan.startDate] }, { cau: cauThauChiTruocM });
+        }
+        await chanDongTienTruocM(tx, { loai: "XOA", ngay: dongTien.map((m) => m.date) });
+        const soTietKiemIds = (
+          await tx.soTietKiem.findMany({ where: { loanId: id }, select: { id: true } })
+        ).map((s) => s.id);
+        await chupVaoThungRac(tx, {
+          bang: "Loan",
+          banGhi,
+          cashMovements: dongTien,
+          ghiChu: { soTietKiemIds },
+        });
 
-      // FK `onDelete: Restrict` là hàng rào cuối: phải dọn dòng LOAN_IN TRƯỚC rồi mới xoá hồ sơ.
-      await tx.cashMovement.deleteMany({ where: { loanId: id } });
-      await tx.loan.delete({ where: { id } });
-      await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_XOA", doiTuong: { loai: "Loan", id } });
-    }, OPT_TX_DONG_TIEN);
+        // FK `onDelete: Restrict` là hàng rào cuối: phải dọn dòng LOAN_IN TRƯỚC rồi mới xoá hồ sơ.
+        await tx.cashMovement.deleteMany({ where: { loanId: id } });
+        await tx.loan.delete({ where: { id } });
+        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_XOA", doiTuong: { loai: "Loan", id } });
+      }, OPT_TX_DONG_TIEN);
 
-    lamMoiTrang();
-    return { ok: true, data: undefined };
-  } catch (e) {
-    await ghiLoiKhoanVay(nguoiDung, "VAY_XOA", id, e);
-    return { ok: false, ...loiKhoanVay(e, "Lỗi khi xoá khoản vay") };
+      lamMoiTrang();
+      return { ok: true, data: undefined };
+    } catch (e) {
+      await ghiLoiKhoanVay(nguoiDung, "VAY_XOA", id, e);
+      return { ok: false, ...loiKhoanVay(e, "Lỗi khi xoá khoản vay") };
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -646,103 +658,107 @@ export async function tatToanKhoanVay(id: string, input?: unknown): Promise<Acti
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = tatToanInputSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  // Không khai ⇒ hôm nay, đúng hành vi cũ. `startOfDay` giờ VN như mọi mốc dòng tiền khác.
-  const ngayHoan = startOfDay(parsed.data?.ngayTatToan ?? new Date());
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await khoaChiaSeBatNoPhaiTra(tx);
-      // Khoá TRƯỚC khi đọc dư nợ: không có nó, một dòng trả gốc/giải ngân commit ngay sau phép
-      // kiểm sẽ để lại khoản "đã tất toán" mà dư nợ khác 0.
-      await khoaKhoanVay(tx, id);
-      const loan = await tx.loan.findUnique({
-        where: { id },
-        select: { name: true, closedAt: true, startDate: true, kind: true },
-      });
-      if (!loan) throw new LoiHopDong("Không tìm thấy khoản vay");
-      if (loan.closedAt !== null) throw new LoiHopDong("Khoản vay đã tất toán");
-      // Thấu chi có đường tất toán RIÊNG (`tat-toan-thau-chi.ts`): ghi lãi đoạn cuối [con dấu, ngày tất toán] +
-      // trả gốc trong cùng transaction, kèm cổng chống trùng của nó. Đóng ở đây là đóng khoản mà lãi đoạn đó
-      // không bao giờ vào Lãi/Lỗ (khoản đã đóng thì không còn lối duyệt). Giao diện đã rẽ đúng nút — đây là
-      // cổng cho lượt gọi thẳng action.
-      if (loan.kind === "OVERDRAFT") {
-        throw new LoiHopDong("Khoản thấu chi tất toán bằng hộp Tất toán thấu chi (ghi cả lãi đoạn cuối) — tải lại trang rồi bấm Tất toán");
-      }
+    const parsed = tatToanInputSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    // Không khai ⇒ hôm nay, đúng hành vi cũ. `startOfDay` giờ VN như mọi mốc dòng tiền khác.
+    const ngayHoan = startOfDay(parsed.data?.ngayTatToan ?? new Date());
 
-      // CẬN DƯỚI của ngày tất toán — cùng khuôn với `tat-toan-thau-chi.ts`, và cần vì đúng lý do đó:
-      // lượt này GHI TIỀN THẬT (dòng hoàn `DEPOSIT_IN` = Σ tiền gửi). Kỳ cuối đến hạn 10/05 mà gõ
-      // nhầm 30/04 thì cả Σ tiền gửi — phần lớn chưa hề rời tài khoản trước tháng 5 — đề ngày 30/04:
-      // Sổ quỹ tháng 4 phồng đúng số đó, tháng 5 hụt đúng số đó. Ngày quá cũ còn kéo lùi D0 của Sổ
-      // quỹ (`ngayMoSo()` = min(date) TOÀN BẢNG `CashMovement`), đổi số mọi tháng chủ shop đã xem.
-      // Ô ngày ở client đã khai `min`; đây mới là cổng thật.
-      if (ngayHoan < startOfDay(loan.startDate)) {
-        throw new LoiHopDong(
-          `Ngày tất toán phải từ ngày bắt đầu khoản vay (${format(loan.startDate, "dd/MM/yyyy")}) trở đi`,
-          "ngayTatToan"
-        );
-      }
-
-      // Lùi trước một dòng đã ghi (trả gốc / gửi tiết kiệm) = nói tiền về TRƯỚC ngày nó đi ra. Chặn
-      // thẳng thay vì để lại một tháng có số không giải thích được.
-      const mocCuoi = await tx.cashMovement.aggregate({
-        where: { loanId: id, kind: { in: ["LOAN_REPAY", "DEPOSIT_OUT"] } },
-        _max: { date: true },
-      });
-      const dongCuoi = mocCuoi._max.date;
-      if (dongCuoi !== null && ngayHoan < startOfDay(dongCuoi)) {
-        throw new LoiHopDong(
-          `Ngày tất toán phải từ dòng tiền gần nhất của khoản (${format(dongCuoi, "dd/MM/yyyy")}) trở đi`,
-          "ngayTatToan"
-        );
-      }
-
-      const duNo = await chanDuNoAm(tx, id);
-      if (duNo !== 0) {
-        throw new LoiHopDong(`Còn dư nợ ${formatVnd(duNo)} — trả hết gốc trước khi tất toán`);
-      }
-
-      // CẤN TRỪ SỔ TIẾT KIỆM BẮT BUỘC: ngân hàng trả lại phần đang giữ hộ ⇒ ĐÚNG một dòng DEPOSIT_IN
-      // bằng Σ đang giữ. Đọc SAU `khoaKhoanVay` nên không có ca một dòng tiền gửi commit chen giữa
-      // lượt đọc và lượt ghi. Khoản không có tiền gửi (mọi khoản TERM/OVERDRAFT cũ) ⇒ Σ = 0 ⇒ KHÔNG
-      // ghi dòng nào, hợp đồng cũ của action không đổi một chữ.
-      //
-      // PHẢI ghi TRƯỚC câu set `closedAt`: `kiemKhoanVay`/`kiemKhoanConHieuLuc` ở `cash-movements.ts`
-      // từ chối mọi dòng gắn khoản đã đóng — dòng này không được là ngoại lệ ngầm của luật đó.
-      //
-      // KHÔNG gọi lại `chanDuNoAm` sau đây: DEPOSIT_IN không nằm trong `KIND_GOC` nên không thể đụng
-      // dư nợ; phép kiểm ở trên vẫn là phép kiểm cuối của mọi dòng GỐC trong transaction này.
-      const tienGui = await tienGuiDangGiu(tx, id);
-      if (tienGui > 0) {
-        // Chỉ khi THẬT SỰ ghi tiền: không có tiền gửi thì lượt này chỉ đóng hồ sơ (`closedAt` = lúc bấm).
-        await chanDongTienTruocM(
-          tx,
-          { loai: "TAO", ngay: [ngayHoan] },
-          { cau: cauTatToanTienGuiTruocM, field: "ngayTatToan" }
-        );
-        await tx.cashMovement.create({
-          data: {
-            date: ngayHoan,
-            kind: "DEPOSIT_IN",
-            amount: tienGui,
-            loanId: id,
-            description: `Nhận lại tiền gửi tiết kiệm ${loan.name} — tất toán`,
-          },
+    try {
+      await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        // Khoá TRƯỚC khi đọc dư nợ: không có nó, một dòng trả gốc/giải ngân commit ngay sau phép
+        // kiểm sẽ để lại khoản "đã tất toán" mà dư nợ khác 0.
+        await khoaKhoanVay(tx, id);
+        const loan = await tx.loan.findUnique({
+          where: { id },
+          select: { name: true, closedAt: true, startDate: true, kind: true },
         });
-      }
+        if (!loan) throw new LoiHopDong("Không tìm thấy khoản vay");
+        if (loan.closedAt !== null) throw new LoiHopDong("Khoản vay đã tất toán");
+        // Thấu chi có đường tất toán RIÊNG (`tat-toan-thau-chi.ts`): ghi lãi đoạn cuối [con dấu, ngày tất toán] +
+        // trả gốc trong cùng transaction, kèm cổng chống trùng của nó. Đóng ở đây là đóng khoản mà lãi đoạn đó
+        // không bao giờ vào Lãi/Lỗ (khoản đã đóng thì không còn lối duyệt). Giao diện đã rẽ đúng nút — đây là
+        // cổng cho lượt gọi thẳng action.
+        if (loan.kind === "OVERDRAFT") {
+          throw new LoiHopDong("Khoản thấu chi tất toán bằng hộp Tất toán thấu chi (ghi cả lãi đoạn cuối) — tải lại trang rồi bấm Tất toán");
+        }
 
-      await tx.loan.update({ where: { id }, data: { closedAt: new Date() } });
-      await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_TAT_TOAN", doiTuong: { loai: "Loan", id } });
-    }, OPT_TX_DONG_TIEN);
+        // CẬN DƯỚI của ngày tất toán — cùng khuôn với `tat-toan-thau-chi.ts`, và cần vì đúng lý do đó:
+        // lượt này GHI TIỀN THẬT (dòng hoàn `DEPOSIT_IN` = Σ tiền gửi). Kỳ cuối đến hạn 10/05 mà gõ
+        // nhầm 30/04 thì cả Σ tiền gửi — phần lớn chưa hề rời tài khoản trước tháng 5 — đề ngày 30/04:
+        // Sổ quỹ tháng 4 phồng đúng số đó, tháng 5 hụt đúng số đó. Ngày quá cũ còn kéo lùi D0 của Sổ
+        // quỹ (`ngayMoSo()` = min(date) TOÀN BẢNG `CashMovement`), đổi số mọi tháng chủ shop đã xem.
+        // Ô ngày ở client đã khai `min`; đây mới là cổng thật.
+        if (ngayHoan < startOfDay(loan.startDate)) {
+          throw new LoiHopDong(
+            `Ngày tất toán phải từ ngày bắt đầu khoản vay (${format(loan.startDate, "dd/MM/yyyy")}) trở đi`,
+            "ngayTatToan"
+          );
+        }
 
-    lamMoiTrang();
-    return { ok: true, data: undefined };
-  } catch (e) {
-    await ghiLoiKhoanVay(nguoiDung, "VAY_TAT_TOAN", id, e);
-    return { ok: false, ...loiKhoanVay(e, "Lỗi khi tất toán khoản vay") };
+        // Lùi trước một dòng đã ghi (trả gốc / gửi tiết kiệm) = nói tiền về TRƯỚC ngày nó đi ra. Chặn
+        // thẳng thay vì để lại một tháng có số không giải thích được.
+        const mocCuoi = await tx.cashMovement.aggregate({
+          where: { loanId: id, kind: { in: ["LOAN_REPAY", "DEPOSIT_OUT"] } },
+          _max: { date: true },
+        });
+        const dongCuoi = mocCuoi._max.date;
+        if (dongCuoi !== null && ngayHoan < startOfDay(dongCuoi)) {
+          throw new LoiHopDong(
+            `Ngày tất toán phải từ dòng tiền gần nhất của khoản (${format(dongCuoi, "dd/MM/yyyy")}) trở đi`,
+            "ngayTatToan"
+          );
+        }
+
+        const duNo = await chanDuNoAm(tx, id);
+        if (duNo !== 0) {
+          throw new LoiHopDong(`Còn dư nợ ${formatVnd(duNo)} — trả hết gốc trước khi tất toán`);
+        }
+
+        // CẤN TRỪ SỔ TIẾT KIỆM BẮT BUỘC: ngân hàng trả lại phần đang giữ hộ ⇒ ĐÚNG một dòng DEPOSIT_IN
+        // bằng Σ đang giữ. Đọc SAU `khoaKhoanVay` nên không có ca một dòng tiền gửi commit chen giữa
+        // lượt đọc và lượt ghi. Khoản không có tiền gửi (mọi khoản TERM/OVERDRAFT cũ) ⇒ Σ = 0 ⇒ KHÔNG
+        // ghi dòng nào, hợp đồng cũ của action không đổi một chữ.
+        //
+        // PHẢI ghi TRƯỚC câu set `closedAt`: `kiemKhoanVay`/`kiemKhoanConHieuLuc` ở `cash-movements.ts`
+        // từ chối mọi dòng gắn khoản đã đóng — dòng này không được là ngoại lệ ngầm của luật đó.
+        //
+        // KHÔNG gọi lại `chanDuNoAm` sau đây: DEPOSIT_IN không nằm trong `KIND_GOC` nên không thể đụng
+        // dư nợ; phép kiểm ở trên vẫn là phép kiểm cuối của mọi dòng GỐC trong transaction này.
+        const tienGui = await tienGuiDangGiu(tx, id);
+        if (tienGui > 0) {
+          // Chỉ khi THẬT SỰ ghi tiền: không có tiền gửi thì lượt này chỉ đóng hồ sơ (`closedAt` = lúc bấm).
+          await chanDongTienTruocM(
+            tx,
+            { loai: "TAO", ngay: [ngayHoan] },
+            { cau: cauTatToanTienGuiTruocM, field: "ngayTatToan" }
+          );
+          await tx.cashMovement.create({
+            data: {
+              date: ngayHoan,
+              kind: "DEPOSIT_IN",
+              amount: tienGui,
+              loanId: id,
+              description: `Nhận lại tiền gửi tiết kiệm ${loan.name} — tất toán`,
+            },
+          });
+        }
+
+        await tx.loan.update({ where: { id }, data: { closedAt: new Date() } });
+        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "VAY_TAT_TOAN", doiTuong: { loai: "Loan", id } });
+      }, OPT_TX_DONG_TIEN);
+
+      lamMoiTrang();
+      return { ok: true, data: undefined };
+    } catch (e) {
+      await ghiLoiKhoanVay(nguoiDung, "VAY_TAT_TOAN", id, e);
+      return { ok: false, ...loiKhoanVay(e, "Lỗi khi tất toán khoản vay") };
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -960,45 +976,49 @@ export async function ghiKyTraNo(input: unknown): Promise<ActionResult<{ duNoCon
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = ghiKySchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { loanId, dueDate, lai, goc, tienGui, boQua } = parsed.data;
-
-  const loan = (await listKhoanVay()).find((r) => r.id === loanId);
-  if (!loan) return { ok: false, error: "Không tìm thấy khoản vay" };
-
-  // Bấm hai lần / bấm lại sau khi back: kỳ vừa ghi KHÔNG còn là kỳ chờ duyệt nữa nên nhánh dưới sẽ
-  // kêu "Kỳ không hợp lệ" — câu đó làm chủ shop tưởng hỏng dữ liệu. Nói đúng chuyện đã xảy ra, theo
-  // CÙNG vị từ với câu UPDATE fencing (`lastDueHandled < dueDate` mới được ghi).
-  if (loan.lastDueHandled !== null && startOfDay(dueDate) <= startOfDay(loan.lastDueHandled)) {
-    return { ok: false, error: "Kỳ này đã được ghi" };
-  }
-
-  const ky = loan.kyCho;
-  if (ky === null || !cungNgay(ky.denNgay, dueDate)) {
-    return { ok: false, error: "Kỳ không hợp lệ — tải lại trang" };
-  }
-
-  // Không lãi, không gốc, không tiền gửi, mà cũng không khai là bỏ qua: lượt này chỉ đóng dấu kỳ rồi
-  // biến mất, không để lại dòng nào lẫn vết nào — sau này không ai giải thích được vì sao kỳ đó trống.
-  if (!boQua && lai === 0 && goc === 0 && tienGui === 0) {
-    return {
-      ok: false,
-      error: "Kỳ không có lãi, gốc lẫn tiền gửi — dùng nút 'Ngân hàng không thu kỳ này'",
-    };
-  }
-
-  const ngayKy = startOfDay(ky.denNgay);
-  const nhan = format(ngayKy, "dd/MM/yyyy");
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const duNoConLai = await chayGhiKyCoRetry({ nguoiDung, loan, ngayKy, nhan, lai, goc, tienGui, boQua });
-    lamMoiTrang();
-    return { ok: true, data: { duNoConLai } };
-  } catch (e) {
-    await ghiLoiKhoanVay(nguoiDung, "VAY_GHI_KY", loanId, e);
-    return { ok: false, ...loiKhoanVay(e, "Lỗi khi ghi kỳ trả nợ") };
+    const parsed = ghiKySchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { loanId, dueDate, lai, goc, tienGui, boQua } = parsed.data;
+
+    const loan = (await listKhoanVay()).find((r) => r.id === loanId);
+    if (!loan) return { ok: false, error: "Không tìm thấy khoản vay" };
+
+    // Bấm hai lần / bấm lại sau khi back: kỳ vừa ghi KHÔNG còn là kỳ chờ duyệt nữa nên nhánh dưới sẽ
+    // kêu "Kỳ không hợp lệ" — câu đó làm chủ shop tưởng hỏng dữ liệu. Nói đúng chuyện đã xảy ra, theo
+    // CÙNG vị từ với câu UPDATE fencing (`lastDueHandled < dueDate` mới được ghi).
+    if (loan.lastDueHandled !== null && startOfDay(dueDate) <= startOfDay(loan.lastDueHandled)) {
+      return { ok: false, error: "Kỳ này đã được ghi" };
+    }
+
+    const ky = loan.kyCho;
+    if (ky === null || !cungNgay(ky.denNgay, dueDate)) {
+      return { ok: false, error: "Kỳ không hợp lệ — tải lại trang" };
+    }
+
+    // Không lãi, không gốc, không tiền gửi, mà cũng không khai là bỏ qua: lượt này chỉ đóng dấu kỳ rồi
+    // biến mất, không để lại dòng nào lẫn vết nào — sau này không ai giải thích được vì sao kỳ đó trống.
+    if (!boQua && lai === 0 && goc === 0 && tienGui === 0) {
+      return {
+        ok: false,
+        error: "Kỳ không có lãi, gốc lẫn tiền gửi — dùng nút 'Ngân hàng không thu kỳ này'",
+      };
+    }
+
+    const ngayKy = startOfDay(ky.denNgay);
+    const nhan = format(ngayKy, "dd/MM/yyyy");
+
+    try {
+      const duNoConLai = await chayGhiKyCoRetry({ nguoiDung, loan, ngayKy, nhan, lai, goc, tienGui, boQua });
+      lamMoiTrang();
+      return { ok: true, data: { duNoConLai } };
+    } catch (e) {
+      await ghiLoiKhoanVay(nguoiDung, "VAY_GHI_KY", loanId, e);
+      return { ok: false, ...loiKhoanVay(e, "Lỗi khi ghi kỳ trả nợ") };
+    }
+  } finally {
+    cua.ra();
   }
 }

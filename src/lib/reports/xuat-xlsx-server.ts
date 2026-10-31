@@ -2,6 +2,7 @@ import { endOfMonth, startOfMonth } from "date-fns";
 import * as XLSX from "xlsx";
 
 import { dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { laLoiCongGhiDangKhoa } from "@/lib/backup/cong-ghi-toan-cuc";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
@@ -91,9 +92,16 @@ export async function tuChoiNeuThieuQuyen(nd: NguoiDung, canDu: readonly Quyen[]
  */
 export async function ghiNhatKyXuat(nd: NguoiDung, loaiBanGhi: string, p: { ky?: string; soDong?: number } = {}): Promise<void> {
   if (dangPhucHoi()) return;
-  await ghiNhatKy(prisma, {
-    actor: { id: nd.id, email: nd.email },
-    hanhDong: HANH_DONG.XUAT_FILE,
-    ghiChu: { loaiBanGhi, ...(p.ky ? { ky: p.ky } : {}), ...(p.soDong !== undefined ? { soDong: p.soDong } : {}) },
-  });
+  try {
+    await ghiNhatKy(prisma, {
+      actor: { id: nd.id, email: nd.email },
+      hanhDong: HANH_DONG.XUAT_FILE,
+      ghiChu: { loaiBanGhi, ...(p.ky ? { ky: p.ky } : {}), ...(p.soDong !== undefined ? { soDong: p.soDong } : {}) },
+    });
+  } catch (e) {
+    // Cờ phục hồi bật SAU câu kiểm trên (route xuất không qua cửa ghi) ⇒ cổng cấp op chặn câu ghi: cùng
+    // luật với nhánh `dangPhucHoi()` — bỏ dòng nhật ký, file vẫn trả. Lỗi khác giữ nguyên hành vi cũ.
+    if (laLoiCongGhiDangKhoa(e)) return;
+    throw e;
+  }
 }

@@ -6,7 +6,8 @@ import {
   phanLoaiQuyenN8n,
   type QuyenN8nThô,
 } from "@/lib/n8n/quyen-doc-kho-khoa";
-import { N8N_RO_ROLE } from "@/lib/n8n/role-doc-kho-khoa";
+import { KEY_N8N_DUOC_DOC, N8N_RO_ROLE } from "@/lib/n8n/role-doc-kho-khoa";
+import { prisma } from "@/lib/prisma";
 
 /**
  * Lưới cho ô cảnh báo "n8n mất quyền đọc kho khoá".
@@ -101,5 +102,27 @@ describe("đọc quyền thật từ Postgres", () => {
     // chứng minh truy vấn đã chạy thật và `current_database()` trả về giá trị.
     expect(kq.lyDo).toMatch(/_test là DB test/);
     expect(kq.lyDo).not.toMatch(/không đọc được quyền/);
+  });
+});
+
+describe("view kho khoá n8n trên DB sau migrate (trạng thái thật, không phải văn bản migration)", () => {
+  // `CREATE OR REPLACE VIEW` không kèm WITH là XOÁ reloptions (đo Postgres 15) — migration thêm khoá phải đặt lại
+  // security_barrier. Ở đây đọc catalog: thiếu barrier / đổi cột / lệch allowlist / đổi owner ⇒ đỏ.
+  it("security_barrier bật, cột (key, value), owner trùng bảng Setting, bộ lọc = đúng KEY_N8N_DUOC_DOC", async () => {
+    const [v] = await prisma.$queryRaw<
+      { reloptions: string[] | null; dinhNghia: string; cot: string[]; cungOwner: boolean }[]
+    >`
+      SELECT c.reloptions, pg_get_viewdef(c.oid) AS "dinhNghia",
+             ARRAY(SELECT a.attname::text FROM pg_attribute a
+                   WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum) AS cot,
+             c.relowner = (SELECT s.relowner FROM pg_class s WHERE s.relname = 'Setting' AND s.relnamespace = c.relnamespace) AS "cungOwner"
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = current_schema() AND c.relname = 'SettingN8n' AND c.relkind = 'v'`;
+    expect(v, "view SettingN8n phải tồn tại trong schema hiện hành").toBeDefined();
+    expect(v.reloptions ?? []).toContain("security_barrier=true");
+    expect(v.cot).toEqual(["key", "value"]);
+    expect(v.cungOwner).toBe(true);
+    const khoa = [...v.dinhNghia.matchAll(/'([A-Za-z0-9]+)'::text/g)].map((m) => m[1]).sort();
+    expect(khoa).toEqual([...KEY_N8N_DUOC_DOC].sort());
   });
 });

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { timNguonKetNoi, type NguonKetNoiId } from "@/lib/ket-noi/catalog-khoa-ket-noi";
 import { xoaCacheCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { chanDoiShopIdKhiCoDuLieu } from "@/lib/ket-noi/chan-doi-shop-id";
@@ -39,57 +39,61 @@ export async function luuKhoaKetNoi(
   // Khoá kết nối là owner-only (spec phân quyền §1.1) — không phải quyền cấp được cho tài khoản phụ.
   const cong = await congChuShopAction();
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const nguon = timNguonKetNoi(nguonId);
-  if (!nguon) return { ok: false, error: "Nguồn không hợp lệ" };
-
-  // CHỈ nhận key nằm trong danh mục của nguồn — key lạ là dấu hiệu client hỏng/bịa, chặn thẳng.
-  const keyHopLe = new Set(nguon.truong.map((t) => t.key));
-  for (const key of Object.keys(values)) {
-    if (!keyHopLe.has(key)) return { ok: false, error: "Có trường không thuộc nguồn này — tải lại trang rồi thử lại" };
-  }
-
-  const canGhi: Array<[string, string]> = [];
-  for (const truong of nguon.truong) {
-    const tho = values[truong.key];
-    if (tho === undefined || tho.trim() === "") continue; // trống = giữ nguyên
-    const parsed = giaTriKhoaSchema.safeParse(tho);
-    if (!parsed.success) {
-      return { ok: false, error: `Ô "${truong.nhan}" không hợp lệ (tối đa 1000 ký tự, một dòng)`, field: truong.key };
-    }
-    canGhi.push([truong.key, parsed.data]);
-  }
-  if (canGhi.length === 0) return { ok: false, error: "Chưa nhập giá trị nào để lưu" };
-
-  // Lưới shop ID: giá trị phải là chuỗi số, và KHÔNG đổi được khi kho thô đã có dữ liệu mang id
-  // cũ (dòng cũ thành mồ côi ÂM THẦM — xem `chan-doi-shop-id.ts`). Message không chứa secret.
-  const loiShopId = await chanDoiShopIdKhiCoDuLieu(canGhi);
-  if (loiShopId) return { ok: false, error: loiShopId };
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      for (const [key, value] of canGhi) {
-        await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+    const nguon = timNguonKetNoi(nguonId);
+    if (!nguon) return { ok: false, error: "Nguồn không hợp lệ" };
+
+    // CHỈ nhận key nằm trong danh mục của nguồn — key lạ là dấu hiệu client hỏng/bịa, chặn thẳng.
+    const keyHopLe = new Set(nguon.truong.map((t) => t.key));
+    for (const key of Object.keys(values)) {
+      if (!keyHopLe.has(key)) return { ok: false, error: "Có trường không thuộc nguồn này — tải lại trang rồi thử lại" };
+    }
+
+    const canGhi: Array<[string, string]> = [];
+    for (const truong of nguon.truong) {
+      const tho = values[truong.key];
+      if (tho === undefined || tho.trim() === "") continue; // trống = giữ nguyên
+      const parsed = giaTriKhoaSchema.safeParse(tho);
+      if (!parsed.success) {
+        return { ok: false, error: `Ô "${truong.nhan}" không hợp lệ (tối đa 1000 ký tự, một dòng)`, field: truong.key };
       }
-      // Chỉ ghi NGUỒN + SỐ Ô đã lưu — tuyệt đối không tên/giá trị khoá (bất biến của file).
-      await ghiNhatKy(tx, {
-        actor: cong.nguoiDung,
-        hanhDong: HANH_DONG.KHOA_KET_NOI_LUU,
-        doiTuong: { loai: "NguonKetNoi", id: nguon.id },
-        ghiChu: { soDong: canGhi.length },
+      canGhi.push([truong.key, parsed.data]);
+    }
+    if (canGhi.length === 0) return { ok: false, error: "Chưa nhập giá trị nào để lưu" };
+
+    // Lưới shop ID: giá trị phải là chuỗi số, và KHÔNG đổi được khi kho thô đã có dữ liệu mang id
+    // cũ (dòng cũ thành mồ côi ÂM THẦM — xem `chan-doi-shop-id.ts`). Message không chứa secret.
+    const loiShopId = await chanDoiShopIdKhiCoDuLieu(canGhi);
+    if (loiShopId) return { ok: false, error: loiShopId };
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        for (const [key, value] of canGhi) {
+          await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+        }
+        // Chỉ ghi NGUỒN + SỐ Ô đã lưu — tuyệt đối không tên/giá trị khoá (bất biến của file).
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.KHOA_KET_NOI_LUU,
+          doiTuong: { loai: "NguonKetNoi", id: nguon.id },
+          ghiChu: { soDong: canGhi.length },
+        });
       });
-    });
-  } catch {
-    // KHÔNG đưa err.message vào body: lỗi Prisma có thể chứa giá trị khóa.
-    return { ok: false, error: "Lỗi khi lưu khóa vào kho" };
+    } catch {
+      // KHÔNG đưa err.message vào body: lỗi Prisma có thể chứa giá trị khóa.
+      return { ok: false, error: "Lỗi khi lưu khóa vào kho" };
+    }
+
+    // Shop ID có cache đọc phía ingest — xóa để giá trị vừa lưu có hiệu lực ngay trong process này.
+    xoaCacheCauHinhShop();
+
+    revalidatePath("/cai-dat");
+    return { ok: true, data: { daLuu: canGhi.length } };
+  } finally {
+    cua.ra();
   }
-
-  // Shop ID có cache đọc phía ingest — xóa để giá trị vừa lưu có hiệu lực ngay trong process này.
-  xoaCacheCauHinhShop();
-
-  revalidatePath("/cai-dat");
-  return { ok: true, data: { daLuu: canGhi.length } };
 }
 
 /**
@@ -136,52 +140,56 @@ export async function doiVaLuuTokenMeta(tokenTuoi: string): Promise<ActionResult
   if (!cong.ok) return cong;
   // Cùng lý do route POST chặn: nhận 200 rồi bị lượt phục hồi lùi bảng Setting = người dùng tin
   // token mới đã nằm trong kho trong khi kho quay về token cũ — hỏng lặng, phát hiện vài tuần sau.
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = giaTriKhoaSchema.safeParse(tokenTuoi);
-  if (!parsed.success) return { ok: false, error: "Token dán vào không hợp lệ — copy lại nguyên vẹn từ Graph API Explorer" };
-
-  const cauHinh = await prisma.setting.findMany({ where: { key: { in: ["metaAdsAppId", "metaAdsAppSecret"] } } });
-  const theoKey = new Map(cauHinh.map((r) => [r.key, r.value]));
-  const appId = theoKey.get("metaAdsAppId") ?? "";
-  const appSecret = theoKey.get("metaAdsAppSecret") ?? "";
-  if (!appId || !appSecret) {
-    return { ok: false, error: "Chưa lưu App ID / App Secret của Meta — điền và lưu 2 ô phía trên trước" };
-  }
-
-  let doi;
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    doi = await doiTokenMetaDaiHan({ tokenTuoi: parsed.data, appId, appSecret });
-  } catch (err) {
-    // Message của `doiTokenMetaDaiHan` cam kết không chứa token/secret — hiện được nguyên văn.
-    return { ok: false, error: err instanceof Error ? err.message : "Đổi token thất bại" };
-  }
-  if (!doi.conSong) {
-    return { ok: false, error: "Facebook báo token đổi ra KHÔNG còn hiệu lực — lấy lại token tươi rồi thử lại" };
-  }
+    const parsed = giaTriKhoaSchema.safeParse(tokenTuoi);
+    if (!parsed.success) return { ok: false, error: "Token dán vào không hợp lệ — copy lại nguyên vẹn từ Graph API Explorer" };
 
-  try {
-    // Nhật ký OK ghi TRONG transaction lưu 4 key token: một trong hai ném ⇒ rollback cả hai, không
-    // có token đã lưu mà thiếu dấu vết. Không mang token/hạn vào nhật ký.
-    await luuTokenMetaVaoKho(
-      {
-        accessToken: doi.tokenMoi,
-        expireAt: doi.hetHanEpoch,
-        dataAccessExpireAt: doi.dataAccessHetHanEpoch,
+    const cauHinh = await prisma.setting.findMany({ where: { key: { in: ["metaAdsAppId", "metaAdsAppSecret"] } } });
+    const theoKey = new Map(cauHinh.map((r) => [r.key, r.value]));
+    const appId = theoKey.get("metaAdsAppId") ?? "";
+    const appSecret = theoKey.get("metaAdsAppSecret") ?? "";
+    if (!appId || !appSecret) {
+      return { ok: false, error: "Chưa lưu App ID / App Secret của Meta — điền và lưu 2 ô phía trên trước" };
+    }
+
+    let doi;
+    try {
+      doi = await doiTokenMetaDaiHan({ tokenTuoi: parsed.data, appId, appSecret });
+    } catch (err) {
+      // Message của `doiTokenMetaDaiHan` cam kết không chứa token/secret — hiện được nguyên văn.
+      return { ok: false, error: err instanceof Error ? err.message : "Đổi token thất bại" };
+    }
+    if (!doi.conSong) {
+      return { ok: false, error: "Facebook báo token đổi ra KHÔNG còn hiệu lực — lấy lại token tươi rồi thử lại" };
+    }
+
+    try {
+      // Nhật ký OK ghi TRONG transaction lưu 4 key token: một trong hai ném ⇒ rollback cả hai, không
+      // có token đã lưu mà thiếu dấu vết. Không mang token/hạn vào nhật ký.
+      await luuTokenMetaVaoKho(
+        {
+          accessToken: doi.tokenMoi,
+          expireAt: doi.hetHanEpoch,
+          dataAccessExpireAt: doi.dataAccessHetHanEpoch,
+        },
+        (tx) => ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.KHOA_KET_NOI_THAY_META }),
+      );
+    } catch {
+      return { ok: false, error: "Đổi token thành công nhưng LƯU thất bại — thử lại" };
+    }
+
+    revalidatePath("/cai-dat");
+    return {
+      ok: true,
+      data: {
+        hetHan: doi.hetHanEpoch ? ngayVn(doi.hetHanEpoch) : "không hết hạn",
+        dataAccessHetHan: doi.dataAccessHetHanEpoch ? ngayVn(doi.dataAccessHetHanEpoch) : "không hết hạn",
+        conNgay: doi.hetHanEpoch ? Math.floor((doi.hetHanEpoch * 1000 - Date.now()) / 86_400_000) : null,
       },
-      (tx) => ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.KHOA_KET_NOI_THAY_META }),
-    );
-  } catch {
-    return { ok: false, error: "Đổi token thành công nhưng LƯU thất bại — thử lại" };
+    };
+  } finally {
+    cua.ra();
   }
-
-  revalidatePath("/cai-dat");
-  return {
-    ok: true,
-    data: {
-      hetHan: doi.hetHanEpoch ? ngayVn(doi.hetHanEpoch) : "không hết hạn",
-      dataAccessHetHan: doi.dataAccessHetHanEpoch ? ngayVn(doi.dataAccessHetHanEpoch) : "không hết hạn",
-      conNgay: doi.hetHanEpoch ? Math.floor((doi.hetHanEpoch * 1000 - Date.now()) / 86_400_000) : null,
-    },
-  };
 }

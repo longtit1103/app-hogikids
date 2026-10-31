@@ -1,6 +1,15 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  /**
+   * Đuôi file Next coi là trang/route (mặc định `tsx`/`ts`/`jsx`/`js`). File `*.e2e.ts(x)` dưới `src/app` là
+   * route/trang/action CHỈ-TEST của e2e cổng ghi trên bản build (`tests/e2e/cong-ghi-prod.spec.ts`) —
+   * Next CHỈ nhận chúng khi BUILD với `E2E_CONG_GHI_BUILD=1` (`npm run test:e2e:prod:cong-ghi`). Build
+   * thường (Dockerfile, CI, `npm run build`) không đặt biến ⇒ `page.e2e.tsx`/`route.e2e.ts` không phải
+   * trang/route, không ai import ⇒ bản build prod KHÔNG có đường chỉ-test nào. Đọc lúc BUILD: biến lúc
+   * `next start` không đổi được gì. Lưới `tests/luoi/file-chi-build-e2e.test.ts`.
+   */
+  pageExtensions: ["tsx", "ts", "jsx", "js", ...(process.env.E2E_CONG_GHI_BUILD === "1" ? ["e2e.tsx", "e2e.ts"] : [])],
   experimental: {
     // Next.js mặc định giới hạn Server Action body = 1MB (vẫn đúng ở 16.3.1) — thấp hơn cap logo
     // 2MB của app (MAX_LOGO_BYTES ở settings.ts/shop-info-section.tsx) nên

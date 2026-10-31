@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/actions/action-result";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { congAction } from "@/lib/quyen/cong-action";
@@ -72,57 +72,65 @@ export async function luuSoDuChotThang(input: unknown): Promise<ActionResult<{ t
   const c = await congAction("tai-chinh-dong-tien:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    const parsed = chotSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const thang = thangChot(parsed.data.thang);
 
-  const parsed = chotSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const thang = thangChot(parsed.data.thang);
+    const loi = await loiThangKhongHopLe(thang);
+    if (loi !== null) return { ok: false, error: loi };
 
-  const loi = await loiThangKhongHopLe(thang);
-  if (loi !== null) return { ok: false, error: loi };
-
-  const { soDuBank, tienMat, note } = parsed.data;
-  await prisma.$transaction(async (tx) => {
-    const row = await tx.soDuChotThang.upsert({
-      where: { thang },
-      create: { thang, soDuBank, tienMat, note },
-      update: { soDuBank, tienMat, note },
+    const { soDuBank, tienMat, note } = parsed.data;
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.soDuChotThang.upsert({
+        where: { thang },
+        create: { thang, soDuBank, tienMat, note },
+        update: { soDuBank, tienMat, note },
+      });
+      await ghiNhatKy(tx, {
+        actor: nguoiDung,
+        hanhDong: "CHOT_SO_DU_LUU",
+        doiTuong: { loai: "SoDuChotThang", id: row.id },
+        ghiChu: { thang: format(thang, "yyyy-MM") },
+      });
     });
-    await ghiNhatKy(tx, {
-      actor: nguoiDung,
-      hanhDong: "CHOT_SO_DU_LUU",
-      doiTuong: { loai: "SoDuChotThang", id: row.id },
-      ghiChu: { thang: format(thang, "yyyy-MM") },
-    });
-  });
-  lamMoiTrang();
-  return { ok: true, data: { thang } };
+    lamMoiTrang();
+    return { ok: true, data: { thang } };
+  } finally {
+    cua.ra();
+  }
 }
 
 export async function xoaSoDuChotThang(input: unknown): Promise<ActionResult<null>> {
   const c = await congAction("tai-chinh-dong-tien:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    const parsed = xoaSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const thang = thangChot(parsed.data.thang);
 
-  const parsed = xoaSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const thang = thangChot(parsed.data.thang);
-
-  const count = await prisma.$transaction(async (tx) => {
-    const { count: n } = await tx.soDuChotThang.deleteMany({ where: { thang } });
-    // Không có gì để xoá thì cũng không có gì để ghi dấu vết.
-    if (n > 0) {
-      await ghiNhatKy(tx, {
-        actor: nguoiDung,
-        hanhDong: "CHOT_SO_DU_XOA",
-        doiTuong: { loai: "SoDuChotThang" },
-        ghiChu: { thang: format(thang, "yyyy-MM") },
-      });
-    }
-    return n;
-  });
-  if (count === 0) return { ok: false, error: "Không tìm thấy bản chốt của tháng này" };
-  lamMoiTrang();
-  return { ok: true, data: null };
+    const count = await prisma.$transaction(async (tx) => {
+      const { count: n } = await tx.soDuChotThang.deleteMany({ where: { thang } });
+      // Không có gì để xoá thì cũng không có gì để ghi dấu vết.
+      if (n > 0) {
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "CHOT_SO_DU_XOA",
+          doiTuong: { loai: "SoDuChotThang" },
+          ghiChu: { thang: format(thang, "yyyy-MM") },
+        });
+      }
+      return n;
+    });
+    if (count === 0) return { ok: false, error: "Không tìm thấy bản chốt của tháng này" };
+    lamMoiTrang();
+    return { ok: true, data: null };
+  } finally {
+    cua.ra();
+  }
 }

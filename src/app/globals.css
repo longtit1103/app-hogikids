@@ -31,6 +31,16 @@
   --warning: #d4a017;
   --error: #c64545;
 
+  /*
+   * Bản CHỮ dành cho nền TỐI (`surface-dark` / `surface-dark-elevated`). Chữ đặt trên `bg-surface-dark` dùng
+   * cặp `*-on-dark` này thay vì token chữ nền be, để sau này đổi màu chữ nền be không kéo theo nền tối.
+   * Hiện giá trị trùng token gốc tương ứng.
+   */
+  --error-on-dark: #c64545;
+  --warning-on-dark: #d4a017;
+  --success-on-dark: #5db872;
+  --muted-on-dark: #6c6a64;
+
   /* shadcn/ui semantic slots, wired to the brand tokens above.
    * Note: shadcn's --muted is a *background* role (e.g. hover states,
    * table rows) while the brief's --muted (#6c6a64) is a *text* role
@@ -96,6 +106,10 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-error: var(--error);
+  --color-error-on-dark: var(--error-on-dark);
+  --color-warning-on-dark: var(--warning-on-dark);
+  --color-success-on-dark: var(--success-on-dark);
+  --color-muted-on-dark: var(--muted-on-dark);
   --color-primary-active: var(--primary-active);
   --color-primary-disabled: var(--primary-disabled);
 

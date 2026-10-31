@@ -2,15 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { LoiVuotTranTien, thuocTinhLoiVuotTran } from "@/components/ui/loi-vuot-tran-tien";
 import { traTienHangGop } from "@/lib/actions/tra-tien-hang";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, MAX_AMOUNT_INPUT, parseAmountInput } from "@/lib/format-amount-input";
 import type { PhieuConNo } from "@/lib/no-phai-tra/phieu-nhap-no-queries";
 
 import { dongPhanBoGui, goiYPhanBoCuTruoc, tongPhanBo } from "./phan-bo-tra-gop";
@@ -42,7 +43,7 @@ export function TraTienHangFormModal({
   mocM: string;
 }) {
   const router = useRouter();
-  const homNay = format(new Date(), "yyyy-MM-dd");
+  const homNay = formatNgayVn(new Date(), "yyyy-MM-dd");
   const conNo = useMemo(() => phieu.filter((p) => !p.daHuy && p.conNo > 0), [phieu]);
 
   const [yeuCauId, setYeuCauId] = useState("");
@@ -59,7 +60,7 @@ export function TraTienHangFormModal({
     if (!open) return;
     setYeuCauId(crypto.randomUUID());
     setTong(0);
-    setNgay(format(new Date(), "yyyy-MM-dd"));
+    setNgay(formatNgayVn(new Date(), "yyyy-MM-dd"));
     setMoTa("");
     setPhanBo({});
     setDaSuaTay(false);
@@ -69,7 +70,9 @@ export function TraTienHangFormModal({
   const tongPb = tongPhanBo(phanBo);
   const lech = tong - tongPb;
   const ngayHopLe = ngay !== "" && ngay >= mocM && ngay <= homNay;
-  const duDieuKien = yeuCauId !== "" && tong > 0 && ngayHopLe && lech === 0 && !dangLuu;
+  // Gõ quá trần 2 tỷ (tổng hoặc một ô phân bổ): báo đỏ tại ô + khoá nút Ghi (server vẫn chặn).
+  const vuotTran = tong > MAX_AMOUNT_INPUT || Object.values(phanBo).some((v) => v > MAX_AMOUNT_INPUT);
+  const duDieuKien = yeuCauId !== "" && tong > 0 && ngayHopLe && lech === 0 && !vuotTran && !dangLuu;
 
   function doiTong(v: number) {
     setTong(v);
@@ -132,10 +135,12 @@ export function TraTienHangFormModal({
                 inputMode="numeric"
                 placeholder="0"
                 className="text-right"
+                {...thuocTinhLoiVuotTran(tong, "tra-hang-tong-loi")}
                 value={formatAmountInput(tong)}
                 onChange={(e) => doiTong(parseAmountInput(e.target.value))}
               />
               {loi.tong && <p className="text-xs text-error">{loi.tong}</p>}
+              <LoiVuotTranTien value={tong} id="tra-hang-tong-loi" />
             </div>
             <div className="flex flex-col gap-1">
               <label htmlFor="tra-hang-ngay" className="text-xs text-muted-foreground">
@@ -171,13 +176,14 @@ export function TraTienHangFormModal({
                     <tr key={p.id} className="border-t border-hairline">
                       <td className="whitespace-nowrap px-3 py-2 text-ink">{p.maPhieu}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                        {format(p.ngayPhieu, "dd/MM/yyyy")}
+                        {formatNgayVn(p.ngayPhieu, "dd/MM/yyyy")}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">{formatVnd(p.conNo)}</td>
                       <td className="px-3 py-2 text-right">
                         <Input
                           inputMode="numeric"
                           aria-label={`Trả phiếu ${p.maPhieu}`}
+                          {...thuocTinhLoiVuotTran(phanBo[p.id], `tra-hang-${p.id}-loi`)}
                           className="ml-auto w-32 text-right tabular-nums"
                           placeholder="0"
                           value={formatAmountInput(phanBo[p.id] ?? 0)}
@@ -186,6 +192,7 @@ export function TraTienHangFormModal({
                             setPhanBo((t) => ({ ...t, [p.id]: parseAmountInput(e.target.value) }));
                           }}
                         />
+                        <LoiVuotTranTien value={phanBo[p.id]} id={`tra-hang-${p.id}-loi`} />
                       </td>
                     </tr>
                   ))}

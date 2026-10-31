@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { KHOA_SETTING_DUONG_DAN_WEBHOOK, VAI_WEBHOOK_PANCAKE } from "@/lib/n8n/provision/duong-dan-webhook-pancake";
 import { CanXacNhanDoiHaTang, provisionN8n } from "@/lib/n8n/provision/provision-n8n";
 import { prisma } from "@/lib/prisma";
 
@@ -16,10 +17,18 @@ const KEYS = [
   "n8nBaseUrl", "n8nApiKey", "n8nAppUrl", "n8nIngestSecret", "n8nCredentialId",
   "n8nHeaderCredentialId", "n8nWorkflowIds", "n8nDbHost", "n8nDbPort", "n8nDbName",
   "n8nDbUser", "n8nDbSsl", "n8nDbRoPassword",
+  ...Object.values(KHOA_SETTING_DUONG_DAN_WEBHOOK),
 ];
 
 async function ghi(key: string, value: string) {
   await prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+}
+
+/** Path webhook Pancake GIẢ — cửa dừng về path có test riêng ở provision-duong-ghi. */
+async function ghiDuongDanWebhook() {
+  for (const [i, vai] of VAI_WEBHOOK_PANCAKE.entries()) {
+    await ghi(KHOA_SETTING_DUONG_DAN_WEBHOOK[vai], String(i).repeat(32));
+  }
 }
 
 beforeEach(async () => {
@@ -70,6 +79,7 @@ describe("provisionN8n — các cửa dừng", () => {
     await ghi("n8nDbHost", "db-test");
     await ghi("n8nDbName", "postgres");
     await ghi("n8nDbRoPassword", "mat-khau-ro");
+    await ghiDuongDanWebhook();
 
     const daGoi: string[] = [];
     vi.stubGlobal(
@@ -96,6 +106,7 @@ describe("provisionN8n — các cửa dừng", () => {
   it("thiếu bộ khoá n8nDb* (chưa chạy setup) → lỗi hướng dẫn, không ghi workflow", async () => {
     await ghi("n8nBaseUrl", "http://n8n-test:5678");
     await ghi("n8nApiKey", "key-test");
+    await ghiDuongDanWebhook();
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ data: [], nextCursor: null }), { status: 200 }))

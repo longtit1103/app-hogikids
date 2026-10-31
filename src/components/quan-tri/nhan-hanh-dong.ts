@@ -66,6 +66,7 @@ export const NHAN_HANH_DONG: Readonly<Record<HanhDong, string>> = {
   [HANH_DONG.XUAT_FILE]: "Xuất file",
   [HANH_DONG.SAO_LUU_TAI]: "Tải bản sao lưu",
   [HANH_DONG.PHUC_HOI]: "Phục hồi dữ liệu từ bản sao lưu",
+  [HANH_DONG.PHUC_HOI_CAT_PHIEN]: "Cắt phiên script đang giữ khoá ghi",
   // Nợ phải trả — phiếu nhập (P3)
   [HANH_DONG.NHAP_HANG_GHI_NO]: "Ghi nhận phiếu nhập vào sổ nợ",
   [HANH_DONG.NHAP_HANG_SUA_NO]: "Sửa phiếu nợ nhà cung cấp",
@@ -84,6 +85,8 @@ export const NHAN_HANH_DONG: Readonly<Record<HanhDong, string>> = {
   [HANH_DONG.VI_ADS_SUA]: "Sửa hồ sơ ví quảng cáo trả trước",
   [HANH_DONG.VI_ADS_XOA]: "Xoá hồ sơ ví quảng cáo trả trước",
   [HANH_DONG.NO_PHAI_TRA_BAT]: "Bật theo dõi nợ phải trả",
+  [HANH_DONG.BC_TIKTOK_DANH_DAU_KHONG_DUNG]: "Đánh dấu Business Center TikTok không dùng thẻ",
+  [HANH_DONG.BC_TIKTOK_BO_DANH_DAU_KHONG_DUNG]: "Bỏ đánh dấu Business Center TikTok không dùng thẻ",
 };
 
 export function nhanHanhDong(ma: string): string {

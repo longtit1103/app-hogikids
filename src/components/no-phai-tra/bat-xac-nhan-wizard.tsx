@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { docChenhLechTaiM, xacNhanBatNoPhaiTra } from "@/lib/actions/bat-no-phai-tra";
 import { formatVnd } from "@/lib/format";
-import { parseSignedAmountInput } from "@/lib/format-amount-input";
+import { MAX_AMOUNT_INPUT, parseSignedAmountInput } from "@/lib/format-amount-input";
 import type { KetQuaDocChenhLech } from "@/lib/no-phai-tra/doc-chenh-lech-tai-m";
 import { goiYDieuChinh, tacDongDieuChinh, type DongDieuChinh } from "@/lib/no-phai-tra/tinh-chenh-lech-tai-m";
 
@@ -118,9 +118,10 @@ export function XacNhanBatWizard({
 
   const dongGui = useMemo(() => dieuChinh.filter((d) => d.soTien > 0), [dieuChinh]);
   const thieuMoTa = dongGui.some((d) => d.moTa.trim() === "");
+  const dieuChinhVuotTran = dongGui.some((d) => d.soTien > MAX_AMOUNT_INPUT);
   const tacDong = tacDongDieuChinh(dongGui);
   const viDaXong = thieuHoSoVi === null || xacNhanViChuaTheoDoi;
-  const coTheBat = b1 && ketQua !== null && !thieuMoTa && dongY && loiDieuKien.length === 0 && nhapHangSauM === null && viDaXong && !dangBat;
+  const coTheBat = b1 && ketQua !== null && !thieuMoTa && !dieuChinhVuotTran && dongY && loiDieuKien.length === 0 && nhapHangSauM === null && viDaXong && !dangBat;
 
   async function bat() {
     if (ketQua === null) return;

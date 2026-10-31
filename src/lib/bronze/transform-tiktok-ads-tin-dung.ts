@@ -1,13 +1,21 @@
+import type { Prisma } from "@/generated/prisma/client";
 import { buildVatByMonth } from "@/lib/ingest/ads-report-mapping";
 import {
   mapAnhChupChiPhiTiktok,
   type AnhChupChiPhiTho,
 } from "@/lib/ingest/tiktok-ads-tin-dung-mapping";
-import { ghiAnhChupTinDungTiktok, type BoDemTinDung } from "@/lib/ingest/tiktok-ads-tin-dung-upsert";
+import {
+  ghiAnhChupTinDungTiktok,
+  khoaNgayTinDung,
+  type BoDemTinDung,
+  type KetQuaGhiTinDung,
+} from "@/lib/ingest/tiktok-ads-tin-dung-upsert";
 import { prisma } from "@/lib/prisma";
 
 import {
   chamMoc,
+  mocPhienBanSql,
+  thuTuPhienBanSql,
   type TransformOptions,
   type TransformStats,
 } from "./transform-raw-helpers";
@@ -20,9 +28,48 @@ import {
  *
  * Người đọc DUY NHẤT của Silver: P&L (`pnl.ts`). Không chạm `Expense` (bảng app sở hữu) ⇒ không cần cờ `rebuild`,
  * không cắt tại mốc Nợ phải trả M (P&L không đổi theo M; chủ shop chốt áp TOÀN BỘ lịch sử).
+ *
+ * THỨ TỰ khi hai lượt chạy song song (trang ingest đêm + lượt dựng lại, hai trang cùng ngày): mỗi ảnh chụp (bc, ngày)
+ * là MỘT transaction giữ khoá NGÀY (`khoaNgayTinDung`) TỪ bước ĐỌC ảnh mới nhất trong kho thô TỚI bước ghi. Đọc ngoài
+ * khoá (như trước) thì lượt cầm ảnh cũ có thể ghi SAU lượt cầm ảnh mới — đè số cũ và xoá advertiser chỉ có trong ảnh
+ * mới. Chốt `nguonFetchedAt` ở câu ghi là lưới thứ hai.
  */
 
-type AnhChupRow = AnhChupChiPhiTho & { externalId: string };
+type AnhChupRow = AnhChupChiPhiTho & { externalId: string; mocPhienBan: Date };
+
+/** Timeout transaction một ảnh chụp: đọc + ghi vài chục dòng là mili-giây; phần dư cho lúc chờ khoá ngày. */
+const TIMEOUT_MOT_ANH_MS = 30_000;
+
+type Loc = { shopId?: string; externalIds?: string[] };
+
+/** Điều kiện WHERE + tham số cho bộ lọc (bc_id, ngày). `null` = `externalIds` rỗng ⇒ không có gì để đọc. */
+function dieuKienLoc(filter: Loc): { where: string; params: unknown[] } | null {
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (filter.shopId !== undefined) {
+    params.push(filter.shopId);
+    conds.push(`"shopId" = $${params.length}`);
+  }
+  if (filter.externalIds !== undefined) {
+    if (filter.externalIds.length === 0) return null;
+    params.push(filter.externalIds);
+    conds.push(`"externalId" = ANY($${params.length}::text[])`);
+  }
+  return { where: conds.length ? `WHERE ${conds.join(" AND ")}` : "", params };
+}
+
+/**
+ * Các ảnh chụp (bc_id, ngày) cần dựng — CHỈ khoá, không payload: payload đọc lại trong transaction có khoá ngày
+ * (`docAnhChupMoiNhat`). `externalIds` mảng rỗng ⇒ 0 khoá (KHÔNG rơi về quét cả bảng) — hợp đồng `LatestFilter`.
+ */
+async function docKhoaAnhChup(filter: Loc): Promise<{ bcId: string; ngay: string }[]> {
+  const loc = dieuKienLoc(filter);
+  if (loc === null) return [];
+  return prisma.$queryRawUnsafe<{ bcId: string; ngay: string }[]>(
+    `SELECT DISTINCT "shopId" AS "bcId", "externalId" AS ngay FROM "RawTiktokBusinessCost" ${loc.where} ORDER BY 1, 2`,
+    ...loc.params,
+  );
+}
 
 /**
  * Ảnh chụp MỚI NHẤT của mỗi (bc_id, ngày) + đầu từng TRANG + các phần tử `cost_list` của MỌI trang rút thành CHUỖI
@@ -35,26 +82,18 @@ type AnhChupRow = AnhChupChiPhiTho & { externalId: string };
  * lý do (không ném lỗi Postgres thô giữa lượt). `trang` không phải mảng ⇒ `cacTrang` NULL ⇒ mapping bỏ ảnh chụp.
  *
  * `externalIds` mảng rỗng = không có gì mới land ⇒ 0 dòng (KHÔNG rơi về quét cả bảng) — cùng hợp đồng `LatestFilter`.
- * `shopId` (= bc_id) có thì lọc để dùng index `[shopId, externalId, fetchedAt]`.
+ * `shopId` (= bc_id) có thì lọc để dùng index `[shopId, externalId, fetchedAt]`. `db` = client transaction đang giữ
+ * khoá ngày — đọc ở đây là đọc SAU khi giành khoá.
  */
-async function docAnhChupMoiNhat(filter: { shopId?: string; externalIds?: string[] }): Promise<AnhChupRow[]> {
-  const conds: string[] = [];
-  const params: unknown[] = [];
-  if (filter.shopId !== undefined) {
-    params.push(filter.shopId);
-    conds.push(`"shopId" = $${params.length}`);
-  }
-  if (filter.externalIds !== undefined) {
-    if (filter.externalIds.length === 0) return [];
-    params.push(filter.externalIds);
-    conds.push(`"externalId" = ANY($${params.length}::text[])`);
-  }
-  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  return prisma.$queryRawUnsafe<AnhChupRow[]>(
+async function docAnhChupMoiNhat(db: Prisma.TransactionClient, filter: Loc): Promise<AnhChupRow[]> {
+  const loc = dieuKienLoc(filter);
+  if (loc === null) return [];
+  return db.$queryRawUnsafe<AnhChupRow[]>(
     `
     SELECT DISTINCT ON ("shopId", "externalId")
       "shopId" AS "bcId",
       "externalId",
+      ${mocPhienBanSql("RawTiktokBusinessCost")} AS "mocPhienBan",
       payload->>'_ngay' AS ngay,
       CASE WHEN jsonb_typeof(payload->'trang') = 'array' THEN (
         SELECT coalesce(
@@ -89,10 +128,10 @@ async function docAnhChupMoiNhat(filter: { shopId?: string; externalIds?: string
         ) WITH ORDINALITY AS t(e, i)
       ) END AS dong
     FROM "RawTiktokBusinessCost"
-    ${where}
-    ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+    ${loc.where}
+    ORDER BY "shopId", "externalId", ${thuTuPhienBanSql("RawTiktokBusinessCost")}
     `,
-    ...params,
+    ...loc.params,
   );
 }
 
@@ -108,7 +147,7 @@ async function docHoaDonTheoThang(thang: string[]): Promise<unknown[]> {
     SELECT payload FROM (
       SELECT DISTINCT ON ("shopId", "externalId") payload
       FROM "RawTiktokBusinessInvoice"
-      ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+      ORDER BY "shopId", "externalId", ${thuTuPhienBanSql("RawTiktokBusinessInvoice")}
     ) moi_nhat
     WHERE left(payload->>'create_time', 7) = ANY($1::text[])
     `,
@@ -132,6 +171,12 @@ async function docAdvertiserCoBaoCao(): Promise<Set<string>> {
   return new Set(rows.map((r) => r.shopId));
 }
 
+/** Kết cục một ảnh chụp trong transaction — áp vào bộ đếm/cảnh báo SAU khi commit (rollback thì không đếm dở). */
+type KetCucAnh =
+  | { loai: "khong-con" }
+  | { loai: "loi"; loi: string }
+  | { loai: "xong"; ghi: KetQuaGhiTinDung; ngay: string; ngoaiSo: string[] };
+
 /** Ảnh chụp chi phí TikTok trong kho thô → Silver `TiktokAdsTinDung` (cộng theo advertiser, nhân VAT tháng). */
 export async function transformTiktokAdsTinDung(
   stats: TransformStats,
@@ -139,18 +184,16 @@ export async function transformTiktokAdsTinDung(
   opts: TransformOptions,
 ): Promise<void> {
   const { externalIds, shopId, checkpoint } = opts;
-  const anhChup = await docAnhChupMoiNhat({ shopId, externalIds });
-  if (anhChup.length === 0) return;
+  const cacKhoa = await docKhoaAnhChup({ shopId, externalIds });
+  if (cacKhoa.length === 0) return;
 
   // VAT đo từ hoá đơn Business Center trong kho thô theo THÁNG — CÙNG hàm mà lượt dựng lại `Expense` ads dùng
   // (`transform-ads-expense.ts`). `Expense` ghi mỗi đêm thì dùng VAT đo trên CỬA SỔ ngày của n8n (`tinhVat`), nên
   // hai suất có thể lệch vài phần triệu ⇒ phần trừ ra lệch vài đồng/ngày (chấp nhận; dựng lại thì khớp). Cảnh báo của bước đo VAT
   // (tháng có hoá đơn mà không dòng nào khớp loại BILL|PAYMENT…) chỉ đẩy ở lượt DỰNG LẠI: trang ingest mỗi đêm
-  // gọi nhánh này 7 lần/BC, lặp lại cùng câu cảnh báo cấp tháng là nhiễu nhật ký.
+  // gọi nhánh này 7 lần/BC, lặp lại cùng câu cảnh báo cấp tháng là nhiễu nhật ký. Tháng lấy từ khoá (khoá = `_ngay`).
   const canhBaoVat: string[] = [];
-  const thangCanDo = [
-    ...new Set(anhChup.map((a) => a.ngay).filter((n): n is string => typeof n === "string").map((n) => n.slice(0, 7))),
-  ];
+  const thangCanDo = [...new Set(cacKhoa.map((k) => k.ngay.slice(0, 7)))];
   const [hoaDon, coBaoCao] = await Promise.all([docHoaDonTheoThang(thangCanDo), docAdvertiserCoBaoCao()]);
   const vat = buildVatByMonth(hoaDon, canhBaoVat);
   if (externalIds === undefined) warnings.push(...canhBaoVat);
@@ -160,38 +203,64 @@ export async function transformTiktokAdsTinDung(
   const ngoaiSo = new Map<string, { bcId: string; ngay: string[] }>();
 
   let i = 0;
-  for (const a of anhChup) {
+  for (const k of cacKhoa) {
     await chamMoc(checkpoint, i++);
-    const m = mapAnhChupChiPhiTiktok(a);
-    if (!m.ok) {
-      // Kẹt ở Bronze ⇒ `skipped`: lượt dựng lại giữ cờ backlog tới khi sửa mapping, đường ingest thường ngày báo
-      // ĐỎ (route `/api/ingest/raw`); số cũ của ngày đó giữ nguyên.
-      stats.skipped++;
-      warnings.push(`Bỏ qua ảnh chụp chi phí TikTok ${a.bcId} ngày ${a.externalId}: ${m.loi}`);
-      continue;
-    }
-    const vatRate = vat.rateForDate(m.ngay);
-    if (vatRate === null) {
-      // Tháng đo được VAT mà tỉ lệ vô lý — cùng luật lượt dựng lại `Expense` (không ghi số sai).
-      stats.skipped++;
-      warnings.push(
-        `Bỏ qua tín dụng TikTok ${a.bcId} ngày ${m.ngay}: VAT tháng ${m.ngay.slice(0, 7)} đo được ngoài dải hợp lý`,
+    let kq: KetCucAnh;
+    try {
+      kq = await prisma.$transaction(
+        async (tx): Promise<KetCucAnh> => {
+          await khoaNgayTinDung(tx, k.ngay);
+          const [a] = await docAnhChupMoiNhat(tx, { shopId: k.bcId, externalIds: [k.ngay] });
+          if (!a) return { loai: "khong-con" }; // kho thô vừa bị xoá (xoá dữ liệu) giữa hai bước đọc
+          const m = mapAnhChupChiPhiTiktok(a);
+          // Kẹt ở Bronze ⇒ `skipped`: lượt dựng lại giữ cờ backlog tới khi sửa mapping, đường ingest thường ngày báo
+          // ĐỎ (route `/api/ingest/raw`); số cũ của ngày đó giữ nguyên.
+          if (!m.ok) {
+            return { loai: "loi", loi: `Bỏ qua ảnh chụp chi phí TikTok ${a.bcId} ngày ${a.externalId}: ${m.loi}` };
+          }
+          const vatRate = vat.rateForDate(m.ngay);
+          // Tháng đo được VAT mà tỉ lệ vô lý — cùng luật lượt dựng lại `Expense` (không ghi số sai).
+          if (vatRate === null) {
+            return {
+              loai: "loi",
+              loi:
+                `Bỏ qua tín dụng TikTok ${a.bcId} ngày ${m.ngay}: VAT tháng ${m.ngay.slice(0, 7)} ` +
+                "đo được ngoài dải hợp lý",
+            };
+          }
+          // Lọc TRƯỚC khi ghi: người ghi `deleteMany` theo danh sách SAU lọc ⇒ dòng cũ của advertiser lạc (ghi trước khi
+          // có luật này) bị gỡ ở lượt kế — đúng ý, không còn trừ nhầm. Advertiser mới chưa kịp có báo cáo đêm đầu ⇒ tín
+          // dụng ngày đó tạm bỏ; đêm sau (cửa sổ 7 ngày land lại ảnh chụp) có báo cáo thì tự ghi. KHÔNG `skipped` — đây
+          // không phải dữ liệu hỏng, báo đỏ mỗi đêm là nhiễu. Chỉ cảnh báo/đếm khi advertiser THẬT có tín dụng (grant ≠ 0).
+          const boNgoaiSo: string[] = [];
+          const theoAdvertiser = m.theoAdvertiser.filter((d) => {
+            if (coBaoCao.has(d.advertiserId)) return true;
+            if (d.grantExVat !== 0) boNgoaiSo.push(d.advertiserId);
+            return false;
+          });
+          const ghi = await ghiAnhChupTinDungTiktok(tx, a.bcId, { ...m, theoAdvertiser }, vatRate, a.mocPhienBan);
+          return { loai: "xong", ghi, ngay: m.ngay, ngoaiSo: boNgoaiSo };
+        },
+        { timeout: TIMEOUT_MOT_ANH_MS },
       );
+    } catch (e) {
+      // Lỗi ghi ⇒ transaction cuộn lại cả ảnh (số cũ của ngày đó giữ nguyên) — `skipped` như mọi ảnh không dựng được.
+      stats.skipped++;
+      warnings.push(`Bỏ qua tín dụng TikTok ${k.bcId} ngày ${k.ngay}: ${e instanceof Error ? e.message : "ghi lỗi"}`);
       continue;
     }
-    // Lọc TRƯỚC khi ghi: người ghi `deleteMany` theo danh sách SAU lọc ⇒ dòng cũ của advertiser lạc (ghi trước khi có
-    // luật này) bị gỡ ở lượt kế — đúng ý, không còn trừ nhầm. Advertiser mới chưa kịp có báo cáo đêm đầu ⇒ tín dụng
-    // ngày đó tạm bỏ; đêm sau (cửa sổ 7 ngày land lại ảnh chụp) có báo cáo thì tự ghi. KHÔNG `skipped` — đây không phải
-    // dữ liệu hỏng, báo đỏ mỗi đêm là nhiễu. Chỉ cảnh báo/đếm khi advertiser đó THẬT có tín dụng (grant ≠ 0).
-    const theoAdvertiser = m.theoAdvertiser.filter((d) => {
-      if (coBaoCao.has(d.advertiserId)) return true;
-      if (d.grantExVat === 0) return false;
-      const g = ngoaiSo.get(d.advertiserId) ?? { bcId: a.bcId, ngay: [] };
-      g.ngay.push(m.ngay);
-      ngoaiSo.set(d.advertiserId, g);
-      return false;
-    });
-    await ghiAnhChupTinDungTiktok(a.bcId, { ...m, theoAdvertiser }, vatRate, stats, warnings);
+    if (kq.loai === "loi") {
+      stats.skipped++;
+      warnings.push(kq.loi);
+    } else if (kq.loai === "xong") {
+      stats.tinDungAdsUpserted += kq.ghi.ghi;
+      stats.tinDungAdsSkippedStale += kq.ghi.cuHon;
+      for (const advertiserId of kq.ngoaiSo) {
+        const g = ngoaiSo.get(advertiserId) ?? { bcId: k.bcId, ngay: [] };
+        g.ngay.push(kq.ngay);
+        ngoaiSo.set(advertiserId, g);
+      }
+    }
   }
 
   if (ngoaiSo.size > 0) {

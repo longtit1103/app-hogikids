@@ -4,10 +4,9 @@ import Link from "next/link";
 import { format, parse } from "date-fns";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { formatPct1 } from "@/components/kenh/channel-format";
 import { ChuThichDoTuoiVaThieu } from "@/components/marketing/canh-bao-do-tuoi-du-lieu";
 import { SoSanBao } from "@/components/marketing/so-san-bao";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatSoDem as soGon, formatVnd } from "@/lib/format";
 import type { ChuThichDoTuoi } from "@/lib/reports/marketing/cau-do-tuoi-du-lieu";
 import type { DongNguonDoanhSo, NguonDoanhSoTiktok } from "@/lib/reports/marketing/nguon-doanh-so-tiktok";
 import type { PheuTiktok } from "@/lib/reports/marketing/pheu-tiktok";
@@ -24,10 +23,6 @@ import { cn } from "@/lib/utils";
  * BẤT BIẾN #2: `pheu`/`nguon` là số SÀN TỰ NHẬN CÔNG — mọi ô đọc từ đó bọc `<SoSanBao>`.
  * `donPancake`/`doanhThuGopPancake`/`chiQuangCao` là số THẬT (từ `calcPnl`, kênh tiktok) — KHÔNG bọc.
  */
-
-function soGon(n: number): string {
-  return new Intl.NumberFormat("vi-VN").format(n);
-}
 
 function dayLabel(dateStr: string): string {
   return format(parse(dateStr, "yyyy-MM-dd", new Date()), "dd/MM");
@@ -331,7 +326,7 @@ export function PheuTiktokSection({
           />
           <OChiSo
             nhan="Tỉ lệ chuyển đổi"
-            giaTri={pheu.tiLeChuyenDoi === null ? "—" : <SoSanBao>{formatPct1(pheu.tiLeChuyenDoi * 100)}</SoSanBao>}
+            giaTri={pheu.tiLeChuyenDoi === null ? "—" : <SoSanBao>{formatPercent(pheu.tiLeChuyenDoi * 100)}</SoSanBao>}
             title="Đơn sàn ÷ lượt truy cập — app tính lại từ hai số sàn, sàn không báo thẳng con số này cho cả kỳ."
           />
           <OChiSo nhan="Đơn (Pancake)" giaTri={`${soGon(donPancake)} đơn`} />
@@ -349,7 +344,7 @@ export function PheuTiktokSection({
             <OChiSo
               nhan="Tỉ trọng doanh số từ GMV Max (sàn)"
               giaTri={
-                pheu.tiTrongGmvMax === null ? "—" : <SoSanBao>{formatPct1(pheu.tiTrongGmvMax * 100)}</SoSanBao>
+                pheu.tiTrongGmvMax === null ? "—" : <SoSanBao>{formatPercent(pheu.tiTrongGmvMax * 100)}</SoSanBao>
               }
               title={`Tính trên ${pheu.soNgayCoDoanhSo} ngày có doanh số trong kỳ.`}
             />

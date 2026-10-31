@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { chotSaoKeTuPdf, xemTruocSaoKeThe, type XemTruocSaoKe } from "@/lib/actions/sao-ke-the";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 
 import { NhapSaoKeTheXemTruoc } from "./nhap-sao-ke-the-xem-truoc";
 import { OCoNhan } from "./o-nhap-co-nhan";
@@ -46,19 +46,20 @@ export function NhapSaoKeTheModal({
   const [dangDoc, setDangDoc] = useState(false);
   const [yeuCauId, setYeuCauId] = useState("");
   const [soDu, setSoDu] = useState<number | null>(null);
-  const [hanTra, setHanTra] = useState("");
   const [note, setNote] = useState("");
   const [loi, setLoi] = useState<Record<string, string>>({});
   const [dangLuu, setDangLuu] = useState(false);
+  /** Câu cảnh báo server trả sau khi chốt (hạn client lệch hạn in PDF ⇒ app dùng hạn PDF); có ⇒ modal ở lại để đọc. */
+  const [canhBaoSauChot, setCanhBaoSauChot] = useState<string | null>(null);
 
   function datLai() {
     setFile(null);
     setXemTruoc(null);
     setLoiFile(null);
     setSoDu(null);
-    setHanTra("");
     setNote("");
     setLoi({});
+    setCanhBaoSauChot(null);
   }
 
   useEffect(() => {
@@ -93,7 +94,6 @@ export function NhapSaoKeTheModal({
       setXemTruoc(res.data);
       setYeuCauId(crypto.randomUUID());
       setSoDu(res.data.ketQua.soDeXuat >= 0 ? res.data.ketQua.soDeXuat : null);
-      setHanTra(res.data.saoKe.hanTra);
       setLoi({});
     } catch {
       setLoiFile("Không đọc được file — thử lại");
@@ -119,7 +119,8 @@ export function NhapSaoKeTheModal({
       fd.set("hash", xemTruoc.hash);
       fd.set("soDu", String(soDu));
       fd.set("soDeXuat", String(xemTruoc.ketQua.soDeXuat));
-      fd.set("hanTra", hanTra);
+      // Hạn trả = hạn IN trên sao kê (server cũng lấy từ file) — gửi để server soi lệch.
+      fd.set("hanTra", xemTruoc.saoKe.hanTra);
       fd.set("note", note);
       const res = await chotSaoKeTuPdf(fd);
       if (!res.ok) {
@@ -129,8 +130,13 @@ export function NhapSaoKeTheModal({
       }
       if (res.code === "DA_GHI_ROI") toast.info("Sao kê này đã được chốt rồi — không ghi thêm.");
       else toast.success("Đã chốt sao kê từ file PDF");
-      onOpenChange(false);
       router.refresh();
+      // Hạn trả khác hạn in trên sao kê: toast biến mất nhanh, chủ shop cần đọc rõ hai ngày ⇒ giữ modal, hiện câu cảnh báo.
+      if (res.data.canhBaoHanTra) {
+        setCanhBaoSauChot(res.data.canhBaoHanTra);
+        return;
+      }
+      onOpenChange(false);
     } catch {
       toast.error("Lưu thất bại — kiểm tra kết nối rồi thử lại (bấm lại an toàn, không ghi trùng)");
     } finally {
@@ -141,8 +147,10 @@ export function NhapSaoKeTheModal({
   const choChot = xemTruoc !== null && xemTruoc.lyDoKhongChot === null;
   /** Sửa số khác số đề xuất ⇒ bắt buộc ghi chú lý do (server cũng chặn). */
   const canGhiChu = xemTruoc !== null && soDu !== null && soDu !== xemTruoc.ketQua.soDeXuat;
+  // Gõ quá trần 2 tỷ: báo đỏ ngay tại ô + khoá nút Chốt (server vẫn chặn — đây chỉ là báo trước).
+  const loiTran = soDu === null ? null : loiVuotTranAmount(soDu);
   const hopLe =
-    choChot && yeuCauId !== "" && soDu !== null && hanTra !== "" && hanTra > (xemTruoc?.saoKe.ngaySaoKe ?? "") && !dangLuu;
+    choChot && yeuCauId !== "" && soDu !== null && !loiTran && !dangLuu;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -151,7 +159,19 @@ export function NhapSaoKeTheModal({
           <DialogTitle>Nhập sao kê PDF</DialogTitle>
         </DialogHeader>
 
-        {xemTruoc === null ? (
+        {canhBaoSauChot !== null ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-ink">Đã chốt sao kê.</p>
+            <p role="status" className="text-sm text-warning" data-testid="sao-ke-pdf-canh-bao-han-tra">
+              {canhBaoSauChot}
+            </p>
+            <DialogFooter>
+              <Button type="button" onClick={() => onOpenChange(false)}>
+                Đóng
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : xemTruoc === null ? (
           <div className="flex flex-col gap-3">
             <OCoNhan id="sao-ke-pdf-the" nhan="Thẻ">
               <select
@@ -203,7 +223,7 @@ export function NhapSaoKeTheModal({
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-3">
-                  <OCoNhan id="sao-ke-pdf-so-du" nhan="Số chốt" loi={loi.soDu}>
+                  <OCoNhan id="sao-ke-pdf-so-du" nhan="Số chốt" loi={loi.soDu ?? loiTran ?? undefined}>
                     <Input
                       id="sao-ke-pdf-so-du"
                       inputMode="numeric"
@@ -214,8 +234,8 @@ export function NhapSaoKeTheModal({
                       }
                     />
                   </OCoNhan>
-                  <OCoNhan id="sao-ke-pdf-han-tra" nhan="Hạn trả" loi={loi.hanTra}>
-                    <Input id="sao-ke-pdf-han-tra" type="date" value={hanTra} onChange={(e) => setHanTra(e.target.value)} />
+                  <OCoNhan id="sao-ke-pdf-han-tra" nhan="Hạn trả" ghiChu="Theo hạn in trên sao kê" loi={loi.hanTra}>
+                    <Input id="sao-ke-pdf-han-tra" type="date" value={xemTruoc.saoKe.hanTra} readOnly aria-readonly="true" />
                   </OCoNhan>
                 </div>
                 <OCoNhan

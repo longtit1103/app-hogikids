@@ -1,3 +1,5 @@
+import { formatVnd } from "@/lib/format";
+
 /**
  * Ô nhập TIỀN của form ghi tay: gõ gì cũng chỉ giữ chữ số rồi hiện lại có dấu phân cách.
  *
@@ -31,7 +33,7 @@ export function parseAmountInput(raw: string): number {
 /** Câu lỗi hiện dưới ô tiền khi vượt trần; `null` = hợp lệ. Dùng chung để mọi form nói cùng một câu. */
 export function loiVuotTranAmount(value: number): string | null {
   return value > MAX_AMOUNT_INPUT
-    ? `Số tiền tối đa ${new Intl.NumberFormat("vi-VN").format(MAX_AMOUNT_INPUT)} đ`
+    ? `Số tiền tối đa ${formatVnd(MAX_AMOUNT_INPUT)}`
     : null;
 }
 

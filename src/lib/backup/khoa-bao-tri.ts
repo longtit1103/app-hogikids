@@ -12,6 +12,10 @@
  * ⚠️ RÀNG BUỘC: chạy nhiều bản sao app thì khoá này KHÔNG còn đủ — lúc đó phải đổi
  * sang khoá ngoài (advisory lock trên một DB khác, hoặc Redis).
  *
+ * Cờ này là cờ DUY NHẤT của cổng ghi toàn cục (`cong-ghi-toan-cuc.ts`): cửa request/action đếm lượt
+ * vào và từ chối khi cờ bật, lưới phụ cấp op chặn op ghi ngoài ngữ cảnh. Tiến trình NGOÀI app (script
+ * CLI) bị loại trừ bằng khoá tư vấn chung trong DB (`khoa-chung-cli.ts`), không bằng cờ này.
+ *
  * ⚠️ Vì sao cờ neo vào `globalThis` chứ không phải biến module: Next gói route handler
  * và server action thành những bundle RIÊNG, nên cùng một file có thể bị nạp thành
  * NHIỀU bản sao module trong cùng tiến trình. Lúc đó `/api/restore` bật cờ ở bản sao
@@ -152,8 +156,8 @@ export function traKhoaPhucHoi(the: ThePhienPhucHoi): void {
 /**
  * Có lượt phục hồi đang chạy không.
  *
- * Quá TTL thì trả `false` VÀ xoá cờ — xoá để câu log dưới đây chỉ kêu MỘT LẦN (hàm này bị gọi ở 34
- * điểm ghi, kêu mỗi lượt là ngập log tới mức không ai đọc). Không bao giờ nhả im lặng: cờ quá hạn
+ * Quá TTL thì trả `false` VÀ xoá cờ — xoá để câu log dưới đây chỉ kêu MỘT LẦN (hàm này bị gọi ở mọi
+ * cửa ghi + mọi op ghi của lưới phụ cổng ghi, kêu mỗi lượt là ngập log tới mức không ai đọc). Không bao giờ nhả im lặng: cờ quá hạn
  * nghĩa là một lượt phục hồi đã đi lạc mà không ai biết, dấu vết trong log container là manh mối
  * duy nhất còn lại.
  */
@@ -171,6 +175,18 @@ export function dangPhucHoi(): boolean {
       `trả khoá: kiểm log phía trên xem nó dừng ở đâu, và kiểm dữ liệu xem có nạp dở không.`,
   );
   return false;
+}
+
+/**
+ * Cờ phục hồi cho CỔNG GHI (`cong-ghi-toan-cuc.ts`) — cùng nghĩa `dangPhucHoi()` (kể cả TTL + câu log).
+ *
+ * Tách export riêng là CỐ Ý: vài test giả lập "lượt phục hồi bắt đầu GIỮA request" bằng cách mock
+ * riêng `dangPhucHoi` để chỉ các chốt kiểm-cờ BÊN TRONG route đổi ý. Cổng gọi qua tên này nên đọc cờ
+ * THẬT — y như `chanRouteKhiDangPhucHoi` trước đây (gọi bản nội bộ module) — thay vì đóng cổng cả tiến
+ * trình test rồi chặn luôn phần dọn dữ liệu của test.
+ */
+export function dangPhucHoiChoCongGhi(): boolean {
+  return dangPhucHoi();
 }
 
 /**
@@ -270,14 +286,25 @@ export const LOI_DANG_PHUC_HOI =
   "Đang phục hồi dữ liệu từ bản sao lưu — mọi thao tác ghi tạm dừng, thử lại sau khi phục hồi xong.";
 
 /**
- * Chốt chặn cho ROUTE HANDLER: trả sẵn `Response` 503 nếu đang phục hồi, `null` nếu
- * đường thông. 503 + `Retry-After` là mã đúng nghĩa "tạm thời bận" — n8n hiểu là thử
- * lại sau chứ không phải hỏng hợp đồng (khác 4xx).
+ * Câu 503 "đang phục hồi" dùng chung. 503 + `Retry-After` là mã đúng nghĩa "tạm thời bận" — n8n
+ * hiểu là thử lại sau chứ không phải hỏng hợp đồng (khác 4xx).
  */
-export function chanRouteKhiDangPhucHoi(): Response | null {
-  if (!dangPhucHoi()) return null;
+export function phanHoi503DangPhucHoi(): Response {
   return Response.json(
     { ok: false, error: LOI_DANG_PHUC_HOI },
     { status: 503, headers: { "Retry-After": "60" } }
   );
+}
+
+/**
+ * Chốt chặn CHỈ KIỂM (không đếm): trả sẵn `Response` 503 nếu đang phục hồi, `null` nếu đường thông.
+ *
+ * ⚠️ Route handler GHI DB KHÔNG dùng hàm này nữa mà đi qua `routeQuaCua` (`cong-ghi-toan-cuc.ts`):
+ * chỉ kiểm thì request vào TRƯỚC cờ vẫn đang ghi khi lượt phục hồi chụp bản lùi/drop schema — cửa có
+ * ĐẾM để lượt phục hồi chờ nó xong. Lưới `tests/backup/cong-ghi-route-qua-cua.test.ts` cấm hàm này
+ * trong `src/app/api/**`.
+ */
+export function chanRouteKhiDangPhucHoi(): Response | null {
+  if (!dangPhucHoi()) return null;
+  return phanHoi503DangPhucHoi();
 }

@@ -148,10 +148,14 @@ export type LoaiFileApp = "trang" | "route" | "dac-biet" | "module";
  * Xếp loại một file dưới `src/app` theo TÊN (bỏ đuôi — mọi đuôi mã nguồn, `page.ts`/`page.js` cũng là
  * trang): trang (page/layout) · route · file đặc biệt Next · module thường (Next không phục vụ). `null`
  * = không phải mã nguồn (css, ico…).
+ *
+ * Đuôi kép `.e2e.<đuôi>` (`page.e2e.tsx`, `route.e2e.ts`) bỏ cùng đuôi: bản build e2e cổng ghi
+ * (`E2E_CONG_GHI_BUILD=1`, `pageExtensions` ở `next.config.ts`) phục vụ chúng như trang/route THẬT, nên
+ * lưới xếp loại như bản build "rộng nhất" — không để file chỉ-test lọt khỏi lưới cổng.
  */
 export function phanLoaiFileApp(rel: string): LoaiFileApp | null {
   if (!laFileMaNguon(rel)) return null;
-  const ten = path.posix.basename(rel).replace(new RegExp(`\\.${DUOI_MA_NGUON}$`), "");
+  const ten = path.posix.basename(rel).replace(new RegExp(`(?:\\.e2e)?\\.${DUOI_MA_NGUON}$`), "");
   if (ten === "page" || ten === "layout") return "trang";
   if (ten === "route") return "route";
   if (RE_FILE_DAC_BIET_NEXT.test(ten)) return "dac-biet";

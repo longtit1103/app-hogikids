@@ -23,6 +23,7 @@ vi.mock("@/lib/sao-ke-the/doc-text-pdf", () => ({ docTextPdf: vi.fn() }));
 
 import { Prisma } from "@/generated/prisma/client";
 import { chotSaoKeTuPdf, xemTruocSaoKeThe, type XemTruocSaoKe } from "@/lib/actions/sao-ke-the";
+import { clearBronzeBacklog, markBronzeBacklog } from "@/lib/bronze/bronze-only";
 import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docDuNoCacThe } from "@/lib/no-phai-tra/du-no-the";
 import { docPhaiTraCacThe } from "@/lib/no-phai-tra/phai-tra-the-queries";
@@ -52,8 +53,60 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+/** BC gánh TikTok Ads của thẻ trong các test (bc_id = `shopId` của trang ingest hoá đơn). */
+const BC = "7129545797879726081";
+const BC_HAI = "7200000000000000002";
+
+/**
+ * `truncateBusinessTables` không xoá `SyncLog` / kho thô hoá đơn / bảng bền trạng thái BC / cờ backlog — dọn để cổng độ
+ * tươi hoá đơn không dính test trước.
+ */
+async function donLuotKeoTiktok(): Promise<void> {
+  await prisma.tiktokBcHoaDon.deleteMany();
+  await prisma.syncLog.deleteMany({ where: { kind: "TIKTOK_ADS" } });
+  await prisma.rawTiktokBusinessInvoice.deleteMany();
+  await clearBronzeBacklog();
+}
+
+/** BC `bcId` đã land hoá đơn vào kho thô lúc `fetchedAt` — cổng xét mọi BC land trong 30 ngày trước ngày sao kê. */
+async function bcDaLandHoaDon(bcId: string, fetchedAt: Date): Promise<void> {
+  await prisma.rawTiktokBusinessInvoice.create({
+    data: {
+      shopId: bcId,
+      externalId: `tx-${bcId}-${fetchedAt.getTime()}`,
+      payloadHash: `h-${bcId}-${fetchedAt.getTime()}`,
+      payload: { transaction_id: `tx-${bcId}` },
+      fetchedAt,
+    },
+  });
+}
+
+/** Một trang ingest hoá đơn TikTok (`/api/ingest/raw`) đã xong — đúng hình `stats` route ghi. */
+async function luotKeoHoaDon(
+  startedAt: Date,
+  o: { status?: "OK" | "ERROR"; stream?: string; mode?: string; landed?: number; bcId?: string; luotId?: string } = {}
+): Promise<void> {
+  await prisma.syncLog.create({
+    data: {
+      kind: "TIKTOK_ADS",
+      status: o.status ?? "OK",
+      startedAt,
+      finishedAt: startedAt,
+      stats: {
+        stream: o.stream ?? "tiktokbusiness/invoice",
+        shopId: o.bcId ?? BC,
+        landed: o.landed ?? 0,
+        mode: o.mode ?? "land+transform",
+        ...(o.luotId !== undefined ? { luotId: o.luotId } : {}),
+        warnings: [],
+      },
+    },
+  });
+}
+
 beforeEach(async () => {
   await truncateBusinessTables();
+  await donLuotKeoTiktok();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
   vi.mocked(docNguoiDungPhien).mockResolvedValue(nguoiDungGia());
   // `clearMocks: false` toàn cục ⇒ tự xoá lịch sử gọi, kẻo phép "không gọi đọc PDF" dính lượt của test trước.
@@ -65,6 +118,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.useRealTimers();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+  await donLuotKeoTiktok();
 });
 
 afterAll(async () => {
@@ -73,8 +127,8 @@ afterAll(async () => {
 });
 
 /**
- * Thẻ Techcombank đuôi 9999 như prod: M 15/10, neo 14/10, TikTok Ads gắn từ 15/10, 480 hoá đơn TikTok, và lần trả
- * thẻ 6.850.000 ngày 17/10 (có trên sao kê, sau neo ⇒ app phải có `CARD_PAY`).
+ * Thẻ Techcombank đuôi 9999 như prod: M 15/10, neo 14/10, TikTok Ads gắn từ 15/10, 480 hoá đơn TikTok, lần trả
+ * thẻ 6.850.000 ngày 17/10 (có trên sao kê, sau neo ⇒ app phải có `CARD_PAY`), và lượt kéo hoá đơn đêm 25/10 OK.
  */
 async function seedThe(): Promise<string> {
   await prisma.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: "2026-10-15" } });
@@ -96,6 +150,8 @@ async function seedThe(): Promise<string> {
   await prisma.cashMovement.create({
     data: { date: vn("2026-10-17", "09:00:00"), kind: "CARD_PAY", amount: 6_850_000, cardId: id, description: "Trả thẻ" },
   });
+  await bcDaLandHoaDon(BC, vn("2026-10-19", "01:15:00"));
+  await luotKeoHoaDon(vn("2026-10-25", "01:15:00"));
   return id;
 }
 
@@ -287,10 +343,161 @@ describe("xemTruocSaoKeThe — giao dịch thẻ khác, độ tươi hoá đơn,
 
   it("chưa có lượt kéo hoá đơn từ ngày sao kê + 2 ⇒ CHẶN dù hôm nay đủ muộn", async () => {
     const A = await seedThe();
-    await prisma.tiktokAdsHoaDon.updateMany({ data: { syncedAt: vn("2026-10-21", "01:15:00") } });
+    await donLuotKeoTiktok();
+    await bcDaLandHoaDon(BC, vn("2026-10-19", "01:15:00"));
+    await luotKeoHoaDon(vn("2026-10-21", "01:15:00"));
     const x = await xem(A);
-    expect(x.lyDoKhongChot).toContain("Chưa có lượt kéo hoá đơn TikTok sau ngày chốt (lượt mới nhất ngày 21/10)");
+    expect(x.lyDoKhongChot).toContain(`Chưa có lượt kéo hoá đơn TikTok sau ngày chốt BC ${BC} (lượt mới nhất ngày 21/10)`);
     expect(await chotSaoKeTuPdf(formChot(A, x))).toMatchObject({ ok: false, code: "HOA_DON_CHUA_VE" });
+  });
+
+  it("ngừng ads sau ngày chốt: hoá đơn mới nhất về 21/10, lượt kéo đêm 22/10 POST lại hoá đơn cũ (landed 0) ⇒ mốc tiến, chốt được", async () => {
+    const A = await seedThe();
+    await donLuotKeoTiktok();
+    await bcDaLandHoaDon(BC, vn("2026-10-19", "01:15:00"));
+    // Không có hoá đơn mới nào sau 21/10 — mốc cũ `max(syncedAt)` đứng yên ở đây và chặn chốt mãi.
+    await prisma.tiktokAdsHoaDon.updateMany({ data: { syncedAt: vn("2026-10-21", "01:15:00") } });
+    await luotKeoHoaDon(vn("2026-10-21", "01:15:00"), { landed: 3 });
+    await luotKeoHoaDon(vn("2026-10-22", "01:15:00"), { landed: 0 });
+    const x = await xem(A);
+    expect(x.lyDoKhongChot).toBeNull();
+    expect((await chotSaoKeTuPdf(formChot(A, x))).ok).toBe(true);
+  });
+
+  it("lượt kéo sau ngày chốt mà HỎNG / chỉ land Bronze / là stream khác ⇒ không tính, vẫn chặn", async () => {
+    const A = await seedThe();
+    await donLuotKeoTiktok();
+    await bcDaLandHoaDon(BC, vn("2026-10-19", "01:15:00"));
+    await luotKeoHoaDon(vn("2026-10-21", "01:15:00"));
+    await luotKeoHoaDon(vn("2026-10-23", "01:15:00"), { status: "ERROR" });
+    // Lượt riêng (đêm sau) chỉ land Bronze: lượt mới nhất không lỗi nhưng chưa dựng Silver ⇒ không phải lượt sạch.
+    await luotKeoHoaDon(vn("2026-10-24", "01:10:00"), { mode: "bronze-only" });
+    await luotKeoHoaDon(vn("2026-10-24", "01:15:00"), { stream: "tiktokbusiness/report" });
+    await luotKeoHoaDon(vn("2026-10-24", "01:20:00"), { stream: "tiktokbusiness/cost" });
+    const x = await xem(A);
+    expect(x.lyDoKhongChot).toContain("lượt mới nhất ngày 21/10");
+    expect(await chotSaoKeTuPdf(formChot(A, x))).toMatchObject({ ok: false, code: "HOA_DON_CHUA_VE" });
+  });
+
+  it("2 BC đã land hoá đơn trong 30 ngày: BC này kéo OK 25/10, BC kia không có lượt nào từ 22/10 (mất quyền finance) ⇒ CHẶN", async () => {
+    const A = await seedThe();
+    await bcDaLandHoaDon(BC_HAI, vn("2026-10-10", "01:15:00"));
+    await luotKeoHoaDon(vn("2026-10-20", "01:15:00"), { bcId: BC_HAI });
+    const x = await xem(A);
+    expect(x.lyDoKhongChot).toBe(
+      `Chưa có lượt kéo hoá đơn TikTok sau ngày chốt BC ${BC_HAI} (lượt mới nhất ngày 20/10) — đợi lượt kéo đêm từ 22/10 rồi nhập lại`,
+    );
+    expect(await chotSaoKeTuPdf(formChot(A, x))).toMatchObject({ ok: false, code: "HOA_DON_CHUA_VE" });
+
+    // BC kia kéo OK từ 22/10 ⇒ mở.
+    await luotKeoHoaDon(vn("2026-10-24", "01:15:00"), { bcId: BC_HAI });
+    expect((await xem(A)).lyDoKhongChot).toBeNull();
+  });
+
+  it("cùng đêm: một trang OK rồi một trang LỖI của cùng BC ⇒ CHẶN (hoá đơn có thể thiếu)", async () => {
+    const A = await seedThe();
+    await luotKeoHoaDon(vn("2026-10-25", "01:16:00"), { status: "ERROR" });
+    const x = await xem(A);
+    expect(x.lyDoKhongChot).toContain(`mới nhất có trang LỖI (BC ${BC})`);
+    expect(await chotSaoKeTuPdf(formChot(A, x))).toMatchObject({ ok: false, code: "HOA_DON_CHUA_VE" });
+
+    // Lượt kéo lại thành công SAU trang lỗi ⇒ mở.
+    await luotKeoHoaDon(vn("2026-10-25", "09:00:00"));
+    expect((await xem(A)).lyDoKhongChot).toBeNull();
+  });
+
+  it("cùng lượt: trang LỖI rồi trang OK SAU nó (cách 3') ⇒ vẫn CHẶN — trang lỗi chưa được kéo lại; lượt sau sạch ⇒ mở", async () => {
+    const A = await seedThe();
+    await luotKeoHoaDon(vn("2026-10-25", "01:16:00"), { status: "ERROR" });
+    await luotKeoHoaDon(vn("2026-10-25", "01:19:00"));
+    const x = await xem(A);
+    expect(x.lyDoKhongChot).toContain(`mới nhất có trang LỖI (BC ${BC})`);
+    expect(await chotSaoKeTuPdf(formChot(A, x))).toMatchObject({ ok: false, code: "HOA_DON_CHUA_VE" });
+
+    // Lượt kéo lại cách xa (lượt mới) chạy hết không lỗi ⇒ mở.
+    await luotKeoHoaDon(vn("2026-10-25", "09:00:00"));
+    expect((await xem(A)).lyDoKhongChot).toBeNull();
+  });
+
+  it("hai trang OK cách 20' cùng một lượt ⇒ lượt sạch, chốt được", async () => {
+    const A = await seedThe();
+    await luotKeoHoaDon(vn("2026-10-25", "01:35:00"));
+    expect((await xem(A)).lyDoKhongChot).toBeNull();
+  });
+
+  it("lượt hôm trước có trang LỖI, lượt hôm sau sạch ⇒ chốt được", async () => {
+    const A = await seedThe();
+    await luotKeoHoaDon(vn("2026-10-24", "01:15:00"));
+    await luotKeoHoaDon(vn("2026-10-24", "01:17:00"), { status: "ERROR" });
+    expect((await xem(A)).lyDoKhongChot).toBeNull(); // lượt 25/10 01:15 (seedThe) sạch, là lượt mới nhất
+  });
+
+  it("trang mang luotId khác nhau dù cách 5' ⇒ hai lượt: lượt sau sạch ⇒ mở; lượt sau có LỖI ⇒ chặn", async () => {
+    const A = await seedThe();
+    await donLuotKeoTiktok();
+    await bcDaLandHoaDon(BC, vn("2026-10-19", "01:15:00"));
+    // Gom theo khoảng cách thì hai trang này cùng lượt (cách 5') ⇒ chặn; theo luotId thì là hai lượt.
+    await luotKeoHoaDon(vn("2026-10-25", "01:15:00"), { status: "ERROR", luotId: "exec-101" });
+    await luotKeoHoaDon(vn("2026-10-25", "01:20:00"), { luotId: "exec-102" });
+    expect((await xem(A)).lyDoKhongChot).toBeNull();
+
+    await luotKeoHoaDon(vn("2026-10-25", "01:25:00"), { status: "ERROR", luotId: "exec-103" });
+    expect((await xem(A)).lyDoKhongChot).toContain(`mới nhất có trang LỖI (BC ${BC})`);
+  });
+
+  it("CÙNG luotId: trang LỖI rồi trang OK cách 45' (quãng nghỉ dài) ⇒ vẫn một lượt có lỗi ⇒ CHẶN", async () => {
+    const A = await seedThe();
+    await donLuotKeoTiktok();
+    await bcDaLandHoaDon(BC, vn("2026-10-19", "01:15:00"));
+    // Gom theo khoảng cách thì trang 02:00 là lượt mới sạch ⇒ mở sai; theo luotId thì cùng lượt với trang lỗi.
+    await luotKeoHoaDon(vn("2026-10-25", "01:15:00"), { status: "ERROR", luotId: "exec-201" });
+    await luotKeoHoaDon(vn("2026-10-25", "02:00:00"), { luotId: "exec-201" });
+    expect((await xem(A)).lyDoKhongChot).toContain(`mới nhất có trang LỖI (BC ${BC})`);
+  });
+
+  it("hai lượt chồng nhau xen kẽ trang ⇒ lượt mới nhất xét theo mốc bắt đầu: lượt bắt đầu sau sạch ⇒ mở", async () => {
+    const A = await seedThe();
+    await donLuotKeoTiktok();
+    await bcDaLandHoaDon(BC, vn("2026-10-19", "01:15:00"));
+    // Lượt 301 bắt đầu 01:15, lượt 302 (chạy tay) bắt đầu 01:16; trang LỖI của 301 rơi SAU trang đầu của 302.
+    await luotKeoHoaDon(vn("2026-10-25", "01:15:00"), { luotId: "exec-301" });
+    await luotKeoHoaDon(vn("2026-10-25", "01:16:00"), { luotId: "exec-302" });
+    await luotKeoHoaDon(vn("2026-10-25", "01:17:00"), { status: "ERROR", luotId: "exec-301" });
+    await luotKeoHoaDon(vn("2026-10-25", "01:18:00"), { luotId: "exec-302" });
+    expect((await xem(A)).lyDoKhongChot).toBeNull();
+
+    // Ngược lại: lượt bắt đầu SAU có trang lỗi ⇒ chặn dù lượt bắt đầu trước có trang OK muộn hơn.
+    await donLuotKeoTiktok();
+    await bcDaLandHoaDon(BC, vn("2026-10-19", "01:15:00"));
+    await luotKeoHoaDon(vn("2026-10-25", "01:15:00"), { luotId: "exec-401" });
+    await luotKeoHoaDon(vn("2026-10-25", "01:16:00"), { status: "ERROR", luotId: "exec-402" });
+    await luotKeoHoaDon(vn("2026-10-25", "01:17:00"), { luotId: "exec-401" });
+    expect((await xem(A)).lyDoKhongChot).toContain(`mới nhất có trang LỖI (BC ${BC})`);
+  });
+
+  it("kho thô còn backlog chưa dựng Silver ⇒ CHẶN dù lượt kéo OK", async () => {
+    const A = await seedThe();
+    await markBronzeBacklog();
+    const x = await xem(A);
+    expect(x.lyDoKhongChot).toContain("Kho thô còn dữ liệu chưa dựng sang bảng nghiệp vụ");
+    expect(await chotSaoKeTuPdf(formChot(A, x))).toMatchObject({ ok: false, code: "HOA_DON_CHUA_VE" });
+  });
+
+  it("trả thẻ MƠ HỒ (sao kê trả 17/10, app có CARD_PAY 16/10 và 18/10 cùng tiền) ⇒ CHẶN, không đoán P", async () => {
+    const A = await seedThe();
+    await prisma.cashMovement.deleteMany({ where: { cardId: A, kind: "CARD_PAY" } });
+    await prisma.cashMovement.createMany({
+      data: [
+        { date: vn("2026-10-16", "09:00:00"), kind: "CARD_PAY", amount: 6_850_000, cardId: A, description: "Trả thẻ" },
+        { date: vn("2026-10-18", "09:00:00"), kind: "CARD_PAY", amount: 6_850_000, cardId: A, description: "Trả thẻ" },
+      ],
+    });
+    const x = await xem(A);
+    expect(x.lyDoKhongChot).toContain("Trả thẻ MƠ HỒ");
+    expect(x.lyDoKhongChot).toContain("sao kê có 1 lần trả 6.850.000 ₫ ngày 17/10 ↔ app có 2 lần 6.850.000 ₫ ngày 16/10, 18/10");
+    expect(x.ketQua.traChuaLenSaoKe).toEqual([]);
+    expect(await chotSaoKeTuPdf(formChot(A, x))).toMatchObject({ ok: false, code: "TRA_THE_MO_HO" });
+    expect(await prisma.kySaoKeThe.count({ where: { laNeoMoSo: false } })).toBe(0);
   });
 
   it("tên thẻ mang 4 số KHÁC số trên sao kê ⇒ CHẶN (xem trước + chốt)", async () => {
@@ -395,6 +602,29 @@ describe("chotSaoKeTuPdf", () => {
     expect((await docPhaiTraCacThe(vn("2026-10-25"))).find((d) => d.cardId === A)?.phaiTra?.nghiaVuKy).toBe(0);
   });
 
+  it("hạn trả client gửi khác hạn in trên sao kê ⇒ ghi hạn IN (05/11), trả cảnh báo + nhật ký nêu cả hai ngày", async () => {
+    const A = await seedThe();
+    const x = await xem(A);
+    const r = await chotSaoKeTuPdf(formChot(A, x, { hanTra: "2026-11-10" }));
+    expect(r).toMatchObject({
+      ok: true,
+      data: { canhBaoHanTra: "Hạn trả nhập 10/11/2026 khác hạn in trên sao kê 05/11/2026 — đã dùng hạn trên sao kê" },
+    });
+    const ky = await prisma.kySaoKeThe.findFirstOrThrow({ where: { cardId: A, laNeoMoSo: false } });
+    expect(ky.hanTra).toEqual(vn("2026-11-05"));
+    const nk = await prisma.auditLog.findFirstOrThrow({ where: { hanhDong: "CHOT_SAO_KE_PDF", doiTuongId: ky.id } });
+    expect(nk.doiTuongMoTa).toContain("khác hạn in trên sao kê 05/11/2026");
+  });
+
+  it("hạn trả client trùng hạn in / để trống ⇒ không cảnh báo, ghi hạn in", async () => {
+    const A = await seedThe();
+    const x = await xem(A);
+    const r = await chotSaoKeTuPdf(formChot(A, x, { hanTra: "" }));
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.data).not.toHaveProperty("canhBaoHanTra");
+    expect((await prisma.kySaoKeThe.findFirstOrThrow({ where: { cardId: A, laNeoMoSo: false } })).hanTra).toEqual(vn("2026-11-05"));
+  });
+
   it("chủ shop sửa số chốt ⇒ bắt buộc ghi chú; có ghi chú ⇒ ghi số đã sửa (số đề xuất vẫn phải khớp server)", async () => {
     const A = await seedThe();
     const x = await xem(A);
@@ -488,10 +718,23 @@ describe("chotSaoKeTuPdf", () => {
     });
   });
 
-  it("ngày sao kê trước M ⇒ từ chối ngayChot; hôm nay = ngày sao kê ⇒ từ chối; hạn ≤ ngày sao kê ⇒ từ chối hanTra", async () => {
+  it("ngày sao kê trước M ⇒ từ chối ngayChot; hôm nay = ngày sao kê ⇒ từ chối; hạn IN ≤ ngày sao kê ⇒ từ chối, nói do file", async () => {
     const A = await seedThe();
     const x = await xem(A);
-    expect(await chotSaoKeTuPdf(formChot(A, x, { hanTra: "2026-10-20" }))).toMatchObject({ ok: false, field: "hanTra" });
+    // Hạn lấy từ sao kê (không từ client) ⇒ ca hạn ≤ ngày sao kê chỉ xảy ra khi chính file in như vậy: lỗi KHÔNG trỏ
+    // vào ô nào (chủ shop không sửa được hạn), xem trước cũng chỉ cho xem.
+    const textHanSai = TEXT_SAO_KE_2010.replace("17:00 05/11/2026", "17:00 20/10/2026");
+    vi.mocked(docTextPdf).mockResolvedValueOnce(textHanSai);
+    const loiHan = await chotSaoKeTuPdf(formChot(A, x));
+    expect(loiHan).toEqual({
+      ok: false,
+      error: "Sao kê in hạn trả 20/10/2026 không sau ngày sao kê 20/10/2026 — file có thể đọc sai",
+      code: "HAN_TRA_PDF",
+    });
+    vi.mocked(docTextPdf).mockResolvedValueOnce(textHanSai);
+    expect((await xem(A)).lyDoKhongChot).toBe(
+      "Sao kê in hạn trả 20/10/2026 không sau ngày sao kê 20/10/2026 — file có thể đọc sai — chỉ xem",
+    );
     expect(await chotSaoKeTuPdf(formChot(A, x, { soDu: "" }))).toMatchObject({ ok: false, field: "soDu" });
     vi.setSystemTime(vn("2026-10-20", "15:00:00"));
     expect(await chotSaoKeTuPdf(formChot(A, x))).toMatchObject({ ok: false, field: "ngayChot" });

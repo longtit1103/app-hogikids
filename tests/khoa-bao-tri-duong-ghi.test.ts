@@ -108,6 +108,7 @@ import { chotSaoKe } from "@/lib/actions/chot-sao-ke";
 import { chotSaoKeTuPdf } from "@/lib/actions/sao-ke-the";
 import { dongThe, ganNenTang, suaThe, taoThe, xoaGanNenTang, xoaThe } from "@/lib/actions/the-tin-dung";
 import { suaViAds, taoViAds, xoaViAds } from "@/lib/actions/vi-ads";
+import { boDanhDauBcTiktokKhongDung, danhDauBcTiktokKhongDung } from "@/lib/actions/bc-tiktok-hoa-don";
 import { xacNhanBatNoPhaiTra } from "@/lib/actions/bat-no-phai-tra";
 import { suaSoTienTruocMoc } from "@/lib/actions/sua-tien-truoc-moc";
 import { LOI_DANG_PHUC_HOI, thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
@@ -203,7 +204,7 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
     },
   ],
   ["sync.triggerSyncNow", () => triggerSyncNow()],
-  // 3 mục dưới đây do PHÉP QUÉT cuối file lôi ra 18/08: chúng gọi `dangPhucHoi()` từ lâu nhưng
+  // 3 mục dưới đây do PHÉP QUÉT cuối file lôi ra 18/08: chúng gọi cổng khoá phục hồi từ lâu nhưng
   // KHÔNG có trong lưới, tức lời khai "chặn MỌI đường ghi" chưa từng được kiểm cho chúng.
   ["ads-import.importAdsExpenses", () => importAdsExpenses(new FormData())],
   // Guard nằm ngay sau cổng chủ shop, TRƯỚC mọi thao tác xoá — gọi trong lúc giữ khoá là an toàn.
@@ -240,6 +241,8 @@ const DUONG_GHI: [string, () => Promise<ActionResult<unknown>>][] = [
   ["vi-ads.taoViAds", () => taoViAds({})],
   ["vi-ads.suaViAds", () => suaViAds("id-gia", {})],
   ["vi-ads.xoaViAds", () => xoaViAds("id-gia")],
+  ["bc-tiktok-hoa-don.danhDauBcTiktokKhongDung", () => danhDauBcTiktokKhongDung({ bcId: "7129545797879726081" })],
+  ["bc-tiktok-hoa-don.boDanhDauBcTiktokKhongDung", () => boDanhDauBcTiktokKhongDung("7129545797879726081")],
   ["bat-no-phai-tra.xacNhanBatNoPhaiTra", () => xacNhanBatNoPhaiTra({})],
   // Sửa số tiền chi phí trước ngày bật: đổi Expense + thêm dòng điều chỉnh mở sổ cùng transaction — lùi mất giữa
   // lượt phục hồi là Lãi/Lỗ và quỹ từ M lệch nhau đúng phần bù.
@@ -346,7 +349,105 @@ const THU_MUC_ACTIONS = path.resolve(here, "../src/lib/actions");
 const CAU_GHI_PRISMA =
   /\b(?:prisma|tx)\.[A-Za-z_$][\w$]*\.(?:create|createMany|createManyAndReturn|update|updateMany|upsert|delete|deleteMany)\b|\$executeRaw(?:Unsafe)?\b/;
 
-type ExportAction = { khoa: string; than: string };
+type ExportAction = { khoa: string; than: string; body: ts.Block | undefined; sf: ts.SourceFile };
+
+const chuanHoaKhoangTrang = (n: ts.Node, sf: ts.SourceFile) => n.getText(sf).replace(/\s+/g, " ").trim();
+
+/**
+ * Khuôn cửa ghi của một action (rỗng = đạt), mọi ý đều đo trên CÂY cú pháp của thân hàm:
+ *  - có đúng một `const cua = vaoCuaGhi();` ở mức cao nhất của thân;
+ *  - ngay sau nó là `if (!cua.ok) return cua.loi;`, rồi MỘT `try` là câu CUỐI CÙNG của thân — không câu
+ *    nào nằm ngoài `try` (return/ghi lọt khỏi `finally` ⇒ bộ đếm không bao giờ trả);
+ *  - `finally` của `try` gọi `cua.ra()`;
+ *  - trước cửa (cổng quyền, tra cứu) không có câu ghi Prisma trực tiếp — ghi lọt khỏi cửa là ghi giữa lúc phục hồi;
+ *  - trong `try`/`catch` của cửa, `return` một lời gọi PHẢI có `await` (`returnThieuAwait`).
+ */
+function viPhamCuaGhi(body: ts.Block | undefined, sf: ts.SourceFile): string[] {
+  if (!body) return ["không có thân hàm"];
+  const ds = [...body.statements];
+  const laVaoCua = (st: ts.Statement) =>
+    ts.isVariableStatement(st) &&
+    st.declarationList.declarations.some(
+      (d) =>
+        ts.isIdentifier(d.name) &&
+        d.name.text === "cua" &&
+        d.initializer !== undefined &&
+        ts.isCallExpression(d.initializer) &&
+        ts.isIdentifier(d.initializer.expression) &&
+        d.initializer.expression.text === "vaoCuaGhi" &&
+        d.initializer.arguments.length === 0,
+    );
+  const viTri = ds.map((st, i) => (laVaoCua(st) ? i : -1)).filter((i) => i >= 0);
+  if (viTri.length !== 1) return [`cần đúng một \`const cua = vaoCuaGhi();\` ở mức cao nhất thân hàm (thấy ${viTri.length})`];
+  const loi: string[] = [];
+  const truoc = ds.slice(0, viTri[0]);
+  if (truoc.some((st) => CAU_GHI_PRISMA.test(st.getText(sf)))) loi.push("có câu ghi Prisma TRƯỚC cửa ghi");
+  const sau = ds.slice(viTri[0] + 1);
+  if (sau.length !== 2) loi.push(`sau cửa phải là đúng 2 câu (if từ chối + try), thấy ${sau.length}`);
+  const [tuChoi, thanTry] = sau;
+  if (!tuChoi || !ts.isIfStatement(tuChoi) || chuanHoaKhoangTrang(tuChoi, sf) !== "if (!cua.ok) return cua.loi;") {
+    loi.push("câu ngay sau cửa phải là `if (!cua.ok) return cua.loi;`");
+  }
+  if (!thanTry || !ts.isTryStatement(thanTry) || !thanTry.finallyBlock) {
+    loi.push("phần còn lại của thân phải nằm trong try { … } finally { cua.ra(); }");
+  } else if (!thanTry.finallyBlock.statements.some((st) => chuanHoaKhoangTrang(st, sf) === "cua.ra();")) {
+    loi.push("finally không gọi cua.ra()");
+  }
+  if (thanTry && ts.isTryStatement(thanTry)) {
+    for (const k of returnThieuAwait(thanTry, sf)) loi.push(`\`return ${k}(…)\` trong cửa thiếu \`await\``);
+  }
+  return loi;
+}
+
+/**
+ * `return f(...)` (không `await`) trong `try { … } finally { cua.ra(); }`: `finally` chạy NGAY khi `f`
+ * chạm `await` đầu tiên — cửa đóng + bộ đếm trả trong khi transaction của `f` còn chạy, drain báo sạch
+ * và bản lùi chụp TRƯỚC lúc nó COMMIT. Trả tên các lời gọi vi phạm trong khối `try` và `catch` của cửa
+ * (bỏ qua hàm lồng — callback có ngữ cảnh riêng).
+ *
+ * Miễn DUY NHẤT: hàm khai ở CÙNG file, không `async`, không khai kiểu trả về chứa `Promise` (helper
+ * dựng câu lỗi đồng bộ như `thatBai`). Hàm nhập từ file khác ⇒ không biết đồng bộ hay không ⇒ phải
+ * `await` (fail-closed: `await` một giá trị thường vô hại).
+ */
+function returnThieuAwait(thanTry: ts.TryStatement, sf: ts.SourceFile): string[] {
+  const dongBo = new Set<string>();
+  for (const st of sf.statements) {
+    if (!ts.isFunctionDeclaration(st) || !st.name) continue;
+    const laAsync = (ts.getModifiers(st) ?? []).some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+    const traPromise = st.type !== undefined && /\bPromise\b|PromiseLike/.test(st.type.getText(sf));
+    if (!laAsync && !traPromise) dongBo.add(st.name.text);
+  }
+  const ra: string[] = [];
+  const xetBieuThuc = (e: ts.Expression): void => {
+    while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e) || ts.isNonNullExpression(e)) {
+      e = e.expression;
+    }
+    if (ts.isConditionalExpression(e)) {
+      xetBieuThuc(e.whenTrue);
+      xetBieuThuc(e.whenFalse);
+      return;
+    }
+    if (ts.isCallExpression(e) || ts.isNewExpression(e)) {
+      const ten = e.expression.getText(sf);
+      if (!(ts.isCallExpression(e) && ts.isIdentifier(e.expression) && dongBo.has(ten))) ra.push(ten);
+    }
+  };
+  const di = (n: ts.Node): void => {
+    if (ts.isFunctionLike(n) || ts.isClassLike(n)) return;
+    if (ts.isReturnStatement(n) && n.expression) xetBieuThuc(n.expression);
+    ts.forEachChild(n, di);
+  };
+  di(thanTry.tryBlock);
+  if (thanTry.catchClause) di(thanTry.catchClause.block);
+  return ra;
+}
+
+/** Thân hàm của đoạn mã mẫu — cho phép đột biến tự kiểm của chính bộ kiểm khuôn. */
+function thanCuaMau(ma: string): { body: ts.Block; sf: ts.SourceFile } {
+  const sf = ts.createSourceFile("mau.ts", `async function f() {${ma}}`, ts.ScriptTarget.Latest, true);
+  const fn = sf.statements[0] as ts.FunctionDeclaration;
+  return { body: fn.body as ts.Block, sf };
+}
 
 /**
  * Liệt kê MỌI `export async function` trong `src/lib/actions/` bằng AST TypeScript (không regex:
@@ -364,6 +465,8 @@ function quetExportActions(): ExportAction[] {
       ra.push({
         khoa: `${ten.replace(/\.ts$/, "")}.${st.name.text}`,
         than: st.body ? st.body.getText(sf) : "",
+        body: st.body,
+        sf,
       });
     }
   }
@@ -374,13 +477,13 @@ function quetExportActions(): ExportAction[] {
  * LƯỚI PHỦ PHẢI ĐẦY ĐỦ — chốt bằng máy thay vì bằng trí nhớ.
  *
  * Bảng `DUONG_GHI` trước đây khai tay: 18/08 phép quét này lôi ra 3 action (`importAdsExpenses`,
- * `deleteAllData`, `dungLaiTuKhoTho`) có gọi `dangPhucHoi()` từ lâu mà chưa bao giờ nằm trong lưới —
+ * `deleteAllData`, `dungLaiTuKhoTho`) có gọi cổng khoá phục hồi từ lâu mà chưa bao giờ nằm trong lưới —
  * tức lời khai "chặn MỌI đường ghi nhập tay" chưa từng được kiểm cho chúng. Bề mặt vừa tăng từ 1 file
  * `settings.ts` lên 4 file nên xác suất quên chỉ có tăng.
  *
  * ⚠️ GIỚI HẠN ĐÃ BIẾT, đừng đọc test này rộng hơn thực tế: phép quét chỉ đọc THÂN HÀM, nên nó KHÔNG
  * tự nhận ra một action ghi DB bằng cách gọi module khác (`dungLaiTuKhoTho` · `importShopeeWallet` ·
- * `triggerSyncNow` đều thuộc dạng đó). Chúng lọt lưới được là nhờ khai `dangPhucHoi()`. Vì vậy lưới
+ * `triggerSyncNow` đều thuộc dạng đó). Chúng lọt lưới được là nhờ mở `vaoCuaGhi()`. Vì vậy lưới
  * chốt theo hướng FAIL-CLOSED: mọi export phải nằm ở `DUONG_GHI` hoặc `CHI_DOC`, không có nhóm thứ ba.
  */
 describe("lưới đường ghi phải phủ hết export của src/lib/actions", () => {
@@ -396,7 +499,7 @@ describe("lưới đường ghi phải phủ hết export của src/lib/actions"
     expect(
       chuaPhanLoai,
       `Action mới chưa phân loại: ${chuaPhanLoai.join(", ")}. Nếu nó GHI dữ liệu → thêm vào DUONG_GHI ` +
-        `(và bảo đảm hàm có \`if (dangPhucHoi()) return …\`). Nếu CHỈ ĐỌC → thêm vào CHI_DOC kèm lý do.`,
+        `(và bảo đảm hàm mở cửa bằng \`vaoCuaGhi()\`, bọc phần còn lại trong try/finally { cua.ra() }). Nếu CHỈ ĐỌC → thêm vào CHI_DOC kèm lý do.`,
     ).toEqual([]);
   });
 
@@ -410,11 +513,18 @@ describe("lưới đường ghi phải phủ hết export của src/lib/actions"
     expect(Object.keys(CHI_DOC).filter((k) => tenTrongLuoi.has(k))).toEqual([]);
   });
 
-  it("mọi mục trong DUONG_GHI thật sự CÓ gọi dangPhucHoi() — mục khai suông là lưới rỗng", () => {
-    const thieuGuard = daQuet
-      .filter((a) => tenTrongLuoi.has(a.khoa) && !a.than.includes("dangPhucHoi()"))
+  it("mọi mục trong DUONG_GHI đi qua cửa ghi đúng khuôn — mục khai suông là lưới rỗng", () => {
+    const sai = daQuet
+      .filter((a) => tenTrongLuoi.has(a.khoa))
+      .flatMap((a) => viPhamCuaGhi(a.body, a.sf).map((v) => `${a.khoa}: ${v}`));
+    expect(sai).toEqual([]);
+  });
+
+  it("không action ghi nào còn tự kiểm cờ phục hồi ở cửa (`dangPhucHoi()`) — cổng duy nhất là vaoCuaGhi()", () => {
+    const conKiemTay = daQuet
+      .filter((a) => tenTrongLuoi.has(a.khoa) && a.than.includes("dangPhucHoi()"))
       .map((a) => a.khoa);
-    expect(thieuGuard).toEqual([]);
+    expect(conKiemTay).toEqual([]);
   });
 
   it("không mục CHI_DOC nào ghi thẳng bằng Prisma — 'chỉ đọc' phải đúng ở mức đọc được bằng máy", () => {
@@ -422,5 +532,105 @@ describe("lưới đường ghi phải phủ hết export của src/lib/actions"
       .filter((a) => a.khoa in CHI_DOC && CAU_GHI_PRISMA.test(a.than))
       .map((a) => a.khoa);
     expect(thucRaCoGhi).toEqual([]);
+  });
+});
+
+/**
+ * Đột biến tự kiểm: bộ kiểm khuôn cửa ghi phải ĐỎ trên từng cách làm hỏng cửa, và xanh trên khuôn đúng —
+ * không thì "mọi action đều đạt" ở trên chỉ chứng minh bộ kiểm dễ tính.
+ */
+describe("bộ kiểm khuôn cửa ghi bắt được từng kiểu làm hỏng cửa", () => {
+  const dung = `
+    const cong = await congAction("x");
+    if (!cong.ok) return cong;
+    const cua = vaoCuaGhi();
+    if (!cua.ok) return cua.loi;
+    try {
+      await prisma.expense.create({ data: {} });
+      return { ok: true };
+    } finally {
+      cua.ra();
+    }`;
+  const kiem = (ma: string) => {
+    const { body, sf } = thanCuaMau(ma);
+    return viPhamCuaGhi(body, sf);
+  };
+
+  it("khuôn đúng → không vi phạm", () => {
+    expect(kiem(dung)).toEqual([]);
+  });
+
+  it("thiếu vaoCuaGhi() → đỏ", () => {
+    expect(kiem(dung.replace("const cua = vaoCuaGhi();", "const cua = tuNghi();")).length).toBeGreaterThan(0);
+  });
+
+  it("quên finally { cua.ra() } → đỏ", () => {
+    expect(kiem(dung.replace("cua.ra();", "")).join("|")).toContain("finally không gọi cua.ra()");
+  });
+
+  it("cua.ra() rơi ra ngoài finally → đỏ", () => {
+    const ma = `
+      const cua = vaoCuaGhi();
+      if (!cua.ok) return cua.loi;
+      try { await prisma.expense.create({ data: {} }); } catch {}
+      cua.ra();
+      return { ok: true };`;
+    expect(kiem(ma).length).toBeGreaterThan(0);
+  });
+
+  it("câu ghi nằm sau try (lọt khỏi cửa) → đỏ", () => {
+    const ma = `${dung}
+    await prisma.expense.create({ data: {} });`;
+    expect(kiem(ma).length).toBeGreaterThan(0);
+  });
+
+  it("thiếu nhánh từ chối `if (!cua.ok) return cua.loi;` → đỏ", () => {
+    expect(kiem(dung.replace("if (!cua.ok) return cua.loi;", "")).length).toBeGreaterThan(0);
+  });
+
+  it("ghi Prisma TRƯỚC cửa → đỏ", () => {
+    const ma = `
+      await prisma.expense.deleteMany({});
+      const cua = vaoCuaGhi();
+      if (!cua.ok) return cua.loi;
+      try { return { ok: true }; } finally { cua.ra(); }`;
+    expect(kiem(ma).join("|")).toContain("TRƯỚC cửa ghi");
+  });
+
+  it("`return` lời gọi async KHÔNG await trong try của cửa → đỏ; có await / helper đồng bộ cùng file → đạt", () => {
+    const voi = (traVe: string) => `
+      const cua = vaoCuaGhi();
+      if (!cua.ok) return cua.loi;
+      try {
+        if (x) return thatBai("A");
+        ${traVe}
+      } catch (e) {
+        return thatBai("B");
+      } finally {
+        cua.ra();
+      }`;
+    const kiemFile = (ma: string, phu = "") => {
+      const sf = ts.createSourceFile("mau.ts", `${phu}\nasync function f() {${ma}}`, ts.ScriptTarget.Latest, true);
+      const fn = sf.statements.find((st) => ts.isFunctionDeclaration(st) && st.name?.text === "f") as ts.FunctionDeclaration;
+      return viPhamCuaGhi(fn.body, sf);
+    };
+    const phu = `function thatBai(m: string) { return { ok: false, error: m }; }
+      async function suaPhieu() { return 1; }`;
+    expect(kiemFile(voi("return await suaPhieu();"), phu)).toEqual([]);
+    expect(kiemFile(voi("return suaPhieu();"), phu).join("|")).toContain("return suaPhieu(…)");
+    // Hàm nhập từ file khác (không khai ở đây) ⇒ fail-closed.
+    expect(kiemFile(voi("return xuLyLoiNhap(e);"), phu).join("|")).toContain("return xuLyLoiNhap(…)");
+    // Nhánh điều kiện, ép kiểu, và trong catch đều bị soi.
+    expect(kiemFile(voi("return (y ? suaPhieu() : thatBai('C')) as never;"), phu).join("|")).toContain("return suaPhieu(…)");
+    expect(
+      kiemFile(voi("return await suaPhieu();").replace('return thatBai("B");', "return suaPhieu();"), phu).join("|"),
+    ).toContain("return suaPhieu(…)");
+    // Callback lồng có ngữ cảnh riêng — không soi.
+    expect(kiemFile(voi("return await prisma.$transaction(async (tx) => { return tx.a.create({}); });"), phu)).toEqual([]);
+  });
+
+  it("hai cửa trong một hàm → đỏ", () => {
+    expect(kiem(`${dung}
+    const cua2 = vaoCuaGhi();`).length).toBeGreaterThan(0);
   });
 });

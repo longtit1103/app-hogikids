@@ -78,6 +78,8 @@ export const BANG_QUYEN_MONG_DOI: Readonly<Record<string, CongMongDoiCoKieu>> = 
   [`${A}/vi-ads.ts#xoaViAds`]: "CHU_SHOP",
   [`${A}/bat-no-phai-tra.ts#xacNhanBatNoPhaiTra`]: "CHU_SHOP",
   [`${A}/bat-no-phai-tra.ts#docChenhLechTaiM`]: "CHU_SHOP",
+  [`${A}/bc-tiktok-hoa-don.ts#danhDauBcTiktokKhongDung`]: "CHU_SHOP",
+  [`${A}/bc-tiktok-hoa-don.ts#boDanhDauBcTiktokKhongDung`]: "CHU_SHOP",
   [`${A}/so-quy-quy-toi-thieu.ts#datQuyToiThieu`]: "tai-chinh-so-quy:sua",
 
   // ── Chi phí ──
@@ -151,10 +153,20 @@ export const BANG_QUYEN_MONG_DOI: Readonly<Record<string, CongMongDoiCoKieu>> = 
   // ── Route có cổng (spec §3.5, §4.3 — quyền ghép còn lại kiểm trong thân) ──
   "src/app/api/backup/route.ts#POST": "CHU_SHOP",
   "src/app/api/restore/route.ts#POST": "CHU_SHOP",
+  "src/app/api/restore/cat-phien/route.ts#POST": "CHU_SHOP",
   "src/app/api/export/bao-cao/route.ts#GET": ["bao-cao:xem", "tai-chinh-loi-lo:xem"],
   "src/app/api/export/gia-von/route.ts#GET": "san-pham:xem",
   "src/app/api/export/so-quy/route.ts#GET": "tai-chinh-so-quy:xem",
   "src/app/api/export/ton-kho/route.ts#GET": "ton-kho:xem",
+
+  // ── Chỉ-test, CHỈ có trong bản build e2e cổng ghi (`E2E_CONG_GHI_BUILD=1`; build thường Next bỏ qua đuôi
+  // `.e2e.*`) — gác bằng cổng chủ shop như code thật. Luật riêng: `tests/luoi/file-chi-build-e2e.test.ts`.
+  "src/app/api/e2e-cong-ghi/route.e2e.ts#GET": "CHU_SHOP",
+  "src/app/api/e2e-cong-ghi/route.e2e.ts#POST": "CHU_SHOP",
+  "src/app/e2e-cong-ghi/page.e2e.tsx#default": "CHU_SHOP",
+  "src/app/e2e-cong-ghi/actions.e2e.ts#ghiGiuBarrierE2e": "CHU_SHOP",
+  "src/app/e2e-cong-ghi/actions.e2e.ts#ghiNgayE2e": "CHU_SHOP",
+  "src/app/e2e-cong-ghi/actions.e2e.ts#ghiNgoaiCuaE2e": "CHU_SHOP",
 
   // ── Trang / layout ──
   "src/app/layout.tsx#default": "KHONG_CONG",
@@ -195,6 +207,7 @@ export const BEARER_ROUTE_INGEST: Readonly<Record<string, HamBearer>> = {
   "src/app/api/ingest/ads/route.ts#POST": "requireIngestSecret",
   "src/app/api/ingest/backup-log/route.ts#POST": "requireIngestSecret",
   "src/app/api/ingest/dem-gia-von/route.ts#POST": "requireIngestSecret",
+  "src/app/api/ingest/luot-hoa-don-tiktok/route.ts#POST": "requireIngestSecret",
   "src/app/api/ingest/raw/route.ts#POST": "requireIngestSecret",
   "src/app/api/ingest/reconcile-orders/route.ts#POST": "requireIngestSecret",
   "src/app/api/ingest/resync-products/route.ts#POST": "requireIngestSecret",

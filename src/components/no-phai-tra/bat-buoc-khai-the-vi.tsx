@@ -1,7 +1,8 @@
 "use client";
 
 import { Input } from "@/components/ui/input";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { LoiVuotTranTien, thuocTinhLoiVuotTran } from "@/components/ui/loi-vuot-tran-tien";
+import { formatAmountInput, MAX_AMOUNT_INPUT, parseAmountInput } from "@/lib/format-amount-input";
 
 /** Một thẻ đang mở, kèm gợi ý kỳ sao kê gần nhất trước ngày bật (server tính theo ngày chốt của thẻ). */
 export type TheChoBat = { id: string; ten: string; saoKeNgayChot: string; saoKeHanTra: string };
@@ -22,7 +23,10 @@ export function khaiTheMacDinh(t: TheChoBat): KhaiThe {
   return { coSaoKe: true, ngayChot: t.saoKeNgayChot, hanTra: t.saoKeHanTra, soDuSaoKe: null, daTraTruoc: 0, duNo: null };
 }
 
-/** Bước 1 xong khi mọi thẻ có dư nợ, thẻ khai sao kê có đủ số + ngày hợp lệ, mọi ví có số dư. */
+/** Số tiền gõ có nằm trong trần 2 tỷ không (`null` = ô trống, hợp lệ ở mức ô — thiếu số do điều kiện khác bắt). */
+const trongTran = (v: number | null | undefined): boolean => v === null || v === undefined || v <= MAX_AMOUNT_INPUT;
+
+/** Bước 1 xong khi mọi thẻ có dư nợ, thẻ khai sao kê có đủ số + ngày hợp lệ, mọi ví có số dư; không số nào vượt trần 2 tỷ. */
 export function buoc1HopLe(
   the: readonly TheChoBat[],
   khai: Readonly<Record<string, KhaiThe>>,
@@ -31,11 +35,14 @@ export function buoc1HopLe(
 ): boolean {
   const theOk = the.every((t) => {
     const k = khai[t.id];
-    if (!k || k.duNo === null) return false;
+    if (!k || k.duNo === null || !trongTran(k.duNo)) return false;
     if (!k.coSaoKe) return true;
-    return k.soDuSaoKe !== null && k.ngayChot !== "" && k.hanTra > k.ngayChot && k.daTraTruoc <= k.soDuSaoKe;
+    return (
+      k.soDuSaoKe !== null && trongTran(k.soDuSaoKe) && trongTran(k.daTraTruoc) &&
+      k.ngayChot !== "" && k.hanTra > k.ngayChot && k.daTraTruoc <= k.soDuSaoKe
+    );
   });
-  return theOk && vi.every((v) => soDuVi[v.id] !== null && soDuVi[v.id] !== undefined);
+  return theOk && vi.every((v) => soDuVi[v.id] !== null && soDuVi[v.id] !== undefined && trongTran(soDuVi[v.id]));
 }
 
 function OTien({
@@ -50,15 +57,19 @@ function OTien({
   nhan: string;
 }) {
   return (
-    <Input
-      id={id}
-      aria-label={nhan}
-      inputMode="numeric"
-      placeholder="0"
-      className="text-right"
-      value={value === null ? "" : formatAmountInput(value) || "0"}
-      onChange={(e) => onChange(e.target.value.replace(/\D/g, "") === "" ? null : parseAmountInput(e.target.value))}
-    />
+    <>
+      <Input
+        id={id}
+        aria-label={nhan}
+        {...thuocTinhLoiVuotTran(value, `${id}-loi`)}
+        inputMode="numeric"
+        placeholder="0"
+        className="text-right"
+        value={value === null ? "" : formatAmountInput(value) || "0"}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "") === "" ? null : parseAmountInput(e.target.value))}
+      />
+      <LoiVuotTranTien value={value} id={`${id}-loi`} />
+    </>
   );
 }
 

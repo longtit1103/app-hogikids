@@ -1,4 +1,4 @@
-import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
 import { capNhatSoLechGiaVon } from "@/lib/gia-von/cap-nhat-so-lech";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { withSyncLog } from "@/lib/ingest/sync-log";
@@ -56,9 +56,11 @@ export async function POST(req: Request): Promise<Response> {
   const unauthorized = requireIngestSecret(req);
   if (unauthorized) return unauthorized;
 
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  return routeQuaCua(() => xuLyPost(req));
+}
 
+/** Thân POST sau cửa ghi (đếm suốt request — lượt phục hồi chờ nó xong). */
+async function xuLyPost(req: Request): Promise<Response> {
   // Đọc body TRƯỚC `withSyncLog` (stream chỉ đọc được một lần). Đọc hỏng = không có tóm tắt.
   const bodyTho = await req.text().catch(() => "");
   const tomTat = docTomTatLoiKeo(bodyTho);

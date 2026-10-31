@@ -19,10 +19,10 @@ import { parseMoneyInput, parseThresholdInput } from "@/lib/parse-inline-product
 import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
 import type { ProductRow, ProductRowChe, ProductVariantRowChe } from "@/lib/queries/products";
 import { cn } from "@/lib/utils";
+import { PAGE_SIZE } from "@/lib/page-size";
 import { InlineMoneyCell } from "./inline-money-cell";
 import { ProductApplyCell } from "./product-apply-cell";
 
-const PAGE_SIZE = 20;
 
 /**
  * Phần giá vốn của một sản phẩm — null ở nhánh che (người thiếu `gia-von-loi-nhuan:xem`: server không

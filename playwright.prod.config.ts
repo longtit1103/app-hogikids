@@ -62,6 +62,8 @@ const cauHinh: PlaywrightTestConfig = {
     "**/che-gia-von-payload.spec.ts",
     "**/phan-quyen-tron-luong.spec.ts",
     "**/xuat-ton-kho-theo-quyen.spec.ts",
+    // Bản build thường không được có route/trang chỉ-test (`*.e2e.ts(x)`) của e2e cổng ghi.
+    "**/khong-co-route-chi-test.spec.ts",
   ],
 };
 

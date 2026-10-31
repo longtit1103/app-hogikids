@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DANH_SACH_WORKFLOW } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
+import { KHOA_SETTING_DUONG_DAN_WEBHOOK, VAI_WEBHOOK_PANCAKE } from "@/lib/n8n/provision/duong-dan-webhook-pancake";
 import { provisionN8n } from "@/lib/n8n/provision/provision-n8n";
 import { prisma } from "@/lib/prisma";
 
@@ -15,7 +16,15 @@ const KEYS = [
   "n8nBaseUrl", "n8nApiKey", "n8nAppUrl", "n8nIngestSecret", "n8nCredentialId",
   "n8nHeaderCredentialId", "n8nWorkflowIds", "n8nCredPgHash", "n8nSyncNowSecret",
   "n8nDbHost", "n8nDbPort", "n8nDbName", "n8nDbUser", "n8nDbSsl", "n8nDbRoPassword",
+  ...Object.values(KHOA_SETTING_DUONG_DAN_WEBHOOK),
 ];
+
+/** Path GIẢ đúng dạng 32 hex — đứng thay path thật của instance trong `Setting`. */
+const DUONG_DAN_GIA = {
+  kho: "0123456789abcdef0123456789abcdef",
+  shopee: "fedcba9876543210fedcba9876543210",
+  tiktok: "00112233445566778899aabbccddeeff",
+} as const;
 
 async function ghi(key: string, value: string) {
   await prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
@@ -27,6 +36,7 @@ async function seedCauHinhDu() {
   await ghi("n8nDbHost", "db-test");
   await ghi("n8nDbName", "postgres");
   await ghi("n8nDbRoPassword", "mat-khau-ro");
+  for (const vai of VAI_WEBHOOK_PANCAKE) await ghi(KHOA_SETTING_DUONG_DAN_WEBHOOK[vai], DUONG_DAN_GIA[vai]);
 }
 
 type WorkflowLuu = { id: string; name: string; active: boolean; nodes: unknown[]; connections: unknown; settings: Record<string, unknown> };
@@ -118,6 +128,31 @@ describe("provisionN8n — đường ghi", () => {
     // Khoá webhook là khoá RIÊNG app sinh — không phải INGEST_SECRET.
     const syncSecret = await prisma.setting.findUniqueOrThrow({ where: { key: "n8nSyncNowSecret" } });
     expect(syncSecret.value).not.toBe("ingest-secret-test");
+
+    // Workflow gửi lên n8n mang path THẬT của instance (từ Setting), không bao giờ mang placeholder —
+    // placeholder lên n8n là webhook đăng ký sai path, Pancake bắn vào 404.
+    for (const w of kho.values()) expect(JSON.stringify(w), w.name).not.toContain("__DUONG_DAN_");
+    for (const vai of VAI_WEBHOOK_PANCAKE) {
+      const ten = DANH_SACH_WORKFLOW.find((d) => d.slug === `pancake-webhook-${vai}`)?.ten;
+      const wf = [...kho.values()].find((x) => x.name === ten);
+      const node = (wf?.nodes as Array<{ type?: string; parameters?: { path?: string } }> | undefined)?.find(
+        (n) => n.type === "n8n-nodes-base.webhook"
+      );
+      expect(node?.parameters?.path, vai).toBe(DUONG_DAN_GIA[vai]);
+    }
+  });
+
+  it("Setting THIẾU path webhook Pancake → dừng trước MỌI request n8n, không ghi khoá hạ tầng nào", async () => {
+    await seedCauHinhDu();
+    await prisma.setting.deleteMany({ where: { key: KHOA_SETTING_DUONG_DAN_WEBHOOK.tiktok } });
+    const fetchGia = vi.fn();
+    vi.stubGlobal("fetch", fetchGia);
+
+    await expect(provisionN8n()).rejects.toThrow(/n8nWebhookPath\.tiktok/);
+
+    expect(fetchGia).not.toHaveBeenCalled();
+    expect(await prisma.setting.findUnique({ where: { key: "n8nAppUrl" } })).toBeNull();
+    expect(await prisma.setting.findUnique({ where: { key: "n8nWorkflowIds" } })).toBeNull();
   });
 
   it("n8n nuốt settings.timezone sau khi ghi → dòng đó LOI, không báo ✓ (lớp lỗi cron-sai-giờ 01/08)", { timeout: 30_000 }, async () => {

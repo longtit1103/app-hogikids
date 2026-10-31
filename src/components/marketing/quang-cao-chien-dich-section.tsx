@@ -2,11 +2,11 @@ import Link from "next/link";
 import { Fragment } from "react";
 
 import { adsSourceLabel } from "@/lib/ads-source-label";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatSoDem as soGon, formatVnd } from "@/lib/format";
 import type { BangItemChienDich } from "@/lib/reports/marketing/gmv-max-theo-san-pham";
 import type { QuangCaoTheoChienDich } from "@/lib/reports/marketing/quang-cao-chien-dich";
 
-import { formatPct1, formatRoas } from "@/components/kenh/channel-format";
+import { formatRoas } from "@/components/kenh/channel-format";
 import { ItemGmvMaxBangCon } from "@/components/marketing/item-gmv-max-bang-con";
 import { SoSanBao } from "@/components/marketing/so-san-bao";
 
@@ -21,10 +21,6 @@ import { SoSanBao } from "@/components/marketing/so-san-bao";
  * Không có cột ROAS quy về doanh thu THẬT — app không quy được doanh thu Pancake
  * về chiến dịch, xem ghi chú trong `quang-cao-chien-dich.ts`.
  */
-
-function soGon(n: number): string {
-  return new Intl.NumberFormat("vi-VN").format(n);
-}
 
 export function QuangCaoChienDichSection({
   dulieu,
@@ -119,7 +115,7 @@ export function QuangCaoChienDichSection({
                       {c.click === null ? "—" : soGon(c.click)}
                     </td>
                     <td className="py-1.5 pr-2 text-right tabular-nums text-muted-foreground">
-                      {c.ctr === null ? "—" : formatPct1(c.ctr)}
+                      {c.ctr === null ? "—" : formatPercent(c.ctr)}
                     </td>
                     <td className="py-1.5 pr-2 text-right tabular-nums text-muted-foreground">
                       {c.cpm === null ? "—" : formatVnd(Math.round(c.cpm))}

@@ -10,12 +10,15 @@ import {
   dungLaiTuKhoTho,
   type ChiPhiKhongDungLai,
 } from "@/lib/actions/data-admin";
+import { clearBronzeBacklog, hasBronzeBacklog } from "@/lib/bronze/bronze-only";
 import { landRaw } from "@/lib/bronze/land-raw";
 import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { lyDoHoaDonTiktokChuaDu } from "@/lib/no-phai-tra/doi-chieu-sao-ke-voi-app";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { prisma } from "@/lib/prisma";
 import { DANH_MUC_QUYEN } from "@/lib/quyen/danh-muc-quyen";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
+import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 import { nguoiDungGia } from "./helpers/nguoi-dung-gia";
 import { seedReference, seedShopIdSetting, seedShopProfile } from "./helpers/test-db";
 
@@ -507,6 +510,69 @@ describe("deleteAllData", () => {
     const raw = await prisma.rawPancakeOrder.findFirst();
     expect(raw?.externalId).toBe(ORDER_PANCAKE_ID);
     expect(await prisma.rawPancakeOrder.count()).toBe(1);
+  });
+
+  it("GIỮ trạng thái bền Business Center TikTok — cổng chốt sao kê phải sống qua lượt xoá SyncLog", async () => {
+    await prisma.tiktokBcHoaDon.deleteMany();
+    await prisma.tiktokBcHoaDon.create({
+      data: { bcId: "7129545797879726081", lanDauCoDau: new Date(), khongDungTu: new Date(), khongDungBoi: "chu@test" },
+    });
+    try {
+      const res = await deleteAllData(SHOP_NAME);
+      expect(res.ok).toBe(true);
+
+      expect(await prisma.syncLog.count({ where: { kind: { not: "BACKUP" } } })).toBe(0);
+      const d = await prisma.tiktokBcHoaDon.findUniqueOrThrow({ where: { bcId: "7129545797879726081" } });
+      expect(d.lanDauCoDau).not.toBeNull();
+      expect(d.khongDungBoi).toBe("chu@test");
+    } finally {
+      await prisma.tiktokBcHoaDon.deleteMany();
+    }
+  });
+
+  it("sau lượt xoá cổng chốt sao kê VẪN nghiêm + VẪN theo quyết định 'không dùng thẻ' (chủ shop chốt giữ bảng bền)", async () => {
+    // BC_DANH_DAU: chủ shop đã xác nhận "không dùng thẻ". BC_DANG_DUNG: app đã nhận dấu lượt của nó.
+    const BC_DANH_DAU = "7129545797879726081";
+    const BC_DANG_DUNG = "7200000000000000002";
+    const mocDanhDau = new Date("2026-10-20T03:00:00.000Z");
+    await prisma.tiktokBcHoaDon.deleteMany();
+    await prisma.tiktokBcHoaDon.createMany({
+      data: [
+        { bcId: BC_DANH_DAU, lanDauCoDau: new Date(), khongDungTu: mocDanhDau, khongDungBoi: "chu@test", khongDungGhiChu: "BC cũ" },
+        { bcId: BC_DANG_DUNG, lanDauCoDau: new Date() },
+      ],
+    });
+    try {
+      expect((await deleteAllData(SHOP_NAME)).ok).toBe(true);
+      if (await hasBronzeBacklog()) await clearBronzeBacklog();
+      const NGAY_MS = 24 * 3600 * 1000;
+      const cong = () =>
+        lyDoHoaDonTiktokChuaDu(prisma, khoaNgayVn(new Date(Date.now() - 5 * NGAY_MS)), khoaNgayVn(new Date()));
+
+      // (b) quyết định "không dùng thẻ" còn nguyên: người/mốc/ghi chú giữ, BC đó vẫn bị bỏ khỏi tập xét.
+      const danhDau = await prisma.tiktokBcHoaDon.findUniqueOrThrow({ where: { bcId: BC_DANH_DAU } });
+      expect(danhDau.khongDungTu).toEqual(mocDanhDau);
+      expect(danhDau.khongDungBoi).toBe("chu@test");
+      expect(danhDau.khongDungGhiChu).toBe("BC cũ");
+      const lyDoTrong = await cong();
+      expect(lyDoTrong).toContain(`BC ${BC_DANG_DUNG}`);
+      expect(lyDoTrong).not.toContain(BC_DANH_DAU);
+
+      // (a) SyncLog đã bị xoá mà chế độ nghiêm vẫn bật: BC chỉ còn trang KHÔNG dấu ⇒ vẫn CHẶN theo luật dấu lượt
+      // (luật cũ sẽ coi trang OK đã dựng Silver là lượt sạch và MỞ).
+      await prisma.syncLog.create({
+        data: {
+          kind: "TIKTOK_ADS",
+          status: "OK",
+          finishedAt: new Date(),
+          stats: { stream: "tiktokbusiness/invoice", shopId: BC_DANG_DUNG, mode: "land+transform", luotId: "9001" },
+        },
+      });
+      expect(await cong()).toContain(`KHÔNG có dấu bắt đầu lượt (BC ${BC_DANG_DUNG})`);
+    } finally {
+      await prisma.tiktokBcHoaDon.deleteMany();
+      await prisma.syncLog.deleteMany({ where: { kind: "TIKTOK_ADS" } });
+    }
   });
 
   it("GIỮ sản phẩm/biến thể và giá vốn nhập tay (APP-OWNED)", async () => {

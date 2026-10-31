@@ -1,3 +1,4 @@
+import { thuTuPhienBanSql } from "@/lib/bronze/transform-raw-helpers";
 import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
 
@@ -32,13 +33,14 @@ export async function docDeXuatGiaVon(cheDo: CheDoDoiChieu): Promise<{
     select: { id: true, pancakeId: true, sku: true, label: true, costPrice: true },
   });
 
-  // Bản MỚI NHẤT mỗi sản phẩm trong Bronze shop KHO (cùng luật `DISTINCT ON` với transform).
+  // Bản ĐỨNG ĐẦU mỗi sản phẩm trong Bronze shop KHO — cùng thứ tự phiên bản với transform (mốc lần thấy cuối:
+  // Pancake trả lại đúng giá cũ sau một lần sửa thì đề xuất theo giá đó, không kẹt ở bản giữa).
   // Đọc payload qua Prisma (JSON.parse) AN TOÀN ở đây: products dùng uuid chuỗi, không có số
   // ≥16 chữ số — cùng căn cứ đã ghi ở `latestPayloads` (transform-raw-helpers.ts).
   const rawProducts = await prisma.$queryRawUnsafe<{ payload: unknown }[]>(
     `SELECT DISTINCT ON ("externalId") payload
        FROM "RawPancakeProduct" WHERE "shopId" = $1
-       ORDER BY "externalId", "fetchedAt" DESC, "id" DESC`,
+       ORDER BY "externalId", ${thuTuPhienBanSql("RawPancakeProduct")}`,
     shopKho,
   );
   const giaKho: BienTheKho[] = rawProducts.flatMap((r) => rutBienTheTuPayload(r.payload));

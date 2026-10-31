@@ -6,8 +6,8 @@
  * đọc của bộ kia. `TEST_DATABASE_URL_E2E` cho e2e một database riêng. Không set biến ⇒ rơi về
  * `TEST_DATABASE_URL` (hành vi cũ; CI dựng Postgres riêng cho từng job nên không cần biến này).
  *
- * Biến ĐỂ TRỐNG cũng phải rơi về `TEST_DATABASE_URL`: `.env.example` khai sẵn dòng mẫu nên máy nào
- * copy về mà chưa dựng DB riêng sẽ có `TEST_DATABASE_URL_E2E=""` — chuỗi rỗng KHÔNG phải "đã set".
+ * Biến ĐỂ TRỐNG cũng phải rơi về `TEST_DATABASE_URL`: `.env.operator.example` khai sẵn dòng mẫu nên máy nào
+ * nối file đó vào `.env` mà chưa dựng DB riêng sẽ có `TEST_DATABASE_URL_E2E=""` — chuỗi rỗng KHÔNG phải "đã set".
  */
 export function e2eDatabaseUrlFromEnv(): string | undefined {
   const rieng = process.env.TEST_DATABASE_URL_E2E?.trim();

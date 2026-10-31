@@ -2,6 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 
 import { mauTimKiemIlike } from "@/lib/escape-ilike";
 import { prisma } from "@/lib/prisma";
+import { PAGE_SIZE } from "@/lib/page-size";
 
 import type { KetQuaChe, QuyenGiaVon } from "./che-gia-von-types";
 
@@ -56,7 +57,6 @@ export type VariantListPage = KetQuaChe<
 
 export type VariantExport = KetQuaChe<{ rows: VariantRow[] }, { rows: VariantRowChe[] }>;
 
-const PAGE_SIZE = 20;
 
 /** Ngưỡng cảnh báo mặc định (Setting.defaultLowStockThreshold; parse int, fallback 5). Dùng cho placeholder UI + biểu thức lọc. */
 export async function getDefaultThreshold(): Promise<number> {

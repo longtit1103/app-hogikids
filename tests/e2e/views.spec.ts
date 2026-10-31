@@ -62,13 +62,14 @@ test.describe("Sản phẩm — giá vốn (gộp theo sản phẩm)", () => {
   });
 
   test("áp giá vốn cấp sản phẩm → mọi biến thể đổi + reload còn giá trị", async ({ page }) => {
-    // "Sản phẩm mẫu 1" có 5 biến thể đang cùng giá 100.000 → áp giá mới bung confirm ghi đè hàng loạt.
-    page.on("dialog", (d) => d.accept());
+    // "Sản phẩm mẫu 1" có 5 biến thể đang cùng giá 100.000 → áp giá mới bung hộp xác nhận ghi đè hàng loạt.
     const row = page.getByTestId("product-row").filter({ hasText: "Sản phẩm mẫu 1" }).first();
     await row.getByTestId("gia-von-sp").click();
     const input = row.getByTestId("gia-von-sp");
     await input.fill("123456");
     await input.press("Enter");
+    // Hộp xác nhận của app (không còn hộp confirm gốc của trình duyệt).
+    await page.getByTestId("xac-nhan-dong-y").click();
     await expect(row.getByTestId("gia-von-sp")).toContainText("123.456");
 
     await page.reload();

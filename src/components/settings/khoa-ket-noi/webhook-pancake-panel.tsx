@@ -24,22 +24,27 @@ export function WebhookPancakePanel({ danhSach }: { danhSach: TrangThaiWebhookSh
     <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-3">
       <p className="text-sm font-medium text-ink">Webhook (sự kiện realtime từ Pancake)</p>
       <div className="flex flex-col gap-2">
-        {danhSach.map((w) => (
-          <div key={w.url} className="flex flex-col gap-0.5">
+        {danhSach.map(({ ten, url, loi, ganNhat }) => (
+          <div key={ten} className="flex flex-col gap-0.5">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
-              <span className="text-xs font-medium text-ink">{w.ten}</span>
+              <span className="text-xs font-medium text-ink">{ten}</span>
               <span className="text-xs text-muted-foreground">
-                {w.ganNhat ? `Sự kiện gần nhất: ${w.ganNhat}` : "Chưa từng nhận sự kiện"}
+                {ganNhat ? `Sự kiện gần nhất: ${ganNhat}` : "Chưa từng nhận sự kiện"}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded bg-background px-2 py-1 text-xs text-muted-foreground">
-                {w.url}
-              </code>
-              <Button type="button" variant="outline" size="xs" className="shrink-0" onClick={() => copy(w.url)}>
-                Copy
-              </Button>
-            </div>
+            {url ? (
+              <div className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate rounded bg-background px-2 py-1 text-xs text-muted-foreground">
+                  {url}
+                </code>
+                <Button type="button" variant="outline" size="xs" className="shrink-0" onClick={() => copy(url)}>
+                  Copy
+                </Button>
+              </div>
+            ) : (
+              // Không có path trong Setting ⇒ KHÔNG hiện URL đoán: dán URL sai vào Pancake là webhook chết câm.
+              <p className="text-xs text-error">{loi}</p>
+            )}
           </div>
         ))}
       </div>

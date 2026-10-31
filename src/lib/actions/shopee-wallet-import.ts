@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { landRaw } from "@/lib/bronze/land-raw";
 import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
@@ -200,128 +200,132 @@ export async function importShopeeWallet(formData: FormData): Promise<ActionResu
   const c = await congAction("tai-chinh-dong-tien:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const form = await readWalletFile(formData);
-  if (!form.ok) return form;
-
-  const p = safeParse(form.buf);
-  if (!p.ok) return p;
-  const { rows, errors, warnings, summary, computed, duplicateKeys } = p.parsed;
-
-  // CỔNG CHẶN 1: còn dòng không đọc được → TỪ CHỐI. Phần lớn ca này đã tự lệch checksum (dòng lỗi bị
-  // loại khỏi cả Σ lẫn countIn/countOut), nhưng KHÔNG phải tất cả: dòng rác mà block "Tóm tắt" không
-  // đếm thì checksum vẫn khớp và dòng đó mất im lặng. Nặng hơn: lỗi CẤU TRÚC (thiếu dòng tiêu đề,
-  // thiếu cột) trả về 0 dòng + Σ = 0, gặp file có Tóm tắt toàn 0 là báo "import 0 dòng thành công".
-  if (errors.length > 0) {
-    return { ok: false, error: invalidRowMessage(errors), code: "PARSE_ERROR" };
-  }
-
-  // CỔNG CHẶN 2: Σ theo Dòng tiền phải khớp block Tóm tắt.
-  const check = verifyChecksum(summary, computed);
-  if (!check.ok) {
-    return {
-      ok: false,
-      error: `Checksum không khớp — từ chối import để tránh thiếu/lệch số. Chi tiết: ${check.detail}`,
-      code: "CHECKSUM_MISMATCH",
-    };
-  }
-
-  // CỔNG CHẶN 3: trùng khoá tổng hợp → Bronze/Silver gộp 1 dòng ⇒ số sẽ thiếu dù checksum khớp.
-  if (duplicateKeys.length > 0) {
-    return { ok: false, error: duplicateKeyMessage(duplicateKeys), code: "DUPLICATE_KEY" };
-  }
-
-  // CỔNG CHẶN 4: chuỗi "Số dư Ví sau giao dịch" phải liền mạch. File xuất CÓ LỌC loại giao dịch
-  // qua được cả 3 cổng trên (Shopee tính lại block "Tóm tắt" theo bộ lọc — đo trên cặp file thật
-  // 13/08) nhưng số dư từng dòng thì Shopee KHÔNG tính lại ⇒ chỗ thiếu giao dịch để lại vết đứt
-  // số học. Guard tự rút lui (không chặn) khi thiếu dữ liệu kiểm — nhưng phải kêu vào warnings.
-  const soDu = timGaySoDuVi(rows, p.parsed.coCotSoDu);
-  if (soDu.gay.length > 0) {
-    return { ok: false, error: thongDiepGaySoDu(soDu.gay), code: "BALANCE_GAP" };
-  }
-  if (soDu.boQuaViSao) {
-    warnings.push(`Không kiểm được tính đủ-dòng qua số dư ví: ${soDu.boQuaViSao}`);
-  }
-
-  if (rows.length === 0) {
-    return { ok: true, data: { landed: 0, transformed: 0, rowCount: 0, skipped: 0, recovered: 0, warnings } };
-  }
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const { shopee } = await layCauHinhShop();
-    const landRes = await landRaw("shopee/wallet", shopee, JSON.stringify({ data: rows }));
+    const form = await readWalletFile(formData);
+    if (!form.ok) return form;
 
-    const tWarnings: string[] = [];
-    // [RT-FM6] Transform dòng vừa land (O(trang)) + TỰ CHỮA dòng kẹt từ lượt hỏng trước — cùng
-    // khuôn `seenIds` của luồng orders. Land commit Bronze RIÊNG rồi transform mới chạy, nên một
-    // lượt chết/lỗi giữa hai bước để lại dòng Bronze CÓ mà Silver THIẾU; nhập lại đúng file đó thì
-    // payload y hệt ⇒ `ON CONFLICT DO NOTHING` ⇒ `landedIds` RỖNG. Chỉ transform theo `landedIds`
-    // là bỏ rơi dòng kẹt trong khi lượt nhập lại báo xanh "0 dòng mới" — đường cứu còn lại là một
-    // lượt "Dựng lại từ kho thô" TOÀN BỘ (nút UI/script, kéo tồn kho lùi ảnh đêm nên phải vá tồn
-    // sau đó) chỉ để vá vài dòng ví, mà chủ shop không có dấu hiệu nào để biết cần bấm nó.
-    //
-    // CHỈ soi phần "thấy mà không vừa land": dòng vừa land đằng nào cũng được transform ngay dưới,
-    // soi cả chúng thì mọi lượt bình thường đều bị kể là "còn kẹt" — cảnh báo giả ở mọi lượt nhập.
-    const landedSet = new Set(landRes.landedIds);
-    const thayMaKhongLand = landRes.seenIds.filter((id) => !landedSet.has(id));
-    const conKet = await locKhoaChuaCoSilver(thayMaKhongLand);
-    if (conKet.length > 0) {
-      tWarnings.push(
-        `${conKet.length} dòng của file này còn kẹt từ lượt import hỏng trước — dựng lại trong lượt này`,
-      );
+    const p = safeParse(form.buf);
+    if (!p.ok) return p;
+    const { rows, errors, warnings, summary, computed, duplicateKeys } = p.parsed;
+
+    // CỔNG CHẶN 1: còn dòng không đọc được → TỪ CHỐI. Phần lớn ca này đã tự lệch checksum (dòng lỗi bị
+    // loại khỏi cả Σ lẫn countIn/countOut), nhưng KHÔNG phải tất cả: dòng rác mà block "Tóm tắt" không
+    // đếm thì checksum vẫn khớp và dòng đó mất im lặng. Nặng hơn: lỗi CẤU TRÚC (thiếu dòng tiêu đề,
+    // thiếu cột) trả về 0 dòng + Σ = 0, gặp file có Tóm tắt toàn 0 là báo "import 0 dòng thành công".
+    if (errors.length > 0) {
+      return { ok: false, error: invalidRowMessage(errors), code: "PARSE_ERROR" };
     }
-    const canTransform = [...new Set([...landRes.landedIds, ...conKet])];
-    const stats = await transformFromRaw("shopee/wallet", tWarnings, { externalIds: canTransform });
 
-    revalidatePath("/tai-chinh");
-
-    // Dòng đã land NHƯNG upsert Silver lỗi (vd amount vượt INT Postgres, lỗi ghi tạm) →
-    // skipped>0. Báo thành công lúc này = số "Tiền đã về" thiếu ÂM THẦM. Trả lỗi TO; dòng
-    // vẫn ở Bronze, nhập lại chính file này là lượt tự chữa phía trên dựng nốt.
-    if (stats.skipped > 0) {
+    // CỔNG CHẶN 2: Σ theo Dòng tiền phải khớp block Tóm tắt.
+    const check = verifyChecksum(summary, computed);
+    if (!check.ok) {
       return {
         ok: false,
-        error: `${stats.skipped} dòng KHÔNG lưu được vào Silver (lỗi ghi DB) — số "Tiền đã về" có thể thiếu. Nhập lại chính file này để dựng nốt phần thiếu. ${tWarnings[0] ?? ""}`.trim(),
-        code: "PARTIAL_PERSIST",
+        error: `Checksum không khớp — từ chối import để tránh thiếu/lệch số. Chi tiết: ${check.detail}`,
+        code: "CHECKSUM_MISMATCH",
       };
     }
 
-    // CỔNG ĐỦ-DÒNG: mọi khoá của file (kể cả record không rút được khoá — `skippedNoId`) phải có
-    // dòng Silver rồi mới được nói "xong". Lưới an toàn cho mọi đường rơi chưa lường: thiếu mà vẫn
-    // `ok:true` chính là kiểu toast-xanh-giả cả bản vá này sinh ra để diệt.
-    const thieuSauTransform = await locKhoaChuaCoSilver(landRes.seenIds);
-    if (thieuSauTransform.length > 0 || landRes.skippedNoId > 0) {
-      const soThieu = thieuSauTransform.length + landRes.skippedNoId;
-      return {
-        ok: false,
-        error: `${soThieu} dòng của file CHƯA vào được Silver — số "Tiền đã về" đang thiếu. Nhập lại chính file này để dựng nốt; còn lỗi thì báo kiểm tra hệ thống. ${tWarnings[0] ?? ""}`.trim(),
-        code: "PARTIAL_PERSIST",
-      };
+    // CỔNG CHẶN 3: trùng khoá tổng hợp → Bronze/Silver gộp 1 dòng ⇒ số sẽ thiếu dù checksum khớp.
+    if (duplicateKeys.length > 0) {
+      return { ok: false, error: duplicateKeyMessage(duplicateKeys), code: "DUPLICATE_KEY" };
     }
 
-    // Nhật ký SAU khi đủ-dòng — KHÔNG cùng transaction với land/transform: hai bước đó commit riêng
-    // theo thiết kế (Bronze trước, Silver sau, lượt nhập lại tự chữa dòng kẹt). Nhật ký hỏng ở đây
-    // ⇒ báo lỗi (không toast xanh), dữ liệu đã vào vẫn đúng và nhập lại chính file là idempotent.
-    await ghiNhatKy(prisma, {
-      actor: nguoiDung,
-      hanhDong: "VI_SHOPEE_IMPORT",
-      doiTuong: { loai: "ShopeeSettlement" },
-      ghiChu: { soDong: rows.length },
-    });
+    // CỔNG CHẶN 4: chuỗi "Số dư Ví sau giao dịch" phải liền mạch. File xuất CÓ LỌC loại giao dịch
+    // qua được cả 3 cổng trên (Shopee tính lại block "Tóm tắt" theo bộ lọc — đo trên cặp file thật
+    // 13/08) nhưng số dư từng dòng thì Shopee KHÔNG tính lại ⇒ chỗ thiếu giao dịch để lại vết đứt
+    // số học. Guard tự rút lui (không chặn) khi thiếu dữ liệu kiểm — nhưng phải kêu vào warnings.
+    const soDu = timGaySoDuVi(rows, p.parsed.coCotSoDu);
+    if (soDu.gay.length > 0) {
+      return { ok: false, error: thongDiepGaySoDu(soDu.gay), code: "BALANCE_GAP" };
+    }
+    if (soDu.boQuaViSao) {
+      warnings.push(`Không kiểm được tính đủ-dòng qua số dư ví: ${soDu.boQuaViSao}`);
+    }
 
-    return {
-      ok: true,
-      data: {
-        landed: landRes.landed,
-        transformed: stats.shopeeUpserted,
-        rowCount: rows.length,
-        skipped: stats.skipped,
-        recovered: conKet.length,
-        warnings: [...warnings, ...tWarnings],
-      },
-    };
-  } catch {
-    return { ok: false, error: "Lỗi khi import file ví Shopee" };
+    if (rows.length === 0) {
+      return { ok: true, data: { landed: 0, transformed: 0, rowCount: 0, skipped: 0, recovered: 0, warnings } };
+    }
+
+    try {
+      const { shopee } = await layCauHinhShop();
+      const landRes = await landRaw("shopee/wallet", shopee, JSON.stringify({ data: rows }));
+
+      const tWarnings: string[] = [];
+      // [RT-FM6] Transform dòng vừa land (O(trang)) + TỰ CHỮA dòng kẹt từ lượt hỏng trước — cùng
+      // khuôn `seenIds` của luồng orders. Land commit Bronze RIÊNG rồi transform mới chạy, nên một
+      // lượt chết/lỗi giữa hai bước để lại dòng Bronze CÓ mà Silver THIẾU; nhập lại đúng file đó thì
+      // payload y hệt ⇒ `ON CONFLICT DO NOTHING` ⇒ `landedIds` RỖNG. Chỉ transform theo `landedIds`
+      // là bỏ rơi dòng kẹt trong khi lượt nhập lại báo xanh "0 dòng mới" — đường cứu còn lại là một
+      // lượt "Dựng lại từ kho thô" TOÀN BỘ (nút UI/script, kéo tồn kho lùi ảnh đêm nên phải vá tồn
+      // sau đó) chỉ để vá vài dòng ví, mà chủ shop không có dấu hiệu nào để biết cần bấm nó.
+      //
+      // CHỈ soi phần "thấy mà không vừa land": dòng vừa land đằng nào cũng được transform ngay dưới,
+      // soi cả chúng thì mọi lượt bình thường đều bị kể là "còn kẹt" — cảnh báo giả ở mọi lượt nhập.
+      const landedSet = new Set(landRes.landedIds);
+      const thayMaKhongLand = landRes.seenIds.filter((id) => !landedSet.has(id));
+      const conKet = await locKhoaChuaCoSilver(thayMaKhongLand);
+      if (conKet.length > 0) {
+        tWarnings.push(
+          `${conKet.length} dòng của file này còn kẹt từ lượt import hỏng trước — dựng lại trong lượt này`,
+        );
+      }
+      const canTransform = [...new Set([...landRes.landedIds, ...conKet])];
+      const stats = await transformFromRaw("shopee/wallet", tWarnings, { externalIds: canTransform });
+
+      revalidatePath("/tai-chinh");
+
+      // Dòng đã land NHƯNG upsert Silver lỗi (vd amount vượt INT Postgres, lỗi ghi tạm) →
+      // skipped>0. Báo thành công lúc này = số "Tiền đã về" thiếu ÂM THẦM. Trả lỗi TO; dòng
+      // vẫn ở Bronze, nhập lại chính file này là lượt tự chữa phía trên dựng nốt.
+      if (stats.skipped > 0) {
+        return {
+          ok: false,
+          error: `${stats.skipped} dòng KHÔNG lưu được vào Silver (lỗi ghi DB) — số "Tiền đã về" có thể thiếu. Nhập lại chính file này để dựng nốt phần thiếu. ${tWarnings[0] ?? ""}`.trim(),
+          code: "PARTIAL_PERSIST",
+        };
+      }
+
+      // CỔNG ĐỦ-DÒNG: mọi khoá của file (kể cả record không rút được khoá — `skippedNoId`) phải có
+      // dòng Silver rồi mới được nói "xong". Lưới an toàn cho mọi đường rơi chưa lường: thiếu mà vẫn
+      // `ok:true` chính là kiểu toast-xanh-giả cả bản vá này sinh ra để diệt.
+      const thieuSauTransform = await locKhoaChuaCoSilver(landRes.seenIds);
+      if (thieuSauTransform.length > 0 || landRes.skippedNoId > 0) {
+        const soThieu = thieuSauTransform.length + landRes.skippedNoId;
+        return {
+          ok: false,
+          error: `${soThieu} dòng của file CHƯA vào được Silver — số "Tiền đã về" đang thiếu. Nhập lại chính file này để dựng nốt; còn lỗi thì báo kiểm tra hệ thống. ${tWarnings[0] ?? ""}`.trim(),
+          code: "PARTIAL_PERSIST",
+        };
+      }
+
+      // Nhật ký SAU khi đủ-dòng — KHÔNG cùng transaction với land/transform: hai bước đó commit riêng
+      // theo thiết kế (Bronze trước, Silver sau, lượt nhập lại tự chữa dòng kẹt). Nhật ký hỏng ở đây
+      // ⇒ báo lỗi (không toast xanh), dữ liệu đã vào vẫn đúng và nhập lại chính file là idempotent.
+      await ghiNhatKy(prisma, {
+        actor: nguoiDung,
+        hanhDong: "VI_SHOPEE_IMPORT",
+        doiTuong: { loai: "ShopeeSettlement" },
+        ghiChu: { soDong: rows.length },
+      });
+
+      return {
+        ok: true,
+        data: {
+          landed: landRes.landed,
+          transformed: stats.shopeeUpserted,
+          rowCount: rows.length,
+          skipped: stats.skipped,
+          recovered: conKet.length,
+          warnings: [...warnings, ...tWarnings],
+        },
+      };
+    } catch {
+      return { ok: false, error: "Lỗi khi import file ví Shopee" };
+    }
+  } finally {
+    cua.ra();
   }
 }

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import type { ActionResult } from "@/lib/actions/action-result";
 import { cn } from "@/lib/utils";
+import { xacNhan } from "@/lib/xac-nhan-hang-doi";
 
 type ProductApplyCellProps = {
   /** Giá trị chung của mẫu (khi mọi biến thể bằng nhau). null = trống/mặc định. */
@@ -73,7 +74,7 @@ export function ProductApplyCell({
     if (!showMixed && parsed === display) return;
 
     const confirmMsg = getConfirmMessage?.(parsed);
-    if (confirmMsg && !window.confirm(confirmMsg)) return; // user hủy → revert, không toast
+    if (confirmMsg && !(await xacNhan(confirmMsg))) return; // user hủy → revert, không toast
 
     const prev = display;
     setDisplay(parsed);

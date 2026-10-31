@@ -6,7 +6,7 @@ import type { SyncKind } from "@/generated/prisma/client";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import type { LatestSync } from "@/lib/actions/sync-types";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import {
   chonBuocCuoiCuaLuot,
   MA_MOC_NGOAI_DAI,
@@ -131,45 +131,49 @@ export async function triggerSyncNow(): Promise<ActionResult<{ mocBam: string; l
   // Không ghi DB, nhưng vẫn phải chặn: mọi trang n8n đẩy về sẽ bị 503 ở `/api/ingest/raw` TRƯỚC
   // `withSyncLog` ⇒ không có dòng nhật ký nào, badge "Đồng bộ lúc…" giữ mốc cũ, mà action này lại
   // trả ok ⇒ toast xanh nhưng không có gì xảy ra.
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  // MỘT nguồn giải URL cho cả nút này lẫn badge trạng thái — xem `giai-url-sync-now.ts`.
-  const dich = await giaiUrlSyncNow();
-  const mocBam = new Date().toISOString();
-  const luotId = randomUUID();
-  if (!dich) {
-    return { ok: false, error: "Chưa cấu hình kết nối n8n — điền n8n URL ở Cài đặt › Kết nối n8n" };
-  }
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    // Header auth của webhook sync-now: khoá RIÊNG `n8nSyncNowSecret` do lượt "Cài workflows"
-    // sinh (KHÔNG phải INGEST_SECRET — header nằm plaintext trong execution data của n8n, còn
-    // INGEST_SECRET mở được cả kho token). Workflow bản cũ chưa bật auth thì header thừa vô hại.
-    const secretRow = await prisma.setting.findUnique({ where: { key: "n8nSyncNowSecret" } });
-    const res = await fetch(dich.url, {
-      method: "POST",
-      headers: { [SYNC_NOW_AUTH_HEADER]: secretRow?.value ?? "", "Content-Type": "application/json" },
-      body: JSON.stringify({ luotId }),
-      // Đây là đường THỨ BA mang secret ra ngoài (cùng họ với lượt Cài workflows và probe). Đo thật
-      // 22/09 trên undici: qua chuyển hướng KHÁC ORIGIN, chỉ `Authorization` bị strip — **header
-      // custom như header auth ở đây đi tiếp nguyên vẹn**. Nên không chặn là `n8nSyncNowSecret`
-      // chảy sang đích lạ chỉ bằng một lượt 302.
-      redirect: "manual",
-      signal: AbortSignal.timeout(5000),
-    });
-    if (laChuyenHuong(res.status)) {
-      return {
-        ok: false,
-        error: "n8n URL trả chuyển hướng — đã dừng, không gửi tiếp. Kiểm tra lại địa chỉ n8n ở Cài đặt",
-      };
+    // MỘT nguồn giải URL cho cả nút này lẫn badge trạng thái — xem `giai-url-sync-now.ts`.
+    const dich = await giaiUrlSyncNow();
+    const mocBam = new Date().toISOString();
+    const luotId = randomUUID();
+    if (!dich) {
+      return { ok: false, error: "Chưa cấu hình kết nối n8n — điền n8n URL ở Cài đặt › Kết nối n8n" };
     }
-    if (!res.ok) {
+    try {
+      // Header auth của webhook sync-now: khoá RIÊNG `n8nSyncNowSecret` do lượt "Cài workflows"
+      // sinh (KHÔNG phải INGEST_SECRET — header nằm plaintext trong execution data của n8n, còn
+      // INGEST_SECRET mở được cả kho token). Workflow bản cũ chưa bật auth thì header thừa vô hại.
+      const secretRow = await prisma.setting.findUnique({ where: { key: "n8nSyncNowSecret" } });
+      const res = await fetch(dich.url, {
+        method: "POST",
+        headers: { [SYNC_NOW_AUTH_HEADER]: secretRow?.value ?? "", "Content-Type": "application/json" },
+        body: JSON.stringify({ luotId }),
+        // Đây là đường THỨ BA mang secret ra ngoài (cùng họ với lượt Cài workflows và probe). Đo thật
+        // 22/09 trên undici: qua chuyển hướng KHÁC ORIGIN, chỉ `Authorization` bị strip — **header
+        // custom như header auth ở đây đi tiếp nguyên vẹn**. Nên không chặn là `n8nSyncNowSecret`
+        // chảy sang đích lạ chỉ bằng một lượt 302.
+        redirect: "manual",
+        signal: AbortSignal.timeout(5000),
+      });
+      if (laChuyenHuong(res.status)) {
+        return {
+          ok: false,
+          error: "n8n URL trả chuyển hướng — đã dừng, không gửi tiếp. Kiểm tra lại địa chỉ n8n ở Cài đặt",
+        };
+      }
+      if (!res.ok) {
+        return { ok: false, error: "Không gọi được n8n — kiểm tra Cài đặt kết nối" };
+      }
+    } catch {
       return { ok: false, error: "Không gọi được n8n — kiểm tra Cài đặt kết nối" };
     }
-  } catch {
-    return { ok: false, error: "Không gọi được n8n — kiểm tra Cài đặt kết nối" };
+    // Không có DB write nào để ghi kèm (lượt đồng bộ tự ghi SyncLog phía ingest) ⇒ nhật ký ghi sau khi
+    // n8n nhận lệnh, NGOÀI `try`: nhật ký hỏng là lỗi hệ thống, không được báo nhầm "không gọi được n8n".
+    await ghiNhatKy(prisma, { actor: cong.nguoiDung, hanhDong: HANH_DONG.DONG_BO_KICH_HOAT });
+    return { ok: true, data: { mocBam, luotId } };
+  } finally {
+    cua.ra();
   }
-  // Không có DB write nào để ghi kèm (lượt đồng bộ tự ghi SyncLog phía ingest) ⇒ nhật ký ghi sau khi
-  // n8n nhận lệnh, NGOÀI `try`: nhật ký hỏng là lỗi hệ thống, không được báo nhầm "không gọi được n8n".
-  await ghiNhatKy(prisma, { actor: cong.nguoiDung, hanhDong: HANH_DONG.DONG_BO_KICH_HOAT });
-  return { ok: true, data: { mocBam, luotId } };
 }

@@ -1,4 +1,3 @@
-import { WEBHOOK_PANCAKE_PATH } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
 import { expect, test, type Page } from "./fixture-cho-trang-stream-xong";
 import { format } from "date-fns";
 
@@ -289,6 +288,16 @@ test.describe("Cài đặt", () => {
     const giaTri = `E2E-PAN-KHO-${Date.now()}`;
     const prisma = testPrisma();
     const coTruoc = await prisma.setting.findUnique({ where: { key: KHOA_KEY } });
+    // Path webhook là dữ liệu của instance (`Setting`), không còn trong repo. Seed path GIẢ cho shop
+    // Shopee để khẳng định URL hiển thị ghép đúng từ Setting; giữ giá trị cũ để trả lại trong finally.
+    const KHOA_PATH_SHOPEE = "n8nWebhookPath.shopee";
+    const PATH_GIA = "e2e0e2e0e2e0e2e0e2e0e2e0e2e0e2e0";
+    const pathTruoc = await prisma.setting.findUnique({ where: { key: KHOA_PATH_SHOPEE } });
+    await prisma.setting.upsert({
+      where: { key: KHOA_PATH_SHOPEE },
+      create: { key: KHOA_PATH_SHOPEE, value: PATH_GIA },
+      update: { value: PATH_GIA },
+    });
     try {
       await page.goto("/cai-dat");
       const khoi = page.locator("section#ket-noi");
@@ -310,14 +319,10 @@ test.describe("Cài đặt", () => {
 
       // Khối webhook nằm trong thân thẻ Pancake: đủ URL để dán lại vào Pancake khi mất cấu hình.
       await expect(khoi.getByText("Webhook (sự kiện realtime từ Pancake)")).toBeVisible();
-      // URL suy TỪ NGUỒN SỰ THẬT (`WEBHOOK_PANCAKE_PATH`, rút từ chính file workflow n8n) chứ
-      // không ghi cứng: path webhook bị xoay khi cần (lần gần nhất 21/09 sau audit bảo mật), và
-      // mỗi bản sao path trong repo là thêm một cửa để nó rò ra bản public. Vẫn khẳng định URL
-      // ĐẦY ĐỦ chứ không phải mẩu chuỗi ngắn — mẩu ngắn thì trang nào cũng "thấy", thành phép
-      // kiểm mù.
-      await expect(
-        khoi.getByText(`https://n8n.example.com/webhook/${WEBHOOK_PANCAKE_PATH.shopee}`)
-      ).toBeVisible();
+      // URL ghép từ path trong `Setting` (đã seed giả ở đầu test) — path thật không được nằm trong
+      // repo. Vẫn khẳng định URL ĐẦY ĐỦ chứ không phải mẩu chuỗi ngắn — mẩu ngắn thì trang nào cũng
+      // "thấy", thành phép kiểm mù.
+      await expect(khoi.getByText(`https://n8n.example.com/webhook/${PATH_GIA}`)).toBeVisible();
 
       // Lưu một khóa bí mật của thẻ Pancake — nút "Lưu khóa" chỉ mở khi có ô đã gõ.
       const nutLuu = thePancake.getByRole("button", { name: "Lưu khóa" });
@@ -335,6 +340,11 @@ test.describe("Cài đặt", () => {
         await prisma.setting.update({ where: { key: KHOA_KEY }, data: { value: coTruoc.value } });
       } else {
         await prisma.setting.deleteMany({ where: { key: KHOA_KEY } });
+      }
+      if (pathTruoc) {
+        await prisma.setting.update({ where: { key: KHOA_PATH_SHOPEE }, data: { value: pathTruoc.value } });
+      } else {
+        await prisma.setting.deleteMany({ where: { key: KHOA_PATH_SHOPEE } });
       }
       await prisma.$disconnect();
     }

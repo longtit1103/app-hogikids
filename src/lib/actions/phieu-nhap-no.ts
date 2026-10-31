@@ -10,7 +10,7 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { maLoiNhatKy } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { formatVnd } from "@/lib/format";
 import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { refIdChoPhieu, TIEN_TO_REF_ID } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
@@ -53,7 +53,7 @@ import { laLoiDongTienBan, OPT_TX_DONG_TIEN, THONG_BAO_KHOA_DONG_TIEN_BAN } from
  * đọc cảnh báo. Mọi lượt sửa khoá dòng phiếu (`khoaCacPhieu`) — cùng khoá với đợt trả gộp, nên một
  * lượt sửa tổng không chen được giữa lúc đợt trả đang kiểm vân tay.
  *
- * PHẢI nằm trong `DUONG_GHI` của `tests/khoa-bao-tri-duong-ghi.test.ts` — `dangPhucHoi()` gọi trực
+ * PHẢI nằm trong `DUONG_GHI` của `tests/khoa-bao-tri-duong-ghi.test.ts` — `vaoCuaGhi()` gọi trực
  * tiếp trong thân từng export.
  */
 
@@ -135,100 +135,104 @@ export async function ghiNhanPhieuVaoSoNo(input: unknown): Promise<ActionResult<
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = ghiNhanSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { uuid, daTraTruoc: daGo, daTraNgay, lyDoLech } = parsed.data;
-
-  // "Đã trả ngay" là TIỀN MỚI ⇒ chỉ sống sau khi bật. Từ chối TRƯỚC mọi câu ghi: không được để lại
-  // hồ sơ mà thiếu dòng tiền chủ shop vừa khai (họ sẽ tưởng đã ghi cả hai).
-  let traNgay: { soTien: number; ngay: Date } | null = null;
-  if (daTraNgay !== undefined) {
-    let mocM: Date;
-    try {
-      mocM = await daBatNoPhaiTra();
-    } catch (e) {
-      if (e instanceof LoiChuaBat) return { ok: false, error: e.message, code: e.code };
-      throw e;
-    }
-    const ngay = ngayTienMoiSchema(mocM).safeParse(daTraNgay.ngay);
-    if (!ngay.success) return { ok: false, error: ngay.error.issues[0].message, field: "daTraNgay" };
-    traNgay = { soTien: daTraNgay.soTien, ngay: startOfDay(ngay.data) };
-  }
-
-  const p = (await docPhieuBronzeMoiNhat([uuid])).get(uuid);
-  if (p === undefined) {
-    return {
-      ok: false,
-      error: "Không còn thấy phiếu nhập này bên Pancake — tải lại trang",
-      code: "DANH_SACH_DA_DOI",
-    };
-  }
-  if (p.status !== STATUS_CON_HIEU_LUC) {
-    return {
-      ok: false,
-      error:
-        p.status === STATUS_DA_HUY
-          ? "Phiếu đã bị huỷ bên Pancake — không ghi nhận nghĩa vụ"
-          : `Phiếu mang trạng thái app chưa biết (mã ${p.status}) — kiểm tra bên Pancake trước`,
-      code: "PHIEU_KHONG_HIEU_LUC",
-    };
-  }
-
-  const refId = refIdChoPhieu(uuid);
-  const maPhieu = p.displayId !== null ? `#${p.displayId}` : `#${uuid.slice(0, 8)}`;
-  let idTao: string | undefined;
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const kq = await daTraTruocHopLe(prisma, { refId, ngayPhieu: p.ngay }, daGo, {
-      laChuShop: laChuShop(nguoiDung),
-      lyDoLech,
-    });
-    const { kho: shopId } = await layCauHinhShop();
-    const ket = await prisma.$transaction(async (tx) => {
-      const tao = await tx.phieuNhapNo.create({
-        data: {
-          refId,
-          shopId,
-          maPhieu,
-          ngayPhieu: p.ngay,
-          tongTien: p.soTien,
-          daTraTruoc: kq.daTraTruoc,
-          ...cotGiaiThich(kq, ""),
-        },
-        select: { id: true },
-      });
-      idTao = tao.id;
-      if (traNgay !== null) {
-        await tx.cashMovement.create({
-          data: {
-            date: traNgay.ngay,
-            kind: "SUPPLIER_PAY",
-            amount: traNgay.soTien,
-            phieuNhapId: tao.id,
-            description: `Trả tiền hàng phiếu ${maPhieu} (trả ngay lúc ghi nhận)`,
-          },
-        });
+    const parsed = ghiNhanSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { uuid, daTraTruoc: daGo, daTraNgay, lyDoLech } = parsed.data;
+
+    // "Đã trả ngay" là TIỀN MỚI ⇒ chỉ sống sau khi bật. Từ chối TRƯỚC mọi câu ghi: không được để lại
+    // hồ sơ mà thiếu dòng tiền chủ shop vừa khai (họ sẽ tưởng đã ghi cả hai).
+    let traNgay: { soTien: number; ngay: Date } | null = null;
+    if (daTraNgay !== undefined) {
+      let mocM: Date;
+      try {
+        mocM = await daBatNoPhaiTra();
+      } catch (e) {
+        if (e instanceof LoiChuaBat) return { ok: false, error: e.message, code: e.code };
+        throw e;
       }
-      await ghiNhatKy(tx, {
-        actor: nguoiDung,
-        hanhDong: "NHAP_HANG_GHI_NO",
-        doiTuong: { loai: "PhieuNhapNo", id: tao.id, moTa: maPhieu },
-        ghiChu: { soDong: traNgay === null ? 0 : 1 },
-      });
-      const doc = await docPhieuTheoId(tao.id, tx);
-      if (doc === null) throw new Error(`PhieuNhapNo ${tao.id} vừa tạo mà không đọc lại được`);
-      return tomTat(doc);
-    });
-    lamMoi();
-    return { ok: true, data: ket };
-  } catch (e) {
-    // `refId` unique: phiếu đã có hồ sơ (tab khác vừa ghi, hoặc bấm lại) ⇒ transaction đã lùi trọn.
-    if ((e as { code?: string })?.code === "P2002") {
-      return { ok: false, error: `Phiếu ${maPhieu} đã có trong sổ nợ — không ghi thêm`, code: "DA_GHI_ROI" };
+      const ngay = ngayTienMoiSchema(mocM).safeParse(daTraNgay.ngay);
+      if (!ngay.success) return { ok: false, error: ngay.error.issues[0].message, field: "daTraNgay" };
+      traNgay = { soTien: daTraNgay.soTien, ngay: startOfDay(ngay.data) };
     }
-    if (!(e instanceof LoiPhieu)) await ghiLoi(nguoiDung, "NHAP_HANG_GHI_NO", idTao, e);
-    return ketQuaLoi(e, "Không ghi nhận được phiếu vào sổ nợ — lỗi hệ thống, thử lại sau.");
+
+    const p = (await docPhieuBronzeMoiNhat([uuid])).get(uuid);
+    if (p === undefined) {
+      return {
+        ok: false,
+        error: "Không còn thấy phiếu nhập này bên Pancake — tải lại trang",
+        code: "DANH_SACH_DA_DOI",
+      };
+    }
+    if (p.status !== STATUS_CON_HIEU_LUC) {
+      return {
+        ok: false,
+        error:
+          p.status === STATUS_DA_HUY
+            ? "Phiếu đã bị huỷ bên Pancake — không ghi nhận nghĩa vụ"
+            : `Phiếu mang trạng thái app chưa biết (mã ${p.status}) — kiểm tra bên Pancake trước`,
+        code: "PHIEU_KHONG_HIEU_LUC",
+      };
+    }
+
+    const refId = refIdChoPhieu(uuid);
+    const maPhieu = p.displayId !== null ? `#${p.displayId}` : `#${uuid.slice(0, 8)}`;
+    let idTao: string | undefined;
+    try {
+      const kq = await daTraTruocHopLe(prisma, { refId, ngayPhieu: p.ngay }, daGo, {
+        laChuShop: laChuShop(nguoiDung),
+        lyDoLech,
+      });
+      const { kho: shopId } = await layCauHinhShop();
+      const ket = await prisma.$transaction(async (tx) => {
+        const tao = await tx.phieuNhapNo.create({
+          data: {
+            refId,
+            shopId,
+            maPhieu,
+            ngayPhieu: p.ngay,
+            tongTien: p.soTien,
+            daTraTruoc: kq.daTraTruoc,
+            ...cotGiaiThich(kq, ""),
+          },
+          select: { id: true },
+        });
+        idTao = tao.id;
+        if (traNgay !== null) {
+          await tx.cashMovement.create({
+            data: {
+              date: traNgay.ngay,
+              kind: "SUPPLIER_PAY",
+              amount: traNgay.soTien,
+              phieuNhapId: tao.id,
+              description: `Trả tiền hàng phiếu ${maPhieu} (trả ngay lúc ghi nhận)`,
+            },
+          });
+        }
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "NHAP_HANG_GHI_NO",
+          doiTuong: { loai: "PhieuNhapNo", id: tao.id, moTa: maPhieu },
+          ghiChu: { soDong: traNgay === null ? 0 : 1 },
+        });
+        const doc = await docPhieuTheoId(tao.id, tx);
+        if (doc === null) throw new Error(`PhieuNhapNo ${tao.id} vừa tạo mà không đọc lại được`);
+        return tomTat(doc);
+      });
+      lamMoi();
+      return { ok: true, data: ket };
+    } catch (e) {
+      // `refId` unique: phiếu đã có hồ sơ (tab khác vừa ghi, hoặc bấm lại) ⇒ transaction đã lùi trọn.
+      if ((e as { code?: string })?.code === "P2002") {
+        return { ok: false, error: `Phiếu ${maPhieu} đã có trong sổ nợ — không ghi thêm`, code: "DA_GHI_ROI" };
+      }
+      if (!(e instanceof LoiPhieu)) await ghiLoi(nguoiDung, "NHAP_HANG_GHI_NO", idTao, e);
+      return ketQuaLoi(e, "Không ghi nhận được phiếu vào sổ nợ — lỗi hệ thống, thử lại sau.");
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -286,26 +290,30 @@ export async function capNhatTongPhieu(input: unknown): Promise<ActionResult<Ket
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    const parsed = capNhatTongSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { phieuNhapId, tongTienMoi } = parsed.data;
 
-  const parsed = capNhatTongSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { phieuNhapId, tongTienMoi } = parsed.data;
-
-  return suaPhieu(nguoiDung, phieuNhapId, "NHAP_HANG_SUA_NO", "tongTien", async (tx, p) => {
-    const uuid = uuidCua(p);
-    const b = (await docPhieuBronzeMoiNhat([uuid], tx)).get(uuid);
-    if (b === undefined) throw new LoiPhieu("Không còn thấy phiếu này bên Pancake — không cập nhật được tổng");
-    if (b.soTien !== tongTienMoi) {
-      throw new LoiPhieu(
-        `Pancake vừa đổi tổng phiếu (hiện ${formatVnd(b.soTien)}) — tải lại trang rồi cập nhật lại`,
-        "DANH_SACH_DA_DOI",
-      );
-    }
-    if (p.tongTien === b.soTien) return false;
-    await tx.phieuNhapNo.update({ where: { id: p.id }, data: { tongTien: b.soTien } });
-    return true;
-  });
+    return await suaPhieu(nguoiDung, phieuNhapId, "NHAP_HANG_SUA_NO", "tongTien", async (tx, p) => {
+      const uuid = uuidCua(p);
+      const b = (await docPhieuBronzeMoiNhat([uuid], tx)).get(uuid);
+      if (b === undefined) throw new LoiPhieu("Không còn thấy phiếu này bên Pancake — không cập nhật được tổng");
+      if (b.soTien !== tongTienMoi) {
+        throw new LoiPhieu(
+          `Pancake vừa đổi tổng phiếu (hiện ${formatVnd(b.soTien)}) — tải lại trang rồi cập nhật lại`,
+          "DANH_SACH_DA_DOI",
+        );
+      }
+      if (p.tongTien === b.soTien) return false;
+      await tx.phieuNhapNo.update({ where: { id: p.id }, data: { tongTien: b.soTien } });
+      return true;
+    });
+  } finally {
+    cua.ra();
+  }
 }
 
 const capNhatDaTraTruocSchema = z.object({ phieuNhapId: idPhieu, daTraTruoc: tienKhongAm, lyDoLech: lyDoLechSchema });
@@ -319,31 +327,35 @@ export async function capNhatDaTraTruoc(input: unknown): Promise<ActionResult<Ke
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    const parsed = capNhatDaTraTruocSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { phieuNhapId, daTraTruoc, lyDoLech } = parsed.data;
 
-  const parsed = capNhatDaTraTruocSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { phieuNhapId, daTraTruoc, lyDoLech } = parsed.data;
-
-  return suaPhieu(nguoiDung, phieuNhapId, "NHAP_HANG_SUA_NO", "daTraTruoc", async (tx, p) => {
-    const kq = await daTraTruocHopLe(tx, p, daTraTruoc, { laChuShop: laChuShop(nguoiDung), lyDoLech });
-    const data = { daTraTruoc: kq.daTraTruoc, ...cotGiaiThich(kq, p.note) };
-    const coDoi =
-      data.daTraTruoc !== p.daTraTruoc ||
-      data.lechDaGiaiThich !== p.lechDaGiaiThich ||
-      data.lechDaGiaiThichSo !== p.lechDaGiaiThichSo ||
-      data.note !== p.note;
-    if (!coDoi) return false;
-    await tx.phieuNhapNo.update({ where: { id: p.id }, data });
-    // Bớt "đã trả trước" cũng hạ trần hoàn tiền: NCC đã hoàn 5 thì đã trả không được tụt dưới 5.
-    try {
-      await chanHoanVuotDaTra(tx, [p.id]);
-    } catch (e) {
-      if (e instanceof LoiHoSoNo) throw new LoiPhieu(e.message, e.code, "daTraTruoc");
-      throw e;
-    }
-    return true;
-  });
+    return await suaPhieu(nguoiDung, phieuNhapId, "NHAP_HANG_SUA_NO", "daTraTruoc", async (tx, p) => {
+      const kq = await daTraTruocHopLe(tx, p, daTraTruoc, { laChuShop: laChuShop(nguoiDung), lyDoLech });
+      const data = { daTraTruoc: kq.daTraTruoc, ...cotGiaiThich(kq, p.note) };
+      const coDoi =
+        data.daTraTruoc !== p.daTraTruoc ||
+        data.lechDaGiaiThich !== p.lechDaGiaiThich ||
+        data.lechDaGiaiThichSo !== p.lechDaGiaiThichSo ||
+        data.note !== p.note;
+      if (!coDoi) return false;
+      await tx.phieuNhapNo.update({ where: { id: p.id }, data });
+      // Bớt "đã trả trước" cũng hạ trần hoàn tiền: NCC đã hoàn 5 thì đã trả không được tụt dưới 5.
+      try {
+        await chanHoanVuotDaTra(tx, [p.id]);
+      } catch (e) {
+        if (e instanceof LoiHoSoNo) throw new LoiPhieu(e.message, e.code, "daTraTruoc");
+        throw e;
+      }
+      return true;
+    });
+  } finally {
+    cua.ra();
+  }
 }
 
 const huySchema = z.object({ phieuNhapId: idPhieu });
@@ -357,16 +369,20 @@ export async function danhDauHuyPhieu(input: unknown): Promise<ActionResult<KetQ
   const c = await congChuShopAction();
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    const parsed = huySchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
 
-  const parsed = huySchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-
-  return suaPhieu(nguoiDung, parsed.data.phieuNhapId, "NHAP_HANG_HUY_NO", "daHuy", async (tx, p) => {
-    if (p.daHuy) return false;
-    await tx.phieuNhapNo.update({ where: { id: p.id }, data: { daHuy: true } });
-    return true;
-  });
+    return await suaPhieu(nguoiDung, parsed.data.phieuNhapId, "NHAP_HANG_HUY_NO", "daHuy", async (tx, p) => {
+      if (p.daHuy) return false;
+      await tx.phieuNhapNo.update({ where: { id: p.id }, data: { daHuy: true } });
+      return true;
+    });
+  } finally {
+    cua.ra();
+  }
 }
 
 const boQuaSchema = z.object({
@@ -384,22 +400,26 @@ export async function boQuaLechDaGiaiThich(input: unknown): Promise<ActionResult
   const c = await congChuShopAction();
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    const parsed = boQuaSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { phieuNhapId, note } = parsed.data;
 
-  const parsed = boQuaSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { phieuNhapId, note } = parsed.data;
-
-  return suaPhieu(nguoiDung, phieuNhapId, "NHAP_HANG_SUA_NO", "lechDaGiaiThich", async (tx, p) => {
-    const chiPhi = await tx.expense.findUnique({ where: { refId: p.refId }, select: { amount: true } });
-    const soChiPhi = chiPhi?.amount ?? 0;
-    if (p.lechDaGiaiThich && p.note === note && p.lechDaGiaiThichSo === soChiPhi) return false;
-    await tx.phieuNhapNo.update({
-      where: { id: p.id },
-      data: { lechDaGiaiThich: true, lechDaGiaiThichSo: soChiPhi, note },
+    return await suaPhieu(nguoiDung, phieuNhapId, "NHAP_HANG_SUA_NO", "lechDaGiaiThich", async (tx, p) => {
+      const chiPhi = await tx.expense.findUnique({ where: { refId: p.refId }, select: { amount: true } });
+      const soChiPhi = chiPhi?.amount ?? 0;
+      if (p.lechDaGiaiThich && p.note === note && p.lechDaGiaiThichSo === soChiPhi) return false;
+      await tx.phieuNhapNo.update({
+        where: { id: p.id },
+        data: { lechDaGiaiThich: true, lechDaGiaiThichSo: soChiPhi, note },
+      });
+      return true;
     });
-    return true;
-  });
+  } finally {
+    cua.ra();
+  }
 }
 
 /**
@@ -412,31 +432,35 @@ export async function xoaPhieu(input: unknown): Promise<ActionResult> {
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = huySchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { phieuNhapId } = parsed.data;
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await khoaCacPhieu(tx, [phieuNhapId]);
-      const phieu = await tx.phieuNhapNo.findUnique({ where: { id: phieuNhapId } });
-      if (!phieu) throw new LoiPhieu("Không tìm thấy phiếu trong sổ nợ — tải lại trang", "KHONG_TIM_THAY");
-      const lyDo = lyDoKhongXoaPhieu({ soDongTien: await tx.cashMovement.count({ where: { phieuNhapId } }) });
-      if (lyDo !== null) throw new LoiPhieu(lyDo, "CON_DONG_TIEN");
-      await chupVaoThungRac(tx, { bang: "PhieuNhapNo", banGhi: phieu });
-      await tx.phieuNhapNo.delete({ where: { id: phieuNhapId } });
-      await ghiNhatKy(tx, {
-        actor: nguoiDung,
-        hanhDong: "NHAP_HANG_XOA_NO",
-        doiTuong: { loai: "PhieuNhapNo", id: phieuNhapId, moTa: phieu.maPhieu },
-      });
-    }, OPT_TX_DONG_TIEN);
-  } catch (e) {
-    if (!(e instanceof LoiPhieu)) await ghiLoi(nguoiDung, "NHAP_HANG_XOA_NO", phieuNhapId, e);
-    return ketQuaLoi(e, "Không xoá được phiếu nợ — lỗi hệ thống, thử lại sau.");
+    const parsed = huySchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { phieuNhapId } = parsed.data;
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await khoaCacPhieu(tx, [phieuNhapId]);
+        const phieu = await tx.phieuNhapNo.findUnique({ where: { id: phieuNhapId } });
+        if (!phieu) throw new LoiPhieu("Không tìm thấy phiếu trong sổ nợ — tải lại trang", "KHONG_TIM_THAY");
+        const lyDo = lyDoKhongXoaPhieu({ soDongTien: await tx.cashMovement.count({ where: { phieuNhapId } }) });
+        if (lyDo !== null) throw new LoiPhieu(lyDo, "CON_DONG_TIEN");
+        await chupVaoThungRac(tx, { bang: "PhieuNhapNo", banGhi: phieu });
+        await tx.phieuNhapNo.delete({ where: { id: phieuNhapId } });
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "NHAP_HANG_XOA_NO",
+          doiTuong: { loai: "PhieuNhapNo", id: phieuNhapId, moTa: phieu.maPhieu },
+        });
+      }, OPT_TX_DONG_TIEN);
+    } catch (e) {
+      if (!(e instanceof LoiPhieu)) await ghiLoi(nguoiDung, "NHAP_HANG_XOA_NO", phieuNhapId, e);
+      return ketQuaLoi(e, "Không xoá được phiếu nợ — lỗi hệ thống, thử lại sau.");
+    }
+    lamMoi();
+    return { ok: true, data: undefined };
+  } finally {
+    cua.ra();
   }
-  lamMoi();
-  return { ok: true, data: undefined };
 }

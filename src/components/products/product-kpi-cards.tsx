@@ -31,7 +31,9 @@ function KpiCard({
     >
       <p className={cn("text-sm", dark ? "text-on-dark/70" : "text-muted-foreground")}>{label}</p>
       <p className={cn("mt-1 font-serif text-2xl", dark ? "text-on-dark" : "text-ink", valueClassName)}>{value}</p>
-      {caption && <p className={cn("mt-1 text-xs text-muted-foreground", captionClassName)}>{caption}</p>}
+      {caption && (
+        <p className={cn("mt-1 text-xs", dark ? "text-muted-on-dark" : "text-muted-foreground", captionClassName)}>{caption}</p>
+      )}
     </div>
   );
   return href ? (
@@ -79,7 +81,7 @@ export function ProductKpiCards({ du }: { du: KetQuaChe<{ kpi: ProductKpi }, { k
           dark
           caption={
             du.kpi.productsWithoutCostInValue > 0 ? (
-              <Link href="?loc=thieu_gia_von" className="text-warning hover:underline">
+              <Link href="?loc=thieu_gia_von" className="text-warning-on-dark hover:underline">
                 * {du.kpi.productsWithoutCostInValue} sản phẩm chưa có giá vốn
               </Link>
             ) : undefined

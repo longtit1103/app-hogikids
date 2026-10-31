@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
 import { requireTokenVaultSecret } from "@/lib/ingest/token-vault-auth";
 import { prisma } from "@/lib/prisma";
 import {
@@ -52,9 +52,12 @@ export async function POST(req: Request): Promise<Response> {
   // dùng token cũ trong bản backup tới lúc nó hết hạn. 503 buộc chạy lại script sau khi phục hồi.
   // GET KHÔNG chặn (bất đối xứng có chủ đích): Meta không có refresh_token xoay vòng để bị đốt nên
   // chặn đọc chỉ làm mất một đêm dữ liệu ads mà không cứu được gì.
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return noStore(dangPhucHoi);
+  // `noStore` bọc cả 503 của cửa (hàm idempotent — thân bên trong đã tự bọc).
+  return noStore(await routeQuaCua(() => xuLyPost(req)));
+}
 
+/** Thân POST sau cửa ghi (đếm suốt request — lượt phục hồi chờ nó xong). */
+async function xuLyPost(req: Request): Promise<Response> {
   let body: unknown;
   try {
     body = await req.json();

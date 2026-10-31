@@ -7,7 +7,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { laDanhMucKhoaAn, LOI_DANH_MUC_KHOA_AN } from "@/lib/expenses/danh-muc-khoa-an";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
@@ -37,85 +37,93 @@ async function hasDuplicateCategoryName(name: string, excludeId?: string): Promi
 export async function createExpenseCategory(name: string): Promise<ActionResult<{ id: string }>> {
   const cong = await congAction("cai-dat:sua");
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = expenseCategoryNameSchema.safeParse(name);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0].message, field: "name" };
-  }
-  if (await hasDuplicateCategoryName(parsed.data)) {
-    return { ok: false, error: "Tên danh mục đã tồn tại", field: "name" };
-  }
-
-  const id = randomUUID();
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.expenseCategory.create({
-        data: { id, name: parsed.data, isSystem: false, isHidden: false },
-      });
-      await ghiNhatKy(tx, {
-        actor: cong.nguoiDung,
-        hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_TAO,
-        doiTuong: { loai: "ExpenseCategory", id, moTa: parsed.data },
-      });
-    });
-  } catch (e) {
-    // Ràng buộc duy nhất trên tên là cổng CUỐI: phép kiểm phía trên đọc rồi mới ghi, nên hai submit
-    // đồng thời đều lọt qua nó và lượt thua rơi vào đây. Trả đúng thông báo mà lượt kiểm đã trả,
-    // đừng để nó hiện ra thành "Lỗi khi thêm danh mục" (chủ shop bấm lại mãi không hiểu vì sao).
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+    const parsed = expenseCategoryNameSchema.safeParse(name);
+    if (!parsed.success) {
+      return { ok: false, error: parsed.error.issues[0].message, field: "name" };
+    }
+    if (await hasDuplicateCategoryName(parsed.data)) {
       return { ok: false, error: "Tên danh mục đã tồn tại", field: "name" };
     }
-    return { ok: false, error: "Lỗi khi thêm danh mục" };
-  }
 
-  revalidatePath("/tai-chinh");
-  revalidatePath("/cai-dat");
-  return { ok: true, data: { id } };
+    const id = randomUUID();
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.expenseCategory.create({
+          data: { id, name: parsed.data, isSystem: false, isHidden: false },
+        });
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_TAO,
+          doiTuong: { loai: "ExpenseCategory", id, moTa: parsed.data },
+        });
+      });
+    } catch (e) {
+      // Ràng buộc duy nhất trên tên là cổng CUỐI: phép kiểm phía trên đọc rồi mới ghi, nên hai submit
+      // đồng thời đều lọt qua nó và lượt thua rơi vào đây. Trả đúng thông báo mà lượt kiểm đã trả,
+      // đừng để nó hiện ra thành "Lỗi khi thêm danh mục" (chủ shop bấm lại mãi không hiểu vì sao).
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        return { ok: false, error: "Tên danh mục đã tồn tại", field: "name" };
+      }
+      return { ok: false, error: "Lỗi khi thêm danh mục" };
+    }
+
+    revalidatePath("/tai-chinh");
+    revalidatePath("/cai-dat");
+    return { ok: true, data: { id } };
+  } finally {
+    cua.ra();
+  }
 }
 
 /** Đổi tên danh mục tùy chỉnh — danh mục hệ thống khóa tên (không sửa được). */
 export async function renameExpenseCategory(id: string, name: string): Promise<ActionResult> {
   const cong = await congAction("cai-dat:sua");
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = expenseCategoryNameSchema.safeParse(name);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0].message, field: "name" };
-  }
-
-  const category = await prisma.expenseCategory.findUnique({ where: { id } });
-  if (!category) {
-    return { ok: false, error: "Danh mục không tồn tại" };
-  }
-  if (category.isSystem) {
-    return { ok: false, error: "Không thể đổi tên danh mục hệ thống" };
-  }
-  if (await hasDuplicateCategoryName(parsed.data, id)) {
-    return { ok: false, error: "Tên danh mục đã tồn tại", field: "name" };
-  }
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.expenseCategory.update({ where: { id }, data: { name: parsed.data } });
-      await ghiNhatKy(tx, {
-        actor: cong.nguoiDung,
-        hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_SUA,
-        doiTuong: { loai: "ExpenseCategory", id, moTa: parsed.data },
-      });
-    });
-  } catch (e) {
-    // Đổi tên đụng đúng ràng buộc duy nhất đó — cùng lý do như lúc thêm mới.
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+    const parsed = expenseCategoryNameSchema.safeParse(name);
+    if (!parsed.success) {
+      return { ok: false, error: parsed.error.issues[0].message, field: "name" };
+    }
+
+    const category = await prisma.expenseCategory.findUnique({ where: { id } });
+    if (!category) {
+      return { ok: false, error: "Danh mục không tồn tại" };
+    }
+    if (category.isSystem) {
+      return { ok: false, error: "Không thể đổi tên danh mục hệ thống" };
+    }
+    if (await hasDuplicateCategoryName(parsed.data, id)) {
       return { ok: false, error: "Tên danh mục đã tồn tại", field: "name" };
     }
-    return { ok: false, error: "Lỗi khi đổi tên danh mục" };
-  }
 
-  revalidatePath("/tai-chinh");
-  revalidatePath("/cai-dat");
-  return { ok: true, data: undefined };
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.expenseCategory.update({ where: { id }, data: { name: parsed.data } });
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_SUA,
+          doiTuong: { loai: "ExpenseCategory", id, moTa: parsed.data },
+        });
+      });
+    } catch (e) {
+      // Đổi tên đụng đúng ràng buộc duy nhất đó — cùng lý do như lúc thêm mới.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        return { ok: false, error: "Tên danh mục đã tồn tại", field: "name" };
+      }
+      return { ok: false, error: "Lỗi khi đổi tên danh mục" };
+    }
+
+    revalidatePath("/tai-chinh");
+    revalidatePath("/cai-dat");
+    return { ok: true, data: undefined };
+  } finally {
+    cua.ra();
+  }
 }
 
 /**
@@ -127,28 +135,32 @@ export async function renameExpenseCategory(id: string, name: string): Promise<A
 export async function toggleExpenseCategoryHidden(id: string, isHidden: boolean): Promise<ActionResult> {
   const cong = await congAction("cai-dat:sua");
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  if (laDanhMucKhoaAn(id)) {
-    return { ok: false, error: LOI_DANH_MUC_KHOA_AN };
-  }
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.expenseCategory.update({ where: { id }, data: { isHidden } });
-      await ghiNhatKy(tx, {
-        actor: cong.nguoiDung,
-        hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_AN_HIEN,
-        doiTuong: { loai: "ExpenseCategory", id },
-      });
-    });
-  } catch {
-    return { ok: false, error: "Lỗi khi cập nhật danh mục" };
-  }
+    if (laDanhMucKhoaAn(id)) {
+      return { ok: false, error: LOI_DANH_MUC_KHOA_AN };
+    }
 
-  revalidatePath("/tai-chinh");
-  revalidatePath("/cai-dat");
-  return { ok: true, data: undefined };
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.expenseCategory.update({ where: { id }, data: { isHidden } });
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_AN_HIEN,
+          doiTuong: { loai: "ExpenseCategory", id },
+        });
+      });
+    } catch {
+      return { ok: false, error: "Lỗi khi cập nhật danh mục" };
+    }
+
+    revalidatePath("/tai-chinh");
+    revalidatePath("/cai-dat");
+    return { ok: true, data: undefined };
+  } finally {
+    cua.ra();
+  }
 }
 
 /**
@@ -163,46 +175,50 @@ export async function toggleExpenseCategoryHidden(id: string, isHidden: boolean)
 export async function deleteExpenseCategory(id: string): Promise<ActionResult> {
   const cong = await congAction("cai-dat:sua");
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const category = await prisma.expenseCategory.findUnique({ where: { id } });
-  if (!category) {
-    return { ok: false, error: "Danh mục không tồn tại" };
-  }
-  if (category.isSystem) {
-    return { ok: false, error: "Không thể xóa danh mục hệ thống" };
-  }
-
-  const [expenseCount, recurringCount] = await Promise.all([
-    prisma.expense.count({ where: { categoryId: id } }),
-    prisma.recurringExpense.count({ where: { categoryId: id } }),
-  ]);
-
-  if (expenseCount > 0) {
-    return { ok: false, code: "HAS_EXPENSES", error: `Danh mục có ${expenseCount} khoản chi, không thể xóa` };
-  }
-  if (recurringCount > 0) {
-    return {
-      ok: false,
-      code: "HAS_EXPENSES",
-      error: `Danh mục đang được dùng bởi ${recurringCount} khoản định kỳ, không thể xóa`,
-    };
-  }
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.expenseCategory.delete({ where: { id } });
-      await ghiNhatKy(tx, {
-        actor: cong.nguoiDung,
-        hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_XOA,
-        doiTuong: { loai: "ExpenseCategory", id, moTa: category.name },
-      });
-    });
-  } catch {
-    return { ok: false, error: "Lỗi khi xóa danh mục" };
-  }
+    const category = await prisma.expenseCategory.findUnique({ where: { id } });
+    if (!category) {
+      return { ok: false, error: "Danh mục không tồn tại" };
+    }
+    if (category.isSystem) {
+      return { ok: false, error: "Không thể xóa danh mục hệ thống" };
+    }
 
-  revalidatePath("/tai-chinh");
-  revalidatePath("/cai-dat");
-  return { ok: true, data: undefined };
+    const [expenseCount, recurringCount] = await Promise.all([
+      prisma.expense.count({ where: { categoryId: id } }),
+      prisma.recurringExpense.count({ where: { categoryId: id } }),
+    ]);
+
+    if (expenseCount > 0) {
+      return { ok: false, code: "HAS_EXPENSES", error: `Danh mục có ${expenseCount} khoản chi, không thể xóa` };
+    }
+    if (recurringCount > 0) {
+      return {
+        ok: false,
+        code: "HAS_EXPENSES",
+        error: `Danh mục đang được dùng bởi ${recurringCount} khoản định kỳ, không thể xóa`,
+      };
+    }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.expenseCategory.delete({ where: { id } });
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.DANH_MUC_CHI_PHI_XOA,
+          doiTuong: { loai: "ExpenseCategory", id, moTa: category.name },
+        });
+      });
+    } catch {
+      return { ok: false, error: "Lỗi khi xóa danh mục" };
+    }
+
+    revalidatePath("/tai-chinh");
+    revalidatePath("/cai-dat");
+    return { ok: true, data: undefined };
+  } finally {
+    cua.ra();
+  }
 }

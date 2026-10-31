@@ -32,9 +32,9 @@ vi.mock("@/lib/backup/run-restore", async (importOriginal) => ({
 }));
 
 import { POST } from "@/app/api/restore/route";
-import { thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { dangPhucHoi, thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { prisma } from "@/lib/prisma";
-import { donKhoaPhucHoi } from "./helpers/khoa-bao-tri-reset";
+import { coPhucHoiDangTrong, donKhoaPhucHoi } from "./helpers/khoa-bao-tri-reset";
 
 /**
  * Nối dây khoá bảo trì vào `POST /api/restore`: lượt phục hồi thứ hai phải bị TỪ CHỐI, không được
@@ -84,8 +84,14 @@ describe("POST /api/restore — khoá độc quyền", () => {
  */
 describe("POST /api/restore — cổng chặn lượt đồng bộ đang chạy", () => {
   afterEach(async () => {
-    await prisma.syncLog.deleteMany();
+    // Đọc cờ TRƯỚC mọi bước dọn: mọi lối ra của route (409/500) phải tự nhả cờ phục hồi. Đầu dò trong
+    // ca (`coPhucHoiDangTrong`) giành rồi trả ngay nên không làm bẩn cờ.
+    const routeChuaNhaCo = dangPhucHoi();
+    // Dọn cờ TRƯỚC câu dọn DB (phòng khi route quên nhả): cờ còn bật thì cổng ghi chặn câu dọn qua
+    // singleton, SyncLog RUNNING sót sang file chạy sau. Khẳng định đặt SAU dọn để không đổ dây chuyền.
     donKhoaPhucHoi();
+    await prisma.syncLog.deleteMany();
+    expect(routeChuaNhaCo, "route để cờ phục hồi còn bật sau khi trả response").toBe(false);
   });
 
   afterAll(async () => {
@@ -101,7 +107,7 @@ describe("POST /api/restore — cổng chặn lượt đồng bộ đang chạy"
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/lượt đồng bộ/i);
     // Cổng nằm TRONG khối try nên `finally` phải trả khoá — đặt ngoài thì app kẹt vĩnh viễn.
-    expect(thuGiuKhoaPhucHoi()).not.toBeNull();
+    expect(coPhucHoiDangTrong()).toBe(true);
   });
 
   it("log RUNNING treo quá lâu KHÔNG khoá phục hồi vĩnh viễn", async () => {

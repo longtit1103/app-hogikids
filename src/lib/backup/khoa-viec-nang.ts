@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Prisma } from "@/generated/prisma/client";
 
+import { chayMienCong } from "@/lib/backup/cong-ghi-toan-cuc";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -130,11 +131,23 @@ export async function conGiuKhoa(the: TheKhoa): Promise<boolean> {
   return d?.token === the.token;
 }
 
-/** Trả khoá — CHỈ khi ta còn là chủ (không giật khoá của việc khác). Gọi trong `finally`. */
+/**
+ * Trả khoá — CHỈ khi ta còn là chủ (không giật khoá của việc khác). Gọi trong `finally`.
+ *
+ * Đi LỐI MIỄN cổng ghi: trả lease phải LUÔN được, kể cả khi cờ phục hồi đang bật và người gọi không
+ * còn ngữ cảnh cửa (vd `finally` chạy sau khi cửa đã đóng). Câu này chỉ xoá đúng token của chính
+ * người gọi ⇒ không cấp quyền ghi nào, không chạm dữ liệu nghiệp vụ, không gỡ khoá của việc khác
+ * (kể cả lượt phục hồi đang giữ lease). Chặn nó thì không bảo vệ gì mà lease kẹt tới hết hạn 5',
+ * chặn oan mọi việc nặng sau đó. Ngược lại `giuKhoaViecNang`/`giaHanKhoa` VẪN qua cổng: giành hay
+ * gia hạn lease khi cờ bật là một việc nặng chưa được drain đếm muốn chạy tiếp — phải bị chặn (lượt
+ * phục hồi tự gọi hai hàm đó trong lối miễn `restore` của nó).
+ */
 export async function traKhoaViecNang(the: TheKhoa): Promise<void> {
-  await prisma.$executeRaw`
-    DELETE FROM "Setting" WHERE "key" = ${KHOA_KEY} AND split_part("value", '|', 1) = ${the.token}
-  `;
+  await chayMienCong("tra-khoa-viec-nang", async () => {
+    await prisma.$executeRaw`
+      DELETE FROM "Setting" WHERE "key" = ${KHOA_KEY} AND split_part("value", '|', 1) = ${the.token}
+    `;
+  });
 }
 
 /**

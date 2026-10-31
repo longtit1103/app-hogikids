@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { LoiVuotTranTien, thuocTinhLoiVuotTran } from "@/components/ui/loi-vuot-tran-tien";
 import { tatToanThauChi } from "@/lib/actions/tat-toan-thau-chi";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, MAX_AMOUNT_INPUT, parseAmountInput } from "@/lib/format-amount-input";
 import { deXuatTatToan } from "@/lib/so-quy/lai-thau-chi";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import type { KhoanVayLich } from "@/lib/so-quy/lich-tra-no";
@@ -60,6 +61,7 @@ export function ThauChiTatToanDialog({
   onOpenChange: (o: boolean) => void;
 }) {
   const router = useRouter();
+  const idLoiLai = `${useId()}-lai`;
   const homNay = formatNgayVn(new Date(), "yyyy-MM-dd");
   const [ngay, setNgay] = useState(homNay);
   const [goc, setGoc] = useState(0);
@@ -168,10 +170,12 @@ export function ThauChiTatToanDialog({
             <Input
               inputMode="numeric"
               aria-label="Lãi"
+              {...thuocTinhLoiVuotTran(lai, idLoiLai)}
               value={formatAmountInput(lai)}
               onChange={(e) => setLai(parseAmountInput(e.target.value))}
               className="text-right"
             />
+            <LoiVuotTranTien value={lai} id={idLoiLai} />
           </label>
         </div>
 
@@ -184,7 +188,7 @@ export function ThauChiTatToanDialog({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Huỷ
           </Button>
-          <Button type="button" disabled={dangChay || ngaySomQua || !ngay} onClick={xacNhan}>
+          <Button type="button" disabled={dangChay || ngaySomQua || !ngay || lai > MAX_AMOUNT_INPUT} onClick={xacNhan}>
             {dangChay ? "Đang ghi…" : "Đã chuyển tiền — tất toán"}
           </Button>
         </DialogFooter>

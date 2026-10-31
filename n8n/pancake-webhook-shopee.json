@@ -12,7 +12,7 @@
       ],
       "parameters": {
         "httpMethod": "POST",
-        "path": "duong-dan-webhook-shopee",
+        "path": "__DUONG_DAN_WEBHOOK_SHOPEE__",
         "responseMode": "onReceived",
         "options": {
           "rawBody": true

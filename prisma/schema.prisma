@@ -747,6 +747,18 @@ model RawPancakeProduct {
   payload     Json
   fetchedAt   DateTime @default(now())
   syncLogId   String?
+  /// LẦN THẤY CUỐI: nguồn trả lại đúng nội dung này (trùng hash ⇒ `landRaw` không chèn), lúc land. `landRaw` ghi cho
+  /// dòng KHÔNG đứng đầu lúc thấy lại (A→B→A — trang có `chupLuc` ≥ mốc bản đầu, hoặc trang thiếu `chupLuc` trên khoá
+  /// thuần di sản) và cho bản ĐANG đứng đầu khi trang có `chupLuc` mới hơn hẳn mốc của nó; NULL = chưa thấy lại.
+  /// Payload/hash/`fetchedAt` vẫn bất biến. Bản đứng đầu = `COALESCE("mocChup", "lanThayCuoi", "fetchedAt") DESC, "id"
+  /// DESC` (`thuTuPhienBanSql`, `src/lib/bronze/transform-raw-helpers.ts`) — MỌI bộ đọc bản đầu của bảng phải dùng nó.
+  lanThayCuoi DateTime?
+  /// MỐC CHỤP NGUỒN của lần thấy MỚI NHẤT của phiên bản này: `chupLuc` n8n gửi kèm trang (lúc BẮT ĐẦU GET trang đó).
+  /// Khi chèn: `chupLuc`; thiếu `chupLuc` ⇒ khoá thuần di sản (không dòng nào mang mốc) giữ NULL (mốc = `fetchedAt` =
+  /// lúc land), khoá đã có mốc ⇒ mốc lớn nhất của khoá − 1 ms (ngay DƯỚI bản đầu, lên đầu ở lượt có `chupLuc` kế tiếp;
+  /// route báo SyncLog ERROR). Khi thấy lại: `GREATEST(mocChup, chupLuc)`; thiếu `chupLuc` ⇒ giữ nguyên. NULL cũng =
+  /// dòng có trước cột này. Trang của lượt chụp TRƯỚC về TRỄ không còn đẩy bản cũ lên đầu.
+  mocChup     DateTime?
 
   @@unique([shopId, externalId, payloadHash])
   @@index([shopId, externalId, fetchedAt])
@@ -922,6 +934,10 @@ model TiktokSettlement {
   currency           String    @default("VND")
   raw                Json?
   syncedAt           DateTime  @default(now())
+  /// Mốc phiên bản của dòng kho thô đã dựng nên bản này (`mocPhienBanSql`, `transform-raw-helpers.ts`) — chốt CAS: chỉ
+  /// ghi khi mốc mới ≥ mốc đang lưu (NULL = dòng có trước cột này ⇒ cho ghi), lượt transform cầm ảnh cũ không đè lượt
+  /// cầm ảnh mới. KHÔNG phải `syncedAt` (chỉ đặt lúc TẠO — hợp đồng của người đọc "dòng về muộn").
+  nguonFetchedAt DateTime?
 
   @@index([statementTime])
 }
@@ -935,6 +951,10 @@ model TiktokAdsSettlement {
   settlementAmount Int // ÂM — TikTok trừ ads vào số dư
   raw              Json?
   syncedAt         DateTime @default(now())
+  /// Mốc phiên bản của dòng kho thô đã dựng nên bản này (`mocPhienBanSql`, `transform-raw-helpers.ts`) — chốt CAS: chỉ
+  /// ghi khi mốc mới ≥ mốc đang lưu (NULL = dòng có trước cột này ⇒ cho ghi), lượt transform cầm ảnh cũ không đè lượt
+  /// cầm ảnh mới. KHÔNG phải `syncedAt` (chỉ đặt lúc TẠO — hợp đồng của người đọc "dòng về muộn").
+  nguonFetchedAt DateTime?
 
   @@index([orderCreateTime])
 }
@@ -951,8 +971,37 @@ model TiktokPayment {
   bankAccount     String?
   raw             Json?
   syncedAt        DateTime  @default(now())
+  /// Mốc phiên bản của dòng kho thô đã dựng nên bản này (`mocPhienBanSql`, `transform-raw-helpers.ts`) — chốt CAS: chỉ
+  /// ghi khi mốc mới ≥ mốc đang lưu (NULL = dòng có trước cột này ⇒ cho ghi), lượt transform cầm ảnh cũ không đè lượt
+  /// cầm ảnh mới. KHÔNG phải `syncedAt` (chỉ đặt lúc TẠO — hợp đồng của người đọc "dòng về muộn").
+  nguonFetchedAt DateTime?
 
   @@index([paidTime])
+}
+
+// ===== Trạng thái BỀN của từng Business Center TikTok với lượt kéo hoá đơn =====
+// Người đọc DUY NHẤT: cổng chốt sao kê thẻ (`lyDoHoaDonTiktokChuaDu`, `doi-chieu-sao-ke-voi-app.ts`) + khối
+// "Business Center TikTok" ở Nợ phải trả. KHÔNG tiền, KHÔNG vào P&L / quỹ / dư nợ.
+//
+// Vì sao bền ngoài `SyncLog`: cổng chỉ soi `SyncLog` trong cửa sổ D − 30 và `SyncLog` có thể bị dọn (xoá dữ liệu
+// giao dịch xoá cả nó) — "BC đã từng đọc được hoá đơn" và "app đã vào chế độ dấu lượt" phải sống qua cả hai, không
+// thì BC mất quyền finance > 30 ngày rơi khỏi tập xét (cổng mở) và luật cũ mù tự quay lại.
+//  - `lanDauCoDau`: lần đầu route dấu lượt nhận dấu của BC. Có ÍT NHẤT MỘT dòng mang cột này ⇒ chế độ nghiêm toàn cục
+//    (mọi BC theo luật dấu lượt).
+//  - `lanCuoiDocDuoc`: lần cuối TikTok cho GET được ít nhất một trang hoá đơn của BC (dấu kết thúc `soTrangDaGet > 0`).
+//    BC đã land hoá đơn vào kho thô cũng tính là "từng đọc được" (cổng hợp thêm kho thô — kho thô không bị dọn).
+//  - `khongDungTu` + `khongDungGhiChu` + `khongDungBoi` (email snapshot): chủ shop xác nhận BC KHÔNG trả quảng cáo
+//    bằng thẻ ⇒ cổng bỏ BC khỏi tập xét. NULL = chưa xác nhận.
+// Route chỉ ghi `lanDauCoDau`/`lanCuoiDocDuoc`; action chủ shop chỉ ghi ba cột `khongDung*`.
+model TiktokBcHoaDon {
+  bcId            String    @id
+  lanDauCoDau     DateTime?
+  lanCuoiDocDuoc  DateTime?
+  khongDungTu     DateTime?
+  khongDungGhiChu String?
+  khongDungBoi    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now()) @updatedAt
 }
 
 // ===== Silver — Hoá đơn quảng cáo TikTok (Business Center) =====
@@ -984,6 +1033,10 @@ model TiktokAdsHoaDon {
   paymentPortfolioId String? // chỉ lưu — KHÔNG dùng làm khoá thẻ (có cả trên hoá đơn ví TikTok Shop trả)
   raw                Json?
   syncedAt           DateTime @default(now())
+  /// Mốc phiên bản của dòng kho thô đã dựng nên bản này (`mocPhienBanSql`, `transform-raw-helpers.ts`) — chốt CAS: chỉ
+  /// ghi khi mốc mới ≥ mốc đang lưu (NULL = dòng có trước cột này ⇒ cho ghi), lượt transform cầm ảnh cũ không đè lượt
+  /// cầm ảnh mới. KHÔNG phải `syncedAt` (chỉ đặt lúc TẠO — hợp đồng của người đọc "dòng về muộn").
+  nguonFetchedAt DateTime?
 
   @@index([createTime])
   @@index([advertiserId, createTime])
@@ -1014,6 +1067,10 @@ model TiktokAdsTinDung {
   grantGomVat  Int // phần P&L trừ ra
   raw          Json?
   syncedAt     DateTime @default(now())
+  /// Mốc phiên bản của dòng kho thô đã dựng nên bản này (`mocPhienBanSql`, `transform-raw-helpers.ts`) — chốt CAS: chỉ
+  /// ghi khi mốc mới ≥ mốc đang lưu (NULL = dòng có trước cột này ⇒ cho ghi), lượt transform cầm ảnh cũ không đè lượt
+  /// cầm ảnh mới. KHÔNG phải `syncedAt` (chỉ đặt lúc TẠO — hợp đồng của người đọc "dòng về muộn").
+  nguonFetchedAt DateTime?
 
   @@unique([advertiserId, ngay])
   @@index([ngay])
@@ -1073,6 +1130,18 @@ model RawTiktokBusinessReport {
   payload     Json
   fetchedAt   DateTime @default(now())
   syncLogId   String?
+  /// LẦN THẤY CUỐI: nguồn trả lại đúng nội dung này (trùng hash ⇒ `landRaw` không chèn), lúc land. `landRaw` ghi cho
+  /// dòng KHÔNG đứng đầu lúc thấy lại (A→B→A — trang có `chupLuc` ≥ mốc bản đầu, hoặc trang thiếu `chupLuc` trên khoá
+  /// thuần di sản) và cho bản ĐANG đứng đầu khi trang có `chupLuc` mới hơn hẳn mốc của nó; NULL = chưa thấy lại.
+  /// Payload/hash/`fetchedAt` vẫn bất biến. Bản đứng đầu = `COALESCE("mocChup", "lanThayCuoi", "fetchedAt") DESC, "id"
+  /// DESC` (`thuTuPhienBanSql`, `src/lib/bronze/transform-raw-helpers.ts`) — MỌI bộ đọc bản đầu của bảng phải dùng nó.
+  lanThayCuoi DateTime?
+  /// MỐC CHỤP NGUỒN của lần thấy MỚI NHẤT của phiên bản này: `chupLuc` n8n gửi kèm trang (lúc BẮT ĐẦU GET trang đó).
+  /// Khi chèn: `chupLuc`; thiếu `chupLuc` ⇒ khoá thuần di sản (không dòng nào mang mốc) giữ NULL (mốc = `fetchedAt` =
+  /// lúc land), khoá đã có mốc ⇒ mốc lớn nhất của khoá − 1 ms (ngay DƯỚI bản đầu, lên đầu ở lượt có `chupLuc` kế tiếp;
+  /// route báo SyncLog ERROR). Khi thấy lại: `GREATEST(mocChup, chupLuc)`; thiếu `chupLuc` ⇒ giữ nguyên. NULL cũng =
+  /// dòng có trước cột này. Trang của lượt chụp TRƯỚC về TRỄ không còn đẩy bản cũ lên đầu.
+  mocChup     DateTime?
 
   @@unique([shopId, externalId, payloadHash])
   @@index([shopId, externalId, fetchedAt])
@@ -1241,6 +1310,18 @@ model RawMetaAdsReport {
   payload     Json
   fetchedAt   DateTime @default(now())
   syncLogId   String?
+  /// LẦN THẤY CUỐI: nguồn trả lại đúng nội dung này (trùng hash ⇒ `landRaw` không chèn), lúc land. `landRaw` ghi cho
+  /// dòng KHÔNG đứng đầu lúc thấy lại (A→B→A — trang có `chupLuc` ≥ mốc bản đầu, hoặc trang thiếu `chupLuc` trên khoá
+  /// thuần di sản) và cho bản ĐANG đứng đầu khi trang có `chupLuc` mới hơn hẳn mốc của nó; NULL = chưa thấy lại.
+  /// Payload/hash/`fetchedAt` vẫn bất biến. Bản đứng đầu = `COALESCE("mocChup", "lanThayCuoi", "fetchedAt") DESC, "id"
+  /// DESC` (`thuTuPhienBanSql`, `src/lib/bronze/transform-raw-helpers.ts`) — MỌI bộ đọc bản đầu của bảng phải dùng nó.
+  lanThayCuoi DateTime?
+  /// MỐC CHỤP NGUỒN của lần thấy MỚI NHẤT của phiên bản này: `chupLuc` n8n gửi kèm trang (lúc BẮT ĐẦU GET trang đó).
+  /// Khi chèn: `chupLuc`; thiếu `chupLuc` ⇒ khoá thuần di sản (không dòng nào mang mốc) giữ NULL (mốc = `fetchedAt` =
+  /// lúc land), khoá đã có mốc ⇒ mốc lớn nhất của khoá − 1 ms (ngay DƯỚI bản đầu, lên đầu ở lượt có `chupLuc` kế tiếp;
+  /// route báo SyncLog ERROR). Khi thấy lại: `GREATEST(mocChup, chupLuc)`; thiếu `chupLuc` ⇒ giữ nguyên. NULL cũng =
+  /// dòng có trước cột này. Trang của lượt chụp TRƯỚC về TRỄ không còn đẩy bản cũ lên đầu.
+  mocChup     DateTime?
 
   @@unique([shopId, externalId, payloadHash])
   @@index([shopId, externalId, fetchedAt])

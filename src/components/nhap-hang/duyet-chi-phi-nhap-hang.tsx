@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { ghiChiPhiNhapHang } from "@/lib/actions/chi-phi-nhap-hang";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
-import { MAX_AMOUNT_INPUT, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
+import { MAX_AMOUNT_INPUT, formatAmountInput, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 import type { PhieuNhapDeXuat, PhieuNhapDeXuatChe } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
 
 /** Trần giống hệt form chi phí (và zod ở action): Prisma `Int` (int32) chết ở 2.147.483.647. */
@@ -198,9 +198,7 @@ export function DuyetChiPhiNhapHang({
                         // Hiển thị có dấu chấm ngăn nghìn như mọi ô tiền khác trong app
                         // (`expense-form-modal.tsx`) — state bên dưới vẫn giữ chuỗi số sạch
                         // (không dấu chấm) để không đổi logic `docSoTien`/`soTienHopLe`.
-                        value={
-                          tien[d.uuid] ? new Intl.NumberFormat("vi-VN").format(Number(tien[d.uuid])) : ""
-                        }
+                        value={hienOTien(tien[d.uuid])}
                         onChange={(e) =>
                           setTien((t) => ({ ...t, [d.uuid]: locSoTuChuoiNhap(e.target.value) }))
                         }
@@ -298,6 +296,15 @@ export function DuyetChiPhiNhapHang({
 function locSoTuChuoiNhap(raw: string): string {
   if (!/\d/.test(raw)) return "";
   return String(parseAmountInput(raw));
+}
+
+/**
+ * Chữ hiện trong ô tiền: có dấu chấm ngăn nghìn như mọi ô tiền khác. Chuỗi "0" hiện "0" — `formatAmountInput`
+ * (0 ⇒ trống, hợp cho ô để gõ mới) làm ô vừa gõ số 0 biến thành trống, tưởng app nuốt phím.
+ */
+function hienOTien(tho: string | undefined): string {
+  if (!tho) return "";
+  return formatAmountInput(Number(tho)) || "0";
 }
 
 /** `NaN` = ô trống hoặc không phải số nguyên — `soTienHopLe` bên dưới là cổng duy nhất quyết hợp lệ. */

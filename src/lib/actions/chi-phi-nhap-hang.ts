@@ -6,7 +6,8 @@ import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { capNhatSoPhieuNhapChuaGhi } from "@/lib/nhap-hang/cap-nhat-so-phieu-nhap";
 import { docDeXuatPhieuNhap } from "@/lib/nhap-hang/doc-phieu-nhap-bronze";
 import {
@@ -64,146 +65,150 @@ export async function ghiChiPhiNhapHang(
 
   // Cùng cổng với mọi action ghi khác. Literal `LOI_DANG_PHUC_HOI` là thứ lưới AST
   // `tests/khoa-bao-tri-duong-ghi.test.ts` soi để biết action này đã khai đúng đường ghi.
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    // Đã bật theo dõi nợ ⇒ màn duyệt KHÔNG ghi chi phí "Nhập hàng" nữa, kể cả phiếu ngày trước M: phiếu đi
+    // đường "Ghi nhận vào sổ nợ" (`PhieuNhapNo`, tiền rời quỹ ngày trả thật). Ghi Expense lùi trước M sau khi
+    // bật là đổi quỹ tháng cũ mà điều chỉnh mở sổ (cố định một lần) không biết. Lối tắt đọc M NGOÀI transaction
+    // (không đọc phiếu vô ích); cổng thật là `chanSoChiPhiDaKhoa` sau khoá chung bên dưới.
+    const mocM = await docMocM();
+    if (mocM !== null) {
+      return { ok: false, code: "DA_BAT_NO_PHAI_TRA", error: new LoiSoChiPhiDaKhoa(mocM, "NHAP_HANG").message };
+    }
 
-  // Đã bật theo dõi nợ ⇒ màn duyệt KHÔNG ghi chi phí "Nhập hàng" nữa, kể cả phiếu ngày trước M: phiếu đi
-  // đường "Ghi nhận vào sổ nợ" (`PhieuNhapNo`, tiền rời quỹ ngày trả thật). Ghi Expense lùi trước M sau khi
-  // bật là đổi quỹ tháng cũ mà điều chỉnh mở sổ (cố định một lần) không biết. Lối tắt đọc M NGOÀI transaction
-  // (không đọc phiếu vô ích); cổng thật là `chanSoChiPhiDaKhoa` sau khoá chung bên dưới.
-  const mocM = await docMocM();
-  if (mocM !== null) {
-    return { ok: false, code: "DA_BAT_NO_PHAI_TRA", error: new LoiSoChiPhiDaKhoa(mocM, "NHAP_HANG").message };
-  }
+    const parsed = ghiSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { vanTay, chon } = parsed.data;
 
-  const parsed = ghiSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { vanTay, chon } = parsed.data;
+    const { deXuat } = await docDeXuatPhieuNhap();
 
-  const { deXuat } = await docDeXuatPhieuNhap();
-
-  // "Duyệt cái gì thì ghi đúng cái đó". Ảnh Bronze mới land giữa lúc xem và lúc bấm (lượt đêm 03:00,
-  // hoặc chủ shop mở trang từ sáng) ⇒ TỪ CHỐI, không ghi gì. Khối "Ảnh hưởng nếu ghi" mà chủ shop
-  // vừa dựa vào để quyết khi đó đang nói về một tập không còn tồn tại.
-  if (vanTayDeXuatPhieuNhap(deXuat) !== vanTay) {
-    return {
-      ok: false,
-      error:
-        "Danh sách phiếu nhập vừa thay đổi (có lượt đồng bộ mới chạy xong) — chưa ghi gì. " +
-        "Tải lại trang để xem danh sách mới rồi duyệt lại.",
-      code: "DANH_SACH_DA_DOI",
-    };
-  }
-
-  const theoUuid = new Map(deXuat.map((d) => [d.uuid, d]));
-  const dong: { phieu: PhieuNhapDeXuat; soTien: number }[] = [];
-  for (const muc of chon) {
-    const phieu = theoUuid.get(muc.uuid);
-    // uuid lạ = client tự soạn (hoặc trang cũ tới mức vân tay lọt khe). Không ghi gì cả: một dòng
-    // tiền không truy được về phiếu Pancake nào là dòng không ai đối chiếu lại được.
-    if (!phieu) {
+    // "Duyệt cái gì thì ghi đúng cái đó". Ảnh Bronze mới land giữa lúc xem và lúc bấm (lượt đêm 03:00,
+    // hoặc chủ shop mở trang từ sáng) ⇒ TỪ CHỐI, không ghi gì. Khối "Ảnh hưởng nếu ghi" mà chủ shop
+    // vừa dựa vào để quyết khi đó đang nói về một tập không còn tồn tại.
+    if (vanTayDeXuatPhieuNhap(deXuat) !== vanTay) {
       return {
         ok: false,
-        error: "Có phiếu không còn trong danh sách đề xuất — chưa ghi gì. Tải lại trang rồi duyệt lại.",
+        error:
+          "Danh sách phiếu nhập vừa thay đổi (có lượt đồng bộ mới chạy xong) — chưa ghi gì. " +
+          "Tải lại trang để xem danh sách mới rồi duyệt lại.",
         code: "DANH_SACH_DA_DOI",
       };
     }
-    dong.push({ phieu, soTien: muc.soTien });
-  }
 
-  // Phiếu đã có dòng trong sổ KHÔNG bao giờ nằm trong `deXuat` (hàm đối chiếu loại sẵn), nên ca
-  // trùng chỉ xảy ra khi một tab khác vừa ghi trong đúng khe giữa lượt đọc và lượt ghi này. Tra
-  // trước để NÊU ĐƯỢC TÊN phiếu trùng; `skipDuplicates` bên dưới là cổng cuối cho khe còn lại.
-  const daCo = new Set(
-    (
-      await prisma.expense.findMany({
-        where: { refId: { in: dong.map((d) => d.phieu.refId) } },
-        select: { refId: true },
-      })
-    ).flatMap((e) => (e.refId === null ? [] : [e.refId])),
-  );
-  const canGhi = dong.filter((d) => !daCo.has(d.phieu.refId));
-
-  if (canGhi.length === 0) {
-    return {
-      ok: false,
-      error: `${dong.length === 1 ? "Phiếu này" : "Các phiếu đã chọn"} đã có trong Sổ chi phí rồi — không ghi thêm dòng nào.`,
-      code: "DA_GHI_ROI",
-    };
-  }
-
-  let daGhi = 0;
-  try {
-    // MỘT câu INSERT: hoặc vào hết, hoặc không dòng nào — nay nằm trong transaction tường minh chỉ để
-    // dòng nhật ký đi CÙNG (nhật ký ném ⇒ không dòng chi phí nào lưu). `skipDuplicates` dựa trên
-    // `Expense.refId @unique` — cổng chống ghi trùng ở tầng DB; không có nó thì một phiếu vừa được
-    // ghi ở tab khác sẽ làm HỎNG CẢ LƯỢT (P2002 abort transaction Postgres).
-    daGhi = await prisma.$transaction(async (tx) => {
-      // CÂU ĐẦU: khoá SHARED với bước bật (EXCLUSIVE). Không khoá thì cổng dưới đọc M = null lúc bước bật
-      // chưa commit, chèn Nhập hàng ngày ≥ M mà bước bật đã kiểm xong "không còn Nhập hàng sau M" ⇒ bật thành
-      // công với dòng lọt (quỹ trừ hai lần). Ngược lại bước bật chờ lượt ghi này commit rồi mới kiểm ⇒ thấy
-      // dòng vừa ghi: ngày ≥ M ⇒ từ chối `CON_NHAP_HANG_SAU_M`; ngày < M ⇒ đã nằm trong quỹ cuối M−1 nó chốt.
-      // Đặt trước mọi khoá khác (thứ tự chung với `createExpense`).
-      await khoaChiaSeBatNoPhaiTra(tx);
-      // Cổng cuối TRONG transaction (bước bật commit giữa lượt đọc M ở trên và câu ghi): đã bật ⇒ từ chối cả
-      // lượt, MỌI ngày phiếu — sổ chi phí khoá khi đã bật (`chan-so-chi-phi-da-khoa.ts`: phiếu < M thuộc quỹ đã
-      // chốt, phiếu ≥ M đi sổ nợ). Xét từng phiếu như một lượt tạo — phiếu đầu bị chặn là cả lượt lùi.
-      for (const d of canGhi) {
-        await chanSoChiPhiDaKhoa(tx, { loai: "TAO", dong: { categoryId: "purchase", date: d.phieu.ngay } });
+    const theoUuid = new Map(deXuat.map((d) => [d.uuid, d]));
+    const dong: { phieu: PhieuNhapDeXuat; soTien: number }[] = [];
+    for (const muc of chon) {
+      const phieu = theoUuid.get(muc.uuid);
+      // uuid lạ = client tự soạn (hoặc trang cũ tới mức vân tay lọt khe). Không ghi gì cả: một dòng
+      // tiền không truy được về phiếu Pancake nào là dòng không ai đối chiếu lại được.
+      if (!phieu) {
+        return {
+          ok: false,
+          error: "Có phiếu không còn trong danh sách đề xuất — chưa ghi gì. Tải lại trang rồi duyệt lại.",
+          code: "DANH_SACH_DA_DOI",
+        };
       }
-      const kq = await tx.expense.createMany({
-        data: canGhi.map((d) => ({
-          date: d.phieu.ngay,
-          categoryId: "purchase",
-          amount: d.soTien,
-          description: moTa(d.phieu),
-          source: "MANUAL" as const,
-          refId: d.phieu.refId,
-          // Nhập hàng là dòng tiền chung của shop, không thuộc kênh bán nào.
-          channelId: null,
-        })),
-        skipDuplicates: true,
-      });
-      // Không dòng nào vào (mọi phiếu vừa bị tab khác ghi) ⇒ không có gì để ghi dấu vết.
-      if (kq.count > 0) {
-        await ghiNhatKy(tx, {
-          actor: nguoiDung,
-          hanhDong: "NHAP_HANG_GHI_CHI_PHI",
-          doiTuong: { loai: "Expense" },
-          ghiChu: { soDong: kq.count },
-        });
-      }
-      return kq.count;
-    }, OPT_TX_DONG_TIEN);
-  } catch (e) {
-    // `skipDuplicates` đã nuốt P2002 nên tới đây là lỗi KHÁC (mất kết nối, out-of-range…). Vẫn dịch
-    // riêng P2002 phòng khi driver đổi hành vi — im lặng ở đây là chủ shop tưởng đã ghi xong.
-    if (e instanceof LoiSoChiPhiDaKhoa) return { ok: false, code: e.code, error: e.message };
-    if (laLoiDongTienBan(e)) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
-    const code = (e as { code?: string })?.code;
-    if (code === "P2002") {
+      dong.push({ phieu, soTien: muc.soTien });
+    }
+
+    // Phiếu đã có dòng trong sổ KHÔNG bao giờ nằm trong `deXuat` (hàm đối chiếu loại sẵn), nên ca
+    // trùng chỉ xảy ra khi một tab khác vừa ghi trong đúng khe giữa lượt đọc và lượt ghi này. Tra
+    // trước để NÊU ĐƯỢC TÊN phiếu trùng; `skipDuplicates` bên dưới là cổng cuối cho khe còn lại.
+    const daCo = new Set(
+      (
+        await prisma.expense.findMany({
+          where: { refId: { in: dong.map((d) => d.phieu.refId) } },
+          select: { refId: true },
+        })
+      ).flatMap((e) => (e.refId === null ? [] : [e.refId])),
+    );
+    const canGhi = dong.filter((d) => !daCo.has(d.phieu.refId));
+
+    if (canGhi.length === 0) {
       return {
         ok: false,
-        error: "Một phiếu vừa được ghi ở nơi khác — chưa ghi gì. Tải lại trang rồi duyệt lại.",
+        error: `${dong.length === 1 ? "Phiếu này" : "Các phiếu đã chọn"} đã có trong Sổ chi phí rồi — không ghi thêm dòng nào.`,
         code: "DA_GHI_ROI",
       };
     }
-    // Tới đây LUÔN là lỗi hạ tầng Prisma/DB (P2002 đã tách nhánh riêng ở trên) — message driver có
-    // thể mang hostname/tên cột. Log đủ phía server, trả client câu cố định.
-    console.error("Không ghi được chi phí nhập hàng:", e);
-    return {
-      ok: false,
-      error: "Không ghi được chi phí nhập hàng — lỗi hệ thống, thử lại sau.",
-    };
+
+    let daGhi = 0;
+    try {
+      // MỘT câu INSERT: hoặc vào hết, hoặc không dòng nào — nay nằm trong transaction tường minh chỉ để
+      // dòng nhật ký đi CÙNG (nhật ký ném ⇒ không dòng chi phí nào lưu). `skipDuplicates` dựa trên
+      // `Expense.refId @unique` — cổng chống ghi trùng ở tầng DB; không có nó thì một phiếu vừa được
+      // ghi ở tab khác sẽ làm HỎNG CẢ LƯỢT (P2002 abort transaction Postgres).
+      daGhi = await prisma.$transaction(async (tx) => {
+        // CÂU ĐẦU: khoá SHARED với bước bật (EXCLUSIVE). Không khoá thì cổng dưới đọc M = null lúc bước bật
+        // chưa commit, chèn Nhập hàng ngày ≥ M mà bước bật đã kiểm xong "không còn Nhập hàng sau M" ⇒ bật thành
+        // công với dòng lọt (quỹ trừ hai lần). Ngược lại bước bật chờ lượt ghi này commit rồi mới kiểm ⇒ thấy
+        // dòng vừa ghi: ngày ≥ M ⇒ từ chối `CON_NHAP_HANG_SAU_M`; ngày < M ⇒ đã nằm trong quỹ cuối M−1 nó chốt.
+        // Đặt trước mọi khoá khác (thứ tự chung với `createExpense`).
+        await khoaChiaSeBatNoPhaiTra(tx);
+        // Cổng cuối TRONG transaction (bước bật commit giữa lượt đọc M ở trên và câu ghi): đã bật ⇒ từ chối cả
+        // lượt, MỌI ngày phiếu — sổ chi phí khoá khi đã bật (`chan-so-chi-phi-da-khoa.ts`: phiếu < M thuộc quỹ đã
+        // chốt, phiếu ≥ M đi sổ nợ). Xét từng phiếu như một lượt tạo — phiếu đầu bị chặn là cả lượt lùi.
+        for (const d of canGhi) {
+          await chanSoChiPhiDaKhoa(tx, { loai: "TAO", dong: { categoryId: "purchase", date: d.phieu.ngay } });
+        }
+        const kq = await tx.expense.createMany({
+          data: canGhi.map((d) => ({
+            date: d.phieu.ngay,
+            categoryId: "purchase",
+            amount: d.soTien,
+            description: moTa(d.phieu),
+            source: "MANUAL" as const,
+            refId: d.phieu.refId,
+            // Nhập hàng là dòng tiền chung của shop, không thuộc kênh bán nào.
+            channelId: null,
+          })),
+          skipDuplicates: true,
+        });
+        // Không dòng nào vào (mọi phiếu vừa bị tab khác ghi) ⇒ không có gì để ghi dấu vết.
+        if (kq.count > 0) {
+          await ghiNhatKy(tx, {
+            actor: nguoiDung,
+            hanhDong: "NHAP_HANG_GHI_CHI_PHI",
+            doiTuong: { loai: "Expense" },
+            ghiChu: { soDong: kq.count },
+          });
+        }
+        return kq.count;
+      }, OPT_TX_DONG_TIEN);
+    } catch (e) {
+      // `skipDuplicates` đã nuốt P2002 nên tới đây là lỗi KHÁC (mất kết nối, out-of-range…). Vẫn dịch
+      // riêng P2002 phòng khi driver đổi hành vi — im lặng ở đây là chủ shop tưởng đã ghi xong.
+      if (e instanceof LoiSoChiPhiDaKhoa) return { ok: false, code: e.code, error: e.message };
+      if (laLoiDongTienBan(e)) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
+      const code = (e as { code?: string })?.code;
+      if (code === "P2002") {
+        return {
+          ok: false,
+          error: "Một phiếu vừa được ghi ở nơi khác — chưa ghi gì. Tải lại trang rồi duyệt lại.",
+          code: "DA_GHI_ROI",
+        };
+      }
+      // Tới đây LUÔN là lỗi hạ tầng Prisma/DB (P2002 đã tách nhánh riêng ở trên) — message driver có
+      // thể mang hostname/tên cột. Log đủ phía server, trả client câu cố định.
+      console.error("Không ghi được chi phí nhập hàng:", e);
+      return {
+        ok: false,
+        error: "Không ghi được chi phí nhập hàng — lỗi hệ thống, thử lại sau.",
+      };
+    }
+
+    await dongBoLaiSoDem();
+    dungLaiManTien();
+
+    // `tongTien` CHỈ đúng khi không phiếu nào bị bỏ (`boQua === 0`) — `createMany` không nói dòng nào
+    // bị `skipDuplicates` bỏ. Client vì vậy chỉ hiện số tiền ở nhánh boQua === 0; nhánh còn lại bảo
+    // tải lại trang để đọc số thật từ sổ. Đoán bừa một con số tiền còn tệ hơn không nói.
+    const tongTien = canGhi.reduce((s, d) => s + d.soTien, 0);
+    return { ok: true, data: { daGhi, boQua: dong.length - daGhi, tongTien } };
+  } finally {
+    cua.ra();
   }
-
-  await dongBoLaiSoDem();
-  dungLaiManTien();
-
-  // `tongTien` CHỈ đúng khi không phiếu nào bị bỏ (`boQua === 0`) — `createMany` không nói dòng nào
-  // bị `skipDuplicates` bỏ. Client vì vậy chỉ hiện số tiền ở nhánh boQua === 0; nhánh còn lại bảo
-  // tải lại trang để đọc số thật từ sổ. Đoán bừa một con số tiền còn tệ hơn không nói.
-  const tongTien = canGhi.reduce((s, d) => s + d.soTien, 0);
-  return { ok: true, data: { daGhi, boQua: dong.length - daGhi, tongTien } };
 }
 
 /**

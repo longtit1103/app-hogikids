@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { REAL_FEE_CHANNELS } from "@/lib/channels/real-fee-channels";
 import type { DateRange } from "@/lib/date-range";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
@@ -59,34 +59,38 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export async function updateChannels(input: unknown): Promise<ActionResult> {
   const cong = await congAction("cai-dat:sua");
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = channelConfigSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0].message };
-  }
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      for (const c of parsed.data) {
-        await tx.channel.update({
-          where: { id: c.id },
-          data: {
-            isActive: c.isActive,
-            platformFeePct: round2(c.platformFeePct),
-            paymentFeePct: round2(c.paymentFeePct),
-            color: c.color,
-          },
-        });
-      }
-      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_KENH });
-    });
-  } catch {
-    return { ok: false, error: "Lỗi khi lưu cấu hình kênh" };
-  }
+    const parsed = channelConfigSchema.safeParse(input);
+    if (!parsed.success) {
+      return { ok: false, error: parsed.error.issues[0].message };
+    }
 
-  revalidatePath("/cai-dat");
-  return { ok: true, data: undefined };
+    try {
+      await prisma.$transaction(async (tx) => {
+        for (const c of parsed.data) {
+          await tx.channel.update({
+            where: { id: c.id },
+            data: {
+              isActive: c.isActive,
+              platformFeePct: round2(c.platformFeePct),
+              paymentFeePct: round2(c.paymentFeePct),
+              color: c.color,
+            },
+          });
+        }
+        await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_KENH });
+      });
+    } catch {
+      return { ok: false, error: "Lỗi khi lưu cấu hình kênh" };
+    }
+
+    revalidatePath("/cai-dat");
+    return { ok: true, data: undefined };
+  } finally {
+    cua.ra();
+  }
 }
 
 /**
@@ -134,60 +138,64 @@ export async function recomputeFeesInRange(
   // Lượt này UPDATE `platformFeeEst` của cả kỳ trong MỘT transaction tới 60s. Chạy giữa lượt phục
   // hồi thì hoặc chết giữa chừng vì bảng bị drop, hoặc commit xong rồi bị bản backup lùi lại —
   // cả hai đều để lại phí sàn không khớp gì cả.
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    const kyHopLe = rangeTinhLaiPhiSchema.safeParse(range);
+    if (!kyHopLe.success) {
+      return { ok: false, error: kyHopLe.error.issues[0]?.message ?? "Kỳ tính lại phí không hợp lệ" };
+    }
+    range = kyHopLe.data;
 
-  const kyHopLe = rangeTinhLaiPhiSchema.safeParse(range);
-  if (!kyHopLe.success) {
-    return { ok: false, error: kyHopLe.error.issues[0]?.message ?? "Kỳ tính lại phí không hợp lệ" };
-  }
-  range = kyHopLe.data;
+    const updated = await prisma.$transaction(
+      async (tx) => {
+        const channels = await tx.channel.findMany();
+        const pctById = new Map(channels.map((c) => [c.id, c.platformFeePct + c.paymentFeePct]));
 
-  const updated = await prisma.$transaction(
-    async (tx) => {
-      const channels = await tx.channel.findMany();
-      const pctById = new Map(channels.map((c) => [c.id, c.platformFeePct + c.paymentFeePct]));
+        const orders = await tx.order.findMany({
+          where: {
+            orderedAt: { gte: range.from, lte: endOfDay(range.to) },
+            channelId: { notIn: [...REAL_FEE_CHANNELS] },
+          },
+          select: { id: true, channelId: true, itemsTotal: true, platformFeeEst: true },
+        });
 
-      const orders = await tx.order.findMany({
-        where: {
-          orderedAt: { gte: range.from, lte: endOfDay(range.to) },
-          channelId: { notIn: [...REAL_FEE_CHANNELS] },
-        },
-        select: { id: true, channelId: true, itemsTotal: true, platformFeeEst: true },
-      });
-
-      // Phí vẫn tính ở JS bằng ĐÚNG công thức cũ (`Math.round`) — KHÔNG đẩy phép tính xuống SQL:
-      // `round` của Postgres làm tròn khác `Math.round` ở số âm/nửa đơn vị, kết quả sẽ lệch từng đồng.
-      // Chỉ gom các đơn cùng phí ĐÍCH vào một `updateMany` thay vì UPDATE từng đơn. Số nhóm = số giá trị
-      // phí đích KHÁC NHAU: kênh có % = 0 ⇒ cả kênh một nhóm phí 0 (lợi lớn); kênh có % ≠ 0 thì
-      // `itemsTotal` khác nhau ⇒ gần như mỗi đơn một nhóm, số câu UPDATE có thể xấp xỉ số đơn như cách
-      // cũ. Mỗi nhóm vẫn cắt theo lô `SO_DON_MOI_CAU_UPDATE` id để một câu không quá dài.
-      const idTheoPhiMoi = new Map<number, string[]>();
-      for (const o of orders) {
-        const fee = Math.round((o.itemsTotal * (pctById.get(o.channelId) ?? 0)) / 100);
-        if (fee === o.platformFeeEst) continue;
-        const nhom = idTheoPhiMoi.get(fee);
-        if (nhom) nhom.push(o.id);
-        else idTheoPhiMoi.set(fee, [o.id]);
-      }
-
-      let n = 0;
-      for (const [fee, ids] of idTheoPhiMoi) {
-        for (let i = 0; i < ids.length; i += SO_DON_MOI_CAU_UPDATE) {
-          const res = await tx.order.updateMany({
-            // Hàng rào phí THẬT nhắc lại NGAY Ở CÂU GHI (không chỉ ở câu đọc): `id in` mà lọt một đơn
-            // Shopee/TikTok vì bất kỳ lý do gì thì câu này vẫn không đụng tới nó.
-            where: { id: { in: ids.slice(i, i + SO_DON_MOI_CAU_UPDATE) }, channelId: { notIn: [...REAL_FEE_CHANNELS] } },
-            data: { platformFeeEst: fee },
-          });
-          n += res.count;
+        // Phí vẫn tính ở JS bằng ĐÚNG công thức cũ (`Math.round`) — KHÔNG đẩy phép tính xuống SQL:
+        // `round` của Postgres làm tròn khác `Math.round` ở số âm/nửa đơn vị, kết quả sẽ lệch từng đồng.
+        // Chỉ gom các đơn cùng phí ĐÍCH vào một `updateMany` thay vì UPDATE từng đơn. Số nhóm = số giá trị
+        // phí đích KHÁC NHAU: kênh có % = 0 ⇒ cả kênh một nhóm phí 0 (lợi lớn); kênh có % ≠ 0 thì
+        // `itemsTotal` khác nhau ⇒ gần như mỗi đơn một nhóm, số câu UPDATE có thể xấp xỉ số đơn như cách
+        // cũ. Mỗi nhóm vẫn cắt theo lô `SO_DON_MOI_CAU_UPDATE` id để một câu không quá dài.
+        const idTheoPhiMoi = new Map<number, string[]>();
+        for (const o of orders) {
+          const fee = Math.round((o.itemsTotal * (pctById.get(o.channelId) ?? 0)) / 100);
+          if (fee === o.platformFeeEst) continue;
+          const nhom = idTheoPhiMoi.get(fee);
+          if (nhom) nhom.push(o.id);
+          else idTheoPhiMoi.set(fee, [o.id]);
         }
-      }
-      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_TINH_LAI_PHI, ghiChu: { soDong: n } });
-      return n;
-    },
-    { maxWait: 10_000, timeout: 60_000 },
-  );
 
-  revalidatePath("/", "layout");
-  return { ok: true, data: { updated } };
+        let n = 0;
+        for (const [fee, ids] of idTheoPhiMoi) {
+          for (let i = 0; i < ids.length; i += SO_DON_MOI_CAU_UPDATE) {
+            const res = await tx.order.updateMany({
+              // Hàng rào phí THẬT nhắc lại NGAY Ở CÂU GHI (không chỉ ở câu đọc): `id in` mà lọt một đơn
+              // Shopee/TikTok vì bất kỳ lý do gì thì câu này vẫn không đụng tới nó.
+              where: { id: { in: ids.slice(i, i + SO_DON_MOI_CAU_UPDATE) }, channelId: { notIn: [...REAL_FEE_CHANNELS] } },
+              data: { platformFeeEst: fee },
+            });
+            n += res.count;
+          }
+        }
+        await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.CAI_DAT_TINH_LAI_PHI, ghiChu: { soDong: n } });
+        return n;
+      },
+      { maxWait: 10_000, timeout: 60_000 },
+    );
+
+    revalidatePath("/", "layout");
+    return { ok: true, data: { updated } };
+  } finally {
+    cua.ra();
+  }
 }

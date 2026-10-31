@@ -306,6 +306,12 @@ export function doiChieuSaoKeThe(
 /**
  * Lý do KHÔNG cho chốt vì giao dịch app ghi ngày SAU ngày sao kê trong khi ngân hàng đã ghi nó trước đó (sao kê có):
  * neo đã gồm nó, lõi `ky-sao-ke.ts` lại đếm giao dịch ngày > ngày chốt ⇒ trừ/cộng hai lần. null = không có.
+ *
+ * App KHÔNG phân biệt được "cùng một lần, ghi sai ngày" với "hai lần khác nhau cùng số tiền" (sao kê có lần ngày
+ * D−1 app chưa ghi, app có lần ngày D+1 là lần mới) ⇒ vẫn CHẶN (để nguyên ca thứ nhất là trừ hai lần), nhưng câu
+ * hướng dẫn nêu cả hai lối: sửa ngày, HOẶC ghi thêm lần ngày ngân hàng rồi nhập lại (lần đó ghép đúng ngày nên lần
+ * mới ngày D+1 thôi bị ghép). Lối thứ hai mở chặn mà app KHÔNG kiểm được: làm sai (thật ra là cùng một lần) là
+ * `CARD_PAY` trùng ⇒ quỹ hụt đúng số đó và dư nợ thẻ thấp đúng số đó ⇒ câu bắt kiểm sao kê TÀI KHOẢN thanh toán trước.
  */
 export function lyDoGiaoDichSaiNgay(k: Pick<KetQuaGhepChiTra, "traSaiNgay" | "chiSaiNgay">): string | null {
   const ds = [
@@ -318,5 +324,38 @@ export function lyDoGiaoDichSaiNgay(k: Pick<KetQuaGhepChiTra, "traSaiNgay" | "ch
   ];
   if (ds.length === 0) return null;
   const loai = k.traSaiNgay.length > 0 ? (k.chiSaiNgay.length > 0 ? "Trả thẻ / khoản chi" : "Trả thẻ") : "khoản chi";
-  return `${ds.join("; ")}. Sửa ngày ${loai} về đúng ngày ngân hàng rồi nhập lại — để nguyên thì sau khi chốt app tính hai lần`;
+  return (
+    `${ds.join("; ")}. Nếu là CÙNG một lần: Sửa ngày ${loai} về đúng ngày ngân hàng rồi nhập lại. ` +
+    `Nếu là HAI lần khác nhau cùng số tiền: ghi thêm lần ngân hàng đã ghi (đúng ngày ngân hàng) vào app rồi nhập lại, ` +
+    `giữ nguyên lần ghi sau ngày sao kê — CHỈ làm vậy sau khi kiểm sao kê TÀI KHOẢN thanh toán thấy ĐỦ hai lần chuyển ` +
+    `số tiền đó (ghi thêm khi thật ra là một lần ⇒ quỹ hụt và dư nợ thẻ thấp đúng số tiền ấy). ` +
+    `Để nguyên thì sau khi chốt app tính hai lần`
+  );
+}
+
+/** "6.850.000 ₫ ngày 13/10, 17/10" — gom theo số tiền, ngày tăng dần. */
+function lietKeTienNgay(xs: ReadonlyArray<{ soTien: number; ngay: string }>): string {
+  const theoTien = new Map<number, string[]>();
+  for (const x of [...xs].sort((a, b) => a.ngay.localeCompare(b.ngay))) {
+    theoTien.set(x.soTien, [...(theoTien.get(x.soTien) ?? []), ngayNgan(x.ngay)]);
+  }
+  return [...theoTien].map(([t, ngay]) => `${formatVnd(t)} ngày ${ngay.join(", ")}`).join("; ");
+}
+
+/**
+ * Lý do KHÔNG cho chốt vì trả thẻ ghép MƠ HỒ (null = không có): nhiều lần trả cùng số tiền trên sao kê và trong app
+ * cách nhau vài ngày, ghép kiểu nào cũng được ⇒ mỗi cách cho một số "trả chưa lên sao kê" và một câu nhắc "chưa ghi"
+ * khác nhau. Không đoán — bắt sửa ngày Trả thẻ về đúng ngày giao dịch ngân hàng (lượt ghép đúng ngày ăn thẳng).
+ */
+export function lyDoTraTheMoHo(k: Pick<KetQuaGhepChiTra, "traMoHo">): string | null {
+  if (k.traMoHo.length === 0) return null;
+  const cum = k.traMoHo.map(
+    (c) =>
+      `sao kê có ${c.dong.length} lần trả ${lietKeTienNgay(c.dong.map((d) => ({ soTien: d.ghiCo, ngay: d.ngayGiaoDich })))}` +
+      ` ↔ app có ${c.giaoDich.length} lần ${lietKeTienNgay(c.giaoDich)}`,
+  );
+  return (
+    `Trả thẻ MƠ HỒ — không ghép chắc được theo ngày: ${cum.join("; ")}. Sửa ngày "Trả thẻ" trong app về ĐÚNG ngày ` +
+    `giao dịch ngân hàng (cột Ngày giao dịch trên sao kê), ghi lần nào còn thiếu, rồi nhập lại`
+  );
 }

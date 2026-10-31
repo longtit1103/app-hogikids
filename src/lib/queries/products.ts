@@ -2,6 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 
 import { mauTimKiemIlike } from "@/lib/escape-ilike";
 import { prisma } from "@/lib/prisma";
+import { PAGE_SIZE } from "@/lib/page-size";
 
 import type { KetQuaChe, QuyenGiaVon } from "./che-gia-von-types";
 import { getDefaultThreshold } from "./variants";
@@ -16,7 +17,6 @@ import { getDefaultThreshold } from "./variants";
  * vốn bị bỏ qua.
  */
 
-const PAGE_SIZE = 20;
 
 /** Trường biến thể KHÔNG nhạy cảm — danh sách được phép (pick). */
 export type ProductVariantRowChe = {

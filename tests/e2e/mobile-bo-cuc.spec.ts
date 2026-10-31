@@ -365,7 +365,16 @@ test.describe("Thanh tab dưới", () => {
       // trang hiện tại" trong khi đang ở Sản phẩm); trạng thái mở/đóng đã có aria-expanded. Vẫn tô
       // màu nhấn để mắt thấy mình đang ở nhóm mục phụ.
       await expect(them).not.toHaveAttribute("aria-current");
-      expect(await them.evaluate((e) => getComputedStyle(e).color)).toBe("rgb(204, 120, 92)");
+      // So với token nhấn `--primary` đọc lúc chạy (không ghi cứng mã màu: token đổi theo chuẩn tương phản).
+      const mauNhan = await page.evaluate(() => {
+        const d = document.createElement("span");
+        d.style.color = "var(--primary)";
+        document.body.appendChild(d);
+        const c = getComputedStyle(d).color;
+        d.remove();
+        return c;
+      });
+      expect(await them.evaluate((e) => getComputedStyle(e).color)).toBe(mauNhan);
     });
 
     test("dòng cuối trang không bị tab bar che", async ({ page }) => {

@@ -12,7 +12,7 @@
       ],
       "parameters": {
         "httpMethod": "POST",
-        "path": "duong-dan-webhook-kho",
+        "path": "__DUONG_DAN_WEBHOOK_KHO__",
         "responseMode": "onReceived",
         "options": {
           "rawBody": true

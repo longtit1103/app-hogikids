@@ -1,3 +1,4 @@
+import { chayMienCong } from "@/lib/backup/cong-ghi-toan-cuc";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -31,11 +32,15 @@ const BACKLOG_KEY = "bronzeBacklogPending";
  * `haCoBacklogNeuChuaBiBatLai`). Rebuild là BẮT BUỘC khi tắt công tắc, không phải tuỳ chọn.
  */
 export async function markBronzeBacklog(): Promise<void> {
-  await prisma.setting.upsert({
-    where: { key: BACKLOG_KEY },
-    create: { key: BACKLOG_KEY, value: "1" },
-    update: { value: "1" },
-  });
+  // LỐI MIỄN cổng ghi: lượt ingest bị cổng cắt giữa land và transform (cờ phục hồi bật) vẫn phải bật
+  // được cờ này — không thì đơn đã land không bao giờ lên Silver mà không ai biết.
+  await chayMienCong("backlog", () =>
+    prisma.setting.upsert({
+      where: { key: BACKLOG_KEY },
+      create: { key: BACKLOG_KEY, value: "1" },
+      update: { value: "1" },
+    }),
+  );
 }
 
 export async function hasBronzeBacklog(): Promise<boolean> {

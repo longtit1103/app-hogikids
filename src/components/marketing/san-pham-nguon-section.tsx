@@ -1,9 +1,8 @@
-import { formatPct1 } from "@/components/kenh/channel-format";
 import { CHUA_KET_NOI_ANALYTICS, KhuTrongMarketing } from "@/components/marketing/khu-trong-marketing";
 import { ChuThichDoTuoiVaThieu } from "@/components/marketing/canh-bao-do-tuoi-du-lieu";
 import { DONG_MOI_TRANG_MARKETING, PhanTrangMarketing } from "@/components/marketing/phan-trang-marketing";
 import { SoSanBao } from "@/components/marketing/so-san-bao";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatSoDem as soGon, formatVnd } from "@/lib/format";
 import type { ChuThichDoTuoi } from "@/lib/reports/marketing/cau-do-tuoi-du-lieu";
 import { KHOI_NGUON, type KhoiNguon } from "@/lib/reports/marketing/nguon-doanh-so-tiktok";
 import type { SanPhamNguonTiktok } from "@/lib/reports/marketing/san-pham-nguon-tiktok";
@@ -25,12 +24,8 @@ type SpDayDu = Record<string, string | undefined>;
  * `duLieu.dong[].ten` đã tự rơi về id khi không khớp (`san-pham-nguon-tiktok.ts`).
  */
 
-function soGon(n: number): string {
-  return new Intl.NumberFormat("vi-VN").format(n);
-}
-
 function pct(v: number | null): string {
-  return v === null ? "—" : formatPct1(v * 100);
+  return v === null ? "—" : formatPercent(v * 100);
 }
 
 const THU_TU_KHOI: KhoiNguon[] = [

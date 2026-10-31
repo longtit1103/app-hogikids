@@ -25,6 +25,9 @@ import {
  * Nhánh "Tiền đã về" của transform (TikTok Shop settlement + ví Shopee). Dòng tiền ĐỐI CHIẾU,
  * ĐỘC LẬP P&L/doanh thu (bất biến #2) — tuyệt đối không lấy số ở đây sửa phí trong P&L.
  * Gọi từ `transform-from-raw.ts`.
+ *
+ * Ba nhánh TikTok truyền `mocPhienBan` của dòng kho thô xuống câu ghi (chốt CAS `nguonFetchedAt`): lượt transform đọc
+ * ảnh cũ rồi ghi SAU lượt đọc ảnh mới thì bị từ chối (`*SkippedStale`), không kéo Silver lùi.
  */
 
 /**
@@ -64,7 +67,7 @@ export async function transformTiktokStatements(
       );
       continue;
     }
-    await upsertOneSettlement(m, row.payload, stats, warnings);
+    await upsertOneSettlement(m, row.payload, row.mocPhienBan, stats, warnings);
   }
 }
 
@@ -92,7 +95,7 @@ export async function transformTiktokAdsTxns(
       );
       continue;
     }
-    await upsertOneAdsSettlement(m, row.payload, stats, warnings);
+    await upsertOneAdsSettlement(m, row.payload, row.mocPhienBan, stats, warnings);
   }
 }
 
@@ -126,7 +129,7 @@ export async function transformTiktokPayments(
           `"Đã rút về bank" ở bất kỳ kỳ nào. Kiểm payload TikTok của lệnh rút này.`,
       );
     }
-    await upsertOnePayment(m, row.payload, stats, warnings);
+    await upsertOnePayment(m, row.payload, row.mocPhienBan, stats, warnings);
   }
 }
 

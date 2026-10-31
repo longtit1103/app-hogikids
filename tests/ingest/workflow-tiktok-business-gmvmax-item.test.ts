@@ -646,7 +646,10 @@ describe("cổng 0 dòng ⇒ KHÔNG land — nhánh CŨ keoReport (auction + GMV
         spend: 81617,
       },
     ]);
-    expect(sk.land.mock.calls[0]).toEqual(["tiktokbusiness/report", "7129548444015902722", noiDung]);
+    // Đối số 4 (`ngay`) trống; đối số 5 = mốc chụp `chupLuc` (ISO) của trang — hợp đồng riêng ở workflow-gui-chup-luc-moi-trang.
+    const [stream, adv, than, ngay, chupLuc] = sk.land.mock.calls[0];
+    expect([stream, adv, than, ngay]).toEqual(["tiktokbusiness/report", "7129548444015902722", noiDung, undefined]);
+    expect(chupLuc).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
   it("guard `bad` GIỮ NGUYÊN: dòng thiếu stat_time_day vẫn THROW (không bị cổng nuốt)", async () => {

@@ -1,8 +1,11 @@
 import { PrismaPg } from "@prisma/adapter-pg";
+import type { ClientConfig } from "pg";
 
 // Đường dẫn TƯƠNG ĐỐI, không alias "@/": file này được nạp cả từ `prisma/seed.ts` và bộ e2e
 // (Playwright không chắc resolve alias — xem `tests/e2e/global-setup.ts`).
 import { PrismaClient } from "../generated/prisma/client";
+import { bocTransactionLe, canOpGhi, laOpGhi } from "./backup/cong-ghi-toan-cuc";
+import { giuKhoaChungCli, nhaKhoaChungCli, tienToAppCli } from "./backup/khoa-chung-cli";
 
 /**
  * NƠI DUY NHẤT dựng `PrismaClient` (Prisma 7). Mọi chỗ cần client — singleton app
@@ -220,17 +223,151 @@ class AdapterThieuUrl extends PrismaPg {
   }
 }
 
+/**
+ * Cấu hình `pg.Client` RIÊNG (không pool) cho kết nối giữ khoá ghi chung — cùng nghĩa URL với pool
+ * app (`sslmode`/`schema`/`options`), cộng `keepAlive` (phát hiện sớm phiên nửa chết: cluster để
+ * `tcp_keepalives_*` mặc định OS ~2h11') và `application_name` để restore nhận ra phiên đang giữ.
+ * `application_name` sẵn có trong URL bị bóc: tham số URL ĐÈ field cấu hình cùng tên trong `pg`.
+ */
+export function cauHinhClientKhoa(url: string, applicationName: string): ClientConfig {
+  const { pool } = cauHinhKetNoiTuUrl(url);
+  const u = new URL(pool.connectionString);
+  u.searchParams.delete("application_name");
+  return {
+    connectionString: u.toString(),
+    options: pool.options,
+    ssl: pool.ssl,
+    connectionTimeoutMillis: pool.connectionTimeoutMillis,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    application_name: applicationName,
+  };
+}
+
+/**
+ * Tiến trình này có phải CLI (cần khoá ghi chung) không: ngoài Next (`NEXT_RUNTIME` được Next gắn
+ * cứng vào bundle server lúc biên dịch) và KHÔNG phải Vitest.
+ *
+ * Vì sao miễn Vitest: Vitest cũng không có `NEXT_RUNTIME`; giữ khoá shared ở singleton của tiến trình
+ * test thì chính test restore trong CÙNG tiến trình không bao giờ giành được X. Test hai tiến trình
+ * (`tests/backup/khoa-chung-cli-hai-tien-trinh.test.ts`) XOÁ `VITEST` khỏi env tiến trình con và kiểm
+ * tiến trình con KHÔNG được miễn — không thì nó xanh giả.
+ */
+export function cheDoKhoaCli(): boolean {
+  return !process.env.NEXT_RUNTIME && !process.env.VITEST;
+}
+
+/** Tên file script đang chạy — gắn vào `application_name` kết nối khoá để câu 409 chỉ đúng thủ phạm. */
+function tenTienTrinh(): string {
+  return process.argv[1]?.split(/[\\/]/).pop() || "?";
+}
+
+/** Gắn `application_name` cho pool CLI (đi nguyên qua `cauHinhKetNoiTuUrl` vào connection string). */
+function urlVoiTenUngDung(url: string, ten: string): string {
+  const u = new URL(url);
+  u.searchParams.set("application_name", ten);
+  return u.toString();
+}
+
+/** Tham số `$allOperations` — chỉ phần cổng cần đọc. */
+type ThamSoOp = { model?: string; operation: string; args: unknown; query: (args: unknown) => Promise<unknown> };
+
+/**
+ * Lớp bọc DUY NHẤT quanh client (một `$extends` + một `Proxy`), gộp hai việc để cả repo chỉ có MỘT
+ * ép kiểu client:
+ *  - KHOÁ GHI CHUNG CLI (`cheDoKhoaCli()`): trước MỖI op ghi, giành (một lần mỗi DB đích, nhớ lời hứa
+ *    theo đích) khoá shared trên `pg.Client` riêng; restore đang giữ X ⇒ op ném `LoiCliDangPhucHoi`.
+ *    `$disconnect` chỉ bỏ client NÀY khỏi khoá của đích — khoá nhả khi không còn client nào dùng nó.
+ *  - CỔNG GHI TRONG TIẾN TRÌNH (`congGhi`, CHỈ singleton app `src/lib/prisma.ts`): op ghi qua
+ *    `canOpGhi`; `$transaction` qua `bocTransactionLe`. Client khác (seed, script, helper test) không
+ *    bật: cờ phục hồi chỉ có nghĩa trong tiến trình app, bật cho helper test là chặn chính phần dọn dữ
+ *    liệu của test.
+ * Không việc nào cần ⇒ trả nguyên client (không đổi gì so với trước).
+ */
+function bocClient(goc: PrismaClient, url: string, congGhi: boolean): PrismaClient {
+  const cli = cheDoKhoaCli();
+  if (!cli && !congGhi) return goc;
+  const cauHinhKhoa = cauHinhClientKhoa(url, `${tienToAppCli()}:${tenTienTrinh()}`);
+  // Danh tính client này trong tập người dùng khoá CLI của đích — `$disconnect` chỉ bỏ ĐÚNG client này.
+  const chuKhoa = {};
+
+  const moRong = goc.$extends({
+    name: "cong-ghi",
+    query: {
+      $allOperations(p) {
+        // Ép kiểu THAM SỐ (không phải client): kiểu sinh của Prisma là union theo từng model/op,
+        // cổng chỉ đọc 4 trường chung.
+        const { model, operation, args, query } = p as unknown as ThamSoOp;
+        if (!laOpGhi(model, operation, args)) return query(args);
+        const chay = async () => {
+          if (cli) await giuKhoaChungCli(cauHinhKhoa, chuKhoa);
+          return query(args);
+        };
+        return congGhi ? canOpGhi(`${model ?? "raw"}.${operation}`, chay) : chay();
+      },
+    },
+  });
+
+  if (congGhi) {
+    // Bọc `$transaction` MỘT LẦN lúc dựng và gắn thành thuộc tính THƯỜNG của client (client mở rộng
+    // của Prisma nhận `defineProperty` và trả lại đúng giá trị đó ở `get`) — KHÔNG chặn trong bẫy `get`
+    // của Proxy dưới đây: chặn ở `get` thì `vi.spyOn(prisma, "$transaction")` (định nghĩa lại thuộc
+    // tính) không còn thay được hàm, test giả lập lỗi/xen giữa lượt ghi chạy vào tx thật mà vẫn tưởng
+    // đã giả lập.
+    const transaction = bocTransactionLe(moRong.$transaction.bind(moRong) as (...a: unknown[]) => Promise<unknown>);
+    Object.defineProperty(moRong, "$transaction", {
+      value: transaction,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+  }
+  const coCong = new Proxy(moRong, {
+    get(target, prop) {
+      if (prop === "$disconnect" && cli) {
+        return async () => {
+          try {
+            await target.$disconnect();
+          } finally {
+            await nhaKhoaChungCli(cauHinhKhoa, chuKhoa);
+          }
+        };
+      }
+      return Reflect.get(target, prop);
+    },
+  });
+  // MỘT ép kiểu khoanh vùng cho cả repo. Đo (tsc): client `$extends` KHÔNG gán được vào `PrismaClient`
+  // (thiếu `$on`) lẫn `Prisma.TransactionClient` (generic `Exact` vs `SelectSubset` lệch ở mọi delegate),
+  // và `tx` trong `$transaction` của nó cũng không ⇒ không ép thì ~87 chỗ `$transaction` + 4 kiểu union
+  // `PrismaClient | Prisma.TransactionClient` phải sửa. An toàn lúc chạy: extension chỉ trả nguyên
+  // kết quả `query(args)` (không đổi kiểu dữ liệu); khác biệt duy nhất là client mở rộng không có
+  // `$on`/`$use` — không ai gọi trên client bọc (script cần `$on` dùng `logTruyVan`, không bị bọc).
+  return coCong as unknown as PrismaClient;
+}
+
 /** Tuỳ chọn thêm cho script đo/kiểm: `logTruyVan` bật sự kiện `query` để gắn `client.$on("query", …)`. */
 export type TuyChonTaoClient = { logTruyVan: true };
 
+/** Tuỳ chọn CHỈ cho singleton app (`src/lib/prisma.ts`): bật cổng ghi trong tiến trình. */
+export type TuyChonClientApp = { congGhi: true };
+
 /**
  * Dựng `PrismaClient` nối tới `url` (URL kiểu Prisma 6, mang `?schema=`). `url` rỗng/thiếu ⇒ client
- * dựng được nhưng mọi truy vấn ném lỗi rõ ràng (xem `AdapterThieuUrl`). App KHÔNG truyền `tuyChon`.
+ * dựng được nhưng mọi truy vấn ném lỗi rõ ràng (xem `AdapterThieuUrl`).
+ *
+ * Ngoài Next (script, seed — trừ Vitest) client tự giữ KHOÁ GHI CHUNG ở lần ghi đầu (xem `bocClient`),
+ * pool gắn `application_name` tiền tố CLI để lượt phục hồi thấy phiên còn sống. `logTruyVan` (script
+ * đo, URL chỉ-đọc `default_transaction_read_only`) KHÔNG bọc để giữ `$on`.
  */
 export function taoPrismaClient(url: string | undefined): PrismaClient;
+export function taoPrismaClient(url: string | undefined, tuyChon: TuyChonClientApp): PrismaClient;
 export function taoPrismaClient(url: string | undefined, tuyChon: TuyChonTaoClient): PrismaClient<"query">;
-export function taoPrismaClient(url: string | undefined, tuyChon?: TuyChonTaoClient): PrismaClient<"query"> | PrismaClient {
-  const log = tuyChon?.logTruyVan ? ([{ emit: "event", level: "query" }] as const) : undefined;
+export function taoPrismaClient(
+  url: string | undefined,
+  tuyChon?: TuyChonTaoClient | TuyChonClientApp,
+): PrismaClient<"query"> | PrismaClient {
+  const logTruyVan = tuyChon !== undefined && "logTruyVan" in tuyChon && tuyChon.logTruyVan;
+  const log = logTruyVan ? ([{ emit: "event", level: "query" }] as const) : undefined;
   if (!url) {
     return new PrismaClient({
       adapter: new AdapterThieuUrl(
@@ -239,6 +376,12 @@ export function taoPrismaClient(url: string | undefined, tuyChon?: TuyChonTaoCli
       ...(log ? { log: [...log] } : {}),
     });
   }
-  const { schema, pool } = cauHinhKetNoiTuUrl(url);
-  return new PrismaClient({ adapter: new PrismaPg(pool, { schema }), ...(log ? { log: [...log] } : {}) });
+  if (log) {
+    const { schema, pool } = cauHinhKetNoiTuUrl(url);
+    return new PrismaClient({ adapter: new PrismaPg(pool, { schema }), log: [...log] });
+  }
+  const congGhi = tuyChon !== undefined && "congGhi" in tuyChon && tuyChon.congGhi;
+  const urlPool = cheDoKhoaCli() ? urlVoiTenUngDung(url, `${tienToAppCli()}-pool`) : url;
+  const { schema, pool } = cauHinhKetNoiTuUrl(urlPool);
+  return bocClient(new PrismaClient({ adapter: new PrismaPg(pool, { schema }) }), url, congGhi);
 }

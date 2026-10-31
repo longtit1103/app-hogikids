@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { differenceInCalendarDays, format } from "date-fns";
 import { toast } from "sonner";
@@ -17,9 +17,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { LoiVuotTranTien, thuocTinhLoiVuotTran } from "@/components/ui/loi-vuot-tran-tien";
 import { tatToanSoTietKiem } from "@/lib/actions/tat-toan-so-tiet-kiem";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, MAX_AMOUNT_INPUT, parseAmountInput } from "@/lib/format-amount-input";
 import { formatVnd } from "@/lib/format";
 import type { SoTietKiemRow } from "@/lib/tiet-kiem/so-tiet-kiem-queries";
 
@@ -36,16 +37,21 @@ const NGAY_COI_LA_TRE = 7;
 
 /** Quá hạn đáo hạn CHỪNG nào thì hiện badge "trễ" — khuôn `NGAY_COI_LA_TRE` ở `khoan-vay-table.tsx`. */
 export function laDaoHanTre(maturityDate: Date, homNay: Date): boolean {
-  return differenceInCalendarDays(homNay, maturityDate) > NGAY_COI_LA_TRE;
+  // Hai khoá ngày VN dựng lại thành mốc 12:00 UTC cùng một hệ: chênh lệch ngày lịch KHÔNG phụ thuộc múi giờ máy.
+  const soNgay = (d: Date) => new Date(`${formatNgayVn(d, NGAY)}T12:00:00Z`);
+  return differenceInCalendarDays(soNgay(homNay), soNgay(maturityDate)) > NGAY_COI_LA_TRE;
 }
 
 export function SoDaoHanCard({ so }: { so: SoTietKiemRow }) {
   const router = useRouter();
+  const idLoiLai = `${useId()}-lai`;
   const [lai, setLai] = useState(so.laiDuKien);
-  const [ngayTatToan, setNgayTatToan] = useState(() => format(new Date(), NGAY));
+  const [ngayTatToan, setNgayTatToan] = useState(() => formatNgayVn(new Date(), NGAY));
   const [dangChay, setDangChay] = useState(false);
   const [moXacNhan, setMoXacNhan] = useState(false);
   const tre = laDaoHanTre(so.maturityDate, new Date());
+  // Lãi gõ quá trần 2 tỷ: báo đỏ tại ô + khoá nút tất toán (action vẫn chặn).
+  const vuotTran = lai > MAX_AMOUNT_INPUT;
 
   async function tatToan() {
     setDangChay(true);
@@ -80,18 +86,20 @@ export function SoDaoHanCard({ so }: { so: SoTietKiemRow }) {
           <Input
             type="date"
             value={ngayTatToan}
-            min={format(so.maturityDate, NGAY)}
-            max={format(new Date(), NGAY)}
+            min={formatNgayVn(so.maturityDate, NGAY)}
+            max={formatNgayVn(new Date(), NGAY)}
             onChange={(e) => setNgayTatToan(e.target.value)}
           />
         </O>
         <O label="Lãi thực nhận" hint="app điền sẵn lãi dự kiến — sửa theo đúng số giấy báo ngân hàng">
           <Input
             inputMode="numeric"
+            {...thuocTinhLoiVuotTran(lai, idLoiLai)}
             value={formatAmountInput(lai)}
             onChange={(e) => setLai(parseAmountInput(e.target.value))}
             className="text-right"
           />
+          <LoiVuotTranTien value={lai} id={idLoiLai} />
         </O>
       </div>
 
@@ -105,7 +113,7 @@ export function SoDaoHanCard({ so }: { so: SoTietKiemRow }) {
               RangeError, React unmount cả cây ⇒ SẬP TRỌN tab Dòng tiền chỉ vì một ô để trống.
               Chặn ngay ở nút mở, và câu dưới nói rõ vì sao nút mờ. */}
           <DialogTrigger
-            disabled={!ngayTatToan}
+            disabled={!ngayTatToan || vuotTran}
             render={<Button type="button">Tất toán</Button>}
           />
           <DialogContent className="max-w-sm">
@@ -120,7 +128,7 @@ export function SoDaoHanCard({ so }: { so: SoTietKiemRow }) {
             </p>
             <DialogFooter>
               <DialogClose render={<Button variant="outline">Huỷ</Button>} />
-              <Button type="button" disabled={dangChay} onClick={tatToan}>
+              <Button type="button" disabled={dangChay || vuotTran} onClick={tatToan}>
                 {dangChay ? "Đang ghi…" : "Xác nhận tất toán"}
               </Button>
             </DialogFooter>

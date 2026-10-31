@@ -31,9 +31,14 @@ export function ngayHoaDonTiktokDuVe(ngayChot: string): string {
 /**
  * Lý do CHƯA chốt được vì hoá đơn TikTok ngày chốt có thể chưa về app (null = đủ tươi). Hai điều kiện:
  *  1. hôm nay (khoá VN) ≥ D + 2;
- *  2. lượt kéo hoá đơn mới nhất vào app (khoá VN của `max(TiktokAdsHoaDon.syncedAt)`) ≥ D + 2 — lượt kéo đêm có thể
- *     hỏng/bị bỏ, hôm nay đủ muộn chưa chắc hoá đơn đã về.
- * `lanKeoMoiNhat` null = chưa từng có hoá đơn nào trong app.
+ *  2. lượt kéo hoá đơn mới nhất vào app ≥ D + 2 — lượt kéo đêm có thể hỏng/bị bỏ, hôm nay đủ muộn chưa chắc hoá đơn
+ *     đã về. `lanKeoMoiNhat` null = chưa từng có lượt kéo hoá đơn thành công nào.
+ * Đường nhập PDF đo điều kiện 2 THEO TỪNG BC (+ trang lỗi, backlog kho thô) ở `lyDoHoaDonTiktokChuaDu`
+ * (`no-phai-tra/doi-chieu-sao-ke-voi-app.ts`) và chỉ mượn hàm này cho điều kiện 1.
+ *
+ * Rủi ro còn lại: workflow n8n `tiktok-business-nightly.json` chỉ POST trang có hoá đơn (`if (list.length)`) ⇒ lượt
+ * kéo mà CẢ cửa sổ 10 ngày (`HOA_DON_CUA_SO_NGAY`) không có hoá đơn nào thì không ghi `SyncLog`, mốc đứng yên ⇒ cổng
+ * chặn nhập PDF chứ không chốt sai — chủ shop dùng form chốt tay (chỉ cảnh báo).
  */
 export function lyDoHoaDonTiktokChuaVe(ngayChot: string, homNay: string, lanKeoMoiNhat: string | null): string | null {
   const tu = ngayHoaDonTiktokDuVe(ngayChot);

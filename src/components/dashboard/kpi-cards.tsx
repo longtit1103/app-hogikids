@@ -3,7 +3,7 @@ import Link from "next/link";
 import { LinkNeuDuocVao } from "@/components/dashboard/link-neu-duoc-vao";
 import { coTheVaoHref } from "@/components/shell/nav-config";
 import { Badge } from "@/components/ui/badge";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatVnd } from "@/lib/format";
 import { chuThichBienRongCoThuNhap } from "@/lib/reports/chu-thich-thu-nhap-tai-chinh";
 import { pnlPercentBase } from "@/lib/reports/pnl-percent-base";
 import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
@@ -62,10 +62,6 @@ function rateTone(pct: number): "text-success" | "text-warning" | "text-error" {
   return "text-error";
 }
 
-function formatPct1(pct: number): string {
-  return `${pct.toFixed(1).replace(".", ",")}%`;
-}
-
 /**
  * Delta tỷ lệ hoàn/bom so tháng trước tính bằng ĐIỂM % (current − previous),
  * không phải % tương đối — so % của % dễ đọc sai (VD 2%→4% không phải
@@ -83,7 +79,7 @@ function ReturnBomDelta({ current, previous }: { current: number | null; previou
   const up = diff > 0;
   return (
     <span className={cn("text-xs", up ? "text-error" : "text-success")}>
-      {up ? "▲" : "▼"} {formatPct1(Math.abs(diff))} điểm so tháng trước
+      {up ? "▲" : "▼"} {formatPercent(Math.abs(diff))} điểm so tháng trước
     </span>
   );
 }
@@ -171,7 +167,7 @@ export function KpiCards({
         <CardShell href={hrefDonHang("/don-hang?trang_thai=hoan_hang,huy_bom")}>
           <p className="text-sm text-muted-foreground">Tỷ lệ hoàn/bom tháng</p>
           <p className={cn("mt-1 font-serif text-2xl", thisRate === null ? "text-ink" : rateTone(thisRate))}>
-            {thisRate === null ? "—" : formatPct1(thisRate)}
+            {thisRate === null ? "—" : formatPercent(thisRate)}
           </p>
           <div className="mt-1">
             <ReturnBomDelta current={thisRate} previous={prevRate} />
@@ -214,10 +210,10 @@ function TheLnRongThang({
           <p className="text-sm text-on-dark/70">LN ròng ước tính tháng</p>
           <Badge className="border-none bg-on-dark/15 text-on-dark">tạm tính</Badge>
         </div>
-        <p className={cn("mt-1 font-serif text-2xl", isNegative ? "text-error" : "text-on-dark")}>
+        <p className={cn("mt-1 font-serif text-2xl", isNegative ? "text-error-on-dark" : "text-on-dark")}>
           {formatVnd(thisMonth.netProfit)}
         </p>
-        <p className="mt-1 text-xs text-on-dark/70">Biên ròng {marginPct === null ? "—" : formatPct1(marginPct)}</p>
+        <p className="mt-1 text-xs text-on-dark/70">Biên ròng {marginPct === null ? "—" : formatPercent(marginPct)}</p>
         {/* Công thức biên ròng KHÔNG đổi (quyết định #10) — nhưng tháng tất toán sổ thì tử số có
             thêm lãi tiết kiệm, biên nhảy vọt. Thiếu câu này là đọc thành bán hàng lãi hơn. */}
         {ghiChuBienRong && <p className="text-xs text-on-dark/70">{ghiChuBienRong}</p>}
@@ -234,13 +230,13 @@ function TheLnRongThang({
         <LinkNeuDuocVao
           href="/san-pham?loc=da_ban_thieu_gia_von"
           hrefDuocPhep={hrefDuocPhep}
-          className="mt-2 inline-block text-xs text-warning hover:underline"
+          className="mt-2 inline-block text-xs text-warning-on-dark hover:underline"
         >
           ⚠ {thisMonth.skuMissingCount} SKU thiếu giá vốn
           {thisMonth.skuUnknownLineCount > 0 && ` + ${thisMonth.skuUnknownLineCount} dòng không khớp SP`}
         </LinkNeuDuocVao>
       ) : thisMonth.skuUnknownLineCount > 0 ? (
-        <span className="mt-2 inline-block text-xs text-warning">
+        <span className="mt-2 inline-block text-xs text-warning-on-dark">
           ⚠ {thisMonth.skuUnknownLineCount} dòng hàng không khớp sản phẩm nào — nhập giá vốn không sửa được COGS của chúng
         </span>
       ) : null}

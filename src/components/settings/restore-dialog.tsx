@@ -14,7 +14,43 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { cauLenhCatTayPhien } from "@/lib/backup/huong-dan-cat-tay-phien-khac-role";
 import { BackupButton } from "./backup-button";
+
+/**
+ * Một phiên DB đang giữ khoá ghi chung — hình khớp `phienDangGiu` của 409 ở `/api/restore`.
+ * `catDuoc` = phiên CÙNG role app (nút cắt dùng được); `false` = role khác, chỉ superuser cắt được.
+ */
+type PhienDangGiu = {
+  pid: number;
+  applicationName: string;
+  backendStart: string;
+  mode: string;
+  usename: string;
+  catDuoc: boolean;
+};
+
+/** Lấy `phienDangGiu` từ thân 409; phần tử sai hình bị bỏ (không tin thân phản hồi tuyệt đối). */
+function docPhienDangGiu(body: unknown): PhienDangGiu[] {
+  const ds = (body as { phienDangGiu?: unknown } | null)?.phienDangGiu;
+  if (!Array.isArray(ds)) return [];
+  return ds.filter(
+    (p): p is PhienDangGiu =>
+      typeof p === "object" &&
+      p !== null &&
+      Number.isInteger((p as PhienDangGiu).pid) &&
+      typeof (p as PhienDangGiu).applicationName === "string" &&
+      typeof (p as PhienDangGiu).backendStart === "string" &&
+      typeof (p as PhienDangGiu).mode === "string" &&
+      typeof (p as PhienDangGiu).usename === "string" &&
+      typeof (p as PhienDangGiu).catDuoc === "boolean",
+  );
+}
+
+function gioBatDau(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "không rõ" : d.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+}
 
 /**
  * "Phục hồi từ file" — confirm 2 bước như "Xóa toàn bộ".
@@ -31,6 +67,10 @@ import { BackupButton } from "./backup-button";
  * - 400 (file sai), 409 (đang bận: lượt phục hồi khác / lượt đồng bộ đang chạy) và 422 (dump đời
  *   trước bản phân quyền — phải phục hồi trên host) → DB nguyên vẹn, toast nói rõ điều đó và KHÔNG
  *   gợi ý bản lùi; 500 → gợi ý khôi phục thủ công.
+ * - 409 kèm `phienDangGiu` (script ngoài app còn giữ khoá ghi chung): tách hai nhóm. Phiên CÙNG role
+ *   app: nút "Cắt phiên" (hai lần bấm) → POST /api/restore/cat-phien; cắt xong chủ shop bấm "Phục hồi"
+ *   lại. Phiên role KHÁC: không nút (app không có quyền cắt) — hiện role + câu lệnh superuser cắt tay.
+ *   Route cắt báo "role khác" ⇒ GIỮ dòng, chuyển sang nhóm cắt tay; chỉ "không còn chặn" mới gỡ dòng.
  */
 export function RestoreDialog({ shopName }: { shopName: string }) {
   const router = useRouter();
@@ -39,7 +79,13 @@ export function RestoreDialog({ shopName }: { shopName: string }) {
   const [file, setFile] = useState<File | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [restoring, setRestoring] = useState(false);
+  const [phienDangGiu, setPhienDangGiu] = useState<PhienDangGiu[]>([]);
+  const [pidCho, setPidCho] = useState<number | null>(null); // đã bấm "Cắt phiên" lần 1, chờ xác nhận.
+  const [pidDangCat, setPidDangCat] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Tách hai nhóm: chỉ phiên CÙNG role app có nút cắt; phiên role khác hiện câu lệnh cắt tay.
+  const phienCatDuoc = phienDangGiu.filter((p) => p.catDuoc);
+  const phienKhacRole = phienDangGiu.filter((p) => !p.catDuoc);
 
   function handleOpenChange(next: boolean) {
     if (restoring) return; // không cho đóng giữa lúc phục hồi.
@@ -48,6 +94,8 @@ export function RestoreDialog({ shopName }: { shopName: string }) {
       setStep(1);
       setFile(null);
       setConfirmText("");
+      setPhienDangGiu([]);
+      setPidCho(null);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -57,6 +105,8 @@ export function RestoreDialog({ shopName }: { shopName: string }) {
   async function handleRestore() {
     if (!matches || !file) return;
     setRestoring(true);
+    setPhienDangGiu([]);
+    setPidCho(null);
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -80,6 +130,7 @@ export function RestoreDialog({ shopName }: { shopName: string }) {
       try {
         const body = (await res.json()) as { error?: string };
         if (body?.error) message = body.error;
+        if (res.status === 409) setPhienDangGiu(docPhienDangGiu(body));
       } catch {
         // body không phải JSON — giữ message mặc định.
       }
@@ -103,6 +154,52 @@ export function RestoreDialog({ shopName }: { shopName: string }) {
       toast.error("Phục hồi thất bại — kiểm tra kết nối. Dữ liệu có thể chưa thay đổi.");
     } finally {
       setRestoring(false);
+    }
+  }
+
+  /** Cắt một phiên giữ khoá: lần bấm đầu chỉ xin xác nhận, lần hai mới gọi route. */
+  async function handleCatPhien({ pid, backendStart }: PhienDangGiu) {
+    if (pidCho !== pid) {
+      setPidCho(pid);
+      return;
+    }
+    setPidDangCat(pid);
+    try {
+      const res = await fetch("/api/restore/cat-phien", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        // `backendStart` để route từ chối khi pid trong danh sách cũ đã thuộc về phiên mới.
+        body: JSON.stringify(backendStart ? { pid, backendStart } : { pid }),
+      });
+      if (res.ok) {
+        toast.success(`Đã cắt phiên ${pid} — bấm "Phục hồi" lại.`);
+        setPhienDangGiu((ds) => ds.filter((p) => p.pid !== pid));
+        return;
+      }
+      let message = "Không cắt được phiên";
+      let khacRole: { usename: string } | null = null;
+      try {
+        const body = (await res.json()) as { error?: string; khacRole?: unknown; usename?: unknown };
+        if (body?.error) message = body.error;
+        if (body?.khacRole === true) khacRole = { usename: typeof body.usename === "string" ? body.usename : "" };
+      } catch {
+        // body không phải JSON — giữ message mặc định.
+      }
+      toast.error(message);
+      if (res.status !== 409) return;
+      // Phiên role khác VẪN đang sống và chặn — giữ dòng, chuyển sang nhóm "cần superuser cắt tay".
+      // Còn lại 409 = phiên không còn chặn (script đã tự thoát) → bỏ khỏi danh sách để khỏi bấm vô ích.
+      const kr = khacRole;
+      setPhienDangGiu((ds) =>
+        kr
+          ? ds.map((p) => (p.pid === pid ? { ...p, catDuoc: false, usename: kr.usename || p.usename } : p))
+          : ds.filter((p) => p.pid !== pid),
+      );
+    } catch {
+      toast.error("Không cắt được phiên — kiểm tra kết nối.");
+    } finally {
+      setPidDangCat(null);
+      setPidCho(null);
     }
   }
 
@@ -193,6 +290,53 @@ export function RestoreDialog({ shopName }: { shopName: string }) {
                   khác cũng bị đăng xuất. Tài khoản nhân sự, quyền, trạng thái khoá và mật khẩu lùi về
                   đời backup — kiểm lại /quan-tri và đổi mật khẩu.
                 </p>
+              )}
+
+              {phienCatDuoc.length > 0 && (
+                <div className="flex flex-col gap-2 rounded-md border border-hairline p-3 text-xs">
+                  <p className="text-ink">
+                    <strong>Script ngoài app đang giữ khoá ghi dữ liệu</strong> — chờ nó chạy xong, hoặc cắt
+                    phiên nếu đó là script bị treo (vd. máy ngủ). Cắt phiên dừng script ngay — giao dịch script
+                    đang làm dở bị huỷ, phần đã lưu trước đó giữ nguyên.
+                  </p>
+                  <ul className="flex flex-col gap-1.5">
+                    {phienCatDuoc.map((p) => (
+                      <li key={p.pid} className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">
+                          pid {p.pid} · {p.applicationName || "không tên"} · từ {gioBatDau(p.backendStart)}
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={pidCho === p.pid ? "destructive" : "outline"}
+                          disabled={restoring || pidDangCat !== null}
+                          onClick={() => handleCatPhien(p)}
+                        >
+                          {pidDangCat === p.pid ? "Đang cắt…" : pidCho === p.pid ? "Bấm lại để cắt" : "Cắt phiên"}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {phienKhacRole.length > 0 && (
+                <div className="flex flex-col gap-2 rounded-md border border-hairline p-3 text-xs">
+                  <p className="text-ink">
+                    <strong>Phiên của role khác đang giữ khoá</strong> — app không có quyền cắt các phiên này.
+                    Chờ script xong, hoặc nhờ người quản trị DB cắt bằng tài khoản superuser:
+                  </p>
+                  <ul className="flex flex-col gap-1.5">
+                    {phienKhacRole.map((p) => (
+                      <li key={p.pid} className="flex flex-col gap-0.5">
+                        <span className="text-muted-foreground">
+                          pid {p.pid} · role {p.usename || "không rõ"} · {p.applicationName || "không tên"}
+                        </span>
+                        <code className="select-all text-ink">{cauLenhCatTayPhien(p.pid)}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
 
               <DialogFooter>

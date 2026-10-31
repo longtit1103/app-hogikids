@@ -7,7 +7,7 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { maLoiNhatKy } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { daBatNoPhaiTra, LoiChuaBat } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { ngayTienMoiSchema } from "@/lib/no-phai-tra/ngay-tien-moi-schema";
@@ -195,46 +195,50 @@ export async function traTienHangGop(input: unknown): Promise<ActionResult<KetQu
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  let mocM: Date;
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    mocM = await daBatNoPhaiTra();
-  } catch (e) {
-    if (e instanceof LoiChuaBat) return { ok: false, error: e.message, code: e.code };
-    throw e;
-  }
+    let mocM: Date;
+    try {
+      mocM = await daBatNoPhaiTra();
+    } catch (e) {
+      if (e instanceof LoiChuaBat) return { ok: false, error: e.message, code: e.code };
+      throw e;
+    }
 
-  const parsed = traGopSchema(mocM).safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const d = parsed.data;
-  const ngay = startOfDay(d.ngay);
+    const parsed = traGopSchema(mocM).safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const d = parsed.data;
+    const ngay = startOfDay(d.ngay);
 
-  // Vân tay nội dung = Ý ĐỊNH tiền (ngày, tổng, phân bổ, mô tả) — KHÔNG gồm vân tay danh sách: gửi lại
-  // cùng mã sau khi tải lại trang (vân tay danh sách đã khác) vẫn là cùng một lượt trả ⇒ DA_GHI_ROI.
-  const bam = bamNoiDung({
-    loai: LOAI_YEU_CAU,
-    ngay: format(ngay, "yyyy-MM-dd"),
-    tong: d.tong,
-    phanBo: d.phanBo,
-    moTa: d.moTa ?? null,
-  });
-
-  try {
-    const ket = await chayTraGopCoRetry({ ...d, ngay, nguoiDung, bam });
-    if ("cu" in ket) return { ok: true, data: ket.cu, code: "DA_GHI_ROI" };
-    lamMoiTrang();
-    return { ok: true, data: ket.moi };
-  } catch (e) {
-    await ghiNhatKyLoi({
-      actor: nguoiDung,
-      hanhDong: "DONG_TIEN_TAO",
-      doiTuong: { loai: "CashMovement", moTa: `Trả tiền hàng gộp ${d.yeuCauId}` },
-      ghiChu: { lyDo: maLoiNhatKy(e) },
+    // Vân tay nội dung = Ý ĐỊNH tiền (ngày, tổng, phân bổ, mô tả) — KHÔNG gồm vân tay danh sách: gửi lại
+    // cùng mã sau khi tải lại trang (vân tay danh sách đã khác) vẫn là cùng một lượt trả ⇒ DA_GHI_ROI.
+    const bam = bamNoiDung({
+      loai: LOAI_YEU_CAU,
+      ngay: format(ngay, "yyyy-MM-dd"),
+      tong: d.tong,
+      phanBo: d.phanBo,
+      moTa: d.moTa ?? null,
     });
-    if (e instanceof LoiTraGop) return { ok: false, error: e.message, code: e.code, field: e.field };
-    if (laLoiDongTienBan(e)) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
-    console.error("Không ghi được đợt trả tiền hàng:", e);
-    return { ok: false, error: "Không ghi được đợt trả tiền hàng — lỗi hệ thống, thử lại sau." };
+
+    try {
+      const ket = await chayTraGopCoRetry({ ...d, ngay, nguoiDung, bam });
+      if ("cu" in ket) return { ok: true, data: ket.cu, code: "DA_GHI_ROI" };
+      lamMoiTrang();
+      return { ok: true, data: ket.moi };
+    } catch (e) {
+      await ghiNhatKyLoi({
+        actor: nguoiDung,
+        hanhDong: "DONG_TIEN_TAO",
+        doiTuong: { loai: "CashMovement", moTa: `Trả tiền hàng gộp ${d.yeuCauId}` },
+        ghiChu: { lyDo: maLoiNhatKy(e) },
+      });
+      if (e instanceof LoiTraGop) return { ok: false, error: e.message, code: e.code, field: e.field };
+      if (laLoiDongTienBan(e)) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
+      console.error("Không ghi được đợt trả tiền hàng:", e);
+      return { ok: false, error: "Không ghi được đợt trả tiền hàng — lỗi hệ thống, thử lại sau." };
+    }
+  } finally {
+    cua.ra();
   }
 }

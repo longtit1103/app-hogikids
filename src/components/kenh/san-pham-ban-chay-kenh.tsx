@@ -1,8 +1,7 @@
 import Link from "next/link";
 
-import { formatPct1 } from "@/components/kenh/channel-format";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatVnd } from "@/lib/format";
 import type { ProductReport } from "@/lib/reports/product-report";
 
 /**
@@ -62,7 +61,7 @@ export function SanPhamBanChayKenh({
                   <TableCell className="text-right tabular-nums">{formatVnd(row.revenue)}</TableCell>
                   {coGiaVon && (
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {marginPct === null ? "—" : formatPct1(marginPct)}
+                      {marginPct === null ? "—" : formatPercent(marginPct)}
                     </TableCell>
                   )}
                 </TableRow>

@@ -1,5 +1,6 @@
 import { endOfDay, format } from "date-fns";
 
+import { thuTuPhienBan } from "@/lib/bronze/transform-raw-helpers";
 import type { DateRange } from "@/lib/date-range";
 import { prisma } from "@/lib/prisma";
 
@@ -162,10 +163,9 @@ export async function quangCaoTheoChienDich(range: DateRange): Promise<QuangCaoT
         -- có dấu hiệu gì. Chuỗi ISO so đúng thứ tự từ điển nên so trực tiếp là an toàn.
         WHERE payload->>'date_start' >= ${format(range.from, "yyyy-MM-dd")}
           AND payload->>'date_start' <= ${format(to, "yyyy-MM-dd")}
-        -- id chốt cuối: fetchedAt là TIMESTAMP(3) và cả một lô land dùng chung
-        -- clock_timestamp() nên trùng mili-giây là chuyện thường — thiếu chốt thì
-        -- bản thắng là tuỳ ý. Cùng khuôn transform-raw-helpers.ts.
-        ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+        -- Thứ tự phiên bản CHUNG với lượt dựng lại (mốc lần thấy cuối, rồi id): Meta trả lại
+        -- đúng số cũ sau một lần chỉnh (A, B, A) thì bản đứng đầu là A như nguồn, không kẹt ở B.
+        ORDER BY "shopId", "externalId", ${thuTuPhienBan("RawMetaAdsReport")}
       )
       SELECT
         payload->>'campaign_id' AS campaign_id,
@@ -230,7 +230,7 @@ export async function quangCaoTheoChienDich(range: DateRange): Promise<QuangCaoT
         WHERE "externalId" NOT LIKE 'auction:%'
           AND left(payload->'dimensions'->>'stat_time_day', 10) >= ${format(range.from, "yyyy-MM-dd")}
           AND left(payload->'dimensions'->>'stat_time_day', 10) <= ${format(to, "yyyy-MM-dd")}
-        ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+        ORDER BY "shopId", "externalId", ${thuTuPhienBan("RawTiktokBusinessReport")}
       )
       SELECT
         g.campaign_id,

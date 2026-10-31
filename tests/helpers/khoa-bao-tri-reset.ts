@@ -1,3 +1,5 @@
+import { thuGiuKhoaPhucHoi, traKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
+
 /**
  * Dọn cờ khoá bảo trì VÔ ĐIỀU KIỆN — chỉ dùng để trả trạng thái sạch giữa các test.
  *
@@ -12,4 +14,15 @@
  */
 export function donKhoaPhucHoi(): void {
   delete (globalThis as Record<string, unknown>).__phienPhucHoiDb;
+}
+
+/**
+ * Đầu dò "cờ phục hồi đang TRỐNG" — giành được thì TRẢ NGAY (không giữ cờ sang `afterEach`), để bước
+ * kiểm chung "route đã nhả cờ" ở `afterEach` áp được cho MỌI ca, kể cả ca có đầu dò.
+ */
+export function coPhucHoiDangTrong(): boolean {
+  const the = thuGiuKhoaPhucHoi();
+  if (!the) return false;
+  traKhoaPhucHoi(the);
+  return true;
 }

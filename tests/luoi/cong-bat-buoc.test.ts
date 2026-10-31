@@ -78,6 +78,12 @@ export const ALLOW_ACTION_KHONG_NHAT_KY: Readonly<Record<string, string>> = {
     "Chỉ đọc: tách file sao kê PDF tải lên + đối chiếu với hoá đơn TikTok của thẻ (bước xem trước), không ghi.",
   "src/lib/actions/bat-no-phai-tra.ts#docChenhLechTaiM":
     "Chỉ đọc: chênh lệch quỹ app ↔ tiền thật tại ngày bật nợ phải trả (bước 2 màn xác nhận), không ghi.",
+  "src/app/e2e-cong-ghi/actions.e2e.ts#ghiGiuBarrierE2e":
+    "Chỉ build e2e cổng ghi — ghi dòng thử `Setting` tiền tố `e2e-cong-ghi:`, không phải thao tác của người dùng.",
+  "src/app/e2e-cong-ghi/actions.e2e.ts#ghiNgayE2e":
+    "Chỉ build e2e cổng ghi — ghi dòng thử `Setting` tiền tố `e2e-cong-ghi:`, không phải thao tác của người dùng.",
+  "src/app/e2e-cong-ghi/actions.e2e.ts#ghiNgoaiCuaE2e":
+    "Chỉ build e2e cổng ghi — ghi dòng thử `Setting` tiền tố `e2e-cong-ghi:` NGOÀI cửa (đo lưới cấp op), không phải thao tác của người dùng.",
   "src/lib/actions/khoang-ngay.ts#luuLuaChonKhoangNgay":
     "Không đọc/ghi DB — chỉ ghi cookie tuỳ chọn khoảng ngày của chính trình duyệt.",
 };
@@ -111,6 +117,16 @@ const TRANG_KHONG_CONG: Readonly<Record<string, string>> = {
   "src/app/(app)/chi-phi/page.tsx": "Bookmark cũ → redirect thẳng `/tai-chinh?tab=so-chi-phi` (xem ca 2b).",
 };
 
+/**
+ * File `"use server"` được phép nằm NGOÀI `src/lib/actions` — CHỈ action chỉ-test của bản build e2e (Next
+ * chỉ nạp chúng qua trang `.e2e.tsx`). Chúng vẫn đi qua lưới action (3) như mọi action thật (cổng đầu
+ * thân + bảng quyền); luật riêng (import, chốt `E2E_CONG_GHI`, cửa ghi) ở `file-chi-build-e2e.test.ts`.
+ */
+const USE_SERVER_CHI_BUILD_E2E: Readonly<Record<string, string>> = {
+  "src/app/e2e-cong-ghi/actions.e2e.ts":
+    "Action chỉ-test e2e cổng ghi — chỉ trang `page.e2e.tsx` nạp, mà trang đó chỉ có trong bản build `E2E_CONG_GHI_BUILD=1`.",
+};
+
 /** Trang trong `TRANG_KHONG_CONG` chỉ làm đúng một việc `redirect()` — ca 2b kiểm cho chắc. */
 const TRANG_CHI_CHUYEN_HUONG = ["src/app/(app)/chi-phi/page.tsx"];
 
@@ -135,7 +151,10 @@ function lietKe(thuMucRel: string, loc: (rel: string) => boolean): string[] {
 const doc = (rel: string) => readFileSync(path.join(GOC, rel), "utf8");
 const docNeuCo = (rel: string): string | null => (existsSync(path.join(GOC, rel)) ? doc(rel) : null);
 const FILE_SRC = lietKe("src", laFileMaNguon);
-const FILE_ACTION = lietKe("src/lib/actions", laFileMaNguon).filter((f) => laFileUseServer(docCay(doc(f), f)));
+const FILE_ACTION = [
+  ...lietKe("src/lib/actions", laFileMaNguon).filter((f) => laFileUseServer(docCay(doc(f), f))),
+  ...Object.keys(USE_SERVER_CHI_BUILD_E2E),
+];
 
 const FILE_APP = lietKe("src/app", laFileMaNguon);
 const FILE_TRANG = FILE_APP.filter((f) => phanLoaiFileApp(f) === "trang");
@@ -219,8 +238,14 @@ describe("lưới cổng bắt buộc — cây src/", () => {
   });
 
   it("(3c) không có \"use server\" ngoài src/lib/actions — action đặt chỗ khác sẽ nằm ngoài lưới", () => {
-    const viPham = FILE_SRC.filter((f) => !f.startsWith("src/lib/actions/") && coUseServerBatKy(docCay(doc(f), f)));
+    const viPham = FILE_SRC.filter(
+      (f) => !f.startsWith("src/lib/actions/") && !Object.hasOwn(USE_SERVER_CHI_BUILD_E2E, f) && coUseServerBatKy(docCay(doc(f), f)),
+    );
     expect(viPham).toEqual([]);
+    for (const f of Object.keys(USE_SERVER_CHI_BUILD_E2E)) {
+      expect(f, "chỉ file `.e2e.ts` mới được miễn").toMatch(/^src\/app\/.+\.e2e\.ts$/);
+      expect(existsSync(path.join(GOC, f)), `${f} không còn — xoá khỏi USE_SERVER_CHI_BUILD_E2E`).toBe(true);
+    }
   });
 
   it("(3d) mục allowlist action trỏ tới action có thật và vẫn cần miễn (đã có cổng ⇒ xoá mục)", () => {

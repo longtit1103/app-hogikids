@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -17,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { XacNhanHopThoai } from "@/components/ui/xac-nhan-hop-thoai";
 import { createCashMovement, suaDieuChinhChuyenDoi, updateCashMovement } from "@/lib/actions/cash-movements";
 import {
   CASH_MOVEMENT_KIND_META,
@@ -42,7 +42,7 @@ import { KhoanVaySelect } from "./khoan-vay-select";
 import { locPhieuChoForm, locTheChoForm, locViChoForm } from "./loc-ho-so-no-cho-form";
 import { SoTietKiemSelect, type SoTietKiemChon } from "./so-tiet-kiem-select";
 
-const QUERY_DATE_FORMAT = "yyyy-MM-dd";
+const QUERY_DATE_FORMAT = "yyyy-MM-dd" as const;
 
 /** Mục đầu ô nguồn nạp của `ADS_TOPUP` = `cardId` null (tiền rời quỹ ngay, không cộng nợ thẻ). */
 const MUC_NAP_TU_NGAN_HANG = "Nạp từ ngân hàng (không qua thẻ)";
@@ -111,7 +111,7 @@ function lienKet(row: DongSua | undefined): LienKet {
 function buildInitialState(row: DongSua | undefined): FormState {
   if (row) {
     return {
-      date: format(row.date, QUERY_DATE_FORMAT),
+      date: formatNgayVn(row.date, QUERY_DATE_FORMAT),
       // `CUTOVER_*` đi chế độ "điều chỉnh mở sổ" (chỉ số + mô tả) — ô loại không dùng nên để trống.
       kind: isCashMovementKindGhiTay(row.kind) ? row.kind : "",
       amount: row.amount,
@@ -124,7 +124,7 @@ function buildInitialState(row: DongSua | undefined): FormState {
     };
   }
   return {
-    date: format(new Date(), QUERY_DATE_FORMAT),
+    date: formatNgayVn(new Date(), QUERY_DATE_FORMAT),
     kind: "",
     amount: 0,
     description: "",
@@ -233,7 +233,7 @@ export function CashMovementFormModal({
   // Dòng điều chỉnh mở sổ nợ: chỉ sửa số tiền + mô tả (chủ shop) qua action riêng — spec §5.8.
   const laDieuChinh = row !== undefined && (KIND_CUTOVER as readonly string[]).includes(row.kind);
   const loai = loaiChoChon(choPhepLoaiSoQuy, noPhaiTra !== null);
-  const todayStr = format(new Date(), QUERY_DATE_FORMAT);
+  const todayStr = formatNgayVn(new Date(), QUERY_DATE_FORMAT);
 
   const [date, setDate] = useState(todayStr);
   const [kind, setKind] = useState<CashMovementKindGhiTay | "">("");
@@ -269,13 +269,21 @@ export function CashMovementFormModal({
     // Chủ ý chỉ nạp lại khi mở hộp thoại / đổi bản ghi — không chạy theo các state còn lại.
   }, [open, row?.id]);
 
+  const [hoiBoThayDoi, setHoiBoThayDoi] = useState(false);
+
   function isDirty(): boolean {
     const current: FormState = { date, kind, amount, description, loanId, savingsId, cardId, phieuNhapId, viAdsId };
     return JSON.stringify(current) !== initialSnapshotRef.current;
   }
 
   function handleOpenChange(next: boolean) {
-    if (!next && isDirty() && !window.confirm("Bỏ thay đổi?")) return;
+    // Hộp "Bỏ thay đổi?" đang hiện: yêu cầu đóng form lúc này là Esc/bấm ngoài đi lên từ hộp con — hộp tự
+    // xử lý lần đóng của nó. Hỏi lại ở đây sẽ bật lại hộp ngay sau khi người dùng vừa chọn "Tiếp tục sửa".
+    if (!next && hoiBoThayDoi) return;
+    if (!next && isDirty()) {
+      setHoiBoThayDoi(true);
+      return;
+    }
     onOpenChange(next);
   }
 
@@ -348,7 +356,7 @@ export function CashMovementFormModal({
     if (!kind || !date) return;
     // D0 = MIN(CashMovement.date) toàn bảng, KHÔNG cấu hình ở Cài đặt: một dòng ghi lùi ngày kéo D0
     // lùi theo và MỌI số Đầu kỳ/Cuối kỳ của các tháng đã xem đổi im lặng. Hỏi lại bằng chính nút Lưu
-    // (bấm lần hai mới gửi) — `window.confirm` bị trình duyệt chặn/nuốt và không dịch được.
+    // (bấm lần hai mới gửi) — hộp confirm gốc của trình duyệt bị trình duyệt chặn/nuốt và không dịch được.
     if (ngayTruocD0 && !hoiTruocD0) {
       setHoiTruocD0(true);
       return;
@@ -409,7 +417,7 @@ export function CashMovementFormModal({
               type="date"
               value={date}
               max={todayStr}
-              min={laNo && noPhaiTra ? format(noPhaiTra.mocM, QUERY_DATE_FORMAT) : undefined}
+              min={laNo && noPhaiTra ? formatNgayVn(noPhaiTra.mocM, QUERY_DATE_FORMAT) : undefined}
               onChange={(e) => {
                 setDate(e.target.value);
                 setFieldErrors((prev) => ({ ...prev, date: "" }));
@@ -589,6 +597,17 @@ export function CashMovementFormModal({
             {saving ? "Đang lưu…" : hoiTruocD0 ? "Xác nhận ghi trước ngày mở sổ" : "Lưu"}
           </Button>
         </DialogFooter>
+        {/* Hộp xác nhận LỒNG trong DialogContent: Base UI nhận dialog con theo cây React nên bấm vào nó
+            không bị form coi là "bấm ra ngoài" (khác `xacNhan()` toàn cục, chỉ hợp khi không có dialog cha). */}
+        <XacNhanHopThoai
+          open={hoiBoThayDoi}
+          onOpenChange={setHoiBoThayDoi}
+          onDongY={() => onOpenChange(false)}
+          tieuDe="Bỏ thay đổi?"
+          noiDung="Bạn có thay đổi chưa lưu. Đóng form sẽ mất các thay đổi đó."
+          nhanDongY="Bỏ thay đổi"
+          nhanHuy="Tiếp tục sửa"
+        />
       </DialogContent>
     </Dialog>
   );

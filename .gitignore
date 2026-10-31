@@ -35,6 +35,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+!.env.operator.example
 
 # Pancake raw API dumps (chứa PII — KHÔNG commit; chỉ fixtures đã ẩn danh mới commit)
 tests/fixtures/pancake/_raw/

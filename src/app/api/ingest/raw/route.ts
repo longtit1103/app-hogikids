@@ -1,28 +1,33 @@
 import type { SyncKind } from "@/generated/prisma/client";
 
-import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
 import { hasBronzeBacklog, isBronzeOnly, markBronzeBacklog } from "@/lib/bronze/bronze-only";
 import { coTheDoiSoat, demDaHachToan, loiBoDongPhaiBaoDo } from "@/lib/bronze/doi-soat-hach-toan";
 import { locDonChuaDongDau } from "@/lib/bronze/ket-cuc-silver";
 import { giuKhoaLandDon } from "@/lib/bronze/khoa-land-don";
-import { landRaw, LoiThieuKhoaStreamTien } from "@/lib/bronze/land-raw";
+import { docChupLuc, kiemCuaSoChupLuc, landRaw, LoiThieuKhoaStreamTien } from "@/lib/bronze/land-raw";
 import { BRONZE_STREAMS, isBronzeStream } from "@/lib/bronze/streams";
 import { transformFromRaw, type TransformStats } from "@/lib/bronze/transform-from-raw";
+import { BANG_LAN_THAY } from "@/lib/bronze/transform-raw-helpers";
 import { docBodyCoTran } from "@/lib/ingest/doc-body-co-tran";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { withSyncLog } from "@/lib/ingest/sync-log";
 import { layCauHinhShop, shopIdsChoVai } from "@/lib/ket-noi/cau-hinh-shop";
+import { LUOT_ID_HOP_LE } from "@/lib/no-phai-tra/dau-luot-hoa-don-tiktok";
 import { prisma } from "@/lib/prisma";
 
 /**
  * POST /api/ingest/raw — n8n đẩy TEXT THÔ Pancake trả về (một stream, một shop, một trang).
  * THAY HẲN /api/ingest/pancake (không giữ 2 nguồn sự thật).
  *
- * Body: `{ stream: BronzeStream, shopId: string, payload: string, ngay?: "YYYY-MM-DD" }`.
+ * Body: `{ stream: BronzeStream, shopId: string, payload: string, ngay?: "YYYY-MM-DD", chupLuc?: ISO 8601 có múi giờ, luotId?: string }`.
+ * `chupLuc` = lúc n8n BẮT ĐẦU GET trang (mốc nguồn chụp, theo TRANG) — xem nhánh kiểm bên dưới.
  * `payload` là CHUỖI: nội dung JSON của Pancake KHÔNG bị JS parse → int64 an toàn
- * (chỉ 4 field vỏ ngoài của request mới đi qua `JSON.parse`).
+ * (chỉ các field vỏ ngoài của request mới đi qua `JSON.parse`).
  * `ngay` chỉ dành cho stream khai `chapNhanNgay` (record không mang trường ngày) — 3 nhánh 400 ở
  * dưới, fail-closed cả hai chiều: gửi thừa cũng chặn, thiếu cũng chặn.
+ * `luotId?` (mã lượt kéo — n8n gửi id execution) — mọi stream nhận, sai khuôn ⇒ 400; có thì mọi dòng SyncLog của trang
+ * mang `stats.luotId` (xem dưới).
  *
  * Luồng: ① LAND (commit ngay, không lọc) → ② TRANSFORM ĐÚNG entity vừa land (`landedIds`).
  * Transform lỗi ⇒ raw vẫn còn: sửa code rồi gọi `transformFromRaw(stream, warnings)` KHÔNG kèm
@@ -32,6 +37,14 @@ import { prisma } from "@/lib/prisma";
  * Silver sau bằng `scripts/rebuild-from-raw.ts` — không phải fetch lại Pancake.
  * Land throw (envelope không có mảng `data` — key hết hạn/rate-limit) ⇒ withSyncLog ghi SyncLog
  * ERROR + trả 500 cho ĐÚNG trang đó. Cố ý: kêu to, không nuốt lặng một trang dữ liệu.
+ *
+ * MỌI dòng SyncLog của route (RUNNING, OK, ERROR — kể cả nhánh 500) mang `stats.stream`, `stats.shopId`
+ * (bc_id với `tiktokbusiness/*`) và `stats.mode`: cổng chốt sao kê thẻ (`lyDoHoaDonTiktokChuaDu`) soi trang
+ * hoá đơn LỖI theo từng BC — dòng 500 thiếu dấu là trang hỏng mà cổng không thấy. `mode` của nhánh 500 =
+ * `loi-<bước>` (`chuan-bi` | `land` | `transform` | `doi-soat`); dòng RUNNING mang `dang-xu-ly` (tiến trình chết
+ * giữa chừng thì dòng dọn treo giữ dấu này). Request mang `luotId` ⇒ thêm `stats.luotId` trên cả ba loại dòng (cổng gom
+ * trang theo lượt kéo). Từ chối ở cửa (400/413) xảy ra TRƯỚC khi có SyncLog — không ghi
+ * dòng nào (không có stream hợp lệ thì không có `kind` để ghi mà không đoán).
  *
  * `stats` là số của TRANG NÀY (không phải tổng tích luỹ toàn bảng).
  */
@@ -51,9 +64,12 @@ export async function POST(req: Request): Promise<Response> {
   const unauthorized = requireIngestSecret(req);
   if (unauthorized) return unauthorized;
 
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  // Cửa ghi: đang phục hồi ⇒ 503; không thì đếm suốt request để lượt phục hồi CHỜ land + transform
+  // của trang này chạy trọn rồi mới chụp bản lùi (không cắt giữa land và transform).
+  return routeQuaCua(() => xuLyPost(req));
+}
 
+async function xuLyPost(req: Request): Promise<Response> {
   // Đọc thân có trần TRƯỚC khi parse. Lỗi đọc luồng (client ngắt giữa chừng) rơi về đúng nhánh
   // 400 mà `req.json()` cũ trả cho cùng ca.
   const doc = await docBodyCoTran(req, MAX_PAYLOAD_LENGTH).catch(() => null);
@@ -70,7 +86,7 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  let body: { stream?: string; shopId?: string; payload?: string; ngay?: string };
+  let body: { stream?: string; shopId?: string; payload?: string; ngay?: string; chupLuc?: unknown; luotId?: unknown };
   try {
     const parsed: unknown = JSON.parse(doc.text);
     // `null`/mảng/số là JSON hợp lệ nhưng không phải vỏ request — trước đây lọt tới bước
@@ -111,6 +127,29 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
+  // `luotId` — mã LƯỢT kéo (n8n gửi `$execution.id`), tuỳ chọn. Gắn vào `dauNhanDien` ⇒ mọi dòng SyncLog của trang
+  // (RUNNING, OK, ERROR kể cả nhánh 500) mang `stats.luotId`: cổng chốt sao kê thẻ gom trang hoá đơn theo đúng mã này
+  // (`gomLuotHoaDon`), thiếu mã mới đoán theo khoảng cách. Sai khuôn ⇒ 400 TRƯỚC khi land (fail-closed như `ngay`):
+  // nhận mã rác là gom nhầm lượt ở cổng.
+  const luotIdTho = body.luotId;
+  if (luotIdTho !== undefined && (typeof luotIdTho !== "string" || !LUOT_ID_HOP_LE.test(luotIdTho))) {
+    return Response.json({ ok: false, error: "luotId phải đúng khuôn [A-Za-z0-9_-], 1–64 ký tự" }, { status: 400 });
+  }
+  const luotId = typeof luotIdTho === "string" ? luotIdTho : undefined;
+
+  // `chupLuc` — tuỳ chọn, mọi stream: lúc n8n BẮT ĐẦU GET trang này. Chỉ bảng có cột lần thấy (`BANG_LAN_THAY`) dùng nó
+  // (`mocChup`); stream khác nhận rồi bỏ qua, để n8n gửi đồng loạt. Sai khuôn / ngoài cửa sổ ⇒ 400 fail-closed như
+  // `ngay`, TRƯỚC khi mở SyncLog: mốc tương lai nằm trong kho thô là ghim bản đó lên đầu khoá mãi mãi.
+  const docChup = docChupLuc(body.chupLuc);
+  if (!docChup.ok) return Response.json({ ok: false, error: docChup.loi }, { status: 400 });
+  const coLanThay = BANG_LAN_THAY.has(BRONZE_STREAMS[stream].table);
+  const chupLuc = coLanThay ? docChup.chupLuc : undefined;
+  if (chupLuc !== undefined) {
+    // Soi lại theo đồng hồ Postgres — đồng hồ mà mốc này sẽ bị so cùng (`fetchedAt`/`lanThayCuoi`).
+    const loi = await kiemCuaSoChupLuc(chupLuc);
+    if (loi !== null) return Response.json({ ok: false, error: loi }, { status: 400 });
+  }
+
   // SyncLog PHẢI tách theo NGUỒN — 3 nguồn đi chung endpoint này:
   //   `tiktok/*`         → TikTok Shop Open API (phí + đối soát)
   //   `tiktokbusiness/*` → TikTok Business (chi tiêu quảng cáo) — API KHÁC HẲN, token khác
@@ -131,6 +170,11 @@ export async function POST(req: Request): Promise<Response> {
           ? "META_ADS"
           : "PANCAKE";
 
+  // Bước đang chạy — `dauKhiLoi` đọc lúc ném để dòng ERROR nói hỏng ở đâu (xem đầu file).
+  let buoc: "chuan-bi" | "land" | "transform" | "doi-soat" = "chuan-bi";
+  const dauNhanDien = { stream, shopId, mode: "dang-xu-ly", ...(luotId !== undefined ? { luotId } : {}) };
+  const dauKhiLoi = () => ({ mode: `loi-${buoc}` });
+
   return withSyncLog(kind, async (warnings, syncLogId) => {
     // Resolve cấu hình shop TRƯỚC khi mở transaction: bước land của `orders` chạy trong
     // transaction giữ khoá tư vấn — để landRaw tự tra bảng `Setting` lúc đó là xin kết nối
@@ -150,6 +194,7 @@ export async function POST(req: Request): Promise<Response> {
     // xong, trang API chen vào land bản mới, rồi webhook mới land bản cũ đè lên. Stream khác
     // KHÔNG có guard đọc-rồi-ghi nào nên giữ nguyên đường cũ (một INSERT tự nó đã nguyên tử).
     let ketQuaLand: Awaited<ReturnType<typeof landRaw>>;
+    buoc = "land";
     try {
       ketQuaLand =
         stream === "orders"
@@ -160,7 +205,7 @@ export async function POST(req: Request): Promise<Response> {
               },
               { timeout: TIMEOUT_LAND_TRANG_MS }
             )
-          : await landRaw(stream, shopId, payload, syncLogId, undefined, shopIdsHopLe, ngay);
+          : await landRaw(stream, shopId, payload, syncLogId, undefined, shopIdsHopLe, ngay, chupLuc);
     } catch (err) {
       // Stream TIỀN có record thiếu khoá ⇒ landRaw đã từ chối CẢ trang (0 dòng Bronze). Báo ERROR mà
       // vẫn HTTP 200: ném tiếp thành 500 thì n8n thử lại cùng trang rồi dừng mọi trang sau của lượt.
@@ -177,17 +222,48 @@ export async function POST(req: Request): Promise<Response> {
         loiSauKhiGhi: err.message,
       };
     }
-    const { landed, skippedNoId, landedIds, seenIds } = ketQuaLand;
+    const { landed, skippedNoId, landedIds, seenIds, reseenIds, soKhoaKetDuoiDau } = ketQuaLand;
     if (skippedNoId > 0) warnings.push(`${skippedNoId} record thiếu 'id' → không land được`);
+    // Bảng có lần thấy mà trang KHÔNG kèm `chupLuc` (workflow n8n chưa cập nhật, script): `landRaw` không cho trang này
+    // vượt bản đầu của khoá đã có mốc chụp, khoá thuần di sản giữ luật cũ.
+    //  - Có khoá THẬT SỰ bị chặn (nguồn báo nội dung khác bản đầu) ⇒ ĐỎ: SyncLog ERROR, HTTP 200, dữ liệu đã land. Bản
+    //    mới chỉ lên đầu ở lượt CÓ `chupLuc` kế tiếp — workflow bị lùi / cài dở thì lượt đó không tới, biến thể mới thiếu
+    //    giá vốn hay chi phí ads ngày cũ kẹt mãi (ads ra khỏi cửa sổ 7 ngày là kẹt hẳn) mà cảnh báo trên dòng OK không
+    //    ai thấy (banner chỉ soi ERROR). KHÔNG bật cờ backlog: dựng lại từ kho thô đọc đúng bản đầu cũ, không cứu được.
+    //  - Không chặn gì (khoá thuần di sản — trước khi nhập workflow mới, hoặc nội dung trùng bản đầu) ⇒ chỉ cảnh báo, để
+    //    giai đoạn chuyển tiếp không đỏ mỗi đêm.
+    const loiKetDuoiDau =
+      soKhoaKetDuoiDau > 0
+        ? `Stream "${stream}" (shop ${shopId}): ${soKhoaKetDuoiDau} khoá có nội dung mới bị giữ DƯỚI bản đầu vì trang ` +
+          "không kèm chupLuc — còn workflow chưa gửi chupLuc (bị lùi bản / cài dở), bản mới nằm dưới bản đầu tới lượt " +
+          "có chupLuc. Cài lại workflow theo n8n/huong-dan-cai-dat-workflows.md rồi chạy lại lượt kéo; dựng lại từ kho " +
+          "thô KHÔNG cứu được."
+        : null;
+    if (loiKetDuoiDau !== null) {
+      warnings.push(loiKetDuoiDau);
+    } else if (coLanThay && chupLuc === undefined) {
+      warnings.push(
+        "trang không kèm chupLuc ⇒ không vượt được bản đầu của khoá đã có mốc chụp (bản mới chỉ lên đầu ở lượt có chupLuc kế tiếp); còn workflow chưa cài lại?",
+      );
+    }
 
     // Chế độ chỉ-land: dừng ngay sau Bronze. Ghi warning để SyncLog nói rõ vì sao Silver không đổi —
     // im lặng bỏ transform sẽ khiến người đọc log tưởng dữ liệu đã lên bảng nghiệp vụ.
     if (isBronzeOnly()) {
       await markBronzeBacklog();
       warnings.push("BRONZE_ONLY: chỉ land raw, KHÔNG dựng Silver");
-      return { stream, shopId, landed, skippedNoId, seen: seenIds.length, mode: "bronze-only" as const };
+      return {
+        stream,
+        shopId,
+        landed,
+        skippedNoId,
+        seen: seenIds.length,
+        mode: "bronze-only" as const,
+        ...(loiKetDuoiDau !== null ? { loiSauKhiGhi: loiKetDuoiDau } : {}),
+      };
     }
 
+    buoc = "transform";
     // Backlog từ đợt trước (BRONZE_ONLY cố ý HOẶC transform lỗi ngoài ý): raw đã nằm sẵn trong
     // Bronze nên kéo lại chỉ ra hash TRÙNG (`landedIds` rỗng) ⇒ transform theo trang KHÔNG dựng
     // được gì. Phải rebuild toàn bảng, nếu không thì đơn cũ lặng lẽ không bao giờ vào Silver →
@@ -220,7 +296,10 @@ export async function POST(req: Request): Promise<Response> {
           `dừng giữa chừng) — dựng lại trong lượt này`
       );
     }
-    const canTransform = [...new Set([...landedIds, ...donChuaXong])];
+    // Vế thứ ba: khoá mà nguồn trả LẠI một nội dung cũ đã có (A→B→A) — trùng hash nên không vào
+    // `landedIds`, nhưng `landRaw` vừa đưa bản đó lên đầu (`lanThayCuoi`) ⇒ Silver phải dựng lại theo
+    // nó. Chỉ đúng các khoá đó (không cả trang); bảng ngoài `BANG_LAN_THAY` luôn rỗng.
+    const canTransform = [...new Set([...landedIds, ...donChuaXong, ...reseenIds])];
 
     let t: TransformStats;
     try {
@@ -253,6 +332,7 @@ export async function POST(req: Request): Promise<Response> {
     // thì phép so thành `0 > 0` — cổng im lặng đúng lúc lượt cứu chữa THẤT BẠI LẦN NỮA, tức đơn
     // kẹt vẫn kẹt mà HTTP vẫn 200. Với stream khác `canTransform` chính bằng `landedIds` nên công
     // thức không đổi.
+    buoc = "doi-soat";
     const accounted = demDaHachToan(t);
     const distinctLanded = new Set(canTransform).size;
     if (coTheDoiSoat(stream, shopId, cauHinh) && distinctLanded > accounted) {
@@ -276,6 +356,8 @@ export async function POST(req: Request): Promise<Response> {
           "số tiền cũ trong Silver được giữ nguyên, bản mới bị bỏ. Sửa mapping rồi dựng lại từ kho thô."
         : null);
     if (loiBoDong !== null) await markBronzeBacklog();
+    // Hai lỗi sau-khi-ghi độc lập nhau ⇒ giữ cả hai trong `error` của SyncLog (lỗi bỏ dòng tiền đi trước).
+    const loiSauKhiGhi = [loiBoDong, loiKetDuoiDau].filter((l): l is string => l !== null).join(" | ");
     return {
       stream,
       shopId,
@@ -284,7 +366,7 @@ export async function POST(req: Request): Promise<Response> {
       seen: seenIds.length,
       mode: "land+transform" as const,
       ...t,
-      ...(loiBoDong !== null ? { loiSauKhiGhi: loiBoDong } : {}),
+      ...(loiSauKhiGhi ? { loiSauKhiGhi } : {}),
     };
-  });
+  }, { dauNhanDien, dauKhiLoi });
 }

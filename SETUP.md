@@ -20,6 +20,10 @@ có gì để xem.
 cp .env.example .env
 ```
 
+`.env.example` là mẫu biến RUNTIME (đúng cái container app đọc). Máy dev cần thêm biến test/script thì nối mẫu operator:
+`cat .env.operator.example >> .env` (`TEST_DATABASE_URL*`, token script lấy token…) — KHÔNG nạp mẫu này vào `.env` của host
+chạy container (mọi khoá trong `.env` đi vào môi trường tiến trình app).
+
 Điền theo chú thích trong file. Bắt buộc: `DATABASE_URL`, `SESSION_SECRET`, `INGEST_SECRET`,
 `APP_INTERNAL_URL` (URL nội bộ mà n8n gọi tới app — chạy docker cùng network thì
 `http://hogikids-app:3000`). Lượt đầu thêm `INIT_EMAIL`/`INIT_PASSWORD` (tài khoản đăng nhập) —
@@ -73,8 +77,17 @@ Chạy app (`npm run dev` hoặc docker) → đăng nhập → **/cai-dat › K�
    truyền cờ ở bước 2; + TikTok Shop/Meta/TikTok Ads nếu dùng). Bấm **Kiểm tra kết nối** từng nguồn.
 2. Khối **"Kết nối n8n"**: điền `n8n URL` (app gọi tới — cùng docker network thì
    `http://hogikids-n8n:5678`), `n8n URL công khai` (Pancake gọi tới) và `n8n API key` → **Lưu** →
-   **Kiểm tra n8n** → **Cài / cập nhật workflows**. Nút này tự đẩy 10 workflow vào n8n, tạo
-   credential, bật lịch chạy, rồi tự kiểm chứng end-to-end (kích một lượt đồng bộ thử).
+   **Kiểm tra n8n**. Bản clone MỚI chưa có webhook nào trên n8n, và path 3 webhook Pancake nằm trong
+   `Setting` (file workflow trong repo chỉ mang placeholder) — nên **sinh path ngẫu nhiên trước** khi cài
+   (lượt thử rồi mới ghi; Docker thì thêm `docker compose run --rm app npx --no-install tsx` vào đầu lệnh,
+   máy dev nối DB thì script đòi gõ lại tên DB hoặc `--xac-nhan-db=<tên DB>`):
+   ```bash
+   npx tsx scripts/nap-duong-dan-webhook-n8n.ts --nguon=ngau-nhien            # lượt thử, chỉ đọc
+   npx tsx scripts/nap-duong-dan-webhook-n8n.ts --nguon=ngau-nhien --apply    # ghi 3 path vào Setting
+   ```
+   Rồi bấm **Cài / cập nhật workflows**. Nút này tự đẩy 10 workflow vào n8n, tạo
+   credential, bật lịch chạy, rồi tự kiểm chứng end-to-end (kích một lượt đồng bộ thử). Thiếu path trong
+   `Setting` thì nút từ chối chạy (không gửi gì lên n8n).
 3. Khối Pancake hiện **3 URL webhook** — dán vào cài đặt webhook của từng shop trong Pancake POS
    (đơn hàng + tồn kho realtime).
 

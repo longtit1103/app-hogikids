@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import type { DonCanXem } from "@/lib/bronze/ket-cuc-silver";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 
 /**
  * Khối "Đơn chưa vào Sổ" trong section Kết nối & Đồng bộ.
@@ -31,15 +32,8 @@ const HUONG_XU_LY: Record<string, string> = {
   FAILED_RETRY_LIMIT: "xử lý nguyên nhân trong ghi chú rồi dựng lại từ kho thô",
 };
 
-function lucVN(d: Date): string {
-  return d.toLocaleString("vi-VN", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+/** "HH:mm dd/MM" giờ VN (một nguồn: `formatNgayVn`). */
+const lucVN = (d: Date): string => formatNgayVn(d, "HH:mm dd/MM");
 
 export function DonKetBronzeSection({
   pendingTotal,
