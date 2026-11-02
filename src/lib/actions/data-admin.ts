@@ -3,12 +3,8 @@
 import { revalidatePath } from "next/cache";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import {
-  dangPhucHoi,
-  LOI_DANG_PHUC_HOI,
-  thuGiuKhoaDungLai,
-  traKhoaDungLai,
-} from "@/lib/backup/khoa-bao-tri";
+import { thuGiuKhoaDungLai, traKhoaDungLai } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import {
   giuKhoaViecNang,
   kiemGiuKhoaTrongTransaction,
@@ -57,6 +53,13 @@ import { docShopProfileKhongCache } from "@/lib/shop-profile/doc-shop-profile";
  *    lưu lần nào" đúng lúc nguy hiểm nhất, trong khi bản dump vừa tạo vẫn là
  *    điểm phục hồi hợp lệ. (Mốc này từng nằm ở `Setting.lastBackupAt` và cũng
  *    từng bị xoá kèm — lý do giữ y hệt, chỉ đổi nơi lưu.)
+ *  - `TiktokBcHoaDon` (trạng thái BỀN của Business Center TikTok cho cổng chốt sao kê thẻ): lượt xoá này xoá `SyncLog`
+ *    — đúng ca bảng sinh ra để sống qua. Xoá nó là cổng mất "chế độ dấu lượt" (quay về luật cũ, mù với trang hỏng
+ *    trước SyncLog), quên BC từng đọc được hoá đơn chỉ thấy qua dấu (lượt đủ 0 hoá đơn), và mất xác nhận "không dùng
+ *    thẻ" chủ shop đã đặt (có nhật ký). Không phải giao dịch, không chứa tiền. CHỦ SHOP CHỐT 31/10/2026: bảng này là
+ *    CẤU HÌNH + trạng thái bảo vệ cổng, không phải sổ sách — sau lượt xoá cổng vẫn nghiêm (BC chỉ còn trang không dấu
+ *    vẫn bị chặn) và BC đã đánh dấu "không dùng thẻ" vẫn bị bỏ khỏi tập xét, giữ nguyên người/mốc xác nhận. Muốn bỏ
+ *    một quyết định thì bỏ đánh dấu ở Nợ phải trả (có nhật ký), không phải xoá dữ liệu giao dịch.
  *
  * Chuỗi xác nhận = `ShopProfile.shopName` (thông tin shop, không còn nằm trên `User`). Lượt xoá KHÔNG
  * đụng `ShopProfile`, `User`, `AuditLog`.
@@ -65,109 +68,114 @@ export async function deleteAllData(shopNameConfirm: string): Promise<ActionResu
   const cong = await congChuShopAction();
   if (!cong.ok) return cong;
 
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  const shop = await docShopProfileKhongCache();
-  if (shopNameConfirm !== shop.shopName) {
-    return { ok: false, error: "Tên shop không khớp" };
-  }
-
-  // Không được chạy CHỒNG với lượt dựng lại từ kho thô: lượt đó đang đọc/ghi đúng những dòng ta sắp
-  // đóng dấu. Khoá phải nằm Ở DB — lượt dựng lại bằng script chạy ở TIẾN TRÌNH RIÊNG nên cờ trong
-  // bộ nhớ của app không thấy nó, và ta sẽ xoá xong rồi bị script dựng lại ngầm.
-  const khoa = await giuKhoaViecNang("xoá dữ liệu giao dịch");
-  if (!khoa.the) {
-    return { ok: false, error: `Đang có "${khoa.dangGiu}" chạy — thử lại sau khi việc đó xong.` };
-  }
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    // Con trước cha để không vỡ khoá ngoại; 1 transaction để hoặc-tất-cả-hoặc-không.
-    await prisma.$transaction(async (tx) => {
-      // KHOÁ LAND ĐƠN: giữ trong CHÍNH transaction này để không có dòng kho thô MỚI chen vào giữa
-      // câu đóng dấu và lúc commit. Không có nó thì một trang ingest land ngay sau câu UPDATE sẽ để
-      // lại dòng chưa-đóng-dấu, và lượt đối soát đêm dựng nó vào một cái Sổ vừa được xoá sạch.
-      await giuKhoaLandDon(tx);
+    const shop = await docShopProfileKhongCache();
+    if (shopNameConfirm !== shop.shopName) {
+      return { ok: false, error: "Tên shop không khớp" };
+    }
 
-      // HÀNG RÀO TRONG TRANSACTION: kiểm TRƯỚC transaction vẫn còn khe — giữa lúc kiểm và lúc
-      // commit, khoá có thể hết hạn và một lượt dựng lại giành mất, rồi nó dựng lại đúng phần ta
-      // vừa xoá. `FOR UPDATE` giữ dòng khoá tới khi transaction này commit nên lượt giành mới phải
-      // CHỜ, và khi chạy được thì hạn của ta đã tươi ⇒ nó không giành nổi.
-      await kiemGiuKhoaTrongTransaction(tx, khoa.the);
+    // Không được chạy CHỒNG với lượt dựng lại từ kho thô: lượt đó đang đọc/ghi đúng những dòng ta sắp
+    // đóng dấu. Khoá phải nằm Ở DB — lượt dựng lại bằng script chạy ở TIẾN TRÌNH RIÊNG nên cờ trong
+    // bộ nhớ của app không thấy nó, và ta sẽ xoá xong rồi bị script dựng lại ngầm.
+    const khoa = await giuKhoaViecNang("xoá dữ liệu giao dịch");
+    if (!khoa.the) {
+      return { ok: false, error: `Đang có "${khoa.dangGiu}" chạy — thử lại sau khi việc đó xong.` };
+    }
 
-      // THỨ TỰ CHẠM BẢNG phải KHỚP đường transform (`Order` → `OrderItem` → `RawPancakeOrder`),
-      // nếu không hai transaction giữ hai đầu rồi chờ nhau và Postgres huỷ một bên: nút Xoá thất
-      // bại ngẫu nhiên đúng lúc đang đồng bộ. `OrderItem` có khoá ngoại `onDelete: Cascade` nên xoá
-      // `Order` trước là cuốn theo item — không cần (và không được) xoá item trước.
-      await tx.order.deleteMany();
-      await tx.expense.deleteMany();
-      await tx.recurringExpense.deleteMany();
-      // THỨ TỰ CON-TRƯỚC-CHA, KHÔNG được đảo: `ThuNhap.savingsId` và `CashMovement.savingsId` đều FK
-      // `onDelete: Restrict`. Xoá `SoTietKiem` trước là Postgres từ chối ⇒ cả transaction vỡ và nút
-      // "Xoá dữ liệu giao dịch" hỏng VĨNH VIỄN. Bỏ quên `ThuNhap` còn tệ hơn vì hỏng LẶNG: lãi tiết
-      // kiệm sống sót và vẫn cộng vào dòng "Thu nhập tài chính" của P&L sau khi Sổ đã xoá sạch.
-      await tx.thuNhap.deleteMany(); // lãi tiết kiệm — con của SoTietKiem
-      await tx.cashMovement.deleteMany(); // khoản tiền khác ghi tay — con của Loan và SoTietKiem
-      // Hồ sơ sổ tiết kiệm — SAU ThuNhap + CashMovement. Cũng là sổ sách nhập tay: kho thô không có
-      // bản gốc nào để dựng lại.
-      await tx.soTietKiem.deleteMany();
-      // Hồ sơ khoản vay — SAU CashMovement (FK `onDelete: Restrict`, con trước cha). Cùng diện.
-      await tx.loan.deleteMany();
-      // NỢ PHẢI TRẢ — SAU `expense.deleteMany()` (Expense.cardId) và `cashMovement.deleteMany()`
-      // (cardId/phieuNhapId/viAdsId), cùng FK Restrict: con trước cha. `Expense` đã xoá TRỌN ở trên nên
-      // không cần bước gỡ `cardId` về NULL. Thẻ là cha của kỳ sao kê + gắn nền tảng ⇒ xoá SAU hai bảng đó.
-      // Dòng sao kê PDF là con của kỳ sao kê (FK Cascade) — xoá tường minh TRƯỚC kỳ, con trước cha.
-      await tx.dongSaoKeThe.deleteMany();
-      await tx.kySaoKeThe.deleteMany();
-      await tx.ganNenTangThe.deleteMany();
-      await tx.phieuNhapNo.deleteMany();
-      await tx.viAdsTraTruoc.deleteMany();
-      await tx.theTinDung.deleteMany();
-      // Mã yêu cầu ghi: kết quả lưu sẵn của các lượt ghi tiền vừa bị xoá — giữ lại thì một lượt gửi lại
-      // cùng mã sẽ được trả "đã ghi rồi" cho dòng tiền không còn tồn tại.
-      await tx.yeuCauGhi.deleteMany();
-      // Mốc bật M — khoá Setting DUY NHẤT lượt xoá chạm tới (xem đầu file).
-      await tx.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-      // THÙNG RÁC: ảnh chụp của đúng những bảng vừa xoá ở trên. Đây là lệnh "xoá sạch dữ liệu giao
-      // dịch" nên giữ lại thùng rác là để lại một đường khôi phục đúng thứ chủ shop vừa cố ý xoá.
-      // Không FK nào trỏ tới/đi ra từ bảng này ⇒ đặt đâu trong transaction cũng an toàn; đặt ở đây
-      // để đứng cạnh 5 bảng nó chụp.
-      await tx.banGhiDaXoa.deleteMany();
-      // Bản chốt số dư cuối tháng: thước đo gắn với D0 của chính sổ vừa xoá — giữ lại là sau khi
-      // nhập sổ mới, thẻ đối chiếu vẫn in chênh lệch của thế giới cũ. Không FK, đặt đâu cũng được.
-      await tx.soDuChotThang.deleteMany();
-      // TRỪ kind BACKUP — xem khối "GIỮ LẠI" ở đầu file: đó là nguồn trạng thái sao lưu, không phải
-      // log giao dịch. Xoá cả bảng thì màn Cài đặt kêu "Chưa sao lưu lần nào" ngay sau lượt xoá.
-      await tx.syncLog.deleteMany({ where: { kind: { not: "BACKUP" } } });
-      // 4 bảng Silver "Tiền đã về" (/tai-chinh?tab=dong-tien) — cũng là sổ sách giao dịch,
-      // bỏ sót thì màn Dòng tiền vẫn còn số trong khi đơn đã sạch.
-      await tx.tiktokSettlement.deleteMany();
-      await tx.tiktokAdsSettlement.deleteMany();
-      await tx.tiktokPayment.deleteMany();
-      await tx.shopeeSettlement.deleteMany();
-      // 2 bảng Silver quảng cáo TikTok dựng từ kho thô: hoá đơn (nguồn dư nợ thẻ) + tín dụng tặng theo ngày (P&L trừ
-      // khỏi Quảng cáo TikTok). Không FK. Bỏ sót `TiktokAdsTinDung` thì Sổ vừa xoá sạch mà P&L vẫn trừ tín dụng cũ
-      // (lãi ròng âm giả nếu kỳ đó không còn chi phí ads). Kho thô giữ nguyên ⇒ nút dựng lại tái tạo y hệt.
-      await tx.tiktokAdsHoaDon.deleteMany();
-      await tx.tiktokAdsTinDung.deleteMany();
+    try {
+      // Con trước cha để không vỡ khoá ngoại; 1 transaction để hoặc-tất-cả-hoặc-không.
+      await prisma.$transaction(async (tx) => {
+        // KHOÁ LAND ĐƠN: giữ trong CHÍNH transaction này để không có dòng kho thô MỚI chen vào giữa
+        // câu đóng dấu và lúc commit. Không có nó thì một trang ingest land ngay sau câu UPDATE sẽ để
+        // lại dòng chưa-đóng-dấu, và lượt đối soát đêm dựng nó vào một cái Sổ vừa được xoá sạch.
+        await giuKhoaLandDon(tx);
 
-      // Chốt kho thô SAU CÙNG — vẫn trong cùng transaction nên vẫn "hoặc tất cả hoặc không", mà
-      // thứ tự chạm bảng thì khớp đường transform. Dòng còn dở PHẢI được chốt là "đã xoá tay":
-      // không có bước này thì đúng những dòng còn dở — chính ca mà cột kết cục sinh ra để bắt — sẽ
-      // được dựng lại đêm hôm sau, chủ shop thấy Sổ vừa xoá bỗng có lại một nhúm đơn lẻ.
-      const daChot = await dongDauDaXoaTay(tx);
-      if (daChot > 0) {
-        console.info(`Xoá dữ liệu giao dịch: chốt ${daChot} dòng kho thô còn dở thành đã-xoá-tay`);
-      }
+        // HÀNG RÀO TRONG TRANSACTION: kiểm TRƯỚC transaction vẫn còn khe — giữa lúc kiểm và lúc
+        // commit, khoá có thể hết hạn và một lượt dựng lại giành mất, rồi nó dựng lại đúng phần ta
+        // vừa xoá. `FOR UPDATE` giữ dòng khoá tới khi transaction này commit nên lượt giành mới phải
+        // CHỜ, và khi chạy được thì hạn của ta đã tươi ⇒ nó không giành nổi.
+        await kiemGiuKhoaTrongTransaction(tx, khoa.the);
 
-      // Nhật ký CÙNG transaction (bảng `AuditLog` không nằm trong danh sách xoá): ghi hỏng ⇒ lượt
-      // xoá rollback, không bao giờ có lượt xoá sạch sổ mà thiếu dấu vết ai bấm.
-      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.DU_LIEU_XOA_TOAN_BO });
-    });
+        // THỨ TỰ CHẠM BẢNG phải KHỚP đường transform (`Order` → `OrderItem` → `RawPancakeOrder`),
+        // nếu không hai transaction giữ hai đầu rồi chờ nhau và Postgres huỷ một bên: nút Xoá thất
+        // bại ngẫu nhiên đúng lúc đang đồng bộ. `OrderItem` có khoá ngoại `onDelete: Cascade` nên xoá
+        // `Order` trước là cuốn theo item — không cần (và không được) xoá item trước.
+        await tx.order.deleteMany();
+        await tx.expense.deleteMany();
+        await tx.recurringExpense.deleteMany();
+        // THỨ TỰ CON-TRƯỚC-CHA, KHÔNG được đảo: `ThuNhap.savingsId` và `CashMovement.savingsId` đều FK
+        // `onDelete: Restrict`. Xoá `SoTietKiem` trước là Postgres từ chối ⇒ cả transaction vỡ và nút
+        // "Xoá dữ liệu giao dịch" hỏng VĨNH VIỄN. Bỏ quên `ThuNhap` còn tệ hơn vì hỏng LẶNG: lãi tiết
+        // kiệm sống sót và vẫn cộng vào dòng "Thu nhập tài chính" của P&L sau khi Sổ đã xoá sạch.
+        await tx.thuNhap.deleteMany(); // lãi tiết kiệm — con của SoTietKiem
+        await tx.cashMovement.deleteMany(); // khoản tiền khác ghi tay — con của Loan và SoTietKiem
+        // Hồ sơ sổ tiết kiệm — SAU ThuNhap + CashMovement. Cũng là sổ sách nhập tay: kho thô không có
+        // bản gốc nào để dựng lại.
+        await tx.soTietKiem.deleteMany();
+        // Hồ sơ khoản vay — SAU CashMovement (FK `onDelete: Restrict`, con trước cha). Cùng diện.
+        await tx.loan.deleteMany();
+        // NỢ PHẢI TRẢ — SAU `expense.deleteMany()` (Expense.cardId) và `cashMovement.deleteMany()`
+        // (cardId/phieuNhapId/viAdsId), cùng FK Restrict: con trước cha. `Expense` đã xoá TRỌN ở trên nên
+        // không cần bước gỡ `cardId` về NULL. Thẻ là cha của kỳ sao kê + gắn nền tảng ⇒ xoá SAU hai bảng đó.
+        // Dòng sao kê PDF là con của kỳ sao kê (FK Cascade) — xoá tường minh TRƯỚC kỳ, con trước cha.
+        await tx.dongSaoKeThe.deleteMany();
+        await tx.kySaoKeThe.deleteMany();
+        await tx.ganNenTangThe.deleteMany();
+        await tx.phieuNhapNo.deleteMany();
+        await tx.viAdsTraTruoc.deleteMany();
+        await tx.theTinDung.deleteMany();
+        // Mã yêu cầu ghi: kết quả lưu sẵn của các lượt ghi tiền vừa bị xoá — giữ lại thì một lượt gửi lại
+        // cùng mã sẽ được trả "đã ghi rồi" cho dòng tiền không còn tồn tại.
+        await tx.yeuCauGhi.deleteMany();
+        // Mốc bật M — khoá Setting DUY NHẤT lượt xoá chạm tới (xem đầu file).
+        await tx.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+        // THÙNG RÁC: ảnh chụp của đúng những bảng vừa xoá ở trên. Đây là lệnh "xoá sạch dữ liệu giao
+        // dịch" nên giữ lại thùng rác là để lại một đường khôi phục đúng thứ chủ shop vừa cố ý xoá.
+        // Không FK nào trỏ tới/đi ra từ bảng này ⇒ đặt đâu trong transaction cũng an toàn; đặt ở đây
+        // để đứng cạnh 5 bảng nó chụp.
+        await tx.banGhiDaXoa.deleteMany();
+        // Bản chốt số dư cuối tháng: thước đo gắn với D0 của chính sổ vừa xoá — giữ lại là sau khi
+        // nhập sổ mới, thẻ đối chiếu vẫn in chênh lệch của thế giới cũ. Không FK, đặt đâu cũng được.
+        await tx.soDuChotThang.deleteMany();
+        // TRỪ kind BACKUP — xem khối "GIỮ LẠI" ở đầu file: đó là nguồn trạng thái sao lưu, không phải
+        // log giao dịch. Xoá cả bảng thì màn Cài đặt kêu "Chưa sao lưu lần nào" ngay sau lượt xoá.
+        await tx.syncLog.deleteMany({ where: { kind: { not: "BACKUP" } } });
+        // 4 bảng Silver "Tiền đã về" (/tai-chinh?tab=dong-tien) — cũng là sổ sách giao dịch,
+        // bỏ sót thì màn Dòng tiền vẫn còn số trong khi đơn đã sạch.
+        await tx.tiktokSettlement.deleteMany();
+        await tx.tiktokAdsSettlement.deleteMany();
+        await tx.tiktokPayment.deleteMany();
+        await tx.shopeeSettlement.deleteMany();
+        // 2 bảng Silver quảng cáo TikTok dựng từ kho thô: hoá đơn (nguồn dư nợ thẻ) + tín dụng tặng theo ngày (P&L trừ
+        // khỏi Quảng cáo TikTok). Không FK. Bỏ sót `TiktokAdsTinDung` thì Sổ vừa xoá sạch mà P&L vẫn trừ tín dụng cũ
+        // (lãi ròng âm giả nếu kỳ đó không còn chi phí ads). Kho thô giữ nguyên ⇒ nút dựng lại tái tạo y hệt.
+        await tx.tiktokAdsHoaDon.deleteMany();
+        await tx.tiktokAdsTinDung.deleteMany();
+
+        // Chốt kho thô SAU CÙNG — vẫn trong cùng transaction nên vẫn "hoặc tất cả hoặc không", mà
+        // thứ tự chạm bảng thì khớp đường transform. Dòng còn dở PHẢI được chốt là "đã xoá tay":
+        // không có bước này thì đúng những dòng còn dở — chính ca mà cột kết cục sinh ra để bắt — sẽ
+        // được dựng lại đêm hôm sau, chủ shop thấy Sổ vừa xoá bỗng có lại một nhúm đơn lẻ.
+        const daChot = await dongDauDaXoaTay(tx);
+        if (daChot > 0) {
+          console.info(`Xoá dữ liệu giao dịch: chốt ${daChot} dòng kho thô còn dở thành đã-xoá-tay`);
+        }
+
+        // Nhật ký CÙNG transaction (bảng `AuditLog` không nằm trong danh sách xoá): ghi hỏng ⇒ lượt
+        // xoá rollback, không bao giờ có lượt xoá sạch sổ mà thiếu dấu vết ai bấm.
+        await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.DU_LIEU_XOA_TOAN_BO });
+      });
+    } finally {
+      await traKhoaViecNang(khoa.the);
+    }
+
+    revalidatePath("/", "layout");
+    return { ok: true, data: undefined };
   } finally {
-    await traKhoaViecNang(khoa.the);
+    cua.ra();
   }
-
-  revalidatePath("/", "layout");
-  return { ok: true, data: undefined };
 }
 
 /**
@@ -422,92 +430,96 @@ export async function dungLaiTuKhoTho(): Promise<ActionResult<KetQuaDungLai>> {
   if (!cong.ok) return cong;
   const { nguoiDung } = cong;
 
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  if (await coLuotDangChay("PANCAKE")) {
-    return { ok: false, error: "Đang có lượt đồng bộ / dựng lại chạy — chờ xong rồi bấm lại" };
-  }
-
-  // Cờ trong-tiến-trình, HẸP hơn `SyncLog` ở trên: chỉ để lượt import file chi phí ads biết mà
-  // tránh đường (nó ghi cùng nhóm dòng `Expense` với lượt này) — xem `khoa-bao-tri.ts`.
-  if (!thuGiuKhoaDungLai()) {
-    return { ok: false, error: "Đang có lượt dựng lại chạy — chờ xong rồi bấm lại" };
-  }
-
-  // Khoá Ở DB: loại trừ lẫn nhau với lượt XOÁ dữ liệu và với script dựng lại chạy ở tiến trình
-  // riêng. Cờ trong bộ nhớ phía trên không thấy được hai đường đó.
-  const khoaDb = await giuKhoaViecNang("dựng lại từ kho thô");
-  if (!khoaDb.the) {
-    traKhoaDungLai();
-    return { ok: false, error: `Đang có "${khoaDb.dangGiu}" chạy — chờ xong rồi bấm lại` };
-  }
-
-  const canhBao: string[] = [];
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const res = await withSyncLog("PANCAKE", async (warnings) => {
-      const stats = await dungLaiGiaoDichTuKhoTho(warnings, taoCheckpoint(khoaDb.the));
-      canhBao.push(...warnings);
-      // `nguon` để đọc nhật ký biết dòng này là lượt bấm tay. KHÔNG ghi khoá `stream`: cổng
-      // "lượt kéo API còn sống" của lượt vá tồn kho soi đúng khoá đó, lượt này không được tự
-      // chứng nhận cho nó.
-      return { nguon: "dung-lai-tay", ...stats };
-    });
-
-    // `withSyncLog` viết cho route handler nên trả `Response` — đọc lại body để lấy số liệu.
-    const body = (await res.json()) as
-      | { ok: true; stats: TransformStats }
-      | { ok: false; error: string };
-    if (!body.ok) {
-      // `withSyncLog` gói MỌI lỗi ném ra từ `fn` (nghiệp vụ LẪN hạ tầng — Prisma, mất kết nối…)
-      // thành `body.error = e.message` — không tách loại. `body.error` có thể mang chi tiết hạ
-      // tầng nên KHÔNG được đẩy thẳng ra client; chi tiết đã nằm sẵn trong `SyncLog.error` của
-      // đúng lượt này (bảng ghi TRƯỚC KHI trả response) nên không mất, chỉ cần xem ở nhật ký.
-      console.error("Dựng lại từ kho thô thất bại (lỗi nghiệp vụ/hạ tầng):", body.error);
-      await ghiNhatKyLoi({ actor: nguoiDung, hanhDong: HANH_DONG.DU_LIEU_DUNG_LAI_TU_KHO, ghiChu: { lyDo: "that-bai" } });
-      return {
-        ok: false,
-        error: "Dựng lại thất bại — xem chi tiết ở nhật ký đồng bộ (/cai-dat).",
-      };
+    if (await coLuotDangChay("PANCAKE")) {
+      return { ok: false, error: "Đang có lượt đồng bộ / dựng lại chạy — chờ xong rồi bấm lại" };
     }
 
-    // Lượt dựng lại chạy qua NHIỀU transaction (không có một transaction chung để ghi kèm) ⇒ ghi
-    // nhật ký ngay sau khi xong. Ghi hỏng thì rơi xuống `catch` (báo lỗi hệ thống): lượt dựng lại
-    // idempotent nên chủ shop bấm lại là an toàn.
-    await ghiNhatKy(prisma, {
-      actor: nguoiDung,
-      hanhDong: HANH_DONG.DU_LIEU_DUNG_LAI_TU_KHO,
-      ghiChu: { soDong: body.stats.ordersUpserted },
-    });
+    // Cờ trong-tiến-trình, HẸP hơn `SyncLog` ở trên: chỉ để lượt import file chi phí ads biết mà
+    // tránh đường (nó ghi cùng nhóm dòng `Expense` với lượt này) — xem `khoa-bao-tri.ts`.
+    if (!thuGiuKhoaDungLai()) {
+      return { ok: false, error: "Đang có lượt dựng lại chạy — chờ xong rồi bấm lại" };
+    }
 
-    revalidatePath("/", "layout");
-    return {
-      ok: true,
-      data: {
-        ordersUpserted: body.stats.ordersUpserted,
-        settlementsUpserted: body.stats.settlementsUpserted,
-        adsUpserted: body.stats.adsUpserted,
-        paymentsUpserted: body.stats.paymentsUpserted,
-        shopeeUpserted: body.stats.shopeeUpserted,
-        adsExpensesUpserted: body.stats.adsExpensesUpserted,
-        hoaDonAdsUpserted: body.stats.hoaDonAdsUpserted,
-        tinDungAdsUpserted: body.stats.tinDungAdsUpserted,
-        soCanhBao: canhBao.length,
-        canhBao: canhBao.slice(0, SO_CANH_BAO_HIEN),
-      },
-    };
-  } catch (err) {
-    // Nhánh `body.ok === false` ở trên đã bắt MỌI lỗi (nghiệp vụ lẫn hạ tầng) mà `withSyncLog` gói
-    // lại từ bên trong `fn` — tới đây là exception THOÁT KHỎI cả lượt gọi đó (chính `withSyncLog`
-    // ném trước khi kịp trả `Response`, hoặc `res.json()` hỏng). Log đủ phía server, trả client
-    // câu cố định thay vì `err.message` thô.
-    console.error("Dựng lại từ kho thô thất bại:", err);
-    await ghiNhatKyLoi({ actor: nguoiDung, hanhDong: HANH_DONG.DU_LIEU_DUNG_LAI_TU_KHO, ghiChu: { lyDo: "loi-he-thong" } });
-    return {
-      ok: false,
-      error: "Dựng lại thất bại — lỗi hệ thống, kiểm log server để biết chi tiết.",
-    };
+    // Khoá Ở DB: loại trừ lẫn nhau với lượt XOÁ dữ liệu và với script dựng lại chạy ở tiến trình
+    // riêng. Cờ trong bộ nhớ phía trên không thấy được hai đường đó.
+    const khoaDb = await giuKhoaViecNang("dựng lại từ kho thô");
+    if (!khoaDb.the) {
+      traKhoaDungLai();
+      return { ok: false, error: `Đang có "${khoaDb.dangGiu}" chạy — chờ xong rồi bấm lại` };
+    }
+
+    const canhBao: string[] = [];
+    try {
+      const res = await withSyncLog("PANCAKE", async (warnings) => {
+        const stats = await dungLaiGiaoDichTuKhoTho(warnings, taoCheckpoint(khoaDb.the));
+        canhBao.push(...warnings);
+        // `nguon` để đọc nhật ký biết dòng này là lượt bấm tay. KHÔNG ghi khoá `stream`: cổng
+        // "lượt kéo API còn sống" của lượt vá tồn kho soi đúng khoá đó, lượt này không được tự
+        // chứng nhận cho nó.
+        return { nguon: "dung-lai-tay", ...stats };
+      });
+
+      // `withSyncLog` viết cho route handler nên trả `Response` — đọc lại body để lấy số liệu.
+      const body = (await res.json()) as
+        | { ok: true; stats: TransformStats }
+        | { ok: false; error: string };
+      if (!body.ok) {
+        // `withSyncLog` gói MỌI lỗi ném ra từ `fn` (nghiệp vụ LẪN hạ tầng — Prisma, mất kết nối…)
+        // thành `body.error = e.message` — không tách loại. `body.error` có thể mang chi tiết hạ
+        // tầng nên KHÔNG được đẩy thẳng ra client; chi tiết đã nằm sẵn trong `SyncLog.error` của
+        // đúng lượt này (bảng ghi TRƯỚC KHI trả response) nên không mất, chỉ cần xem ở nhật ký.
+        console.error("Dựng lại từ kho thô thất bại (lỗi nghiệp vụ/hạ tầng):", body.error);
+        await ghiNhatKyLoi({ actor: nguoiDung, hanhDong: HANH_DONG.DU_LIEU_DUNG_LAI_TU_KHO, ghiChu: { lyDo: "that-bai" } });
+        return {
+          ok: false,
+          error: "Dựng lại thất bại — xem chi tiết ở nhật ký đồng bộ (/cai-dat).",
+        };
+      }
+
+      // Lượt dựng lại chạy qua NHIỀU transaction (không có một transaction chung để ghi kèm) ⇒ ghi
+      // nhật ký ngay sau khi xong. Ghi hỏng thì rơi xuống `catch` (báo lỗi hệ thống): lượt dựng lại
+      // idempotent nên chủ shop bấm lại là an toàn.
+      await ghiNhatKy(prisma, {
+        actor: nguoiDung,
+        hanhDong: HANH_DONG.DU_LIEU_DUNG_LAI_TU_KHO,
+        ghiChu: { soDong: body.stats.ordersUpserted },
+      });
+
+      revalidatePath("/", "layout");
+      return {
+        ok: true,
+        data: {
+          ordersUpserted: body.stats.ordersUpserted,
+          settlementsUpserted: body.stats.settlementsUpserted,
+          adsUpserted: body.stats.adsUpserted,
+          paymentsUpserted: body.stats.paymentsUpserted,
+          shopeeUpserted: body.stats.shopeeUpserted,
+          adsExpensesUpserted: body.stats.adsExpensesUpserted,
+          hoaDonAdsUpserted: body.stats.hoaDonAdsUpserted,
+          tinDungAdsUpserted: body.stats.tinDungAdsUpserted,
+          soCanhBao: canhBao.length,
+          canhBao: canhBao.slice(0, SO_CANH_BAO_HIEN),
+        },
+      };
+    } catch (err) {
+      // Nhánh `body.ok === false` ở trên đã bắt MỌI lỗi (nghiệp vụ lẫn hạ tầng) mà `withSyncLog` gói
+      // lại từ bên trong `fn` — tới đây là exception THOÁT KHỎI cả lượt gọi đó (chính `withSyncLog`
+      // ném trước khi kịp trả `Response`, hoặc `res.json()` hỏng). Log đủ phía server, trả client
+      // câu cố định thay vì `err.message` thô.
+      console.error("Dựng lại từ kho thô thất bại:", err);
+      await ghiNhatKyLoi({ actor: nguoiDung, hanhDong: HANH_DONG.DU_LIEU_DUNG_LAI_TU_KHO, ghiChu: { lyDo: "loi-he-thong" } });
+      return {
+        ok: false,
+        error: "Dựng lại thất bại — lỗi hệ thống, kiểm log server để biết chi tiết.",
+      };
+    } finally {
+      await traKhoaViecNang(khoaDb.the);
+      traKhoaDungLai();
+    }
   } finally {
-    await traKhoaViecNang(khoaDb.the);
-    traKhoaDungLai();
+    cua.ra();
   }
 }

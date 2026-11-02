@@ -71,8 +71,15 @@ export const KEY_N8N_DUOC_DOC = [
   "tiktokBusinessAppSecret",
   "tiktokBusinessToken",
   "tiktokBusinessManualDays",
+  // TikTok Business: ngày bắt đầu KÉO BÙ hoá đơn (khối dấu lượt hoá đơn, `tiktok-business-nightly`) — thêm 31/10/2026
+  "tiktokBusinessHoaDonTuNgay",
 ] as const;
 
-/** Migration đảo view sang allowlist — test đọc chéo neo vào đúng file này. */
+/**
+ * Migration MỚI NHẤT dựng view allowlist (đảo sang allowlist ở `20260921130000_setting_n8n_view_allowlist`) — test đọc
+ * chéo neo vào đúng file này; thêm key là viết migration `CREATE OR REPLACE VIEW` mới rồi trỏ hằng này sang nó.
+ * Migration đó BẮT BUỘC kèm `ALTER VIEW "SettingN8n" SET (security_barrier = true)`: đo trên Postgres 15, `CREATE OR
+ * REPLACE VIEW` không mang mệnh đề WITH là XOÁ reloptions (comment trong `20260921130000` nói "giữ nguyên" là sai).
+ */
 export const MIGRATION_VIEW_N8N_ALLOWLIST =
-  "prisma/migrations/20260921130000_setting_n8n_view_allowlist/migration.sql";
+  "prisma/migrations/20261031150000_setting_n8n_khoa_keo_bu_hoa_don_tiktok/migration.sql";

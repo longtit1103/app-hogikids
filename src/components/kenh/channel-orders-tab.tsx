@@ -16,8 +16,8 @@ import { formatVnd } from "@/lib/format";
 import { ORDER_STATUS_META } from "@/lib/orders/order-status-meta";
 import type { OrderListRow } from "@/lib/queries/orders";
 import { cn } from "@/lib/utils";
+import { PAGE_SIZE } from "@/lib/page-size";
 
-const PAGE_SIZE = 20;
 
 const STATUS_OPTIONS = (Object.entries(ORDER_STATUS_META) as [OrderStatus, { slug: string; label: string }][]).map(
   ([status, meta]) => ({ status, ...meta })

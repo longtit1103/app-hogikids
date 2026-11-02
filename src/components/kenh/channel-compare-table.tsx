@@ -4,9 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 
-import { formatPct1, formatRoas } from "@/components/kenh/channel-format";
+import { formatRoas } from "@/components/kenh/channel-format";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatVnd } from "@/lib/format";
 import type { ChannelPnl } from "@/lib/reports/pnl";
 import { coLaiKenh, type ChannelPnlChe, type ChannelPnlCheTruong } from "@/lib/reports/pnl-che";
 import { cn } from "@/lib/utils";
@@ -116,7 +116,7 @@ function DataRow({
       <TableCell className="text-right">{formatVnd(c.ads)}</TableCell>
       <TableCell className="text-right">{formatVnd(c.platformFee)}</TableCell>
       <TableCell className="text-right">
-        {c.returnBomRatePct === null ? "—" : formatPct1(c.returnBomRatePct)} · {c.returnBomOrderCount.toLocaleString("vi-VN")} đơn
+        {c.returnBomRatePct === null ? "—" : formatPercent(c.returnBomRatePct)} · {c.returnBomOrderCount.toLocaleString("vi-VN")} đơn
       </TableCell>
       {hienLai && (
         <TableCell className={cn("bg-surface-soft text-right", netProfit !== null && netProfit < 0 && "text-error")}>

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
 import { ARTIFACT_SAO_LUU } from "@/lib/backup/trang-thai-sao-luu";
 import { docBodyCoTran } from "@/lib/ingest/doc-body-co-tran";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
@@ -35,9 +35,11 @@ export async function POST(req: Request): Promise<Response> {
 
   // Dòng `SyncLog` ghi lúc này bị bản backup lùi mất dù sao. 503 để cron host (`full-backup.sh`)
   // thấy lỗi và ghi vào log của nó, thay vì nhận 200 rồi lượt sao lưu đêm mất dấu hoàn toàn.
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  return routeQuaCua(() => xuLyPost(req));
+}
 
+/** Thân POST sau cửa ghi (đếm suốt request — lượt phục hồi chờ nó xong). */
+async function xuLyPost(req: Request): Promise<Response> {
   // Đọc thân có trần TRƯỚC khi parse. Lỗi đọc luồng (client ngắt giữa chừng) rơi về nhánh 400 như
   // `req.json()` cũ.
   const doc = await docBodyCoTran(req, TRAN_BODY_BYTE).catch(() => null);

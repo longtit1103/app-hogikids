@@ -1,7 +1,5 @@
 "use client";
 
-import { format } from "date-fns";
-
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { soKyChoTheoLich } from "@/lib/so-quy/lich-tra-no";
 
@@ -126,7 +124,7 @@ type Props = {
 
 export function KhoanVayFormFields({ f, setF, loi, khoaNen, khoaCheDo, daDuyetKy, ngayNen, doiCheDo, doiNgayNen, doiTien, hienTien, d0, hoiTruocD0 }: Props) {
   const homNay = new Date();
-  const ngayToiDa = format(homNay, NGAY);
+  const ngayToiDa = formatNgayVn(homNay, NGAY);
   // Một chỗ khai "ô nền bị khoá" cho cả 4 ô — chép `disabled`/`title` bốn lần là để chúng lệch nhau.
   const khoa = khoaNen ? { disabled: true, title: KHOA_NEN_HINT } : {};
   const thauChi = f.cheDo === "thau-chi";

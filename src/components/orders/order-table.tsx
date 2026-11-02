@@ -12,9 +12,9 @@ import {
 } from "@/lib/orders/provisional-fee";
 import type { OrderListRow } from "@/lib/queries/orders";
 import { cn } from "@/lib/utils";
+import { PAGE_SIZE } from "@/lib/page-size";
 import { OrderStatusBadge } from "./order-status-badge";
 
-const PAGE_SIZE = 20;
 
 function hrefWith(sp: Record<string, string | undefined>, overrides: Record<string, string | undefined>): string {
   const params = new URLSearchParams();

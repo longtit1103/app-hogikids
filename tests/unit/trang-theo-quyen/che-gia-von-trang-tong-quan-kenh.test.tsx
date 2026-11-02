@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Quyen } from "@/lib/quyen/danh-muc-quyen";
 import type { NguoiDung } from "@/lib/quyen/nguoi-dung-phien";
 import type { ChannelPnl, PnlBreakdown } from "@/lib/reports/pnl";
+import type { ProductReportRow } from "@/lib/reports/product-report";
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { choChuaSoCanh, khoaTrongCay } from "./quet-cay-phan-tu";
 
@@ -31,7 +32,19 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-const CANH = { cogs: 9_131_717, gross: 8_272_721, net: 6_363_631, netKenh: 5_454_541, margin: 47.123, ngay: 4_545_451, lai: 3_939_393 };
+const CANH = {
+  cogs: 9_131_717,
+  gross: 8_272_721,
+  net: 6_363_631,
+  netKenh: 5_454_541,
+  margin: 47.123,
+  ngay: 4_545_451,
+  lai: 3_939_393,
+  // Trang chủ mới: chi phí ngày, lãi + giá vốn theo sản phẩm (đều thuộc quyền giá vốn).
+  ngayChiPhi: 3_737_373,
+  spLai: 2_828_281,
+  spCogs: 1_919_191,
+};
 
 const m = vi.hoisted(() => ({
   calcPnl: vi.fn(),
@@ -41,6 +54,9 @@ const m = vi.hoisted(() => ({
   computeChannelRevenueAdsSeries: vi.fn(),
   sumThuNhapTaiChinh: vi.fn(),
   computeProductReport: vi.fn(),
+  demTrangThaiDon: vi.fn(),
+  docSanPhamCoBienTheTonThap: vi.fn(),
+  getLowStockPreview: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -67,14 +83,20 @@ vi.mock("@/lib/reports/daily-series", () => ({
   computeChannelDailyRevenue: m.computeChannelDailyRevenue,
   computeChannelRevenueAdsSeries: m.computeChannelRevenueAdsSeries,
 }));
-vi.mock("@/lib/reports/product-report", () => ({ computeProductReport: m.computeProductReport }));
+vi.mock("@/lib/reports/product-report", async (goc) => ({
+  ...(await goc<typeof import("@/lib/reports/product-report")>()),
+  computeProductReport: m.computeProductReport,
+}));
+// Loader trang chủ mới: đếm trạng thái đơn + tồn thấp là truy vấn Prisma riêng — mock ở ranh giới hàm.
+vi.mock("@/lib/trang-chu/dem-trang-thai-don", () => ({ demTrangThaiDon: m.demTrangThaiDon }));
+vi.mock("@/lib/queries/variants", async (goc) => ({
+  ...(await goc<typeof import("@/lib/queries/variants")>()),
+  docSanPhamCoBienTheTonThap: m.docSanPhamCoBienTheTonThap,
+  getLowStockPreview: m.getLowStockPreview,
+}));
 vi.mock("@/lib/queries/orders", () => ({
   getOrderListPage: async () => ({ rows: [], total: 0 }),
   ORDER_PAGE_SIZE: 20,
-}));
-vi.mock("@/lib/dashboard/khoi-chi-tiet-theo-quyen", () => ({
-  SYNC_KINDS_DASHBOARD: [],
-  taiKhoiChiTietDashboard: async () => ({ productReport: null, lowStock: null, syncLogs: null }),
 }));
 vi.mock("@/lib/expenses/ensure-recurring-expenses", () => ({
   ensureRecurringExpensesForMonths: async () => undefined,
@@ -100,6 +122,19 @@ function pnlCanh(): PnlBreakdown {
     netProfit: CANH.net,
     orderCount: 40,
     returnBomOrderCount: 2,
+    returnedOrderFee: 0,
+    adsBySource: {},
+    adsTinDungTang: 0,
+    shipping: 0,
+    packaging: 0,
+    returnBom: 0,
+    fixed: 0,
+    financialIncome: 0,
+    interest: 0,
+    other: 0,
+    otherCategoryIds: [],
+    skuMissingCount: 0,
+    skuUnknownLineCount: 0,
   } as unknown as PnlBreakdown;
 }
 
@@ -122,14 +157,44 @@ function kenhCanh(): ChannelPnl {
   };
 }
 
+/** Một sản phẩm đã bán, đủ giá vốn: lãi + COGS là số canh (chỉ nhánh có quyền giá vốn được mang xuống). */
+function spCanh(): ProductReportRow {
+  return {
+    productId: "sp-1",
+    name: "Áo",
+    imageUrl: null,
+    soldQty: 3,
+    revenue: 6_000_000,
+    cogs: CANH.spCogs,
+    grossProfit: CANH.spLai,
+    marginPct: CANH.margin,
+    currentStock: 4,
+    orderCount: 3,
+    skus: [
+      { variantId: "v1", sku: "A", label: "M", soldQty: 3, revenue: 6_000_000, cogs: CANH.spCogs, grossProfit: CANH.spLai, currentStock: 4 },
+    ],
+  };
+}
+
 /** Mọi chỗ trong cây mang một số canh nào đó. */
 function choLo(el: unknown): string[] {
-  return [CANH.cogs, CANH.gross, CANH.net, CANH.netKenh, CANH.margin, CANH.ngay, CANH.lai].flatMap((so) =>
+  return [
+    CANH.cogs,
+    CANH.gross,
+    CANH.net,
+    CANH.netKenh,
+    CANH.margin,
+    CANH.ngay,
+    CANH.lai,
+    CANH.ngayChiPhi,
+    CANH.spLai,
+    CANH.spCogs,
+  ].flatMap((so) =>
     choChuaSoCanh(el, so).map((d) => `${so} @ ${d}`),
   );
 }
 
-const KHOA_CAM = ["cogs", "grossProfit", "netProfit", "marginPct"];
+const KHOA_CAM = ["cogs", "grossProfit", "netProfit", "marginPct", "chiPhi", "loiNhuan"];
 
 function dat(role: "OWNER" | "STAFF", ...q: Quyen[]) {
   nguoiHienTai = nguoiDungGia({ role, quyen: new Set(q) });
@@ -139,14 +204,22 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.calcPnl.mockImplementation(async () => pnlCanh());
   m.computeChannelPnl.mockImplementation(async () => [kenhCanh()]);
-  m.computeDailySeries.mockResolvedValue([{ date: "2026-10-01", revenue: 1_000_000, netProfit: CANH.ngay }]);
+  m.computeDailySeries.mockResolvedValue([
+    { date: "2026-10-01", revenue: 1_000_000, netProfit: CANH.ngay, chiPhi: CANH.ngayChiPhi, orderCount: 2 },
+  ]);
   m.computeChannelDailyRevenue.mockResolvedValue([]);
   m.computeChannelRevenueAdsSeries.mockResolvedValue([]);
   m.sumThuNhapTaiChinh.mockResolvedValue(CANH.lai);
   m.computeProductReport.mockImplementation(async (_r: unknown, _o: unknown, q: { coQuyenGiaVon: boolean }) => ({
     coQuyenGiaVon: q.coQuyenGiaVon,
-    rows: [],
+    // Nhánh che: đúng hình dạng hàm thật trả (không cogs/grossProfit/marginPct) — vẫn có dòng để phép quét có gì mà soi.
+    rows: q.coQuyenGiaVon
+      ? [spCanh()]
+      : [{ productId: "sp-1", name: "Áo", imageUrl: null, soldQty: 3, revenue: 6_000_000, currentStock: 4, orderCount: 3, skus: [] }],
   }));
+  m.demTrangThaiDon.mockResolvedValue({ PENDING: 1, SHIPPING: 2, COMPLETED: 30, RETURNED: 2, CANCELLED: 1 });
+  m.docSanPhamCoBienTheTonThap.mockResolvedValue(new Set<string>());
+  m.getLowStockPreview.mockResolvedValue({ rows: [], total: 0 });
 });
 
 const dungDashboard = () => DashboardPage({ searchParams: Promise.resolve({}) });
@@ -155,12 +228,13 @@ const dungKenhChiTiet = () =>
   KenhChiTietPage({ params: Promise.resolve({ id: "shopee" }), searchParams: Promise.resolve({}) });
 
 describe.each([
-  { ten: "Dashboard /", quyen: "tong-quan:xem" as Quyen, dung: dungDashboard },
-  { ten: "/kenh", quyen: "kenh:xem" as Quyen, dung: dungKenh },
-  { ten: "/kenh/[id]", quyen: "kenh:xem" as Quyen, dung: dungKenhChiTiet },
+  // Dashboard: thêm bao-cao + ton-kho để các khối sản phẩm / tồn thấp cũng nằm trong cây bị quét.
+  { ten: "Dashboard /", quyen: ["tong-quan:xem", "bao-cao:xem", "ton-kho:xem"] as Quyen[], dung: dungDashboard },
+  { ten: "/kenh", quyen: ["kenh:xem"] as Quyen[], dung: dungKenh },
+  { ten: "/kenh/[id]", quyen: ["kenh:xem"] as Quyen[], dung: dungKenhChiTiet },
 ])("$ten — che giá vốn ở tầng page", ({ quyen, dung }) => {
   it("thiếu giá vốn ⇒ KHÔNG số canh nào, không khoá nhạy cảm nào trong props cây trang", async () => {
-    dat("STAFF", quyen);
+    dat("STAFF", ...quyen);
     const el = await dung();
     expect(choLo(el)).toEqual([]);
     const khoa = khoaTrongCay(el);
@@ -171,6 +245,16 @@ describe.each([
     dat("OWNER");
     const el = await dung();
     expect(choLo(el).length).toBeGreaterThan(0);
+  });
+});
+
+describe("Dashboard / — phép quét thấy số giá vốn trang chủ mới khi có quyền (không xanh giả)", () => {
+  it("chủ shop ⇒ thấy chi phí ngày, lãi sản phẩm, giá vốn khối tiền đi đâu", async () => {
+    dat("OWNER");
+    const el = await dungDashboard();
+    for (const so of [CANH.ngayChiPhi, CANH.spLai, CANH.cogs, CANH.net]) {
+      expect(choChuaSoCanh(el, so).length, `số ${so}`).toBeGreaterThan(0);
+    }
   });
 });
 

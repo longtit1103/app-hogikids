@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
 import { requireTokenVaultSecret } from "@/lib/ingest/token-vault-auth";
 import { prisma } from "@/lib/prisma";
 
@@ -77,9 +77,12 @@ export async function POST(req: Request): Promise<Response> {
   // vòng refresh_token nên cái cũ đã chết. Mục đích là để n8n THROW ồn ào (`persistToken` in nguyên
   // cặp token ra log lỗi để chép lại bằng tay) thay vì nhận 200 rồi bị lượt phục hồi lùi bảng
   // `Setting` — mất lặng, chỉ phát hiện vài tuần sau khi dữ liệu đã hụt.
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return noStore(dangPhucHoi);
+  // `noStore` bọc cả 503 của cửa (hàm idempotent — thân bên trong đã tự bọc).
+  return noStore(await routeQuaCua(() => xuLyPost(req)));
+}
 
+/** Thân POST sau cửa ghi (đếm suốt request — lượt phục hồi chờ nó xong). */
+async function xuLyPost(req: Request): Promise<Response> {
   let body: unknown;
   try {
     body = await req.json();
@@ -159,9 +162,12 @@ export async function GET(req: Request): Promise<Response> {
   // (đốt refresh_token cũ) → ghi token mới. Chặn ở bước cuối chỉ kịp báo động; chặn ở đây thì
   // `loadToken()` của workflow throw TRƯỚC khi refresh ("dừng TRƯỚC khi refresh để không đốt
   // refresh_token khi chưa có chỗ lưu") ⇒ refresh_token còn nguyên, đêm sau chạy lại là xong.
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return noStore(dangPhucHoi);
+  // Đi cùng cửa với route ghi (đếm): lượt đọc này mở đầu chuỗi đọc → refresh → ghi của workflow.
+  return noStore(await routeQuaCua(() => xuLyGet()));
+}
 
+/** Thân GET sau cửa (chỉ đọc kho token). */
+async function xuLyGet(): Promise<Response> {
   const rows = await prisma.setting.findMany({
     where: { key: { in: [KEY_ACCESS_TOKEN, KEY_REFRESH_TOKEN, KEY_EXPIRE_AT, KEY_SAVED_AT, KEY_REFRESH_EXPIRE_AT] } },
   });

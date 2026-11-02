@@ -72,14 +72,14 @@ vi.mock("@/lib/ingest/sync-log", async (importOriginal) => {
 });
 
 import { POST } from "@/app/api/restore/route";
-import { thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
 import { giuKhoaViecNang, traKhoaViecNang } from "@/lib/backup/khoa-viec-nang";
 import { runPgDump } from "@/lib/backup/run-pg-dump";
 import { runRestore } from "@/lib/backup/run-restore";
 import { coLuotDangChay } from "@/lib/ingest/sync-log";
 import { prisma } from "@/lib/prisma";
 import { VIEC_GHI_GIA_VON } from "@/lib/gia-von/ghi-gia-von-theo-pancake";
-import { donKhoaPhucHoi } from "./helpers/khoa-bao-tri-reset";
+import { coPhucHoiDangTrong, donKhoaPhucHoi } from "./helpers/khoa-bao-tri-reset";
 
 const KHOA_KEY = "khoaViecNang";
 
@@ -123,14 +123,22 @@ async function cuopKhoaViecNang(viec: string): Promise<void> {
  */
 describe("POST /api/restore — giành khoá việc nặng làm cổng drain", () => {
   afterEach(async () => {
+    // Đọc cờ TRƯỚC mọi bước dọn: MỌI lối ra của route (200/409/500) phải tự nhả cờ phục hồi — lưới
+    // chung cho cả các ca không có đầu dò riêng (vd 409 việc nặng ở các chốt 3d / giữa pg_dump / trước
+    // phá huỷ). Đầu dò trong ca (`coPhucHoiDangTrong`) giành rồi trả ngay nên không làm bẩn cờ.
+    const routeChuaNhaCo = dangPhucHoi();
     vi.mocked(giuKhoaViecNang).mockClear();
     vi.mocked(traKhoaViecNang).mockClear();
     vi.mocked(coLuotDangChay).mockClear();
     vi.mocked(runPgDump).mockClear();
     vi.mocked(runRestore).mockClear();
+    // Dọn cờ TRƯỚC câu dọn DB (phòng khi route quên nhả): cờ còn bật thì cổng ghi chặn câu dọn qua
+    // singleton, dòng khoá/SyncLog sót sang file sau. Khẳng định đặt SAU dọn để ca đỏ không kéo đổ
+    // dây chuyền các ca kế tiếp.
+    donKhoaPhucHoi();
     await prisma.setting.deleteMany({ where: { key: KHOA_KEY } });
     await prisma.syncLog.deleteMany();
-    donKhoaPhucHoi();
+    expect(routeChuaNhaCo, "route để cờ phục hồi còn bật sau khi trả response").toBe(false);
   });
 
   afterAll(async () => {
@@ -149,7 +157,7 @@ describe("POST /api/restore — giành khoá việc nặng làm cổng drain", (
     // Restore thua thì TUYỆT ĐỐI không được đụng vào khoá của việc đang chạy.
     expect(await docKhoaTrongDb()).toContain(khoa.the.token);
     // Khoá bảo trì phải được trả trong finally — không kẹt app chỉ-đọc.
-    expect(thuGiuKhoaPhucHoi()).not.toBeNull();
+    expect(coPhucHoiDangTrong()).toBe(true);
 
     await traKhoaViecNang(khoa.the);
   });
@@ -291,6 +299,6 @@ describe("POST /api/restore — giành khoá việc nặng làm cổng drain", (
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/lượt đồng bộ/i);
     // Và khoá bảo trì vẫn được trả dù bước trả lease nổ.
-    expect(thuGiuKhoaPhucHoi()).not.toBeNull();
+    expect(coPhucHoiDangTrong()).toBe(true);
   });
 });

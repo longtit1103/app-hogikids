@@ -188,14 +188,22 @@ describe("nhánh hoá đơn — cửa sổ thời gian, trang rỗng, land hỏn
     const getText = vi.fn(async (_p: string, _qs: Qs) => traTrang(luot++));
     const land = vi.fn(async (..._a: unknown[]) => landTraVe);
     const loiLand: string[] = [];
+    // Dấu lượt hoá đơn (bắt đầu/kết thúc) có suite riêng — ở đây app luôn nhận dấu.
+    const guiDauLuot = vi.fn(async () => true);
+    // Trang hoá đơn land qua `landTrangHoaDon` của khối dấu lượt (kèm luotId) — giả ở đây, suite dấu lượt chạy thật.
     const keoHoaDon = new Function(
       "tiktokGetText",
-      "landRaw",
+      "landTrangHoaDon",
       "tokenErr",
-      "hoaDonLocThoiGian",
+      "PHAM_VI_HOA_DON",
       "loiLandHoaDon",
-      `"use strict";\n${catHam("docJson")}\n${catHam("keoHoaDon")}\nreturn keoHoaDon;`,
-    )(getText, land, tokenErr, LOC, loiLand) as (bc: string) => Promise<unknown[]>;
+      "guiDauLuot",
+      "laThieuQuyenFinance",
+      "log",
+      `"use strict";\n${catHam("docJson")}\n${catHam("soNguyenPageInfo")}\n${catHam("keoHoaDon")}\nreturn keoHoaDon;`,
+    )(getText, land, tokenErr, { loc: LOC, phamVi: null, keoBu: null }, loiLand, guiDauLuot, laThieuQuyenFinance, () => {}) as (
+      bc: string,
+    ) => Promise<unknown[]>;
     return { keoHoaDon, getText, land, loiLand };
   }
 

@@ -2,30 +2,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ChuaSyncEmptyState } from "@/components/dashboard/chua-sync-empty-state";
-import { KpiCards, type KpiCardsDuLieu } from "@/components/dashboard/kpi-cards";
-import { LowStockCard } from "@/components/dashboard/low-stock-card";
-import { SyncStatusCard } from "@/components/dashboard/sync-status-card";
-import { TopProductsCard } from "@/components/dashboard/top-products-card";
 import { coTheVaoHref, hrefDuocPhep } from "@/components/shell/nav-config";
+import { BanChay } from "@/components/trang-chu/ban-chay";
+import { LaiNhieuNenDay } from "@/components/trang-chu/lai-nhieu-nen-day";
+import { SapHetHang } from "@/components/trang-chu/sap-het-hang";
+import { TheoKenh } from "@/components/trang-chu/theo-kenh";
+import { TinhTrangDon } from "@/components/trang-chu/tinh-trang-don";
 import type { Quyen } from "@/lib/quyen/danh-muc-quyen";
-import type { PnlChe } from "@/lib/reports/pnl-che";
-import type { ProductReportRowChe } from "@/lib/reports/product-report";
+import type { TheoKenh as DuTheoKenh, TinhTrangDon as DuTinhTrangDon } from "@/lib/trang-chu/kieu-du-lieu-trang-chu";
 
 /**
- * Link trên Dashboard chỉ dựng khi người xem vào được trang đích (tập `hrefDuocPhep` do server tính).
+ * Link trên trang chủ chỉ dựng khi người xem vào được trang đích (tập `hrefDuocPhep` do server tính).
  * Thiếu tập ⇒ mặc định KHÔNG link — không bao giờ "mở khi quên truyền".
  */
-
-const che = {
-  revenue: 1_000_000,
-  voucher: 0,
-  platformFee: 0,
-  netRevenue: 900_000,
-  ads: 0,
-  orderCount: 3,
-  returnBomOrderCount: 1,
-} as PnlChe;
-const du: KpiCardsDuLieu = { coQuyenGiaVon: false, today: che, thisMonth: che, lastMonthSameDays: che };
 
 const ownerVaStaff = {
   xemDon: { role: "STAFF" as const, quyen: new Set<Quyen>(["tong-quan:xem", "don-hang:xem"]) },
@@ -41,55 +30,77 @@ describe("coTheVaoHref", () => {
   });
 });
 
-describe("KpiCards — thẻ Đơn hợp lệ / Tỷ lệ hoàn-bom", () => {
-  it("thiếu don-hang:xem ⇒ không link /don-hang; có ⇒ link cả hai thẻ", () => {
-    const hrefs = hrefDuocPhep(ownerVaStaff.chiTongQuan);
-    const an = renderToStaticMarkup(<KpiCards du={du} hrefDuocPhep={hrefs} />);
-    expect(an).toContain("Đơn hợp lệ hôm nay");
-    expect(an).not.toContain('href="/don-hang');
-    expect(renderToStaticMarkup(<KpiCards du={du} />)).not.toContain('href="/don-hang');
+describe("TinhTrangDon — link sang /don-hang theo quyền", () => {
+  const du: DuTinhTrangDon = {
+    tong: 10,
+    theoTrangThai: { COMPLETED: 6, SHIPPING: 2, PENDING: 1, RETURNED: 1, CANCELLED: 0 },
+  };
+  const ky = { tu: "2026-10-25", den: "2026-10-31" };
 
-    const hien = renderToStaticMarkup(<KpiCards du={du} hrefDuocPhep={hrefDuocPhep(ownerVaStaff.xemDon)} />);
-    expect(hien).toContain('href="/don-hang"');
-    expect(hien).toContain("href=\"/don-hang?trang_thai=hoan_hang,huy_bom\"");
+  it("thiếu don-hang:xem ⇒ không link /don-hang; có ⇒ link lọc theo trạng thái + kỳ", () => {
+    const an = renderToStaticMarkup(<TinhTrangDon du={du} ky={ky} hrefDuocPhep={hrefDuocPhep(ownerVaStaff.chiTongQuan)} />);
+    expect(an).toContain("Thành công");
+    expect(an).not.toContain('href="/don-hang');
+    expect(renderToStaticMarkup(<TinhTrangDon du={du} ky={ky} hrefDuocPhep={[]} />)).not.toContain('href="/don-hang');
+
+    const hien = renderToStaticMarkup(<TinhTrangDon du={du} ky={ky} hrefDuocPhep={hrefDuocPhep(ownerVaStaff.xemDon)} />);
+    expect(hien).toContain('href="/don-hang?trang_thai=hoan_thanh&amp;ngay_tu=2026-10-25&amp;ngay_den=2026-10-31"');
   });
 });
 
-describe("SyncStatusCard / ChuaSyncEmptyState — link Cài đặt", () => {
+describe("TheoKenh — link sang /kenh/<id> theo quyền", () => {
+  const du: DuTheoKenh = {
+    coQuyenGiaVon: false,
+    rows: [{ channelId: "shopee", ten: "Shopee", doanhSo: 1_000_000, donHang: 3 }],
+  };
+
+  it("thiếu kenh:xem ⇒ dòng tĩnh; có ⇒ link", () => {
+    const an = renderToStaticMarkup(<TheoKenh du={du} hrefDuocPhep={["/", "/don-hang"]} />);
+    expect(an).toContain("Shopee");
+    expect(an).not.toContain('href="/kenh');
+    expect(renderToStaticMarkup(<TheoKenh du={du} hrefDuocPhep={["/kenh"]} />)).toContain('href="/kenh/shopee"');
+  });
+});
+
+describe("ChuaSyncEmptyState — link Cài đặt", () => {
   it("thiếu cai-dat:xem ⇒ không link; chủ shop ⇒ có link", () => {
     const hrefsStaff = hrefDuocPhep(ownerVaStaff.xemDon);
     const hrefsChu = hrefDuocPhep({ role: "OWNER", quyen: new Set<Quyen>() });
-
-    expect(renderToStaticMarkup(<SyncStatusCard rows={[]} hrefDuocPhep={hrefsStaff} />)).not.toContain("Cài đặt kết nối");
-    expect(renderToStaticMarkup(<SyncStatusCard rows={[]} />)).not.toContain('href="/cai-dat"');
-    expect(renderToStaticMarkup(<SyncStatusCard rows={[]} hrefDuocPhep={hrefsChu} />)).toContain('href="/cai-dat"');
 
     expect(renderToStaticMarkup(<ChuaSyncEmptyState hrefDuocPhep={hrefsStaff} />)).not.toContain('href="/cai-dat"');
     expect(renderToStaticMarkup(<ChuaSyncEmptyState hrefDuocPhep={hrefsChu} />)).toContain('href="/cai-dat"');
   });
 });
 
-describe("LowStockCard / TopProductsCard — link sang trang cần quyền riêng", () => {
+describe("SapHetHang / BanChay / LaiNhieuNenDay — link sang trang cần quyền riêng", () => {
   const rows = [{ variantId: "v1", sku: "SKU-1", productName: "Áo", label: "M", stock: 2 }];
-  const sp: ProductReportRowChe[] = [
-    { productId: "p1", name: "Áo", imageUrl: null, soldQty: 1, revenue: 10_000, currentStock: 1, orderCount: 1, skus: [] },
-  ];
+  const ban = [{ productId: "p1", ten: "Áo", soLuong: 1, doanhSo: 10_000 }];
+  const lai = {
+    top: [{ productId: "p1", ten: "Áo", loiNhuan: 5_000, soLuong: 1, laiMoiCai: 5_000, bienLai: 50, tonKho: 9, tonThap: false }],
+    soThieuGiaVon: 0,
+  };
 
-  it("tồn kho thấp: thiếu ton-kho:xem ⇒ không link; có ⇒ link", () => {
-    const an = renderToStaticMarkup(<LowStockCard rows={rows} total={1} hrefDuocPhep={["/", "/don-hang"]} />);
-    expect(an).toContain("SKU-1");
+  it("sắp hết hàng: thiếu ton-kho:xem ⇒ không link; có ⇒ link", () => {
+    const an = renderToStaticMarkup(<SapHetHang rows={rows} total={1} hrefDuocPhep={["/", "/don-hang"]} />);
+    expect(an).toContain("Áo · M");
     expect(an).not.toContain("href=");
-    expect(renderToStaticMarkup(<LowStockCard rows={rows} total={1} hrefDuocPhep={["/ton-kho"]} />)).toContain(
+    expect(renderToStaticMarkup(<SapHetHang rows={rows} total={1} hrefDuocPhep={["/ton-kho"]} />)).toContain(
       'href="/ton-kho?loc=sap_het"',
     );
   });
 
-  it("top sản phẩm: thiếu bao-cao:xem ⇒ không link; có ⇒ link dòng + link báo cáo", () => {
-    const an = renderToStaticMarkup(<TopProductsCard products={sp} hrefDuocPhep={["/"]} />);
+  it("bán chạy: thiếu bao-cao:xem ⇒ không link; có ⇒ link dòng sản phẩm", () => {
+    const an = renderToStaticMarkup(<BanChay rows={ban} hrefDuocPhep={["/"]} />);
     expect(an).not.toContain("href=");
-    expect(an).not.toContain("Xem báo cáo sản phẩm");
-    const hien = renderToStaticMarkup(<TopProductsCard products={sp} hrefDuocPhep={["/bao-cao"]} />);
+    expect(renderToStaticMarkup(<BanChay rows={ban} hrefDuocPhep={["/bao-cao"]} />)).toContain("sp=p1");
+  });
+
+  it("lãi nhiều – nên đẩy: thiếu bao-cao:xem ⇒ không link, không 'Xem tất cả'; có ⇒ cả hai", () => {
+    const an = renderToStaticMarkup(<LaiNhieuNenDay du={lai} hrefDuocPhep={["/"]} />);
+    expect(an).not.toContain("href=");
+    expect(an).not.toContain("Xem tất cả");
+    const hien = renderToStaticMarkup(<LaiNhieuNenDay du={lai} hrefDuocPhep={["/bao-cao"]} />);
     expect(hien).toContain("sp=p1");
-    expect(hien).toContain("Xem báo cáo sản phẩm");
+    expect(hien).toContain("Xem tất cả");
   });
 });

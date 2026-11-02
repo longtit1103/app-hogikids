@@ -23,6 +23,7 @@ import {
   SYNC_NOW_WEBHOOK_PATH,
   type CredentialGan,
 } from "./doc-goi-workflow-tu-repo";
+import { docDuongDanWebhookBatBuoc, ThieuDuongDanWebhook } from "./duong-dan-webhook-pancake";
 
 /**
  * "Cài / cập nhật workflows" — đẩy 10 workflow từ repo vào n8n qua Public API. Fail-closed từng
@@ -75,6 +76,20 @@ async function bocPrisma<T>(viec: string, chay: () => Promise<T>): Promise<T> {
   } catch (e) {
     console.error(`provision n8n — lỗi ${viec}:`, e);
     throw new Error(`Lỗi khi ${viec} (chi tiết trong log server).`);
+  }
+}
+
+/**
+ * Đọc path webhook qua cùng lớp che lỗi Prisma, NHƯNG giữ nguyên `ThieuDuongDanWebhook` — thông điệp
+ * của nó chỉ đường sửa (không chứa giá trị nào), che đi là người bấm không biết phải làm gì.
+ */
+async function bocLoiDuongDan<T>(chay: () => Promise<T>): Promise<T> {
+  try {
+    return await chay();
+  } catch (e) {
+    if (e instanceof ThieuDuongDanWebhook) throw e;
+    console.error("provision n8n — lỗi đọc đường dẫn webhook:", e);
+    throw new Error("Lỗi khi đọc đường dẫn webhook trong kho khoá (chi tiết trong log server).");
   }
 }
 
@@ -266,6 +281,12 @@ export async function provisionN8n(opts: { xacNhanDoiHaTang?: boolean } = {}): P
   if (secretCu && secretCu !== ingestSecret) doi.push("n8nIngestSecret: (giá trị sẽ đổi)");
   if (doi.length > 0 && !opts.xacNhanDoiHaTang) throw new CanXacNhanDoiHaTang(doi);
 
+  // Path 3 webhook Pancake là dữ liệu của instance (`Setting`), file repo chỉ mang placeholder.
+  // Thiếu ⇒ DỪNG trước mọi request/ghi: đẩy tiếp là n8n đăng ký path placeholder, path thật Pancake
+  // đang bắn trả 404. KHÔNG tự sinh path mới ở đây — bản đang chạy mà sinh mới là đổi path ngay
+  // dưới chân Pancake; sinh mới/xoay là thao tác có chủ đích (script nạp path, hàm xoay).
+  const duongDanWebhook = await bocLoiDuongDan(() => docDuongDanWebhookBatBuoc(prisma));
+
   // GET danh sách TRƯỚC khi gửi bất kỳ secret nào — URL sai/không phải n8n thì dừng ở đây.
   const client = taoN8nClient(baseUrl, apiKey);
   const danhSachTrenN8n = await listWorkflows(client);
@@ -285,7 +306,7 @@ export async function provisionN8n(opts: { xacNhanDoiHaTang?: boolean } = {}): P
 
   const rows: DongKetQuaProvision[] = [];
   for (const wf of DANH_SACH_WORKFLOW) {
-    const body = dongGoiWorkflow(wf.slug, creds);
+    const body = dongGoiWorkflow(wf.slug, creds, duongDanWebhook);
     const dong: DongKetQuaProvision = { slug: wf.slug, ten: body.name, hanhDong: "loi", active: false };
     rows.push(dong);
     try {

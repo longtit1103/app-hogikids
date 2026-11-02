@@ -11,6 +11,7 @@ import {
   type PnlIncomeInput,
   type PnlTinDungInput,
 } from "@/lib/reports/pnl";
+import { chiaChiPhi } from "@/lib/trang-chu/chia-chi-phi";
 
 import type { OrderStatus } from "@/generated/prisma/client";
 
@@ -41,12 +42,16 @@ export interface DailyPoint {
   date: string /* yyyy-MM-dd */;
   revenue: number;
   netProfit: number;
+  /** "Chi phí" trang chủ (`chiaChiPhi(b).chiPhi`, spec trang chủ §4.3) — gộp field, không tính lại. */
+  chiPhi: number;
+  /** Đơn hợp lệ của ngày (`b.orderCount`). */
+  orderCount: number;
 }
 
 /**
- * Doanh thu + LN ròng từng ngày. Fetch orders + expenses 1 LẦN cho cả range,
+ * Doanh thu + LN ròng + chi phí + số đơn hợp lệ từng ngày. Fetch orders + expenses 1 LẦN cho cả range,
  * bucket theo ngày, rồi chạy `calcPnlCore` cho từng bucket (KHÔNG gọi calcPnl
- * mỗi ngày → tránh N query). Ngày trống vẫn có point {revenue:0, netProfit:0}.
+ * mỗi ngày → tránh N query). Ngày trống vẫn có point 0 ở mọi số.
  */
 export async function computeDailySeries(range: DateRange): Promise<DailyPoint[]> {
   const to = endOfDay(range.to);
@@ -110,7 +115,8 @@ export async function computeDailySeries(range: DateRange): Promise<DailyPoint[]
       incomes: incomesByDay.get(date) ?? [],
       tinDungTang: tinDungByDay.get(date) ?? [],
     });
-    return { date, revenue: b.revenue, netProfit: b.netProfit };
+    // chiPhi/orderCount lấy từ CÙNG breakdown của bucket — không query thêm, Σ ngày = cả kỳ.
+    return { date, revenue: b.revenue, netProfit: b.netProfit, chiPhi: chiaChiPhi(b).chiPhi, orderCount: b.orderCount };
   });
 }
 

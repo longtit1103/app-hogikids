@@ -82,6 +82,15 @@ export type UpsertStats = {
   settlementsUpserted: number; // Silver TiktokSettlement (Phase 2)
   adsUpserted: number; // Silver TiktokAdsSettlement (ads TikTok trừ)
   paymentsUpserted: number; // Silver TiktokPayment (lệnh rút bank)
+  /**
+   * Bản KHÔNG ghi vì Silver TikTok (sao kê / khoản ads trừ ví / lệnh rút) đang giữ bản dựng từ dòng kho thô MỚI HƠN
+   * (chốt `nguonFetchedAt` — lượt transform cầm ảnh cũ tới sau). Cùng họ `ordersSkippedStale`: kết cục ĐÚNG, RIÊNG
+   * khỏi `skipped`; `demDaHachToan` cộng phần sao kê + lệnh rút. BẮT BUỘC (không `?`) để đường nào dựng bộ đếm mà
+   * quên trường là tsc đỏ, không phải cổng đối soát im lặng coi là 0.
+   */
+  settlementsSkippedStale: number;
+  adsSkippedStale: number;
+  paymentsSkippedStale: number;
   shopeeUpserted: number; // Silver ShopeeSettlement (ví Shopee import tay)
   adsExpensesUpserted: number; // Expense source=ADS_API dựng lại từ báo cáo ads trong kho thô
 };

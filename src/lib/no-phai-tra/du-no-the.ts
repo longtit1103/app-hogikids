@@ -64,6 +64,21 @@ const LOAI_HOA_DON_CHI_THE = ["BILL_PAYMENT", "ADD_BALANCE"];
 /** Hoá đơn trả bằng TIỀN (thẻ/ví) — loại khác (CREDIT = tín dụng tặng) không chạm thẻ. */
 const HOA_DON_TRA_TIEN = "CASH";
 
+/**
+ * Điều kiện DUY NHẤT "hoá đơn TikTok tính vào dư nợ thẻ" trong `[tu, truoc)`: tiền rời phương thức thanh toán
+ * (`BILL_PAYMENT`/`ADD_BALANCE`) trả bằng TIỀN (`CASH`), của MỌI BC (không lọc `bcId` — gán thẻ bằng `theCuaNenTang`).
+ * Hoá đơn ví TikTok Shop trả cũng thuộc tập này (bù bằng `VI_TRU` từ nguồn khác) ⇒ thiếu hoá đơn của BC nào cũng làm
+ * dư nợ lệch. Người gọi tự chặn dưới bằng mốc M (nợ thẻ chỉ đọc hoá đơn từ M). Dùng chung: dư nợ thẻ, nhắc hoá đơn
+ * ngày chốt, đối chiếu sao kê PDF, cổng chốt sao kê (BC đánh dấu "không dùng thẻ"), action đánh dấu.
+ */
+export function dieuKienHoaDonTiktokTinhNoThe(tu: Date, truoc: Date): Prisma.TiktokAdsHoaDonWhereInput {
+  return {
+    createTime: { gte: tu, lt: truoc },
+    transactionType: { in: LOAI_HOA_DON_CHI_THE },
+    billingType: HOA_DON_TRA_TIEN,
+  };
+}
+
 const laNenTangHoaDonThat = (nenTang: string): boolean =>
   (NEN_TANG_HOA_DON_THAT as readonly string[]).includes(nenTang);
 
@@ -161,11 +176,7 @@ export async function docGiaoDichTheChiTiet(
     c.mocM === null || !coTiktok
       ? Promise.resolve([])
       : db.tiktokAdsHoaDon.findMany({
-          where: {
-            createTime: { gte: c.mocM, lt: truoc },
-            transactionType: { in: LOAI_HOA_DON_CHI_THE },
-            billingType: HOA_DON_TRA_TIEN,
-          },
+          where: dieuKienHoaDonTiktokTinhNoThe(c.mocM, truoc),
           select: { id: true, createTime: true, amount: true, amountType: true },
         }),
     db.cashMovement.findMany({
@@ -245,12 +256,7 @@ export async function docHoaDonTiktokTrongNgay(
   const tu = dau > c.mocM ? dau : c.mocM;
   const [rows, vi] = await Promise.all([
     db.tiktokAdsHoaDon.findMany({
-      where: {
-        createTime: { gte: tu, lt: sau },
-        transactionType: { in: LOAI_HOA_DON_CHI_THE },
-        billingType: HOA_DON_TRA_TIEN,
-        amountType: "POSITIVE",
-      },
+      where: { ...dieuKienHoaDonTiktokTinhNoThe(tu, sau), amountType: "POSITIVE" },
       select: { createTime: true, amount: true },
     }),
     db.tiktokAdsSettlement.findMany({

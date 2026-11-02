@@ -7,7 +7,8 @@ import { revalidatePath } from "next/cache";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import { kiemQuyenXemGiaVon } from "@/lib/actions/cong-gia-von";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import {
   giuKhoaViecNang,
   kiemGiuKhoaTrongTransaction,
@@ -62,120 +63,124 @@ export async function apGiaVonTheoPancake(
 
   // Cùng cổng với mọi action ghi khác. Literal `LOI_DANG_PHUC_HOI` là thứ lưới AST
   // `tests/khoa-bao-tri-duong-ghi.test.ts` soi để biết action này đã khai đúng đường ghi.
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const { deXuat } = await docDeXuatGiaVon(cheDo);
-
-  // "Duyệt cái gì thì ghi đúng cái đó". Danh sách đổi giữa lúc xem và lúc bấm (lượt đêm land ảnh
-  // Bronze mới, hoặc chủ shop bấm Đồng bộ ngay ở tab khác) ⇒ TỪ CHỐI, không ghi gì. Bảng ΔCOGS
-  // theo tháng mà chủ shop vừa dựa vào để quyết khi đó đang nói về một tập không còn tồn tại.
-  const vanTayBayGio = vanTayDeXuat(deXuat);
-  if (vanTayBayGio !== vanTayLucXem) {
-    return {
-      ok: false,
-      error:
-        "Danh sách vừa thay đổi (có lượt đồng bộ mới chạy xong) — chưa ghi gì. " +
-        "Tải lại trang để xem con số mới rồi duyệt lại.",
-      code: "DANH_SACH_DA_DOI",
-    };
-  }
-
-  if (deXuat.length === 0) {
-    return { ok: true, data: { daGhi: 0, boQua: 0, soDeXuat: 0 } };
-  }
-
-  // Lease CÙNG TÊN với CLI ⇒ hai đường ghi loại trừ nhau, và cả hai cùng bị lượt phục hồi chặn.
-  const khoa = await giuKhoaViecNang(VIEC_GHI_GIA_VON);
-  if (!khoa.the) {
-    return { ok: false, error: `Đang có "${khoa.dangGiu}" chạy — thử lại sau khi việc đó xong.` };
-  }
-  const the = khoa.the;
-
-  let kq: Awaited<ReturnType<typeof ghiGiaVonTheoPancake>>;
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const ghiLuc = new Date();
-    // Gọi thẳng lõi ghi (backup + CAS + hàng rào lease TRONG từng transaction) thay vì
-    // `ghiGiaVonDuoiKhoaViecNang`: lease đã giành ở trên rồi, để hàm đó giành lần hai là tự chặn
-    // chính mình. Hàng rào vẫn nguyên — đó mới là thứ đóng khe "lease hết hạn dưới chân".
-    kq = await ghiGiaVonTheoPancake(prisma, deXuat, {
-      duongDanBackup: duongDanBackup(ghiLuc, cheDo),
-      cheDo,
-      ghiLuc,
-      hangRao: (tx) => kiemGiuKhoaTrongTransaction(tx, the),
-    });
+    const { deXuat } = await docDeXuatGiaVon(cheDo);
 
-    await dongBoLaiSoDem();
-    dungLaiManTien();
-  } catch (e) {
-    // Lượt bị cắt giữa chừng: đã có k dòng vào DB. Nói thẳng con số — im lặng ở đây là để chủ shop
-    // tưởng chưa ghi gì rồi bấm lại trên một trạng thái nửa vời.
-    // Lượt cụt giữa chừng ĐÃ đổi tiền của k dòng ⇒ vẫn phải dựng lại màn, nếu không chủ shop nhìn
-    // số cũ và tưởng chưa có gì xảy ra. Đây là ca dễ sót nhất: nhánh lỗi thường bị bỏ trống.
-    await dongBoLaiSoDem();
-    dungLaiManTien();
-    // Có thể đã có dòng vào DB ⇒ để lại dấu vết LOI (số dòng đã ghi, không giá trị).
-    await ghiNhatKyLoi({
-      actor: cong.nguoiDung,
-      hanhDong: HANH_DONG.GIA_VON_AP_THEO_PANCAKE,
-      ghiChu: e instanceof LoiDungGiuaChung ? { soDong: e.daGhi, lyDo: "dung-giua-chung" } : { lyDo: "loi-he-thong" },
-    });
-    if (e instanceof LoiDungGiuaChung) {
-      // `LoiDungGiuaChung.message` nhúng NGUYÊN VĂN message của lỗi gốc (Prisma…, có thể mang
-      // hostname/role DB) — không được đẩy thẳng ra client. Log đủ phía server; dựng câu tiếng
-      // Việt CHỈ từ các field có cấu trúc của lớp lỗi (daGhi/boQua/tong/duongDanBackup), không
-      // kèm lý do thô.
-      console.error("Lượt áp giá vốn bị cắt giữa chừng:", e);
-      // Mất lease giữa chừng là lý do chủ shop HÀNH ĐỘNG được (chờ việc kia xong rồi chạy lại), và
-      // câu của `MatKhoaViecNang` là chữ cố định, không mang chi tiết hạ tầng ⇒ giữ lại nguyên văn.
-      const lyDo =
-        e.cause instanceof MatKhoaViecNang
-          ? e.cause.message
-          : "lỗi hệ thống, xem chi tiết ở log server";
+    // "Duyệt cái gì thì ghi đúng cái đó". Danh sách đổi giữa lúc xem và lúc bấm (lượt đêm land ảnh
+    // Bronze mới, hoặc chủ shop bấm Đồng bộ ngay ở tab khác) ⇒ TỪ CHỐI, không ghi gì. Bảng ΔCOGS
+    // theo tháng mà chủ shop vừa dựa vào để quyết khi đó đang nói về một tập không còn tồn tại.
+    const vanTayBayGio = vanTayDeXuat(deXuat);
+    if (vanTayBayGio !== vanTayLucXem) {
       return {
         ok: false,
         error:
-          `DỪNG GIỮA CHỪNG sau ${e.daGhi + e.boQua}/${e.tong} dòng (ít nhất ${e.daGhi} đã ghi, ` +
-          `${e.boQua} bỏ qua vì không còn khớp giá lúc xem) — ${lyDo}.\n` +
-          `Backup "${e.duongDanBackup}" giữ giá TRƯỚC KHI GHI của cả ${e.tong} dòng đề xuất: chỉ ` +
-          `hoàn nguyên dòng nào đang mang giá MỚI trong DB; dòng bị bỏ qua (chủ shop vừa sửa tay) ` +
-          `thì để nguyên.`,
+          "Danh sách vừa thay đổi (có lượt đồng bộ mới chạy xong) — chưa ghi gì. " +
+          "Tải lại trang để xem con số mới rồi duyệt lại.",
+        code: "DANH_SACH_DA_DOI",
       };
     }
-    // Phòng xa: hiện KHÔNG đường nào trong `try` ném lỗi Prisma trần (vòng ghi đã bọc mọi lỗi thành
-    // `LoiDungGiuaChung`; `docDeXuatGiaVon`/`giuKhoaViecNang` nằm NGOÀI `try`). Nhánh này giữ để
-    // nếu sau này ai thêm câu Prisma vào `try` thì message (có thể mang hostname/role) vẫn không
-    // lọt ra client.
-    if (
-      e instanceof Prisma.PrismaClientKnownRequestError ||
-      e instanceof Prisma.PrismaClientUnknownRequestError ||
-      e instanceof Prisma.PrismaClientInitializationError ||
-      e instanceof Prisma.PrismaClientRustPanicError
-    ) {
-      console.error("Lỗi hạ tầng khi áp giá vốn:", e);
-      return { ok: false, error: "Không áp được giá vốn — lỗi hệ thống, thử lại sau." };
-    }
-    console.error("Lỗi không xác định khi áp giá vốn:", e);
-    return {
-      ok: false,
-      error: `Không áp được giá vốn: ${e instanceof Error ? e.message : String(e)}`,
-    };
-  } finally {
-    try {
-      await traKhoaViecNang(the);
-    } catch (e) {
-      console.error("Không trả được khoá việc nặng sau lượt áp giá vốn — tự hết hạn tối đa 5 phút.", e);
-    }
-  }
 
-  // Lõi ghi chia NHIỀU transaction (mỗi lô một CAS + hàng rào lease) — không có một transaction chung
-  // để ghi kèm ⇒ nhật ký ghi sau khi xong, NGOÀI `try` ở trên: nhật ký hỏng là lỗi hệ thống, không
-  // được biến thành câu "Không áp được giá vốn" (giá đã áp thật).
-  await ghiNhatKy(prisma, {
-    actor: cong.nguoiDung,
-    hanhDong: HANH_DONG.GIA_VON_AP_THEO_PANCAKE,
-    ghiChu: { soDong: kq.daGhi },
-  });
-  return { ok: true, data: { daGhi: kq.daGhi, boQua: kq.boQua, soDeXuat: deXuat.length } };
+    if (deXuat.length === 0) {
+      return { ok: true, data: { daGhi: 0, boQua: 0, soDeXuat: 0 } };
+    }
+
+    // Lease CÙNG TÊN với CLI ⇒ hai đường ghi loại trừ nhau, và cả hai cùng bị lượt phục hồi chặn.
+    const khoa = await giuKhoaViecNang(VIEC_GHI_GIA_VON);
+    if (!khoa.the) {
+      return { ok: false, error: `Đang có "${khoa.dangGiu}" chạy — thử lại sau khi việc đó xong.` };
+    }
+    const the = khoa.the;
+
+    let kq: Awaited<ReturnType<typeof ghiGiaVonTheoPancake>>;
+    try {
+      const ghiLuc = new Date();
+      // Gọi thẳng lõi ghi (backup + CAS + hàng rào lease TRONG từng transaction) thay vì
+      // `ghiGiaVonDuoiKhoaViecNang`: lease đã giành ở trên rồi, để hàm đó giành lần hai là tự chặn
+      // chính mình. Hàng rào vẫn nguyên — đó mới là thứ đóng khe "lease hết hạn dưới chân".
+      kq = await ghiGiaVonTheoPancake(prisma, deXuat, {
+        duongDanBackup: duongDanBackup(ghiLuc, cheDo),
+        cheDo,
+        ghiLuc,
+        hangRao: (tx) => kiemGiuKhoaTrongTransaction(tx, the),
+      });
+
+      await dongBoLaiSoDem();
+      dungLaiManTien();
+    } catch (e) {
+      // Lượt bị cắt giữa chừng: đã có k dòng vào DB. Nói thẳng con số — im lặng ở đây là để chủ shop
+      // tưởng chưa ghi gì rồi bấm lại trên một trạng thái nửa vời.
+      // Lượt cụt giữa chừng ĐÃ đổi tiền của k dòng ⇒ vẫn phải dựng lại màn, nếu không chủ shop nhìn
+      // số cũ và tưởng chưa có gì xảy ra. Đây là ca dễ sót nhất: nhánh lỗi thường bị bỏ trống.
+      await dongBoLaiSoDem();
+      dungLaiManTien();
+      // Có thể đã có dòng vào DB ⇒ để lại dấu vết LOI (số dòng đã ghi, không giá trị).
+      await ghiNhatKyLoi({
+        actor: cong.nguoiDung,
+        hanhDong: HANH_DONG.GIA_VON_AP_THEO_PANCAKE,
+        ghiChu: e instanceof LoiDungGiuaChung ? { soDong: e.daGhi, lyDo: "dung-giua-chung" } : { lyDo: "loi-he-thong" },
+      });
+      if (e instanceof LoiDungGiuaChung) {
+        // `LoiDungGiuaChung.message` nhúng NGUYÊN VĂN message của lỗi gốc (Prisma…, có thể mang
+        // hostname/role DB) — không được đẩy thẳng ra client. Log đủ phía server; dựng câu tiếng
+        // Việt CHỈ từ các field có cấu trúc của lớp lỗi (daGhi/boQua/tong/duongDanBackup), không
+        // kèm lý do thô.
+        console.error("Lượt áp giá vốn bị cắt giữa chừng:", e);
+        // Mất lease giữa chừng là lý do chủ shop HÀNH ĐỘNG được (chờ việc kia xong rồi chạy lại), và
+        // câu của `MatKhoaViecNang` là chữ cố định, không mang chi tiết hạ tầng ⇒ giữ lại nguyên văn.
+        const lyDo =
+          e.cause instanceof MatKhoaViecNang
+            ? e.cause.message
+            : "lỗi hệ thống, xem chi tiết ở log server";
+        return {
+          ok: false,
+          error:
+            `DỪNG GIỮA CHỪNG sau ${e.daGhi + e.boQua}/${e.tong} dòng (ít nhất ${e.daGhi} đã ghi, ` +
+            `${e.boQua} bỏ qua vì không còn khớp giá lúc xem) — ${lyDo}.\n` +
+            `Backup "${e.duongDanBackup}" giữ giá TRƯỚC KHI GHI của cả ${e.tong} dòng đề xuất: chỉ ` +
+            `hoàn nguyên dòng nào đang mang giá MỚI trong DB; dòng bị bỏ qua (chủ shop vừa sửa tay) ` +
+            `thì để nguyên.`,
+        };
+      }
+      // Phòng xa: hiện KHÔNG đường nào trong `try` ném lỗi Prisma trần (vòng ghi đã bọc mọi lỗi thành
+      // `LoiDungGiuaChung`; `docDeXuatGiaVon`/`giuKhoaViecNang` nằm NGOÀI `try`). Nhánh này giữ để
+      // nếu sau này ai thêm câu Prisma vào `try` thì message (có thể mang hostname/role) vẫn không
+      // lọt ra client.
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError ||
+        e instanceof Prisma.PrismaClientUnknownRequestError ||
+        e instanceof Prisma.PrismaClientInitializationError ||
+        e instanceof Prisma.PrismaClientRustPanicError
+      ) {
+        console.error("Lỗi hạ tầng khi áp giá vốn:", e);
+        return { ok: false, error: "Không áp được giá vốn — lỗi hệ thống, thử lại sau." };
+      }
+      console.error("Lỗi không xác định khi áp giá vốn:", e);
+      return {
+        ok: false,
+        error: `Không áp được giá vốn: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    } finally {
+      try {
+        await traKhoaViecNang(the);
+      } catch (e) {
+        console.error("Không trả được khoá việc nặng sau lượt áp giá vốn — tự hết hạn tối đa 5 phút.", e);
+      }
+    }
+
+    // Lõi ghi chia NHIỀU transaction (mỗi lô một CAS + hàng rào lease) — không có một transaction chung
+    // để ghi kèm ⇒ nhật ký ghi sau khi xong, NGOÀI `try` ở trên: nhật ký hỏng là lỗi hệ thống, không
+    // được biến thành câu "Không áp được giá vốn" (giá đã áp thật).
+    await ghiNhatKy(prisma, {
+      actor: cong.nguoiDung,
+      hanhDong: HANH_DONG.GIA_VON_AP_THEO_PANCAKE,
+      ghiChu: { soDong: kq.daGhi },
+    });
+    return { ok: true, data: { daGhi: kq.daGhi, boQua: kq.boQua, soDeXuat: deXuat.length } };
+  } finally {
+    cua.ra();
+  }
 }
 
 /**

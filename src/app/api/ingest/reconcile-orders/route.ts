@@ -1,4 +1,4 @@
-import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
 import { isBronzeOnly } from "@/lib/bronze/bronze-only";
 import { doiSoatDonConDo } from "@/lib/bronze/doi-soat-don-con-do";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
@@ -30,9 +30,11 @@ export async function POST(req: Request): Promise<Response> {
   const unauthorized = requireIngestSecret(req);
   if (unauthorized) return unauthorized;
 
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  return routeQuaCua(() => xuLyPost());
+}
 
+/** Thân POST sau cửa ghi (đếm suốt request — lượt phục hồi chờ nó xong). */
+async function xuLyPost(): Promise<Response> {
   return withSyncLog("PANCAKE", async (warnings) => {
     // Công tắc chỉ-land đang bật = "Sổ đứng yên, chờ dựng lại". Dựng lúc này là lách chính công tắc
     // mình vừa bật. Không mất gì: dòng vẫn ở "chưa xong", lượt sau nhặt lại.

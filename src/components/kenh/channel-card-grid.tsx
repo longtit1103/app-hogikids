@@ -1,9 +1,9 @@
 import Link from "next/link";
 
 import { DeltaLine, findLeaderChannelId, MetricCell } from "@/components/kenh/channel-card-metric";
-import { feeBadgeLabel, formatPct1, formatRoas } from "@/components/kenh/channel-format";
+import { feeBadgeLabel, formatRoas } from "@/components/kenh/channel-format";
 import { Badge } from "@/components/ui/badge";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatVnd } from "@/lib/format";
 import type { ChannelPnl } from "@/lib/reports/pnl";
 import { coLaiKenh, type ChannelPnlChe } from "@/lib/reports/pnl-che";
 import { cn } from "@/lib/utils";
@@ -108,7 +108,7 @@ export function ChannelCardGrid({
               />
               <MetricCell
                 label="Hoàn/Bom"
-                value={`${c.returnBomRatePct === null ? "—" : formatPct1(c.returnBomRatePct)} · ${c.returnBomOrderCount.toLocaleString("vi-VN")} đơn`}
+                value={`${c.returnBomRatePct === null ? "—" : formatPercent(c.returnBomRatePct)} · ${c.returnBomOrderCount.toLocaleString("vi-VN")} đơn`}
                 dark={dark}
                 delta={
                   compareOn && (
@@ -125,7 +125,7 @@ export function ChannelCardGrid({
                 <MetricCell
                   label="LN ròng kênh"
                   value={formatVnd(lai.netProfit)}
-                  valueClassName={lai.netProfit < 0 ? "text-error" : undefined}
+                  valueClassName={lai.netProfit < 0 ? (dark ? "text-error-on-dark" : "text-error") : undefined}
                   dark={dark}
                   delta={compareOn && <DeltaLine current={lai.netProfit} previous={laiTruoc?.netProfit ?? null} dark={dark} />}
                 />
@@ -140,7 +140,7 @@ export function ChannelCardGrid({
               {lai && (
                 <MetricCell
                   label="Tỷ suất LN"
-                  value={lai.marginPct === null ? "—" : formatPct1(lai.marginPct)}
+                  value={lai.marginPct === null ? "—" : formatPercent(lai.marginPct)}
                   dark={dark}
                   delta={compareOn && <DeltaLine current={lai.marginPct} previous={laiTruoc?.marginPct ?? null} dark={dark} />}
                 />

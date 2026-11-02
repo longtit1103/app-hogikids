@@ -2,16 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { addDays, format } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { suaThe, taoThe } from "@/lib/actions/the-tin-dung";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import type { TheKemTrangThai } from "@/lib/no-phai-tra/the-tin-dung-queries";
 
 import { OCoNhan } from "./o-nhap-co-nhan";
+
+/** Việt Nam không có giờ mùa hè ⇒ lùi đúng 24h từ một thời điểm là lùi đúng một ngày VN. */
+const MOT_NGAY_MS = 24 * 60 * 60 * 1000;
 
 /** Ô trong form ứng với `field` server trả — lỗi ngoài tập này đi toast. */
 const O_TREN_FORM = new Set(["ten", "nganHang", "ngayChotSaoKe", "ngayHanTra", "note", "neoBanDau"]);
@@ -37,9 +40,9 @@ export function TheTinDungFormModal({
 }) {
   const router = useRouter();
   const laSua = the !== undefined;
-  const homQua = format(addDays(new Date(), -1), "yyyy-MM-dd");
+  const homQua = formatNgayVn(new Date(Date.now() - MOT_NGAY_MS), "yyyy-MM-dd");
   // Neo hợp lệ ∈ [M − 1, hôm qua] (neo trước M chỉ sinh ở bước bật).
-  const neoSomNhat = mocM === null ? null : format(addDays(new Date(`${mocM}T00:00:00+07:00`), -1), "yyyy-MM-dd");
+  const neoSomNhat = mocM === null ? null : formatNgayVn(new Date(new Date(`${mocM}T00:00:00+07:00`).getTime() - MOT_NGAY_MS), "yyyy-MM-dd");
 
   const [ten, setTen] = useState("");
   const [nganHang, setNganHang] = useState("");

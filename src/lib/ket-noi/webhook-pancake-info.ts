@@ -1,8 +1,9 @@
 import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
-import { WEBHOOK_PANCAKE_PATH } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
+import { docDuongDanWebhookPancake, KHOA_SETTING_DUONG_DAN_WEBHOOK } from "@/lib/n8n/provision/duong-dan-webhook-pancake";
 import { prisma } from "@/lib/prisma";
 
 import type { Prisma } from "@/generated/prisma/client";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 
 /**
  * Webhook Pancake trong khối "Khóa kết nối": chặng Pancake → n8n KHÔNG có khóa nào để điền
@@ -11,15 +12,16 @@ import type { Prisma } from "@/generated/prisma/client";
  * gần nhất để biết webhook còn sống hay đã đứt (đứt = tồn kho/trạng thái đơn hết realtime,
  * chỉ còn lượt API đêm vét bù).
  *
- * URL soi gương `n8n/huong-dan-cai-dat-workflows.md` mục "Webhook Pancake — 3 workflow":
- * path KHÔNG phải secret (thiết kế đã chốt 2026-07-22) — hiện lên UI được.
+ * Path là thứ DUY NHẤT làm URL khó đoán (webhook không có xác thực) — nên nó sống trong `Setting`
+ * của instance (`n8nWebhookPath.<vai>`), không nằm trong repo. Hiện ở đây được: trang này chỉ chủ shop
+ * xem, và chủ shop CẦN chính URL đó để dán vào Pancake.
  */
 
 /**
  * Base MẶC ĐỊNH khi chưa điền `Setting.n8nWebhookPublicBase` — đúng giá trị prod HogiKids đang
  * chạy (giữ hành vi hiển thị cho tới khi chủ shop điền ô mới; bản clone PHẢI điền vì n8n của họ
- * ở domain khác). Path lấy TỪ chính JSON workflow (`WEBHOOK_PANCAKE_PATH`) — một nguồn sự thật,
- * lệch path là URL dán vào Pancake trỏ vào hư không.
+ * ở domain khác). Path lấy từ CÙNG nguồn mà lượt "Cài / cập nhật workflows" đẩy lên n8n
+ * (`docDuongDanWebhookPancake`) — lệch nguồn là URL dán vào Pancake trỏ vào hư không.
  */
 const N8N_WEBHOOK_BASE_MAC_DINH = "https://n8n.example.com";
 
@@ -31,7 +33,10 @@ const DS_WEBHOOK = [
 
 export type TrangThaiWebhookShop = {
   ten: string;
-  url: string;
+  /** `null` = Setting chưa có path hợp lệ — KHÔNG hiện URL đoán/placeholder, hiện `loi` thay thế. */
+  url: string | null;
+  /** Lý do không có URL (chỉ đường sửa) — `null` khi URL dùng được. */
+  loi: string | null;
   /** "14:03 20/08 (28 phút trước)" — format sẵn phía server; `null` = CHƯA TỪNG nhận sự kiện live. */
   ganNhat: string | null;
 };
@@ -45,15 +50,8 @@ function tuongDoi(truocMs: number): string {
   return `${Math.floor(gio / 24)} ngày trước`;
 }
 
-function lucVN(d: Date): string {
-  return d.toLocaleString("vi-VN", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+/** "HH:mm dd/MM" giờ VN (một nguồn: `formatNgayVn`). */
+const lucVN = (d: Date): string => formatNgayVn(d, "HH:mm dd/MM");
 
 /**
  * Bộ lọc "sự kiện CHỨNG MINH webhook còn sống". Export để test khoá được đúng phép lọc này thay vì
@@ -96,11 +94,18 @@ export async function docTrangThaiWebhookPancake(bayGio: Date = new Date()): Pro
     shopIdTheoVai = null;
   }
 
+  const duongDan = await docDuongDanWebhookPancake(prisma);
+
   return DS_WEBHOOK.map((w) => {
     const luc = shopIdTheoVai ? (theoShop.get(shopIdTheoVai[w.vai]) ?? null) : null;
+    const path = duongDan.duongDan[w.vai];
     return {
       ten: w.ten,
-      url: `${base}/${WEBHOOK_PANCAKE_PATH[w.vai]}`,
+      url: path ? `${base}/${path}` : null,
+      loi: path
+        ? null
+        : `Chưa có đường dẫn webhook trong Setting (${KHOA_SETTING_DUONG_DAN_WEBHOOK[w.vai]}) — ` +
+          "nạp path n8n đang chạy bằng scripts/nap-duong-dan-webhook-n8n.ts trước khi dán URL vào Pancake.",
       ganNhat: luc ? `${lucVN(luc)} (${tuongDoi(bayGio.getTime() - luc.getTime())})` : null,
     };
   });

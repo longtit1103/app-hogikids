@@ -28,7 +28,7 @@ import { NGAY, ngayVn, O, parseLaiSuat } from "./khoan-vay-form-fields";
  * riêng khi `startDate` sớm hơn D0 (ngày mở sổ quỹ) — GỘP chung một cờ xác nhận (`canXacNhan`) với
  * nhịp "đổi tiền" cũ để chủ shop không phải bấm ba lần khi cả hai cảnh báo cùng nổ ra một lúc. Nhịp
  * xác nhận hai lượt bấm giống `cash-movement-form-modal.tsx`: lượt Lưu đầu tiên chỉ hiện cảnh báo,
- * lượt thứ hai mới thật sự gửi — tránh `window.confirm` (bị trình duyệt chặn/nuốt, không dịch được
+ * lượt thứ hai mới thật sự gửi — tránh hộp confirm gốc của trình duyệt (bị trình duyệt chặn/nuốt, không dịch được
  * câu tiếng Việt).
  */
 
@@ -61,9 +61,9 @@ function trangThaiBanDau(so: SoTietKiemRow | undefined): SoTietKiemFormState {
       name: so.name,
       bank: so.bank,
       principal: so.principal,
-      startDate: format(so.startDate, NGAY),
+      startDate: formatNgayVn(so.startDate, NGAY),
       termMonths: String(so.termMonths),
-      maturityDate: format(so.maturityDate, NGAY),
+      maturityDate: formatNgayVn(so.maturityDate, NGAY),
       laiSuat: so.annualRateBp ? (so.annualRateBp / 100).toLocaleString("vi-VN") : "",
       loanId: so.loan?.id ?? "",
       note: so.note,
@@ -73,7 +73,7 @@ function trangThaiBanDau(so: SoTietKiemRow | undefined): SoTietKiemFormState {
     name: "",
     bank: "",
     principal: 0,
-    startDate: format(new Date(), NGAY),
+    startDate: formatNgayVn(new Date(), NGAY),
     termMonths: "",
     maturityDate: "",
     laiSuat: "",
@@ -138,7 +138,7 @@ export function SoTietKiemFormModal({
 
   const loansConHieuLuc = loans.filter((l) => l.closedAt === null || l.id === f.loanId);
   const doiNenTang =
-    isEdit && so !== undefined && (f.principal !== so.principal || f.startDate !== format(so.startDate, NGAY));
+    isEdit && so !== undefined && (f.principal !== so.principal || f.startDate !== formatNgayVn(so.startDate, NGAY));
   // Chạy cho CẢ tạo lẫn sửa (khác `doiNenTang`, chỉ có nghĩa lúc sửa) — sổ mới gửi ngày trước D0 cũng
   // phải hỏi, vì dòng `SAVINGS_OUT` sinh ra là dòng tiền THẬT đầu tiên có thể kéo D0 lùi theo.
   const ngayTruocD0 = ngayTruocMoSo(f.startDate, d0);
@@ -222,7 +222,7 @@ export function SoTietKiemFormModal({
           <O label="Ngày gửi" error={loi.startDate}>
             <Input
               type="date"
-              max={format(new Date(), NGAY)}
+              max={formatNgayVn(new Date(), NGAY)}
               value={f.startDate}
               onChange={(e) => doiNen("startDate", e.target.value)}
             />

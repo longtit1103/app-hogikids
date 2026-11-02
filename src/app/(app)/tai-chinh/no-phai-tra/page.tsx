@@ -3,6 +3,8 @@ import { format } from "date-fns";
 import Link from "next/link";
 
 import { BatChecklist } from "@/components/no-phai-tra/bat-checklist";
+import { dongBcTiktokChoKhoi } from "@/components/no-phai-tra/bc-tiktok-dong";
+import { BcTiktokSection } from "@/components/no-phai-tra/bc-tiktok-section";
 import { BatChonNgayForm } from "@/components/no-phai-tra/bat-chon-ngay-form";
 import { BatDaBatTomTat } from "@/components/no-phai-tra/bat-da-bat-tom-tat";
 import { XacNhanBatWizard } from "@/components/no-phai-tra/bat-xac-nhan-wizard";
@@ -10,6 +12,7 @@ import { GhiNhanPhieuVaoSoNo } from "@/components/no-phai-tra/ghi-nhan-phieu-vao
 import { NoPhieuNhapSection } from "@/components/no-phai-tra/no-phieu-nhap-section";
 import { TheTinDungSection } from "@/components/no-phai-tra/the-tin-dung-section";
 import { ViAdsSection } from "@/components/no-phai-tra/vi-ads-section";
+import { docDanhSachBcTiktok } from "@/lib/no-phai-tra/bc-tiktok-hoa-don";
 import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { kiemDieuKienBat } from "@/lib/no-phai-tra/dieu-kien-bat-no-phai-tra";
 import { docNhacTruocBat } from "@/lib/no-phai-tra/dieu-kien-bat-truoc-m";
@@ -40,7 +43,8 @@ type SearchParams = { tab?: string; m?: string };
  * còn nợ, hồ sơ ví quảng cáo trả trước — hồ sơ KHÔNG đổi quỹ) và tab **Xác nhận** (chỉ mở khi hôm nay ≥
  * ngày bật: khai số dư cuối ngày trước đó, đối chiếu tiền thật, chọn điều chỉnh, bật một lần). Đã bật:
  * hiện mốc + chỉ báo trôi quỹ trước ngày bật + chỉ báo thẻ đã đóng còn dư nợ + các dòng điều chỉnh đã ghi + hồ sơ
- * ví (ví mới vẫn tạo được).
+ * ví (ví mới vẫn tạo được). Cả hai trạng thái có khối Business Center TikTok (đánh dấu BC "không dùng thẻ" cho cổng
+ * chốt sao kê thẻ).
  */
 export default async function NoPhaiTraPage({ searchParams }: { searchParams: Promise<SearchParamsTho<SearchParams>> }) {
   await yeuCauChuShopTrang("/tai-chinh/no-phai-tra");
@@ -48,12 +52,13 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
   const daBat = await docMocM();
 
   if (daBat !== null) {
-    const [dieuChinh, vis, troi, the] = await Promise.all([
+    const [dieuChinh, vis, troi, the, bcs] = await Promise.all([
       docDieuChinhDaGhi(),
       docHoSoViAds(),
       docTroiQuyTruocM(daBat),
       // Thẻ đã đóng còn dư nợ ≠ 0 (ads về muộn gán thẻ đóng) — chỉ báo cạnh trôi quỹ.
       docTheKemTrangThai(),
+      docDanhSachBcTiktok(prisma),
     ]);
     return (
       <div className="flex flex-col gap-6">
@@ -65,6 +70,7 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
           theDongConNo={locTheDongConNo(the)}
         />
         <ViAdsSection vis={vis} daBat />
+        <BcTiktokSection dong={dongBcTiktokChoKhoi(bcs)} />
       </div>
     );
   }
@@ -73,12 +79,13 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
   const mocMDate = new Date(`${mocM}T00:00:00+07:00`);
   const daToiM = khoaNgayVn(new Date()) >= mocM;
   const tab = sp.tab === "xac-nhan" && daToiM ? "xac-nhan" : "chuan-bi";
-  const [khoi, vis, loiDieuKien, nhacTruocBat, phieuChoGhi] = await Promise.all([
+  const [khoi, vis, loiDieuKien, nhacTruocBat, phieuChoGhi, bcs] = await Promise.all([
     docKhoiNoPhaiTra(),
     docHoSoViAds(),
     kiemDieuKienBat({ mocM: mocMDate }),
     docNhacTruocBat(mocMDate, prisma),
     tab === "chuan-bi" ? docPhieuChoGhiNo() : Promise.resolve([]),
+    tab === "chuan-bi" ? docDanhSachBcTiktok(prisma) : Promise.resolve([]),
   ]);
 
   return (
@@ -105,6 +112,7 @@ export default async function NoPhaiTraPage({ searchParams }: { searchParams: Pr
           <BatChecklist loi={loiDieuKien} nhac={nhacTruocBat} />
           <TheTinDungSection the={khoi.the} mocM={null} goiYChot={khoi.goiYChot} choPhepSua laChuShop />
           <ViAdsSection vis={vis} daBat={false} />
+          <BcTiktokSection dong={dongBcTiktokChoKhoi(bcs)} />
           {khoi.phieu.length > 0 && <NoPhieuNhapSection phieu={khoi.phieu} vanTay={khoi.vanTay} mocM={null} choPhepSua />}
           <section className="flex flex-col gap-2">
             <h2 className="font-serif text-lg text-ink">Ghi nhận phiếu nhập còn nợ nhà cung cấp</h2>

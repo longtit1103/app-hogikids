@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { addMonths, endOfDay, format, getDaysInMonth, setDate, startOfMonth } from "date-fns";
 
 import { dangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { laLoiCongGhiDangKhoa } from "@/lib/backup/cong-ghi-toan-cuc";
 import { khoaThangDinhKy } from "@/lib/expenses/khoa-thang-dinh-ky";
 import { chanSoChiPhiDaKhoa, LoiSoChiPhiDaKhoa } from "@/lib/no-phai-tra/chan-so-chi-phi-da-khoa";
 import { khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
@@ -204,6 +205,10 @@ async function sinhCoKhoaChung(
     }, OPT_TX_DONG_TIEN);
   } catch (e) {
     if (laLoiDongTienBan(e)) return { ...KHONG_SINH };
+    // Lượt phục hồi bật cờ giữa lúc kiểm `dangPhucHoi()` ở đầu hàm và câu ghi: bộ sinh chạy lúc RENDER
+    // trang (không qua cửa ghi) nên cổng cấp op chặn câu ghi — bỏ lượt sinh này (lần render sau sinh bù),
+    // không làm trang lỗi 500.
+    if (laLoiCongGhiDangKhoa(e)) return { ...KHONG_SINH };
     throw e;
   }
 }

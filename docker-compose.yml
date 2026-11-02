@@ -36,6 +36,14 @@ services:
     # 3g. Lưu ý lịch sử: comment cũ ở đây viện dẫn con số 2GiB của hằng đó làm cơ sở cho 3g — con
     # số ấy là TRẦN GIẢ (tiến trình chết từ ~45 MiB), nên lập luận cũ sai; giữ 3g vì lý do mới.
     mem_limit: 3g
+    # Giới hạn log container: driver mặc định json-file KHÔNG xoay ⇒ file log phình vô hạn trên đĩa
+    # minipc (chung với Postgres + n8n). 5 file × 10 MB = trần 50 MB; cổng soi log của deploy pha B
+    # chỉ nhìn 4 phút gần nhất nên không cần giữ hơn.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     networks: [supabase_default]   # supabase-db VÀ hogikids-n8n ĐỀU ở supabase_default (đã verify) → app gọi cả hai bằng tên; chỉ cần 1 mạng
 # depends_on KHÔNG bắt buộc: supabase-db + hogikids-n8n thuộc stack Supabase/n8n; app chỉ attach external network supabase_default.
 # XÁC MINH tên mạng thật trước khi up (phòng project-name khác):

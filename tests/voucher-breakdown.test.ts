@@ -89,6 +89,7 @@ async function ingestThat(payload: unknown): Promise<void> {
     productsUpserted: 0, variantsUpserted: 0, ordersUpserted: 0, ordersSkippedMirror: 0,
     ordersSkippedStale: 0, ordersDiscardedGiuaChung: 0, skipped: 0, boQuaCoChuDich: 0, unknownStatusOrders: 0,
     settlementsUpserted: 0, adsUpserted: 0, paymentsUpserted: 0, shopeeUpserted: 0, adsExpensesUpserted: 0,
+    settlementsSkippedStale: 0, adsSkippedStale: 0, paymentsSkippedStale: 0,
   };
   await upsertOneOrder(mo, raw, stats, []);
 }
@@ -221,6 +222,7 @@ describe("computeVoucherBreakdown", () => {
       productsUpserted: 0, variantsUpserted: 0, ordersUpserted: 0, ordersSkippedMirror: 0,
       ordersSkippedStale: 0, ordersDiscardedGiuaChung: 0, skipped: 0, boQuaCoChuDich: 0, unknownStatusOrders: 0,
       settlementsUpserted: 0, adsUpserted: 0, paymentsUpserted: 0, shopeeUpserted: 0, adsExpensesUpserted: 0,
+    settlementsSkippedStale: 0, adsSkippedStale: 0, paymentsSkippedStale: 0,
     };
     await upsertOneOrder(mo, raw, stats, []);
 

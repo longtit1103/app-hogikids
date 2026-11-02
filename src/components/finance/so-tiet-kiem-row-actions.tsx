@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format, startOfDay } from "date-fns";
 import { MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,9 +14,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { LoiVuotTranTien, thuocTinhLoiVuotTran } from "@/components/ui/loi-vuot-tran-tien";
 import { xoaSoTietKiem } from "@/lib/actions/so-tiet-kiem";
 import { moLaiSoTietKiem, tatToanSoTietKiem } from "@/lib/actions/tat-toan-so-tiet-kiem";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
+import { formatAmountInput, MAX_AMOUNT_INPUT, parseAmountInput } from "@/lib/format-amount-input";
 import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { lyDoKhongXoaSoTietKiem, type TrangThaiKhoaXoa } from "@/lib/tiet-kiem/ly-do-khong-xoa-so-tiet-kiem";
@@ -49,10 +50,13 @@ import { SoTietKiemFormModal } from "./so-tiet-kiem-form-modal";
 /** Map dữ liệu hiển thị → đầu vào của `lyDoKhongXoaSoTietKiem` (Phase 02) — export để kiểm riêng. */
 /**
  * Sổ đã tới ngày đáo hạn chưa — quyết định mục "Tất toán" có hiện trong menu ⋯ hay không.
- * Cắt về đầu ngày cả hai vế: đáo hạn ĐÚNG hôm nay là ĐÃ tới hạn, không phải "còn vài tiếng nữa".
+ * So hai vế bằng KHOÁ NGÀY `yyyy-MM-dd` theo giờ VN (chuỗi cùng độ dài, so từ điển = so ngày): đáo hạn
+ * ĐÚNG hôm nay là ĐÃ tới hạn, không phải "còn vài tiếng nữa". Không dùng `startOfDay` của date-fns —
+ * nó cắt theo múi giờ MÁY, trình duyệt lệch múi giờ sẽ hiện menu Tất toán mà ô ngày (min/max theo VN)
+ * không chọn được ngày nào.
  */
 export function soDaDenHan(maturityDate: Date, homNay: Date): boolean {
-  return startOfDay(maturityDate) <= startOfDay(homNay);
+  return formatNgayVn(maturityDate, NGAY) <= formatNgayVn(homNay, NGAY);
 }
 
 export function trangThaiKhoaXoaTuRow(
@@ -106,10 +110,11 @@ export function SoTietKiemRowActions({
   d0: Date | null;
 }) {
   const router = useRouter();
+  const idLoiLai = `${useId()}-lai`;
   const [moSua, setMoSua] = useState(false);
   const [hopThoai, setHopThoai] = useState<HopThoai>(null);
   const [dangChay, setDangChay] = useState(false);
-  const [ngayTatToan, setNgayTatToan] = useState(() => format(new Date(), NGAY));
+  const [ngayTatToan, setNgayTatToan] = useState(() => formatNgayVn(new Date(), NGAY));
   const [lai, setLai] = useState(0);
 
   const daTatToan = so.closedAt !== null;
@@ -130,12 +135,12 @@ export function SoTietKiemRowActions({
   const daDenHan = soDaDenHan(so.maturityDate, new Date());
 
   function moTatToan() {
-    setNgayTatToan(format(new Date(), NGAY));
+    setNgayTatToan(formatNgayVn(new Date(), NGAY));
     setLai(so.laiDuKien);
     setHopThoai("tatToan");
   }
   function moRutTruocHan() {
-    setNgayTatToan(format(new Date(), NGAY));
+    setNgayTatToan(formatNgayVn(new Date(), NGAY));
     setLai(0);
     setHopThoai("rutTruocHan");
   }
@@ -221,17 +226,19 @@ export function SoTietKiemRowActions({
                 <Input
                   type="date"
                   value={ngayTatToan}
-                  max={format(new Date(), NGAY)}
+                  max={formatNgayVn(new Date(), NGAY)}
                   onChange={(e) => setNgayTatToan(e.target.value)}
                 />
               </O>
               <O label="Lãi thực nhận">
                 <Input
                   inputMode="numeric"
+                  {...thuocTinhLoiVuotTran(lai, idLoiLai)}
                   value={formatAmountInput(lai)}
                   onChange={(e) => setLai(parseAmountInput(e.target.value))}
                   className="text-right"
                 />
+                <LoiVuotTranTien value={lai} id={idLoiLai} />
               </O>
               <p className="text-xs text-muted-foreground">Tổng nhận về: {formatVnd(so.principal + lai)}</p>
             </div>
@@ -249,7 +256,7 @@ export function SoTietKiemRowActions({
                 <Button
                   type="button"
                   variant={hopThoai === "xoa" ? "destructive" : "default"}
-                  disabled={dangChay}
+                  disabled={dangChay || lai > MAX_AMOUNT_INPUT}
                   onClick={chay}
                 >
                   {dangChay ? "Đang chạy…" : hopThoai ? NUT[hopThoai] : ""}

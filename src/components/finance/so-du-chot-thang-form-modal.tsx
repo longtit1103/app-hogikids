@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { luuSoDuChotThang } from "@/lib/actions/so-du-chot-thang";
 import { formatVnd } from "@/lib/format";
-import { formatAmountInput, parseAmountInput, parseSignedAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseAmountInput, parseSignedAmountInput } from "@/lib/format-amount-input";
 import type { BanChot, KhoanCauTruc } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import { CAU_VI_ADS_TRA_TRUOC, NGU_CANH_CHOT_CU, type NguCanhChot } from "@/lib/so-quy/ngu-canh-chot-no-phai-tra";
 
@@ -24,7 +24,7 @@ import { CAU_VI_ADS_TRA_TRUOC, NGU_CANH_CHOT_CU, type NguCanhChot } from "@/lib/
  *
  * Cả hai ô bằng 0 là giá trị HỢP LỆ (tài khoản rỗng) nên không chặn — nhưng đó cũng là dấu vết của
  * "quên gõ ô bank" ⇒ hỏi lại một nhịp (bấm Lưu lần hai mới gửi), cùng khuôn `hoiTruocD0` ở form
- * khoản tiền: `window.confirm` bị trình duyệt chặn/nuốt và không dịch được.
+ * khoản tiền: hộp confirm gốc của trình duyệt bị trình duyệt chặn/nuốt và không dịch được.
  */
 
 /** Ba khoá duy nhất có ô trên form — lỗi mang field ngoài tập này phải đi toast. */
@@ -126,6 +126,10 @@ export function SoDuChotThangFormModal({
     }
   }
 
+  // Gõ quá trần 2 tỷ: báo đỏ tại ô + khoá nút Lưu (server vẫn chặn). Ngân hàng cho âm ⇒ soi trị tuyệt đối.
+  const loiTranBank = loiVuotTranAmount(Math.abs(parseSignedAmountInput(bankRaw)));
+  const loiTranMat = loiVuotTranAmount(tienMat);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -149,7 +153,7 @@ export function SoDuChotThangFormModal({
               giải ngân vào tài khoản, nên gõ đúng số dư thật trên tài khoản, không cộng/trừ dư nợ.
             </p>
           )}
-          <Field id="chot-so-du-bank" label="Số dư ngân hàng" error={fieldErrors.soDuBank}>
+          <Field id="chot-so-du-bank" label="Số dư ngân hàng" error={fieldErrors.soDuBank ?? loiTranBank ?? undefined}>
             <Input
               id="chot-so-du-bank"
               inputMode="numeric"
@@ -178,7 +182,7 @@ export function SoDuChotThangFormModal({
               </p>
             )}
           </Field>
-          <Field id="chot-tien-mat" label="Tiền mặt" error={fieldErrors.tienMat}>
+          <Field id="chot-tien-mat" label="Tiền mặt" error={fieldErrors.tienMat ?? loiTranMat ?? undefined}>
             <Input
               id="chot-tien-mat"
               inputMode="numeric"
@@ -205,7 +209,7 @@ export function SoDuChotThangFormModal({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Hủy
             </Button>
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving || Boolean(loiTranBank) || Boolean(loiTranMat)}>
               {saving ? "Đang lưu…" : hoiCaHaiKhong ? "Lưu (xác nhận 0)" : "Lưu"}
             </Button>
           </DialogFooter>

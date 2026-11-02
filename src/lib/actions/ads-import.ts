@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@/generated/prisma/client";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { dangDungLaiTuKhoTho, dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { dangDungLaiTuKhoTho } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { parseAdsFile, type AdsPreset, type KetQuaParseAds, type ParsedAdsRow } from "@/lib/import/ads-csv";
 import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
 import { LoiFileTuChoi } from "@/lib/import/xlsx-shared";
@@ -342,218 +343,222 @@ export async function importAdsExpenses(formData: FormData): Promise<
   const cong = await congAction("marketing:sua");
   if (!cong.ok) return cong;
 
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const form = await readForm(formData);
-  if (!form.ok) return form;
-
-  if (dangDungLaiTuKhoTho()) {
-    return {
-      ok: false,
-      error: "Đang dựng lại dữ liệu từ kho thô — chờ xong rồi import lại (tránh ghi đè lẫn nhau)",
-    };
-  }
-
-  const doc = docFileAds(form.buf, form.preset);
-  if (!doc.ok) return { ok: false, error: doc.error };
-  const { rows: parsed, errors, skippedZero } = doc;
-  const skippedInvalid = errors.length;
-  const adsSource = adsSourceForPreset(form.preset);
-
-  // Bước 2: dedupe nội bộ.
-  const tatCa = dedupeInternal(parsed, adsSource);
-
-  if (tatCa.length === 0) {
-    // Không có dòng hợp lệ nào — không cần vào transaction.
-    return {
-      ok: true,
-      data: {
-        imported: 0,
-        skippedDuplicates: 0,
-        skippedInvalid,
-        overwrittenApiRows: 0,
-        skippedApiConflict: 0,
-        skippedTruocM: 0,
-        mocM: null,
-        skippedZero,
-      },
-    };
-  }
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const result = await prisma.$transaction(async (tx) => {
-      await khoaChiaSeBatNoPhaiTra(tx);
-      // Khoá TRƯỚC mọi truy vấn đọc sổ: cả bước 3 (dedupe) lẫn bước 4 (xung đột API) đều là
-      // đọc-để-quyết-định — đọc ngoài khoá thì hai lượt ghi vẫn cùng thấy "chưa có gì".
-      await giuKhoaGhiChiTieuAds(tx);
-      const mocM = await docMocM(tx);
-      const mocMKey = mocM === null ? null : vnDateKey(mocM);
+    const form = await readForm(formData);
+    if (!form.ok) return form;
 
-      // Bước 2b: bỏ dòng ngày < M TRƯỚC mọi bước sau ⇒ ngày < M không vào dedupe, không vào tập ngày ghi đè
-      // (không bao giờ xoá ADS_API < M), không được chèn.
-      const { conLai: unique, soDongTruocM: skippedTruocM } = boDongTruocMocM(tatCa, mocM);
-      const ghiChuBoQua = skippedTruocM > 0 ? { boQuaTruocM: skippedTruocM } : {};
-      const bounds = dateBounds(unique);
-      if (!bounds) {
-        // Mọi dòng đều trước M — không đọc/ghi sổ, nhưng vẫn để lại dấu lượt import đã bị bỏ trọn.
-        await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.ADS_IMPORT, ghiChu: { soDong: 0, ...ghiChuBoQua } });
-        return { imported: 0, skippedDuplicates: 0, overwrittenApiRows: 0, skippedApiConflict: 0, skippedTruocM, mocM: mocMKey };
-      }
+    if (dangDungLaiTuKhoTho()) {
+      return {
+        ok: false,
+        error: "Đang dựng lại dữ liệu từ kho thô — chờ xong rồi import lại (tránh ghi đè lẫn nhau)",
+      };
+    }
 
-      // Bước 3: dedupe DB (IMPORT|MANUAL) trên ngày+mô tả+tiền+nguồn ads.
-      //
-      // Bộ lọc dưới đây là bản SQL của đúng luật khoá ở `daCoTrongSo`: chỉ dòng CÙNG nguồn ads —
-      // hoặc BỎ TRỐNG ô đó — mới có cửa chặn dòng file. Dòng khác nguồn không bao giờ sinh ra khoá
-      // khớp nên kéo về cũng vô nghĩa. KHÔNG lọc theo `channelId`: kênh không thuộc định danh dòng
-      // (xem `dedupeKey`), lọc theo nó sẽ giấu mất chính dòng trùng cần chặn khi chủ shop bấm nhầm
-      // kênh ở lần import sau. Bước 4 (xung đột ADS_API) cũng chỉ làm theo `adsSource` — hai bước
-      // dùng CÙNG một luật định danh, không lệch nhau.
-      const existingLedger = await tx.expense.findMany({
-        where: {
-          categoryId: ADS_CATEGORY_ID,
-          source: { in: ["IMPORT", "MANUAL"] },
-          date: { gte: bounds.min, lt: bounds.denHet },
-          OR: [{ adsSource }, { adsSource: null }],
+    const doc = docFileAds(form.buf, form.preset);
+    if (!doc.ok) return { ok: false, error: doc.error };
+    const { rows: parsed, errors, skippedZero } = doc;
+    const skippedInvalid = errors.length;
+    const adsSource = adsSourceForPreset(form.preset);
+
+    // Bước 2: dedupe nội bộ.
+    const tatCa = dedupeInternal(parsed, adsSource);
+
+    if (tatCa.length === 0) {
+      // Không có dòng hợp lệ nào — không cần vào transaction.
+      return {
+        ok: true,
+        data: {
+          imported: 0,
+          skippedDuplicates: 0,
+          skippedInvalid,
+          overwrittenApiRows: 0,
+          skippedApiConflict: 0,
+          skippedTruocM: 0,
+          mocM: null,
+          skippedZero,
         },
-        select: { date: true, description: true, amount: true, adsSource: true },
-      });
-      const ledgerKeys = new Set(
-        existingLedger.map((e) =>
-          dedupeKey(vnDateKey(e.date), e.description, e.amount, e.adsSource ?? O_TRONG)
-        )
-      );
+      };
+    }
 
-      let skippedDuplicates = 0;
-      const afterDbDedupe: ParsedAdsRow[] = [];
-      for (const r of unique) {
-        if (daCoTrongSo(ledgerKeys, vnDateKey(r.date), r.campaignName, r.amount, adsSource)) {
-          skippedDuplicates++;
-          continue;
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        // Khoá TRƯỚC mọi truy vấn đọc sổ: cả bước 3 (dedupe) lẫn bước 4 (xung đột API) đều là
+        // đọc-để-quyết-định — đọc ngoài khoá thì hai lượt ghi vẫn cùng thấy "chưa có gì".
+        await giuKhoaGhiChiTieuAds(tx);
+        const mocM = await docMocM(tx);
+        const mocMKey = mocM === null ? null : vnDateKey(mocM);
+
+        // Bước 2b: bỏ dòng ngày < M TRƯỚC mọi bước sau ⇒ ngày < M không vào dedupe, không vào tập ngày ghi đè
+        // (không bao giờ xoá ADS_API < M), không được chèn.
+        const { conLai: unique, soDongTruocM: skippedTruocM } = boDongTruocMocM(tatCa, mocM);
+        const ghiChuBoQua = skippedTruocM > 0 ? { boQuaTruocM: skippedTruocM } : {};
+        const bounds = dateBounds(unique);
+        if (!bounds) {
+          // Mọi dòng đều trước M — không đọc/ghi sổ, nhưng vẫn để lại dấu lượt import đã bị bỏ trọn.
+          await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.ADS_IMPORT, ghiChu: { soDong: 0, ...ghiChuBoQua } });
+          return { imported: 0, skippedDuplicates: 0, overwrittenApiRows: 0, skippedApiConflict: 0, skippedTruocM, mocM: mocMKey };
         }
-        afterDbDedupe.push(r);
-      }
 
-      // Bước 4: xung đột API — những ngày đã có dòng ADS_API cùng adsSource.
-      const apiRows = await tx.expense.findMany({
-        where: {
-          categoryId: ADS_CATEGORY_ID,
-          source: "ADS_API",
-          adsSource,
-          date: { gte: bounds.min, lt: bounds.denHet },
-        },
-        select: { date: true },
-      });
-      const apiDays = new Set(apiRows.map((e) => vnDateKey(e.date)));
-
-      // Dòng ADS_API mang giờ khác 00:00+07 chỉ có thể đến từ ngoài app (UI neo 00:00+07 và chặn
-      // sửa/xoá dòng ADS_API) hoặc từ một hợp đồng ingest đời cũ. Cửa sổ quét theo KHOẢNG NGÀY nay
-      // tóm được chúng và ghi đè sẽ xoá đúng — nhưng phải kêu lên, vì nó báo có đường ghi thẳng vào
-      // sổ chi phí mà app không biết.
-      const lechMoc = apiRows.filter((e) => e.date.getTime() !== anchorDate(vnDateKey(e.date)).getTime());
-      if (lechMoc.length > 0) {
-        console.warn(
-          `[import ads] ${lechMoc.length} dòng ADS_API mang giờ khác 00:00+07 trong khoảng ngày của file ` +
-            `(${[...new Set(lechMoc.map((e) => vnDateKey(e.date)))].join(", ")}) — dữ liệu này được ghi ` +
-            `từ ngoài app, kiểm lại nguồn`
+        // Bước 3: dedupe DB (IMPORT|MANUAL) trên ngày+mô tả+tiền+nguồn ads.
+        //
+        // Bộ lọc dưới đây là bản SQL của đúng luật khoá ở `daCoTrongSo`: chỉ dòng CÙNG nguồn ads —
+        // hoặc BỎ TRỐNG ô đó — mới có cửa chặn dòng file. Dòng khác nguồn không bao giờ sinh ra khoá
+        // khớp nên kéo về cũng vô nghĩa. KHÔNG lọc theo `channelId`: kênh không thuộc định danh dòng
+        // (xem `dedupeKey`), lọc theo nó sẽ giấu mất chính dòng trùng cần chặn khi chủ shop bấm nhầm
+        // kênh ở lần import sau. Bước 4 (xung đột ADS_API) cũng chỉ làm theo `adsSource` — hai bước
+        // dùng CÙNG một luật định danh, không lệch nhau.
+        const existingLedger = await tx.expense.findMany({
+          where: {
+            categoryId: ADS_CATEGORY_ID,
+            source: { in: ["IMPORT", "MANUAL"] },
+            date: { gte: bounds.min, lt: bounds.denHet },
+            OR: [{ adsSource }, { adsSource: null }],
+          },
+          select: { date: true, description: true, amount: true, adsSource: true },
+        });
+        const ledgerKeys = new Set(
+          existingLedger.map((e) =>
+            dedupeKey(vnDateKey(e.date), e.description, e.amount, e.adsSource ?? O_TRONG)
+          )
         );
-      }
 
-      // Ngày ghi đè = ngày file (đã dedupe NỘI BỘ) trùng ngày đã có ADS_API —
-      // tính ĐỘC LẬP với dedupe DB (bước 3). Nếu chỉ lấy từ afterDbDedupe thì 1
-      // ngày vừa có sẵn dòng IMPORT/MANUAL (khiến dòng file bị loại ở bước 3)
-      // VỪA có dòng ADS_API sẽ không bao giờ bị xoá → ngày đó bị đếm 2 lần
-      // (IMPORT + ADS_API) mà action vẫn báo overwrittenApiRows=0.
-      const fileDays = new Set(unique.map((r) => vnDateKey(r.date)));
-      const overwriteDayKeys = new Set<string>();
-      for (const day of apiDays) {
-        if (fileDays.has(day)) overwriteDayKeys.add(day);
-      }
-
-      let overwrittenApiRows = 0;
-      let skippedApiConflict = 0;
-      const toInsert: ParsedAdsRow[] = [];
-
-      for (const r of afterDbDedupe) {
-        const day = vnDateKey(r.date);
-        // skip: bỏ dòng file thuộc ngày đã có số API. overwrite: vẫn chèn (dòng
-        // ADS_API của ngày đó bị xoá ngay dưới đây, độc lập với vòng lặp này).
-        if (apiDays.has(day) && form.conflictMode === "skip") {
-          skippedApiConflict++;
-          continue;
+        let skippedDuplicates = 0;
+        const afterDbDedupe: ParsedAdsRow[] = [];
+        for (const r of unique) {
+          if (daCoTrongSo(ledgerKeys, vnDateKey(r.date), r.campaignName, r.amount, adsSource)) {
+            skippedDuplicates++;
+            continue;
+          }
+          afterDbDedupe.push(r);
         }
-        toInsert.push(r);
-      }
 
-      // Xoá dòng ADS_API của các ngày ghi đè (chỉ đúng adsSource) rồi mới chèn dòng file.
-      if (form.conflictMode === "overwrite" && overwriteDayKeys.size > 0) {
-        const deleted = await tx.expense.deleteMany({
+        // Bước 4: xung đột API — những ngày đã có dòng ADS_API cùng adsSource.
+        const apiRows = await tx.expense.findMany({
           where: {
             categoryId: ADS_CATEGORY_ID,
             source: "ADS_API",
             adsSource,
-            // Xoá theo KHOẢNG NGÀY VN, khớp đúng cách phát hiện xung đột (`apiDays` so bằng khoá
-            // ngày). Xoá bằng `date: { in: … }` mốc 00:00+07 sẽ để lại dòng ADS_API mang giờ khác
-            // trong đúng ngày vừa ghi đè ⇒ ngày đó có cả IMPORT lẫn ADS_API, `overwrittenApiRows`
-            // báo 0, chi phí quảng cáo đếm 2 lần mà sổ trông vẫn hợp lệ.
-            OR: [...overwriteDayKeys].map((d) => ({
-              date: { gte: anchorDate(d), lt: anchorNgaySau(d) },
-            })),
+            date: { gte: bounds.min, lt: bounds.denHet },
           },
+          select: { date: true },
         });
-        overwrittenApiRows = deleted.count;
-      }
+        const apiDays = new Set(apiRows.map((e) => vnDateKey(e.date)));
 
-      // Bước 5: chèn phần còn lại.
-      if (toInsert.length > 0) {
-        // KHÔNG qua cổng khoá sổ chi phí (`chanSoChiPhiDaKhoa` từ chối CẢ lượt; chủ shop chốt bỏ dòng < M, nhập
-        // phần còn lại). Thay vào đó: khoá chung câu đầu + `boDongTruocMocM` ở bước 2b ⇒ `unique` chỉ còn ngày ≥ M
-        // ⇒ không chèn dòng < M, `overwriteDayKeys` (suy từ `unique`) không chứa ngày < M ⇒ không xoá ADS_API < M.
-        // Lưới: `khoa-duong-ghi-nhap-hang-da-khoa-so` (chỉ danh mục ads) + `khoa-chung-bat-cho-duong-ghi-nhap-hang`.
-        await tx.expense.createMany({
-          data: toInsert.map((r) => ({
-            date: r.date,
-            categoryId: ADS_CATEGORY_ID,
-            adsSource,
-            description: r.campaignName,
-            channelId: form.channelId,
-            amount: r.amount,
-            source: "IMPORT" as const,
-            refId: null,
-          })),
+        // Dòng ADS_API mang giờ khác 00:00+07 chỉ có thể đến từ ngoài app (UI neo 00:00+07 và chặn
+        // sửa/xoá dòng ADS_API) hoặc từ một hợp đồng ingest đời cũ. Cửa sổ quét theo KHOẢNG NGÀY nay
+        // tóm được chúng và ghi đè sẽ xoá đúng — nhưng phải kêu lên, vì nó báo có đường ghi thẳng vào
+        // sổ chi phí mà app không biết.
+        const lechMoc = apiRows.filter((e) => e.date.getTime() !== anchorDate(vnDateKey(e.date)).getTime());
+        if (lechMoc.length > 0) {
+          console.warn(
+            `[import ads] ${lechMoc.length} dòng ADS_API mang giờ khác 00:00+07 trong khoảng ngày của file ` +
+              `(${[...new Set(lechMoc.map((e) => vnDateKey(e.date)))].join(", ")}) — dữ liệu này được ghi ` +
+              `từ ngoài app, kiểm lại nguồn`
+          );
+        }
+
+        // Ngày ghi đè = ngày file (đã dedupe NỘI BỘ) trùng ngày đã có ADS_API —
+        // tính ĐỘC LẬP với dedupe DB (bước 3). Nếu chỉ lấy từ afterDbDedupe thì 1
+        // ngày vừa có sẵn dòng IMPORT/MANUAL (khiến dòng file bị loại ở bước 3)
+        // VỪA có dòng ADS_API sẽ không bao giờ bị xoá → ngày đó bị đếm 2 lần
+        // (IMPORT + ADS_API) mà action vẫn báo overwrittenApiRows=0.
+        const fileDays = new Set(unique.map((r) => vnDateKey(r.date)));
+        const overwriteDayKeys = new Set<string>();
+        for (const day of apiDays) {
+          if (fileDays.has(day)) overwriteDayKeys.add(day);
+        }
+
+        let overwrittenApiRows = 0;
+        let skippedApiConflict = 0;
+        const toInsert: ParsedAdsRow[] = [];
+
+        for (const r of afterDbDedupe) {
+          const day = vnDateKey(r.date);
+          // skip: bỏ dòng file thuộc ngày đã có số API. overwrite: vẫn chèn (dòng
+          // ADS_API của ngày đó bị xoá ngay dưới đây, độc lập với vòng lặp này).
+          if (apiDays.has(day) && form.conflictMode === "skip") {
+            skippedApiConflict++;
+            continue;
+          }
+          toInsert.push(r);
+        }
+
+        // Xoá dòng ADS_API của các ngày ghi đè (chỉ đúng adsSource) rồi mới chèn dòng file.
+        if (form.conflictMode === "overwrite" && overwriteDayKeys.size > 0) {
+          const deleted = await tx.expense.deleteMany({
+            where: {
+              categoryId: ADS_CATEGORY_ID,
+              source: "ADS_API",
+              adsSource,
+              // Xoá theo KHOẢNG NGÀY VN, khớp đúng cách phát hiện xung đột (`apiDays` so bằng khoá
+              // ngày). Xoá bằng `date: { in: … }` mốc 00:00+07 sẽ để lại dòng ADS_API mang giờ khác
+              // trong đúng ngày vừa ghi đè ⇒ ngày đó có cả IMPORT lẫn ADS_API, `overwrittenApiRows`
+              // báo 0, chi phí quảng cáo đếm 2 lần mà sổ trông vẫn hợp lệ.
+              OR: [...overwriteDayKeys].map((d) => ({
+                date: { gte: anchorDate(d), lt: anchorNgaySau(d) },
+              })),
+            },
+          });
+          overwrittenApiRows = deleted.count;
+        }
+
+        // Bước 5: chèn phần còn lại.
+        if (toInsert.length > 0) {
+          // KHÔNG qua cổng khoá sổ chi phí (`chanSoChiPhiDaKhoa` từ chối CẢ lượt; chủ shop chốt bỏ dòng < M, nhập
+          // phần còn lại). Thay vào đó: khoá chung câu đầu + `boDongTruocMocM` ở bước 2b ⇒ `unique` chỉ còn ngày ≥ M
+          // ⇒ không chèn dòng < M, `overwriteDayKeys` (suy từ `unique`) không chứa ngày < M ⇒ không xoá ADS_API < M.
+          // Lưới: `khoa-duong-ghi-nhap-hang-da-khoa-so` (chỉ danh mục ads) + `khoa-chung-bat-cho-duong-ghi-nhap-hang`.
+          await tx.expense.createMany({
+            data: toInsert.map((r) => ({
+              date: r.date,
+              categoryId: ADS_CATEGORY_ID,
+              adsSource,
+              description: r.campaignName,
+              channelId: form.channelId,
+              amount: r.amount,
+              source: "IMPORT" as const,
+              refId: null,
+            })),
+          });
+        }
+
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.ADS_IMPORT,
+          ghiChu: { soDong: toInsert.length, ...ghiChuBoQua },
         });
+        return {
+          imported: toInsert.length,
+          skippedDuplicates,
+          overwrittenApiRows,
+          skippedApiConflict,
+          skippedTruocM,
+          mocM: mocMKey,
+        };
+      },
+      // Từ khi transaction phải GIÀNH KHOÁ ở lệnh đầu, thời gian NẰM CHỜ tính vào hạn transaction.
+      // Bên kia khoá ads là `/api/ingest/ads` — nó cố ý chạy tới 60s cho lô lớn. Giữ mặc định 5s ở đây
+      // nghĩa là: lượt import trùng giờ lượt ingest đêm sẽ chết vì P2028 dù chẳng có gì sai. KHÔNG dùng
+      // `OPT_TX_DONG_TIEN` (20s): hạn 60s này đã phủ ngân sách 10s chờ khoá chung với bước bật.
+      { timeout: 60_000, maxWait: 10_000 },
+      );
+
+      revalidatePath("/chi-phi");
+      return { ok: true, data: { ...result, skippedInvalid, skippedZero } };
+    } catch (err) {
+      // Chờ khoá chung quá 10s = bước bật nợ phải trả đang chạy — transaction đã lùi, chưa ghi gì.
+      if (err instanceof LoiKhoaDongTienBan) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
+      // P2028 = hết hạn transaction; ở đây gần như luôn là "đang chờ khoá của lượt ghi ads khác".
+      // Nói rõ để chủ shop CHỜ chứ không đi sửa file (file vừa qua bước xem trước thì không sai).
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2028") {
+        return { ok: false, error: "Đang có lượt ghi chi tiêu quảng cáo khác chạy — chờ ít phút rồi import lại" };
       }
-
-      await ghiNhatKy(tx, {
-        actor: cong.nguoiDung,
-        hanhDong: HANH_DONG.ADS_IMPORT,
-        ghiChu: { soDong: toInsert.length, ...ghiChuBoQua },
-      });
-      return {
-        imported: toInsert.length,
-        skippedDuplicates,
-        overwrittenApiRows,
-        skippedApiConflict,
-        skippedTruocM,
-        mocM: mocMKey,
-      };
-    },
-    // Từ khi transaction phải GIÀNH KHOÁ ở lệnh đầu, thời gian NẰM CHỜ tính vào hạn transaction.
-    // Bên kia khoá ads là `/api/ingest/ads` — nó cố ý chạy tới 60s cho lô lớn. Giữ mặc định 5s ở đây
-    // nghĩa là: lượt import trùng giờ lượt ingest đêm sẽ chết vì P2028 dù chẳng có gì sai. KHÔNG dùng
-    // `OPT_TX_DONG_TIEN` (20s): hạn 60s này đã phủ ngân sách 10s chờ khoá chung với bước bật.
-    { timeout: 60_000, maxWait: 10_000 },
-    );
-
-    revalidatePath("/chi-phi");
-    return { ok: true, data: { ...result, skippedInvalid, skippedZero } };
-  } catch (err) {
-    // Chờ khoá chung quá 10s = bước bật nợ phải trả đang chạy — transaction đã lùi, chưa ghi gì.
-    if (err instanceof LoiKhoaDongTienBan) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
-    // P2028 = hết hạn transaction; ở đây gần như luôn là "đang chờ khoá của lượt ghi ads khác".
-    // Nói rõ để chủ shop CHỜ chứ không đi sửa file (file vừa qua bước xem trước thì không sai).
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2028") {
-      return { ok: false, error: "Đang có lượt ghi chi tiêu quảng cáo khác chạy — chờ ít phút rồi import lại" };
+      return { ok: false, error: "Lỗi khi import chi phí ads" };
     }
-    return { ok: false, error: "Lỗi khi import chi phí ads" };
+  } finally {
+    cua.ra();
   }
 }

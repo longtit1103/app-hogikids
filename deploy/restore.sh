@@ -32,6 +32,13 @@
 #   ✱ Bước CUỐI thu hồi MỌI phiên đăng nhập (`deploy/thu-hoi-phien-sau-phuc-hoi.sql`) — không thì
 #     cookie cấp trong đời bản dump sống lại. Dump đời trước phân quyền: in hướng dẫn migrate + chạy tay.
 #
+# ✱ LOẠI TRỪ PHIÊN ROLE APP suốt lúc thay schema (xem khối "LOẠI TRỪ PHIÊN ROLE APP" bên dưới) ✱
+#   Khoá MUỘN (sau mọi guard file, sát trước DROP), mở SỚM (ngay sau hậu kỳ quyền, TRƯỚC bước thu hồi
+#   phiên và lối thoát mã 3). Đích ≠ `postgres`: REVOKE CONNECT cấp DATABASE, trả lại ĐÚNG `datacl` đã
+#   lưu. Đích = `postgres` (DB chung Supabase): app phải dừng sẵn + `ALTER ROLE hogikids NOLOGIN`.
+#   Mọi lối thoát (lỗi, mã 3, Ctrl-C) đều mở lại; mở hỏng ⇒ in lệnh mở tay + giữ tệp đánh dấu
+#   `~/docker/backups/.restore-dang-do` để lượt sau dừng ngay ở preflight.
+#
 # CHỈ nhận bản `pg_dump -Fc` STANDALONE 1-DB (custom .dump) hoặc plain `.sql.gz`.
 # TỪ CHỐI `.tar.gz` backup-toàn-server (chặn TRƯỚC mọi thao tác DB — C1).
 #
@@ -50,7 +57,11 @@ set -euo pipefail
 
 DB_DEFAULT=postgres
 SCHEMA_DEFAULT=app
-CONTAINER=supabase-db
+# Container Postgres đích. Ghi đè bằng `CONTAINER_DB_DICH` CHỈ để diễn tập trên stack song song
+# (`supabase-db-drill` — runbook DR): `main` chỉ nhận `supabase-db` hoặc `supabase-db-<hậu tố>`, và
+# container app cần kiểm đã dừng đi theo ĐÚNG hậu tố đó (`hogikids-app-<hậu tố>`) — không có núm riêng
+# nào để tắt phép kiểm app.
+CONTAINER="${CONTAINER_DB_DICH:-supabase-db}"
 OWNER_ROLE=hogikids
 
 # Mã thoát RIÊNG cho ca "dữ liệu đã nạp nhưng quy trình CHƯA XONG": dump đời trước phân quyền (chưa có
@@ -88,7 +99,7 @@ N8N_SETTING_VIEW=SettingN8n
 # một bản backup tạo TRƯỚC 21/09 sẽ đưa view về bản FAIL-OPEN cũ (`key NOT IN (…)`), phơi lại 43/45
 # key cho role n8n — gồm cả kho token Meta/TikTok. Và im lặng tuyệt đối: ô cảnh báo ở /cai-dat chỉ
 # đo QUYỀN, không bao giờ đọc ĐỊNH NGHĨA view. Đường DR là đúng đường dùng khi thảm hoạ thật.
-KEY_N8N_DUOC_DOC="n8nAppUrl n8nIngestSecret n8nTokenVaultSecret pancakeApiKeyKho pancakeApiKeyShopee pancakeApiKeyTiktok pancakeShopIdKho pancakeShopIdShopee pancakeShopIdTiktok metaAdsAccountId metaAdsManualDays tiktokShopAppKey tiktokShopAppSecret tiktokShopCipher tiktokShopShopId tiktokShopManualDays tiktokShopAnalyticsManualDays tiktokShopAffiliateManualDays tiktokBusinessAppId tiktokBusinessAppSecret tiktokBusinessToken tiktokBusinessManualDays"
+KEY_N8N_DUOC_DOC="n8nAppUrl n8nIngestSecret n8nTokenVaultSecret pancakeApiKeyKho pancakeApiKeyShopee pancakeApiKeyTiktok pancakeShopIdKho pancakeShopIdShopee pancakeShopIdTiktok metaAdsAccountId metaAdsManualDays tiktokShopAppKey tiktokShopAppSecret tiktokShopCipher tiktokShopShopId tiktokShopManualDays tiktokShopAnalyticsManualDays tiktokShopAffiliateManualDays tiktokBusinessAppId tiktokBusinessAppSecret tiktokBusinessToken tiktokBusinessManualDays tiktokBusinessHoaDonTuNgay"
 
 # Schema HỆ THỐNG Supabase self-host — đồng bộ với SUPABASE_SYSTEM_SCHEMAS trong
 # src/lib/backup/assert-plain-sql-only-schema.ts (bản twin TS). Sửa một bên PHẢI sửa bên kia;
@@ -732,7 +743,342 @@ thu_hoi_phien_sau_phuc_hoi() {
   echo "✓ Đã thu hồi mọi phiên — mọi người phải đăng nhập lại." >&2
 }
 
+# ===========================================================================
+# LOẠI TRỪ PHIÊN ROLE APP TRONG LÚC THAY SCHEMA
+#
+# Vì sao: từ lúc DROP tới lúc nạp xong, một phiên `hogikids` còn sống (app chưa dừng hẳn, script
+# `docker compose run --rm app …`, máy dev nối qua Tailscale) ghi vào schema nửa vời hoặc vào bảng vừa
+# dựng lại — dữ liệu lai, không ai thấy. `docker compose stop app` KHÔNG dừng được tiến trình CLI.
+#
+# HAI CHẾ ĐỘ — chọn theo DB đích, KHÔNG BAO GIỜ trộn:
+#   • Đích ≠ `postgres` (DB nháp diễn tập DR, DB riêng): `REVOKE CONNECT ON DATABASE "<db>" FROM PUBLIC,
+#     hogikids` — chặn ĐÚNG DB đó, DB khác trong cluster (gồm prod) nối bình thường. KHÔNG `ALTER ROLE`:
+#     role là đối tượng TOÀN CLUSTER — DB nháp, 3 DB test và prod cùng cluster `supabase-db`, cùng role
+#     `hogikids` ⇒ NOLOGIN trong lúc diễn tập là đánh sập prod.
+#   • Đích = `postgres` (DB chung Supabase): CẤM REVOKE PUBLIC — đo prod 28/10: PostgREST
+#     (`authenticator`) và storage nối DB này NHỜ quyền PUBLIC (`=Tc/postgres`), REVOKE là cắt Supabase;
+#     REVOKE riêng `hogikids` thì vô tác dụng (vẫn còn PUBLIC). ⇒ app phải dừng sẵn (preflight kiểm
+#     `docker ps`) + `ALTER ROLE hogikids NOLOGIN` (chấp nhận: chặn luôn `hogikids` ở các DB test).
+#   Hai chế độ cùng cắt phiên `pg_terminate_backend(pid, 5000)` lọc `datname = <đích> AND usename =
+#   'hogikids'` rồi CHỜ có hạn tới 0 phiên — terminate chỉ gửi tín hiệu, kiểm ngay sau đó có thể còn
+#   thấy phiên đang chết.
+#
+# Trả lại (chế độ REVOKE) bằng `UPDATE pg_catalog.pg_database SET datacl = <bản lưu nguyên văn>` rồi đọc
+# lại so chuỗi. KHÔNG dùng GRANT: superuser GRANT ghi grantor = owner (lệch chuỗi khi grantor gốc khác
+# owner), và `datacl` NULL (mặc định PUBLIC CONNECT — DB nháp do supabase_admin tạo) không quay về NULL
+# được bằng GRANT. Catalog là dữ liệu: superuser UPDATE được (`allow_system_table_mods` chỉ chặn DDL).
+# ⚠️ Lối UPDATE này CHỈ dành cho DB nháp `datacl` NULL (đúng trạng thái đo 28/10 của DB diễn tập DR):
+# UPDATE catalog KHÔNG chạm `pg_shdepend`. Với ACL có mục role tường minh (`hogikids=c/…`), REVOKE đã xoá
+# dòng phụ thuộc của role, UPDATE ghi lại mục đó mà KHÔNG dựng lại phụ thuộc ⇒ về sau `DROP ROLE` lọt
+# kiểm phụ thuộc, để `aclitem` treo theo OID. Cần restore vào DB có grant tường minh ⇒ trả bằng
+# `GRANT … GRANTED BY <grantor gốc>` thay vì UPDATE (chưa làm — chưa có đích nào như vậy).
+#
+# Bài học trap 23/09: lỗi là trap bị ĐÈ, không phải dùng trap. Ở đây chỉ có MỘT trap EXIT
+# (`don_dep_khi_thoat` — mở lại + dọn MỌI file tạm) và MỘT trap ERR (`khi_loi` → `mo_lai_dang_nhap`), cài
+# trong `main` (source file để test thì không cài gì). Không chỗ nào khác được `trap … EXIT`.
+#
+# VÙNG PHÁ HUỶ (`BUOC_PHA_HUY` ≠ "") — từ lệnh DROP tới hết hậu kỳ trả quyền (`reassign_owner_scoped`).
+# MỌI lối thoát trong vùng này mà schema có thể đã DỞ ⇒ FAIL-CLOSED: KHÔNG mở lại đăng nhập, GIỮ tệp
+# đánh dấu (ghi lý do + bước dở), in cách kiểm schema + lệnh mở tay. Lượt sau dừng ở preflight cho tới
+# khi người vận hành kiểm + mở tay — app/n8n không bao giờ được nối lại một schema nửa vời mà không ai
+# biết (bật app tay ngoài khối `restore.sh && docker compose up -d` là ghi vào schema dở, mất ở lượt
+# restore lại). Gồm:
+#  - bị NGẮT (INT/TERM, hoặc lệnh chết vì tín hiệu — mã > 128) lúc DROP / nạp / trả quyền: `docker exec`
+#    KHÔNG chuyển tín hiệu vào container ⇒ `pg_restore`/`psql`/`ALTER … OWNER` trong `supabase-db` có thể
+#    VẪN chạy; mở lại lúc đó là mở cửa cho app/CLI ghi xen (dữ liệu lai);
+#  - lỗi THƯỜNG (mã 1…128) SAU khi DROP đã commit: nạp dở (`--exit-on-error`/`ON_ERROR_STOP` không có
+#    `--single-transaction` ⇒ phần đã nạp ở lại), hậu kỳ trả quyền dở (role app thiếu quyền một phần);
+#  - `exit` tường minh trong vùng (trap EXIT cũng xét vùng, không chỉ trap ERR).
+# NGOẠI LỆ duy nhất: lệnh DROP tự LỖI THƯỜNG ⇒ mở lại như cũ — cổng khoá việc nặng + DROP + CREATE chạy
+# trong MỘT `psql -c` (một transaction ngầm, xem `drop_schema_dich`) ⇒ lỗi = rollback, schema còn nguyên.
+# Bị ngắt GIỮA lệnh DROP thì vẫn giữ khoá (không biết transaction đã commit chưa). Lỗi/ngắt TRƯỚC DROP ⇒
+# mở lại như mọi lối thoát khác.
+# ===========================================================================
+
+# DB chung của Supabase self-host — đích này dùng chế độ NOLOGIN (xem trên).
+DB_SUPABASE_CHUNG=postgres
+
+# Số lần kiểm "còn phiên role app" (mỗi lần cắt lại + đếm) và số giây nghỉ giữa hai lần. Ghi đè qua
+# biến môi trường chỉ để harness test chạy nhanh; `main` từ chối giá trị không phải số nguyên.
+HAN_CHO_HET_PHIEN_LAN="${RESTORE_HAN_CHO_HET_PHIEN_LAN:-30}"
+NGU_GIUA_LAN_KIEM_PHIEN="${RESTORE_NGU_GIUA_LAN_KIEM:-1}"
+
+# Trạng thái khoá — biến TOÀN CỤC: trap đọc được ở mọi lối thoát, kể cả `exit` gọi sâu trong hàm.
+#   LOAI_TRU_CHE_DO: "" = chưa khoá / đã mở · "revoke" = đã REVOKE CONNECT cấp DB · "nologin".
+LOAI_TRU_CHE_DO=""
+LOAI_TRU_DB=""
+LOAI_TRU_ACL=""      # datacl nguyên văn trước REVOKE; "NULL" = cột NULL (mặc định PUBLIC CONNECT)
+TEP_DANG_DO=""       # đặt trong main (mặc định ~/docker/backups/.restore-dang-do)
+APP_CONTAINER=""     # đặt trong main theo hậu tố của $CONTAINER
+TEP_TAM_CAN_DON=""   # mỗi dòng một đường dẫn file tạm — don_dep_khi_thoat dọn hết
+BUOC_PHA_HUY=""      # "" = ngoài vùng phá huỷ · drop · nap · tra_quyen — xem "VÙNG PHÁ HUỶ"
+
+# Một câu SQL qua psql, in kết quả dạng trơn (`-tA`). arg1 = db, arg2 = SQL.
+psql_mot_cau() {
+  docker exec "$CONTAINER" psql -U supabase_admin -d "$1" -X -tA -v ON_ERROR_STOP=1 -c "$2"
+}
+
+dang_ky_tep_tam() { TEP_TAM_CAN_DON="${TEP_TAM_CAN_DON}$1"$'\n'; }
+
+don_tep_tam() {
+  local f
+  while IFS= read -r f; do
+    if [[ -n "$f" ]]; then rm -f -- "$f"; fi
+  done <<EOF
+$TEP_TAM_CAN_DON
+EOF
+  TEP_TAM_CAN_DON=""
+}
+
+# Câu SQL mở lại cho chế độ arg1 — DÙNG CHUNG cho lượt mở tự động, lệnh mở tay in ra, và tệp đánh dấu.
+sql_mo_lai_dang_nhap() {
+  if [[ "$1" == nologin ]]; then
+    printf '%s' "ALTER ROLE $OWNER_ROLE LOGIN;"
+  elif [[ "$LOAI_TRU_ACL" == NULL ]]; then
+    printf '%s' "UPDATE pg_catalog.pg_database SET datacl = NULL WHERE datname = '$LOAI_TRU_DB';"
+  else
+    printf '%s' "UPDATE pg_catalog.pg_database SET datacl = '$LOAI_TRU_ACL'::aclitem[] WHERE datname = '$LOAI_TRU_DB';"
+  fi
+}
+
+# Lệnh mở tay (heredoc nháy đơn — dán nguyên văn được dù ACL có dấu nháy kép). arg1 = chế độ.
+in_lenh_mo_tay() {
+  echo "    docker exec -i $CONTAINER psql -U supabase_admin -d $LOAI_TRU_DB -X -v ON_ERROR_STOP=1 <<'SQL'"
+  echo "$(sql_mo_lai_dang_nhap "$1")"
+  echo "SQL"
+  echo "    rồi xoá tệp đánh dấu: rm -f $TEP_DANG_DO"
+}
+
+# Tệp đánh dấu — ghi TRƯỚC câu khoá: chết giữa chừng (mất điện, kill -9) thì lượt sau vẫn biết role/DB
+# đang khoá CÓ CHỦ ĐÍCH và mở thế nào. `set -C` ⇒ không đè tệp của một lượt khác chưa xử lý xong.
+ghi_tep_dang_do() {
+  mkdir -p "$(dirname "$TEP_DANG_DO")"
+  (
+    set -C
+    {
+      echo "# restore.sh ĐANG DỞ — đăng nhập role $OWNER_ROLE đang bị khoá CÓ CHỦ ĐÍCH."
+      echo "thoi_diem=$(date '+%Y-%m-%d %H:%M:%S %z')"
+      echo "container=$CONTAINER"
+      echo "db=$LOAI_TRU_DB"
+      echo "che_do=$1"
+      echo "acl_da_luu=$LOAI_TRU_ACL"
+      echo "# Mở tay — CHỈ khi chắc không còn lượt restore.sh nào đang chạy:"
+      in_lenh_mo_tay "$1"
+    } > "$TEP_DANG_DO"
+  )
+}
+
+# Preflight: còn tệp đánh dấu ⇒ một lượt trước dừng giữa chừng mà KHÔNG mở lại được. Không đoán, không
+# tự mở (có thể lượt đó vẫn đang chạy ở terminal khác) — in nội dung + cách xử lý rồi dừng.
+kiem_tep_dang_do() {
+  [[ -e "$TEP_DANG_DO" ]] || return 0
+  echo "Lỗi: còn tệp đánh dấu '$TEP_DANG_DO' — một lượt restore.sh trước dừng giữa chừng và CÓ THỂ" >&2
+  echo "    còn khoá đăng nhập role '$OWNER_ROLE'. DB KHÔNG bị đụng ở lượt này. Nội dung tệp:" >&2
+  sed 's/^/      /' "$TEP_DANG_DO" >&2 || true
+  echo "    Kiểm không còn lượt nào đang chạy (ps aux | grep restore.sh), chạy lệnh mở tay ở trên, xoá tệp" >&2
+  echo "    rồi chạy lại. Đích là DB nháp thì kiểm datacl; đích postgres thì kiểm rolcanlogin của '$OWNER_ROLE'." >&2
+  return 1
+}
+
+# Preflight cho đích = DB chung: container app (cùng hậu tố với $CONTAINER) phải đã dừng. So khớp
+# NGUYÊN DÒNG bằng bash, không pipe vào `grep -q` (pipefail + SIGPIPE ⇒ kết luận "đã dừng" oan).
+kiem_app_da_dung() {
+  local ds
+  ds=$(docker ps --format '{{.Names}}') || {
+    echo "Lỗi: không chạy được 'docker ps' để kiểm container '$APP_CONTAINER' đã dừng — DB KHÔNG bị đụng." >&2
+    return 1
+  }
+  if [[ $'\n'"$ds"$'\n' == *$'\n'"$APP_CONTAINER"$'\n'* ]]; then
+    echo "Lỗi: container '$APP_CONTAINER' ĐANG CHẠY — đích '$DB_SUPABASE_CHUNG' khoá đăng nhập role '$OWNER_ROLE' (NOLOGIN)" >&2
+    echo "    suốt lúc thay schema. Dừng app trước: docker compose stop app — rồi chạy lại. DB KHÔNG bị đụng." >&2
+    return 1
+  fi
+}
+
+# Cắt mọi phiên role app trên DB đích rồi chờ tới 0 phiên (có hạn). arg1 = db.
+cho_het_phien_role_app() {
+  local db=$1 i con=""
+  local loc="datname = '$db' AND usename = '$OWNER_ROLE'"
+  for (( i = 1; i <= HAN_CHO_HET_PHIEN_LAN; i++ )); do
+    psql_mot_cau "$db" "SELECT pg_terminate_backend(pid, 5000) FROM pg_catalog.pg_stat_activity WHERE $loc" > /dev/null
+    con=$(psql_mot_cau "$db" "SELECT count(*) FROM pg_catalog.pg_stat_activity WHERE $loc")
+    if [[ "$con" == 0 ]]; then
+      echo "✓ Không còn phiên '$OWNER_ROLE' nào trên '$db'." >&2
+      return 0
+    fi
+    echo "   còn $con phiên '$OWNER_ROLE' trên '$db' — chờ (lần $i/$HAN_CHO_HET_PHIEN_LAN)..." >&2
+    sleep "$NGU_GIUA_LAN_KIEM_PHIEN"
+  done
+  echo "Lỗi: sau $HAN_CHO_HET_PHIEN_LAN lần vẫn còn '$con' phiên '$OWNER_ROLE' trên '$db' — dừng TRƯỚC khi dọn schema." >&2
+  return 1
+}
+
+# KHOÁ — gọi SAU mọi guard file, sát trước `drop_schema_dich`. arg1 = db, arg2 = schema.
+khoa_dang_nhap_role_app() {
+  local db=$1 schema=$2 acl login quyen
+  # Xem trước khoá việc nặng (chỉ đọc, cùng khối SQL với cổng trong `drop_schema_dich` — cổng đó vẫn là
+  # chốt thật, cùng transaction với DROP). Không xem trước thì bước cắt phiên dưới đây GIẾT chính việc
+  # nặng đang chạy (dựng lại từ kho thô bằng `docker compose run`), rồi cổng vẫn từ chối vì dòng khoá
+  # còn hạn ⇒ Silver dở dang VÀ không phục hồi.
+  psql_mot_cau "$db" "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; SET LOCAL lock_timeout = '${LOCK_TIMEOUT_CONG_KHOA_GIAY}s'; $(sql_cong_khoa_viec_nang "$schema")" > /dev/null || {
+    echo "Lỗi: xem trước khoá việc nặng thất bại (đọc dòng ERROR phía trên) — CHƯA khoá đăng nhập, schema CÒN NGUYÊN." >&2
+    echo "    KHOA_VIEC_NANG_DANG_GIU ⇒ một việc nặng đang ghi schema này: chờ nó xong rồi chạy lại." >&2
+    return 1
+  }
+
+  LOAI_TRU_DB=$db
+  if [[ "$db" == "$DB_SUPABASE_CHUNG" ]]; then
+    login=$(psql_mot_cau "$db" "SELECT rolcanlogin FROM pg_catalog.pg_roles WHERE rolname = '$OWNER_ROLE'")
+    if [[ "$login" != t ]]; then
+      echo "Lỗi: role '$OWNER_ROLE' hiện có rolcanlogin='$login' (kỳ vọng t) mà KHÔNG có tệp đánh dấu — không biết" >&2
+      echo "    trạng thái gốc để trả lại. Kiểm tay rồi chạy lại. CHƯA khoá gì, schema CÒN NGUYÊN." >&2
+      return 1
+    fi
+    LOAI_TRU_ACL=""
+    ghi_tep_dang_do nologin
+    LOAI_TRU_CHE_DO=nologin
+    echo ">> Khoá đăng nhập role '$OWNER_ROLE' (NOLOGIN) — đích là DB chung Supabase, KHÔNG đụng quyền PUBLIC..." >&2
+    psql_mot_cau "$db" "ALTER ROLE $OWNER_ROLE NOLOGIN;" > /dev/null
+  else
+    acl=$(psql_mot_cau "$db" "SELECT COALESCE(datacl::text, 'NULL') FROM pg_catalog.pg_database WHERE datname = '$db'")
+    # Chỉ nhận đúng hai hình dạng: NULL hoặc mảng aclitem `{…}` một dòng, không nháy đơn (nội suy vào
+    # literal SQL lúc trả lại). Lạ ⇒ dừng TRƯỚC khi đụng gì — trả sai ACL là DB mất quyền nối.
+    if [[ "$acl" != NULL && ( "$acl" != "{"*"}" || "$acl" == *"'"* || "$acl" == *$'\n'* ) ]]; then
+      echo "Lỗi: không đọc được datacl của DB '$db' (nhận: '$acl') — DB có tồn tại? CHƯA khoá gì, schema CÒN NGUYÊN." >&2
+      return 1
+    fi
+    LOAI_TRU_ACL=$acl
+    ghi_tep_dang_do revoke
+    LOAI_TRU_CHE_DO=revoke
+    echo ">> Chặn role '$OWNER_ROLE' nối DB '$db' (REVOKE CONNECT cấp DATABASE; datacl đã lưu: $acl)..." >&2
+    psql_mot_cau "$db" "REVOKE CONNECT ON DATABASE \"$db\" FROM PUBLIC, $OWNER_ROLE;" > /dev/null
+    # REVOKE của superuser chạy "như owner" ⇒ grant do role KHÁC cấp, hay quyền thừa hưởng qua role cha,
+    # còn nguyên. Hỏi thẳng quyền hiệu lực thay vì tin câu REVOKE.
+    quyen=$(psql_mot_cau "$db" "SELECT has_database_privilege('$OWNER_ROLE', '$db', 'CONNECT')")
+    if [[ "$quyen" != f ]]; then
+      echo "Lỗi: sau REVOKE role '$OWNER_ROLE' VẪN nối được '$db' (has_database_privilege='$quyen') — grant từ role" >&2
+      echo "    khác hoặc qua role cha. Gỡ tay rồi chạy lại. Đang trả ACL về bản lưu, schema CÒN NGUYÊN." >&2
+      return 1
+    fi
+  fi
+  cho_het_phien_role_app "$db"
+}
+
+# MỞ LẠI — idempotent, chạy TỐI ĐA một lần mỗi lượt khoá. Gọi tường minh ở luồng chính (ngay sau hậu kỳ
+# quyền) + qua trap ERR (lỗi ở bất kỳ đâu trong vùng khoá) + trap EXIT (`exit N`, Ctrl-C). Trong subshell
+# (`$(…)` thừa hưởng trap ERR do `set -E`) thì bỏ qua — trạng thái ở đó là bản sao, mở ở đó là mở hai lần.
+# Hỏng ⇒ in lệnh mở tay, GIỮ tệp đánh dấu, trả 1. Không dựa `set -e` bên trong (thường chạy ở ngữ cảnh
+# điều kiện / trap): mọi bước tự kiểm bằng `if`.
+mo_lai_dang_nhap() {
+  [[ "${BASH_SUBSHELL:-0}" -eq 0 ]] || return 0
+  [[ -n "$LOAI_TRU_CHE_DO" ]] || return 0
+  local che_do=$LOAI_TRU_CHE_DO acl_sau="" ok=0
+  LOAI_TRU_CHE_DO=""
+  echo ">> Mở lại đăng nhập role '$OWNER_ROLE' (chế độ $che_do, DB '$LOAI_TRU_DB')..." >&2
+  if psql_mot_cau "$LOAI_TRU_DB" "$(sql_mo_lai_dang_nhap "$che_do")" > /dev/null; then
+    if [[ "$che_do" == nologin ]]; then
+      ok=1
+    elif acl_sau=$(psql_mot_cau "$LOAI_TRU_DB" "SELECT COALESCE(datacl::text, 'NULL') FROM pg_catalog.pg_database WHERE datname = '$LOAI_TRU_DB'") \
+      && [[ "$acl_sau" == "$LOAI_TRU_ACL" ]]; then
+      ok=1
+    else
+      echo "✗ datacl sau khi trả ('$acl_sau') KHÁC bản lưu ('$LOAI_TRU_ACL')." >&2
+    fi
+  fi
+  if [[ "$ok" -eq 1 ]]; then
+    rm -f -- "$TEP_DANG_DO" || echo "!!! Không xoá được tệp đánh dấu '$TEP_DANG_DO' — xoá tay trước lượt sau." >&2
+    echo "✓ Đã mở lại đăng nhập role '$OWNER_ROLE' trên '$LOAI_TRU_DB'." >&2
+    return 0
+  fi
+  echo "✗ KHÔNG mở lại được đăng nhập role '$OWNER_ROLE' — app/CLI sẽ không nối được '$LOAI_TRU_DB'. Mở tay:" >&2
+  in_lenh_mo_tay "$che_do" >&2
+  return 1
+}
+
+# Thoát trong VÙNG PHÁ HUỶ (arg1 = mã thoát, arg2 = kiểu: ngat | loi | exit) ⇒ GIỮ khoá + tệp đánh dấu
+# (ghi lý do + bước dở), in cách kiểm schema + lệnh mở tay. Ngoài vùng thì không làm gì (lối thoát gọi
+# mở lại như thường). Idempotent (xoá `LOAI_TRU_CHE_DO` ⇒ `mo_lai_dang_nhap` không mở). Trong subshell
+# bỏ qua — trạng thái ở đó là bản sao.
+giu_khoa_neu_dang_pha_huy() {
+  [[ "${BASH_SUBSHELL:-0}" -eq 0 ]] || return 0
+  [[ -n "$BUOC_PHA_HUY" && -n "$LOAI_TRU_CHE_DO" ]] || return 0
+  local che_do=$LOAI_TRU_CHE_DO ma=$1 kieu=$2 buoc=$BUOC_PHA_HUY
+  LOAI_TRU_CHE_DO=""   # don_dep_khi_thoat sẽ KHÔNG mở lại
+  {
+    if [[ "$kieu" == ngat ]]; then
+      echo "bi_ngat_giua_nap=$(date '+%Y-%m-%d %H:%M:%S %z') ma=$ma buoc_do=$buoc"
+      echo "# Bị ngắt SAU khi đã DROP — kiểm hết tiến trình nạp/trả quyền trong container trước khi mở tay."
+    else
+      echo "loi_sau_drop=$(date '+%Y-%m-%d %H:%M:%S %z') ma=$ma kieu=$kieu buoc_do=$buoc"
+      echo "# Lỗi SAU khi đã DROP — schema '${SCHEMA:-?}' đang DỞ (bước '$buoc' chưa xong)."
+    fi
+  } >> "$TEP_DANG_DO" 2>/dev/null || true
+  {
+    if [[ "$kieu" == ngat ]]; then
+      echo "!!! Bị ngắt (mã $ma) ở bước '$buoc' SAU khi đã DROP schema '${SCHEMA:-?}' của '$LOAI_TRU_DB' — 'docker exec'"
+      echo "    không chuyển tín hiệu vào container nên pg_restore/psql/ALTER … OWNER CÓ THỂ VẪN ĐANG CHẠY."
+    else
+      echo "!!! Lỗi (mã $ma) ở bước '$buoc' SAU khi đã DROP schema '${SCHEMA:-?}' của '$LOAI_TRU_DB' — schema đang DỞ"
+      echo "    (nạp thiếu bảng/dữ liệu, hoặc role app chưa được trả đủ quyền). Đọc dòng lỗi phía trên."
+    fi
+    echo "    KHÔNG mở lại đăng nhập role '$OWNER_ROLE', GIỮ tệp đánh dấu '$TEP_DANG_DO'. Schema đang DỞ — đừng bật app."
+    echo "    1) Kiểm còn tiến trình nạp/trả quyền không:"
+    echo "         docker exec $CONTAINER ps aux | grep -E 'pg_restore|psql' | grep -v grep"
+    echo "         docker exec $CONTAINER psql -U supabase_admin -d $LOAI_TRU_DB -X -c \"SELECT pid, state, query_start, left(query, 60) FROM pg_stat_activity WHERE usename = 'supabase_admin' AND datname = '$LOAI_TRU_DB' AND pid <> pg_backend_pid();\""
+    echo "       và xem schema đang dở tới đâu (số bảng; đối chiếu với bản dump):"
+    echo "         docker exec $CONTAINER psql -U supabase_admin -d $LOAI_TRU_DB -X -c \"SELECT count(*) AS so_bang FROM pg_tables WHERE schemaname = '${SCHEMA:-?}';\""
+    echo "    2) Chờ chúng xong (hoặc pg_cancel_backend), sửa nguyên nhân lỗi (đầy đĩa, dump hỏng…), rồi mở tay:"
+    in_lenh_mo_tay "$che_do"
+    echo "    3) Chạy lại restore.sh từ đầu để có schema trọn vẹn (lượt mới DROP + nạp lại sạch). Đừng bật app trước đó."
+  } >&2
+}
+
+bi_ngat() {
+  giu_khoa_neu_dang_pha_huy "$1" ngat
+  exit "$1"
+}
+
+# Trap ERR. Trong VÙNG PHÁ HUỶ ⇒ giữ khoá (lệnh chết vì TÍN HIỆU — mã > 128, Ctrl-C tới cả nhóm tiến
+# trình, docker CLI chết trước khi bash kịp chạy trap INT — tính là bị ngắt). Ngoại lệ: chính lệnh DROP
+# lỗi THƯỜNG ⇒ transaction đã rollback, schema còn nguyên ⇒ mở lại như mọi lỗi trước DROP.
+khi_loi() {
+  if [[ -n "$BUOC_PHA_HUY" ]]; then
+    if [[ "$1" -gt 128 ]]; then
+      giu_khoa_neu_dang_pha_huy "$1" ngat
+      return 0
+    fi
+    if [[ "$BUOC_PHA_HUY" != drop ]]; then
+      giu_khoa_neu_dang_pha_huy "$1" loi
+      return 0
+    fi
+  fi
+  mo_lai_dang_nhap || true
+}
+
+# Trap EXIT DUY NHẤT: mở lại (nếu còn khoá) + dọn mọi file tạm. Giữ mã thoát gốc; mở hỏng mà mã gốc là
+# 0 thì thoát 1 — không bao giờ báo thành công với role còn khoá. Còn trong VÙNG PHÁ HUỶ (vd `exit`
+# tường minh, trap ERR không chạy) ⇒ giữ khoá thay vì mở.
+don_dep_khi_thoat() {
+  local ma=$?
+  if [[ -n "$BUOC_PHA_HUY" ]]; then
+    giu_khoa_neu_dang_pha_huy "$ma" exit
+    if [[ "$ma" -eq 0 ]]; then ma=1; fi
+  fi
+  if ! mo_lai_dang_nhap; then
+    if [[ "$ma" -eq 0 ]]; then ma=1; fi
+  fi
+  don_tep_tam
+  exit "$ma"
+}
+
 main() {
+  # Trap cài ở ĐÂY, không ở mức file: test `source` restore.sh để gọi từng hàm thì không dính trap.
+  set -E
+  trap 'khi_loi $?' ERR
+  trap 'don_dep_khi_thoat' EXIT
+  trap 'bi_ngat 130' INT
+  trap 'bi_ngat 143' TERM
+
   # --- 0) Tham số --------------------------------------------------------
   if [[ $# -lt 1 || $# -gt 3 ]]; then
     echo "Cách dùng: bash deploy/restore.sh <dump> [db] [schema]" >&2
@@ -761,6 +1107,24 @@ main() {
   if ! [[ "$SCHEMA" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
     echo "Lỗi: tên schema '$SCHEMA' không hợp lệ (chỉ chữ/số/_ , bắt đầu bằng chữ hoặc _)." >&2
     exit 1
+  fi
+  # Regex qua biến: bash 3.2 (macOS — máy chạy test) parse ngoặc tròn trần trong `=~` không ổn định.
+  local re_container='^supabase-db(-[a-z0-9]+)?$' re_so='^[0-9]+$'
+  if ! [[ "$CONTAINER" =~ $re_container ]]; then
+    echo "Lỗi: container DB '$CONTAINER' không hợp lệ (chỉ supabase-db hoặc supabase-db-<hậu tố>)." >&2
+    exit 1
+  fi
+  if ! [[ "$HAN_CHO_HET_PHIEN_LAN" =~ $re_so && "$HAN_CHO_HET_PHIEN_LAN" -ge 1 && "$NGU_GIUA_LAN_KIEM_PHIEN" =~ $re_so ]]; then
+    echo "Lỗi: RESTORE_HAN_CHO_HET_PHIEN_LAN / RESTORE_NGU_GIUA_LAN_KIEM phải là số nguyên (lần ≥ 1)." >&2
+    exit 1
+  fi
+  APP_CONTAINER="hogikids-app${CONTAINER#supabase-db}"
+  TEP_DANG_DO="${RESTORE_TEP_DANG_DO:-${HOME:?thiếu HOME}/docker/backups/.restore-dang-do}"
+
+  # --- 0b) Preflight loại trừ (TRƯỚC mọi thao tác DB) ------------------------
+  kiem_tep_dang_do || exit 1
+  if [[ "$DB" == "$DB_SUPABASE_CHUNG" ]]; then
+    kiem_app_da_dung || exit 1
   fi
 
   # --- 1) Cảnh báo + xác nhận (TRƯỚC mọi thao tác DB) --------------------
@@ -849,7 +1213,7 @@ main() {
       echo ">> Bung dump ra SQL phẳng để soi NỘI DUNG (không chỉ TOC)..." >&2
       local sql_bung
       sql_bung=$(mktemp "${TMPDIR:-/tmp}/hogikids-bung-XXXXXX")
-      trap 'rm -f "$sql_bung"' EXIT
+      dang_ky_tep_tam "$sql_bung"   # don_dep_khi_thoat dọn ở mọi lối thoát — KHÔNG đặt bẫy thoát riêng
       docker exec -i "$CONTAINER" pg_restore --clean --if-exists --exit-on-error \
         --no-owner --no-privileges -n "$SCHEMA" -f - < "$F" > "$sql_bung" || {
         echo "Lỗi: không bung được '$F' ra SQL phẳng (pg_restore -f -) — file có thể hỏng. TỪ CHỐI." >&2
@@ -864,15 +1228,18 @@ main() {
         exit 1
       }
       rm -f "$sql_bung"
-      trap - EXIT
     fi
     # Dọn schema TRƯỚC khi nạp — `--clean` KHÔNG đủ: nó chỉ drop object CÓ trong TOC, nên bảng/cột
     # sinh ra SAU thời điểm sao lưu (migration mới) sống sót và trộn vào bản vừa phục hồi. Đo thật
     # 29/07: restore một dump 1 bảng vào schema đang có thêm bảng lạ ⇒ bảng lạ VẪN CÒN; thêm bước
     # dọn này thì đúng chỉ còn nội dung của bản dump. Dump custom KHÔNG tự tạo schema (cờ `-n` bỏ
     # qua entry SCHEMA) nên phải tạo lại ngay tại đây.
+    # Khoá MUỘN: mọi guard file đã qua, bước kế tiếp là phá huỷ.
+    khoa_dang_nhap_role_app "$DB" "$SCHEMA"
     echo ">> Dọn schema '$SCHEMA' của '$DB' (thay sạch, không để sót object sinh sau backup)..." >&2
+    BUOC_PHA_HUY=drop
     drop_schema_dich "$DB" "$SCHEMA" ""
+    BUOC_PHA_HUY=nap
     echo ">> Phục hồi custom dump vào '$DB' (schema '$SCHEMA')..." >&2
     docker exec -i "$CONTAINER" pg_restore --clean --if-exists --exit-on-error \
       --no-owner --no-privileges -n "$SCHEMA" -U supabase_admin -d "$DB" < "$F"
@@ -913,7 +1280,7 @@ main() {
     # chính file này, không gunzip lại). Trap dọn file tạm ở mọi lối thoát.
     local sql_tmp
     sql_tmp=$(mktemp "${TMPDIR:-/tmp}/hogikids-restore-XXXXXX")
-    trap 'rm -f "$sql_tmp"' EXIT
+    dang_ky_tep_tam "$sql_tmp"   # don_dep_khi_thoat dọn ở mọi lối thoát — KHÔNG đặt bẫy thoát riêng
     gunzip -c "$F" > "$sql_tmp"
 
     # Guard schema-scoped cho plain SQL (đường plain KHÔNG có `-n` backstop).
@@ -928,21 +1295,37 @@ main() {
     if grep -iEq "(^|;)[[:space:]]*CREATE[[:space:]]+SCHEMA[[:space:]]+(IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+)?\"?${SCHEMA}\"?([^[:alnum:]_]|$)" "$sql_tmp"; then
       dump_tu_tao=1
     fi
+    # Khoá MUỘN: mọi guard file đã qua, bước kế tiếp là phá huỷ.
+    khoa_dang_nhap_role_app "$DB" "$SCHEMA"
     echo ">> Dọn schema '$SCHEMA' của '$DB' (dump tự tạo schema: ${dump_tu_tao:-không})..." >&2
+    BUOC_PHA_HUY=drop
     drop_schema_dich "$DB" "$SCHEMA" "$dump_tu_tao"
+    BUOC_PHA_HUY=nap
     echo ">> Nạp SQL vào '$DB' (schema '$SCHEMA')..." >&2
     docker exec -i "$CONTAINER" psql -U supabase_admin -d "$DB" -v ON_ERROR_STOP=1 < "$sql_tmp"
 
     rm -f "$sql_tmp"
-    trap - EXIT
   fi
 
   # --- 5) Hậu kỳ BẮT BUỘC ------------------------------------------------
   # Restore chạy `-U supabase_admin --no-owner --no-privileges` → object thuộc `supabase_admin` và
   # sạch ACL: role app mất quyền (app chết sau DR), role chỉ-đọc n8n mất quyền đọc kho khoá (9
   # workflow chết trong im lặng), enum/function ở lại owner cũ (migration sau này bị từ chối).
-  # Trả owner + cấp lại quyền CHỈ trong schema đích (KHÔNG REASSIGN OWNED).
+  # Trả owner + cấp lại quyền CHỈ trong schema đích (KHÔNG REASSIGN OWNED). Vẫn trong VÙNG PHÁ HUỶ: lỗi /
+  # ngắt giữa chừng là role app thiếu quyền một phần ⇒ giữ khoá; xong trọn mới ra khỏi vùng.
+  BUOC_PHA_HUY=tra_quyen
   reassign_owner_scoped "$DB" "$SCHEMA"
+  BUOC_PHA_HUY=""
+
+  # --- 5b) Mở SỚM đăng nhập role app -------------------------------------
+  # TRƯỚC bước thu hồi phiên: nó có thể thoát mã 3 và hướng dẫn `prisma migrate deploy` — lệnh đó chạy
+  # bằng role app, role còn khoá là hướng dẫn chết ngay bước đầu. Bước thu hồi chạy bằng supabase_admin
+  # nên không cần khoá; app (đích postgres) vẫn đang dừng tới khi người vận hành `up -d`.
+  if ! mo_lai_dang_nhap; then
+    echo "    Dữ liệu ĐÃ nạp + trả quyền xong; CHƯA thu hồi phiên. GIỮ APP DỪNG. Sau khi mở tay, chạy tiếp:" >&2
+    echo "      docker exec -i $CONTAINER psql -U supabase_admin -d $DB -X -v ON_ERROR_STOP=1 < deploy/thu-hoi-phien-sau-phuc-hoi.sql" >&2
+    exit 1
+  fi
 
   # --- 6) Thu hồi mọi phiên (BƯỚC CUỐI) ----------------------------------
   # Lỗi ⇒ `set -e` dừng script, exit ≠ 0 — dữ liệu đã nạp nhưng cookie đời dump chưa bị chặn. Dump đời

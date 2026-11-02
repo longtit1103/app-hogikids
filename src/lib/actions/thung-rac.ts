@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import { maLoiNhatKy } from "@/lib/actions/khoan-vay-chung";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import type { HanhDong } from "@/lib/nhat-ky/hanh-dong";
 import { ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { congAction } from "@/lib/quyen/cong-action";
@@ -19,7 +19,7 @@ import { xoaVinhVienBanGhiDaXoa } from "@/lib/thung-rac/xoa-vinh-vien-ban-ghi";
  * `khoan-vay.ts` · `so-tiet-kiem.ts`), xem `src/lib/thung-rac/ghi-thung-rac.ts`.
  *
  * Cả hai PHẢI nằm trong `DUONG_GHI` của `tests/khoa-bao-tri-duong-ghi.test.ts` — phép quét AST chỉ
- * đọc THÂN HÀM export nên `dangPhucHoi()` phải gọi TRỰC TIẾP ở đây, không uỷ quyền cho module lõi.
+ * đọc THÂN HÀM export nên `vaoCuaGhi()` phải gọi TRỰC TIẾP ở đây, không uỷ quyền cho module lõi.
  *
  * QUYỀN hai tầng (spec phân quyền §1.4): cổng action chỉ đòi ÍT NHẤT MỘT quyền `sua` vào thùng rác;
  * quyền thật theo LOẠI bản ghi kiểm TRONG transaction của helper, trên `bang` đọc từ DB. Thiếu ⇒
@@ -77,19 +77,23 @@ export async function khoiPhucBanGhi(id: string): Promise<ActionResult<string | 
   const c = await congAction(QUYEN_VAO_THUNG_RAC);
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  let ketQua;
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    // KHÔNG bọc transaction ngoài: helper tự mở MỘT transaction (quyền + CAS + ghi + nhật ký).
-    ketQua = await khoiPhucBanGhiDaXoa(id, nguoiDung);
-  } catch (e) {
-    return xuLyLoiThungRac(e, nguoiDung, "THUNG_RAC_KHOI_PHUC", id, "Lỗi khi khôi phục bản ghi");
-  }
-  if (!ketQua.ok) return { ok: false, error: ketQua.lyDo };
+    let ketQua;
+    try {
+      // KHÔNG bọc transaction ngoài: helper tự mở MỘT transaction (quyền + CAS + ghi + nhật ký).
+      ketQua = await khoiPhucBanGhiDaXoa(id, nguoiDung);
+    } catch (e) {
+      return await xuLyLoiThungRac(e, nguoiDung, "THUNG_RAC_KHOI_PHUC", id, "Lỗi khi khôi phục bản ghi");
+    }
+    if (!ketQua.ok) return { ok: false, error: ketQua.lyDo };
 
-  lamMoiMoiMan();
-  return { ok: true, data: ketQua.canhBao };
+    lamMoiMoiMan();
+    return { ok: true, data: ketQua.canhBao };
+  } finally {
+    cua.ra();
+  }
 }
 
 /**
@@ -100,16 +104,20 @@ export async function xoaVinhVienBanGhi(id: string): Promise<ActionResult> {
   const c = await congAction(QUYEN_VAO_THUNG_RAC);
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  let ketQua;
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    ketQua = await xoaVinhVienBanGhiDaXoa(id, nguoiDung);
-  } catch (e) {
-    return xuLyLoiThungRac(e, nguoiDung, "THUNG_RAC_XOA_VINH_VIEN", id, "Lỗi khi xoá vĩnh viễn");
-  }
-  if (!ketQua.ok) return { ok: false, error: ketQua.lyDo };
+    let ketQua;
+    try {
+      ketQua = await xoaVinhVienBanGhiDaXoa(id, nguoiDung);
+    } catch (e) {
+      return await xuLyLoiThungRac(e, nguoiDung, "THUNG_RAC_XOA_VINH_VIEN", id, "Lỗi khi xoá vĩnh viễn");
+    }
+    if (!ketQua.ok) return { ok: false, error: ketQua.lyDo };
 
-  revalidatePath("/tai-chinh");
-  return { ok: true, data: undefined };
+    revalidatePath("/tai-chinh");
+    return { ok: true, data: undefined };
+  } finally {
+    cua.ra();
+  }
 }

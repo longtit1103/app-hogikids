@@ -8,6 +8,7 @@ import {
 import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { docMocM } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { transformFromRaw, type TransformStats } from "./transform-from-raw";
+import { thuTuPhienBan } from "./transform-raw-helpers";
 
 /**
  * Dựng lại Silver TỪ BRONZE — KHÔNG fetch lại Pancake.
@@ -212,6 +213,12 @@ export async function rebuildFromRaw(
     skippedTruocM: meta.skippedTruocM + ttAds.skippedTruocM,
     hoaDonAdsUpserted: hd.hoaDonAdsUpserted,
     tinDungAdsUpserted: td.tinDungAdsUpserted,
+    // Bản cũ hơn bản Silver đang giữ (chốt nguonFetchedAt) — kết cục ĐÚNG, ngoài `skipped` nên không giữ cờ backlog.
+    settlementsSkippedStale: st.settlementsSkippedStale,
+    adsSkippedStale: ad.adsSkippedStale,
+    paymentsSkippedStale: pay.paymentsSkippedStale,
+    hoaDonAdsSkippedStale: hd.hoaDonAdsSkippedStale,
+    tinDungAdsSkippedStale: td.tinDungAdsSkippedStale,
   };
 }
 
@@ -372,6 +379,12 @@ export async function dungLaiGiaoDichTuKhoTho(
     skippedTruocM: meta.skippedTruocM + ttAds.skippedTruocM,
     hoaDonAdsUpserted: hd.hoaDonAdsUpserted,
     tinDungAdsUpserted: td.tinDungAdsUpserted,
+    // Bản cũ hơn bản Silver đang giữ (chốt nguonFetchedAt) — kết cục ĐÚNG, ngoài `skipped` nên không giữ cờ backlog.
+    settlementsSkippedStale: st.settlementsSkippedStale,
+    adsSkippedStale: ad.adsSkippedStale,
+    paymentsSkippedStale: pay.paymentsSkippedStale,
+    hoaDonAdsSkippedStale: hd.hoaDonAdsSkippedStale,
+    tinDungAdsSkippedStale: td.tinDungAdsSkippedStale,
   };
 }
 
@@ -406,7 +419,7 @@ async function conSanPhamKetOBronze(): Promise<number> {
       SELECT DISTINCT ON ("externalId") "externalId", payload
       FROM "RawPancakeProduct"
       WHERE "shopId" = ${kho}
-      ORDER BY "externalId", "fetchedAt" DESC, "id" DESC
+      ORDER BY "externalId", ${thuTuPhienBan("RawPancakeProduct")}
     )
     SELECT COUNT(*)::int AS n
     FROM ban_moi_nhat r

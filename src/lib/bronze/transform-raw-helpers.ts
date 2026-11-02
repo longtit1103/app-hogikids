@@ -1,3 +1,4 @@
+import { Prisma } from "@/generated/prisma/client";
 import type { UpsertStats } from "@/lib/ingest/pancake-upsert";
 import { prisma } from "@/lib/prisma";
 
@@ -16,11 +17,18 @@ import { NOI_MOC_PHIEN_BAN_DON_SQL, THU_TU_PHIEN_BAN_DON_SQL } from "./thu-tu-ph
  * `coTheDoiSoat` loại mọi stream `shops: null`).
  *
  * `tinDungAdsUpserted`: số dòng (advertiser × ngày) đã ghi Silver `TiktokAdsTinDung` — cùng lý do nằm ngoài `UpsertStats`.
+ *
+ * `hoaDonAdsSkippedStale` / `tinDungAdsSkippedStale`: bản KHÔNG ghi vì Silver đang giữ bản dựng từ dòng kho thô MỚI
+ * HƠN (chốt `nguonFetchedAt`) — kết cục ĐÚNG, tách khỏi `skipped`. Ở đây (không ở `UpsertStats`) cùng lý do hai bộ đếm
+ * `*Upserted` của chúng: không cổng đối soát nào soi hai stream này. Ba bộ đếm stale của sao kê / khoản ads trừ ví /
+ * lệnh rút nằm trong `UpsertStats` vì `demDaHachToan` đọc chúng.
  */
 export type TransformStats = UpsertStats & {
   skippedTruocM: number;
   hoaDonAdsUpserted: number;
   tinDungAdsUpserted: number;
+  hoaDonAdsSkippedStale: number;
+  tinDungAdsSkippedStale: number;
 };
 
 export const empty = (): TransformStats => ({
@@ -41,6 +49,11 @@ export const empty = (): TransformStats => ({
   skippedTruocM: 0,
   hoaDonAdsUpserted: 0,
   tinDungAdsUpserted: 0,
+  settlementsSkippedStale: 0,
+  adsSkippedStale: 0,
+  paymentsSkippedStale: 0,
+  hoaDonAdsSkippedStale: 0,
+  tinDungAdsSkippedStale: 0,
 });
 
 export type TransformOptions = {
@@ -112,6 +125,11 @@ export type TransformOptions = {
    * dung đó. Lấy `fetchedAt` thuần thì mọi mốc webhook sau ảnh già (kể cả sự kiện trùng
    * `remain_quantity`) thắng API mãi, lượt vá đêm mất quyền sửa tồn. Mốc SyncLog cho biết lần API
    * nhìn gần nhất; `fetchedAt` giữ cho ca dòng vừa land muộn hơn mốc đó.
+   *
+   * CỐ Ý vẫn là `fetchedAt` (không phải mốc phiên bản có lần thấy `lanThayCuoi`) dù `RawPancakeProduct` thuộc
+   * `BANG_LAN_THAY`: lần thấy lại luôn xảy ra TRONG một lượt kéo products, nên `lanThayCuoi` chỉ muộn hơn mốc SyncLog của
+   * lượt đó vài giây. Dùng nó thì ảnh API thắng webhook trong vài giây đó; giữ `fetchedAt` thì webhook thắng — hướng
+   * an toàn cho tồn kho (số webhook là sự kiện thật, lượt vá đêm sau tự khẳng định lại).
    */
   mocApiTonKho?: Date;
 };
@@ -133,6 +151,72 @@ export async function chamMoc(
   if (checkpoint && i % CHAM_MOC_MOI === 0) await checkpoint();
 }
 
+/**
+ * MỐC PHIÊN BẢN kho thô — MỘT định nghĩa cho cả hai câu hỏi "bản nào đứng đầu" (chọn payload dựng Silver, màn đọc
+ * thẳng Bronze) và "Silver đang giữ bản mới hơn chưa" (chốt CAS `nguonFetchedAt` của Silver TikTok).
+ *
+ * Bảng trong `BANG_LAN_THAY` có cột `lanThayCuoi` mà `landRaw` ghi khi nguồn trả LẠI đúng một nội dung đã có (A→B→A:
+ * hash trùng nên không chèn dòng, `fetchedAt` của A vẫn là lần land ĐẦU), và cột `mocChup` = lúc nguồn CHỤP lần thấy
+ * mới nhất (`chupLuc` n8n gửi theo trang). Thiếu `chupLuc`: khoá thuần di sản giữ NULL (mốc = lúc land, luật cũ); khoá
+ * đã có mốc thì bản mới chèn ngay DƯỚI bản đầu (mốc lớn nhất − 1 ms) và thấy lại không ghi — không vượt được bản đầu
+ * (`landRaw`). Mốc = `COALESCE("mocChup","lanThayCuoi","fetchedAt")`: so mốc CHỤP chứ không phải mốc LAND, nên trang
+ * của lượt chụp trước về trễ không đẩy bản cũ lên đầu; dòng có trước cột `mocChup` (NULL) rơi về luật cũ.
+ * Hai câu hỏi PHẢI dùng chung mốc này: xếp bản đầu theo lần thấy mà CAS lại so `fetchedAt` trần thì A quay lại đứng
+ * đầu Bronze nhưng bị CAS từ chối trước B — Silver giữ B, lỗi A→B→A sống lại đúng ở bảng tiền.
+ *
+ * Danh sách = bảng KHÔNG có mốc nội dung trong payload mà có người đọc bản đầu: sản phẩm Pancake (Silver sản phẩm +
+ * đề xuất giá vốn ⇒ COGS), báo cáo ads Meta / TikTok Business (dựng lại `Expense` + màn /marketing). CỐ Ý NGOÀI:
+ *  - đơn Pancake: thứ tự riêng theo `updated_at` (`thu-tu-phien-ban-don.ts`);
+ *  - TỒN KHO không có bảng kho thô riêng cùng khuôn: tồn API nằm trong payload sản phẩm (đã thuộc danh sách qua
+ *    `RawPancakeProduct`), còn webhook ghi thẳng `Variant.stock` với guard thứ tự riêng (`stockUpdatedAt`);
+ *  - stream tiền TikTok (sao kê / giao dịch / lệnh rút / hoá đơn / ảnh chụp chi phí): nội dung tiến một chiều (trạng
+ *    thái thanh toán), ảnh chụp chi phí băm cả `request_id` nên mỗi lần kéo là một dòng mới; giao dịch TikTok Shop còn
+ *    có người đọc ngoài lượt dựng (đối soát tiền về) — thêm bảng vào đây phải đi kèm migration + sửa MỌI bộ đọc (lưới
+ *    `tests/bronze/luoi-thu-tu-phien-ban-bronze.test.ts`). Với các bảng này mốc = `fetchedAt` — CAS vẫn đúng nghĩa.
+ */
+export const BANG_LAN_THAY: ReadonlySet<string> = new Set([
+  "RawPancakeProduct",
+  "RawMetaAdsReport",
+  "RawTiktokBusinessReport",
+]);
+
+/**
+ * Các cột tạo nên mốc phiên bản, theo thứ tự ưu tiên của `COALESCE` — MỘT chỗ khai cho cả bản có bí danh lẫn không.
+ * `mocChup` đứng TRƯỚC `lanThayCuoi`: lần thấy lại luôn ghi cả hai, nên mốc chụp nguồn quyết; dòng chỉ có `lanThayCuoi`
+ * (ghi trước khi có cột `mocChup`) hoặc chỉ có `fetchedAt` giữ thứ tự cũ.
+ */
+const COT_MOC_PHIEN_BAN = ["mocChup", "lanThayCuoi", "fetchedAt"] as const;
+
+/**
+ * Mốc phiên bản của bảng có cột lần thấy, kèm bí danh bảng `biDanh` (hằng trong code) — cho câu có nhiều bảng cùng mang
+ * các cột này (`landRaw` so dòng với các phiên bản khác của chính nó).
+ */
+export function mocLanThayCua(biDanh: string): string {
+  return `COALESCE(${COT_MOC_PHIEN_BAN.map((c) => `${biDanh}."${c}"`).join(", ")})`;
+}
+
+/** Mốc phiên bản của bảng có cột lần thấy. Không kèm bí danh bảng ⇒ chỉ dùng khi câu có đúng một bảng mang các cột này. */
+export const MOC_PHIEN_BAN_SQL = `COALESCE(${COT_MOC_PHIEN_BAN.map((c) => `"${c}"`).join(", ")})`;
+
+/** Mốc phiên bản của `table` (hằng registry, KHÔNG lấy từ input) dạng mảnh SQL, không bí danh. */
+export function mocPhienBanSql(table: string): string {
+  return BANG_LAN_THAY.has(table) ? MOC_PHIEN_BAN_SQL : `"fetchedAt"`;
+}
+
+/**
+ * Khoá `ORDER BY` của thứ tự phiên bản (bản ĐỨNG ĐẦU trước) — ghép sau khoá nhóm cho `DISTINCT ON`. `"id" DESC` chốt
+ * cuối: mốc là TIMESTAMP(3), hai phiên bản trùng mili-giây thì `DISTINCT ON` chọn tuỳ ý (số tiền theo may rủi).
+ * KHÔNG dùng cho đơn Pancake (`THU_TU_PHIEN_BAN_DON_SQL`).
+ */
+export function thuTuPhienBanSql(table: string): string {
+  return `${mocPhienBanSql(table)} DESC, "id" DESC`;
+}
+
+/** Bản `Prisma.Sql` của `thuTuPhienBanSql` cho `$queryRaw` dạng tagged template. */
+export function thuTuPhienBan(table: string): Prisma.Sql {
+  return Prisma.raw(thuTuPhienBanSql(table));
+}
+
 export type RawRow = {
   /**
    * `id` của CHÍNH dòng Bronze thắng cuộc. Cần để đóng dấu kết cục lên đúng phiên bản đã dựng nên
@@ -144,6 +228,11 @@ export type RawRow = {
   externalId: string;
   payload: unknown;
   fetchedAt?: Date;
+  /**
+   * Mốc phiên bản của dòng (`mocPhienBanSql`) — giá trị ghi vào `nguonFetchedAt` của Silver TikTok để chốt CAS. KHÁC
+   * `fetchedAt` ở bảng có cột lần thấy (A→B→A); đơn Pancake vẫn dùng `fetchedAt` làm mốc land (`Order.rawFetchedAt`).
+   */
+  mocPhienBan: Date;
 };
 
 export type LatestFilter = {
@@ -169,6 +258,9 @@ export type LatestFilter = {
  * có bản nào để so ⇒ chọn theo `fetchedAt` là dựng nội dung cũ. Bản nằm dưới bản đứng đầu được đóng
  * dấu `SUPERSEDED` ngay khi bản đứng đầu có kết cục (`dongDauKetCuc`), nên đối soát đêm không bao
  * giờ thử lại nó.
+ *
+ * Bảng khác: thứ tự phiên bản chung `thuTuPhienBanSql` (mốc = lần thấy cuối nếu bảng có cột đó, không thì
+ * `fetchedAt` — xem `BANG_LAN_THAY`).
  *
  * Tiebreaker `"id" DESC`: `fetchedAt` là TIMESTAMP(3) — 2 phiên bản cùng entity land trong CÙNG
  * mili-giây thì `DISTINCT ON` chọn bản tuỳ ý, tức số TIỀN của đơn phụ thuộc may rủi. Thêm `id`
@@ -202,12 +294,14 @@ export async function latestPayloads(
   // Đơn Pancake xếp theo thứ tự phiên bản dùng chung với sổ kết cục — xem ghi chú hàm.
   const laDonPancake = table === "RawPancakeOrder";
   const noiMoc = laDonPancake ? NOI_MOC_PHIEN_BAN_DON_SQL : "";
-  const thuTu = laDonPancake ? THU_TU_PHIEN_BAN_DON_SQL : `"fetchedAt" DESC, "id" DESC`;
+  const thuTu = laDonPancake ? THU_TU_PHIEN_BAN_DON_SQL : thuTuPhienBanSql(table);
   // `fetchedAt` đi kèm payload: nhánh `orders` dùng nó làm SỐ PHIÊN BẢN cho phép ghi Silver, để hai
-  // lượt transform song song không ghi ngược thứ tự (xem `Order.rawFetchedAt`).
+  // lượt transform song song không ghi ngược thứ tự (xem `Order.rawFetchedAt`). `mocPhienBan` là số
+  // phiên bản của nhánh Silver TikTok (`nguonFetchedAt`).
   return prisma.$queryRawUnsafe<RawRow[]>(
     `
-    SELECT DISTINCT ON ("shopId", "externalId") "id", "shopId", "externalId", payload, "fetchedAt"
+    SELECT DISTINCT ON ("shopId", "externalId") "id", "shopId", "externalId", payload, "fetchedAt",
+      ${mocPhienBanSql(table)} AS "mocPhienBan"
     FROM "${table}" ${noiMoc}
     ${where}
     ORDER BY "shopId", "externalId", ${thuTu}
@@ -223,7 +317,7 @@ export async function latestPayloads(
  * `latestPayloads`) sẽ bỏ sót khoản đó → hụt tiền + trôi giảm dần mỗi đêm.
  * Subquery kiểm mọi version nên bắt được, mà VẪN chỉ dùng `type` (bất biến #2 —
  * KHÔNG nhận diện bằng số tiền). Payload amount/date lấy từ bản latest (số tiền
- * ổn định giữa các version).
+ * ổn định giữa các version). Trả kèm `mocPhienBan` của bản latest cho chốt CAS `TiktokAdsSettlement.nguonFetchedAt`.
  */
 export async function latestAdsPayloads(filter: {
   shopId: string;
@@ -238,7 +332,8 @@ export async function latestAdsPayloads(filter: {
   }
   return prisma.$queryRawUnsafe<RawRow[]>(
     `
-    SELECT DISTINCT ON ("shopId", "externalId") "shopId", "externalId", payload
+    SELECT DISTINCT ON ("shopId", "externalId") "id", "shopId", "externalId", payload,
+      ${mocPhienBanSql("RawTiktokShopTransaction")} AS "mocPhienBan"
     FROM "RawTiktokShopTransaction"
     WHERE "shopId" = $1
       AND "externalId" IN (
@@ -246,7 +341,7 @@ export async function latestAdsPayloads(filter: {
         WHERE "shopId" = $1 AND payload->>'type' = $2
       )
       ${extra}
-    ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+    ORDER BY "shopId", "externalId", ${thuTuPhienBanSql("RawTiktokShopTransaction")}
     `,
     ...params,
   );

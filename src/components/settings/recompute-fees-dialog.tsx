@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { endOfMonth, format, startOfMonth } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -17,8 +16,20 @@ import {
 import { Input } from "@/components/ui/input";
 import { countRecomputableOrders, recomputeFeesInRange } from "@/lib/actions/settings-channels";
 import type { DateRange } from "@/lib/date-range";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 
-const QUERY_DATE_FORMAT = "yyyy-MM-dd";
+/**
+ * Đầu → cuối THÁNG HIỆN TẠI theo giờ VN (`yyyy-MM-dd`). Không dùng `startOfMonth/endOfMonth` của date-fns:
+ * chúng chạy theo múi giờ MÁY, trình duyệt lệch múi giờ sẽ mặc định sai tháng — mà thao tác tính lại
+ * ghi đè phí và không hoàn tác được. `buildRange` bên dưới cũng neo +07:00 nên hai đầu phải cùng múi.
+ */
+export function thangVnHienTai(now: Date = new Date()): { tu: string; den: string } {
+  const thang = formatNgayVn(now, "yyyy-MM");
+  const [nam, th] = thang.split("-").map(Number);
+  // Ngày 0 của tháng kế = ngày cuối tháng này (UTC để khỏi dính múi giờ máy).
+  const ngayCuoi = new Date(Date.UTC(nam, th, 0)).getUTCDate();
+  return { tu: `${thang}-01`, den: `${thang}-${String(ngayCuoi).padStart(2, "0")}` };
+}
 
 /** yyyy-MM-dd → biên [from 00:00, to 00:00] giờ VN; action tự endOfDay(to). */
 function buildRange(fromStr: string, toStr: string): DateRange | null {
@@ -46,9 +57,9 @@ export function RecomputeFeesDialog() {
 
   function handleOpenChange(next: boolean) {
     if (next) {
-      const now = new Date();
-      setFromStr(format(startOfMonth(now), QUERY_DATE_FORMAT));
-      setToStr(format(endOfMonth(now), QUERY_DATE_FORMAT));
+      const { tu, den } = thangVnHienTai();
+      setFromStr(tu);
+      setToStr(den);
       setCount(null);
     }
     setOpen(next);
@@ -101,8 +112,8 @@ export function RecomputeFeesDialog() {
   }
 
   const range = buildRange(fromStr, toStr);
-  const fromLabel = range ? format(range.from, "dd/MM") : "—";
-  const toLabel = range ? format(range.to, "dd/MM") : "—";
+  const fromLabel = range ? formatNgayVn(range.from, "dd/MM") : "—";
+  const toLabel = range ? formatNgayVn(range.to, "dd/MM") : "—";
   const hasNone = count === 0;
 
   return (

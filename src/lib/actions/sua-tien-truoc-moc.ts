@@ -7,7 +7,7 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { maLoiNhatKy } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { daBatNoPhaiTra, khoaChiaSeBatNoPhaiTra, LoiChuaBat } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import {
@@ -61,102 +61,107 @@ export async function suaSoTienTruocMoc(
   const c = await congChuShopAction();
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  if (typeof id !== "string" || id.trim() === "") return { ok: false, error: "Thiếu khoản chi cần sửa" };
-
-  const parsed = schema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { amountMoi, amountCuDaThay, lyDo } = parsed.data;
-
-  let ketQua: KetQuaSuaTienTruocMoc;
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    ketQua = await prisma.$transaction(async (tx) => {
-      await khoaChiaSeBatNoPhaiTra(tx);
-      const mocM = await daBatNoPhaiTra(tx);
+    if (typeof id !== "string" || id.trim() === "") return { ok: false, error: "Thiếu khoản chi cần sửa" };
 
-      const dong = await tx.expense.findUnique({
-        where: { id },
-        select: {
-          date: true,
-          categoryId: true,
-          refId: true,
-          source: true,
-          cardId: true,
-          amount: true,
-          description: true,
-        },
-      });
-      if (dong === null) throw new LoiSuaTienTruocMoc("KHONG_TIM_THAY", CAU_VUA_DOI);
-      const lyDoChan = lyDoKhongSuaTienTruocMoc(dong, mocM);
-      if (lyDoChan !== null) throw new LoiSuaTienTruocMoc(lyDoChan, cauKhongSuaTien(lyDoChan, mocM));
-      if (dong.amount !== amountCuDaThay) throw new LoiSuaTienTruocMoc("SO_TIEN_DA_DOI", CAU_VUA_DOI);
-      if (amountMoi === dong.amount) {
-        throw new LoiSuaTienTruocMoc("SO_TIEN_KHONG_DOI", "Số tiền mới bằng số đang ghi — không có gì để sửa.");
-      }
+    const parsed = schema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { amountMoi, amountCuDaThay, lyDo } = parsed.data;
 
-      const d0 = await ngayMoSo(tx);
-      const bu = keHoachBuSuaTien(dong.date, dong.amount, amountMoi, d0);
+    let ketQua: KetQuaSuaTienTruocMoc;
+    try {
+      ketQua = await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        const mocM = await daBatNoPhaiTra(tx);
 
-      const { count } = await tx.expense.updateMany({
-        where: {
-          id,
-          amount: dong.amount,
-          date: dong.date,
-          categoryId: dong.categoryId,
-          source: dong.source,
-          refId: dong.refId,
-          cardId: null,
-        },
-        data: { amount: amountMoi },
-      });
-      if (count === 0) throw new LoiSuaTienTruocMoc("SO_TIEN_DA_DOI", CAU_VUA_DOI);
-
-      const thongTin = { ngayDong: dong.date, moTaDong: dong.description, cu: dong.amount, moi: amountMoi, lyDo };
-      let cutoverId: string | null = null;
-      if (bu.coBu) {
-        const row = await tx.cashMovement.create({
-          data: {
-            kind: bu.chieu === "IN" ? "CUTOVER_ADJ_IN" : "CUTOVER_ADJ_OUT",
-            amount: bu.soTien,
-            date: mocM,
-            description: moTaDongBu(thongTin),
-            yeuCauId: null,
+        const dong = await tx.expense.findUnique({
+          where: { id },
+          select: {
+            date: true,
+            categoryId: true,
+            refId: true,
+            source: true,
+            cardId: true,
+            amount: true,
+            description: true,
           },
-          select: { id: true },
         });
-        cutoverId = row.id;
-      }
+        if (dong === null) throw new LoiSuaTienTruocMoc("KHONG_TIM_THAY", CAU_VUA_DOI);
+        const lyDoChan = lyDoKhongSuaTienTruocMoc(dong, mocM);
+        if (lyDoChan !== null) throw new LoiSuaTienTruocMoc(lyDoChan, cauKhongSuaTien(lyDoChan, mocM));
+        if (dong.amount !== amountCuDaThay) throw new LoiSuaTienTruocMoc("SO_TIEN_DA_DOI", CAU_VUA_DOI);
+        if (amountMoi === dong.amount) {
+          throw new LoiSuaTienTruocMoc("SO_TIEN_KHONG_DOI", "Số tiền mới bằng số đang ghi — không có gì để sửa.");
+        }
 
-      const moTa = moTaNhatKySuaTien({ ...thongTin, bu, mocM });
-      await ghiNhatKy(tx, {
-        actor: nguoiDung,
-        hanhDong: "CHI_PHI_SUA_TIEN_TRUOC_MOC",
-        doiTuong: { loai: "Expense", id, moTa },
-        ghiChu: { lyDo: LY_DO_NHAT_KY, thang: format(dong.date, "yyyy-MM") },
-      });
-      if (cutoverId !== null) {
+        const d0 = await ngayMoSo(tx);
+        const bu = keHoachBuSuaTien(dong.date, dong.amount, amountMoi, d0);
+
+        const { count } = await tx.expense.updateMany({
+          where: {
+            id,
+            amount: dong.amount,
+            date: dong.date,
+            categoryId: dong.categoryId,
+            source: dong.source,
+            refId: dong.refId,
+            cardId: null,
+          },
+          data: { amount: amountMoi },
+        });
+        if (count === 0) throw new LoiSuaTienTruocMoc("SO_TIEN_DA_DOI", CAU_VUA_DOI);
+
+        const thongTin = { ngayDong: dong.date, moTaDong: dong.description, cu: dong.amount, moi: amountMoi, lyDo };
+        let cutoverId: string | null = null;
+        if (bu.coBu) {
+          const row = await tx.cashMovement.create({
+            data: {
+              kind: bu.chieu === "IN" ? "CUTOVER_ADJ_IN" : "CUTOVER_ADJ_OUT",
+              amount: bu.soTien,
+              date: mocM,
+              description: moTaDongBu(thongTin),
+              yeuCauId: null,
+            },
+            select: { id: true },
+          });
+          cutoverId = row.id;
+        }
+
+        const moTa = moTaNhatKySuaTien({ ...thongTin, bu, mocM });
         await ghiNhatKy(tx, {
           actor: nguoiDung,
-          hanhDong: "DONG_TIEN_TAO",
-          doiTuong: { loai: "CashMovement", id: cutoverId, moTa },
-          ghiChu: { lyDo: LY_DO_NHAT_KY },
+          hanhDong: "CHI_PHI_SUA_TIEN_TRUOC_MOC",
+          doiTuong: { loai: "Expense", id, moTa },
+          ghiChu: { lyDo: LY_DO_NHAT_KY, thang: format(dong.date, "yyyy-MM") },
         });
-      }
-      return bu.coBu ? { coBu: true, chieu: bu.chieu, soTienBu: bu.soTien } : { coBu: false };
-    }, OPT_TX_DONG_TIEN);
-  } catch (e) {
-    await ghiNhatKyLoi({
-      actor: nguoiDung,
-      hanhDong: "CHI_PHI_SUA_TIEN_TRUOC_MOC",
-      doiTuong: { loai: "Expense", id },
-      ghiChu: { lyDo: maLoiNhatKy(e) },
-    });
-    if (e instanceof LoiChuaBat || e instanceof LoiSuaTienTruocMoc) return { ok: false, code: e.code, error: e.message };
-    if (laLoiDongTienBan(e)) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
-    console.error("[suaSoTienTruocMoc]", e);
-    return { ok: false, error: "Lỗi khi sửa số tiền khoản chi" };
-  }
+        if (cutoverId !== null) {
+          await ghiNhatKy(tx, {
+            actor: nguoiDung,
+            hanhDong: "DONG_TIEN_TAO",
+            doiTuong: { loai: "CashMovement", id: cutoverId, moTa },
+            ghiChu: { lyDo: LY_DO_NHAT_KY },
+          });
+        }
+        return bu.coBu ? { coBu: true, chieu: bu.chieu, soTienBu: bu.soTien } : { coBu: false };
+      }, OPT_TX_DONG_TIEN);
+    } catch (e) {
+      await ghiNhatKyLoi({
+        actor: nguoiDung,
+        hanhDong: "CHI_PHI_SUA_TIEN_TRUOC_MOC",
+        doiTuong: { loai: "Expense", id },
+        ghiChu: { lyDo: maLoiNhatKy(e) },
+      });
+      if (e instanceof LoiChuaBat || e instanceof LoiSuaTienTruocMoc) return { ok: false, code: e.code, error: e.message };
+      if (laLoiDongTienBan(e)) return { ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN };
+      console.error("[suaSoTienTruocMoc]", e);
+      return { ok: false, error: "Lỗi khi sửa số tiền khoản chi" };
+    }
 
-  lamMoiTrang();
-  return { ok: true, data: ketQua };
+    lamMoiTrang();
+    return { ok: true, data: ketQua };
+  } finally {
+    cua.ra();
+  }
 }

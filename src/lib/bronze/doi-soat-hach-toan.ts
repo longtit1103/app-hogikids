@@ -24,6 +24,12 @@ import { type BronzeStream } from "./streams";
  * mất dòng. Bỏ sót nó là báo động giả mỗi lần hai lượt dựng Silver chạy so le, mà đường hạ cờ chắc
  * chắn nhất (dựng lại toàn bảng bằng script) lại kéo tồn kho realtime lùi về ảnh ban đêm.
  *
+ * `settlementsSkippedStale` / `paymentsSkippedStale` CÓ tính — cùng luật với `ordersSkippedStale`: sao kê / lệnh rút
+ * KHÔNG ghi vì Silver đang giữ bản dựng từ dòng kho thô MỚI HƠN (chốt CAS `nguonFetchedAt` — lượt transform cầm ảnh cũ
+ * tới sau). Không tính thì hai lượt so le là `accounted < distinctLanded` ⇒ bật backlog oan. BẮT BUỘC trong
+ * `UpsertStats` (cùng bài học bộ đếm `ordersSkippedStale` ở đầu file). Các bộ đếm stale TikTok khác
+ * (`adsSkippedStale`, hoá đơn, tín dụng) KHÔNG cộng — cùng lý do loại `adsUpserted` (stream ngoài `coTheDoiSoat`).
+ *
  * `ordersDiscardedGiuaChung` CÓ tính — cùng luật với `ordersSkippedStale`: dòng vừa bị lượt "Xóa dữ
  * liệu giao dịch" đóng `DISCARDED` GIỮA khe land→transform. Số phận dòng đã chốt ĐÚNG Ý chủ shop
  * (lượt ghi Silver đã cuộn lại, không hồi sinh) — không phải mất dòng. Không tính thì chính lượt xoá
@@ -45,7 +51,9 @@ export function demDaHachToan(stats: UpsertStats): number {
     stats.ordersDiscardedGiuaChung +
     stats.productsUpserted +
     stats.settlementsUpserted +
+    stats.settlementsSkippedStale +
     stats.paymentsUpserted +
+    stats.paymentsSkippedStale +
     stats.shopeeUpserted
   );
 }

@@ -3,6 +3,12 @@ import { expect, test } from "./fixture-cho-trang-stream-xong";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 test.describe("Đăng nhập", () => {
+  test("tham số redirect lặp (?redirect=a&redirect=b) vẫn ra trang đăng nhập, không 500", async ({ page }) => {
+    const res = await page.goto("/dang-nhap?redirect=a&redirect=b");
+    expect(res?.status()).toBe(200);
+    await expect(page.getByLabel("Email")).toBeVisible();
+  });
+
   test("sai email/mật khẩu hiện lỗi chung và ở lại /dang-nhap", async ({ page }) => {
     await page.goto("/dang-nhap");
 

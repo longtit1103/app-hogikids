@@ -8,7 +8,7 @@ import { LoiHopDong, maLoiNhatKy } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
 import { cauGuiTruocM, loiSoTietKiem, soTietKiemSchema } from "@/lib/actions/so-tiet-kiem-chung";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { prisma } from "@/lib/prisma";
 import { ghiNhatKy, ghiNhatKyLoi } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { chanDongTienTruocM } from "@/lib/no-phai-tra/chan-dong-tien-truoc-m";
@@ -38,7 +38,7 @@ import { chanSoDuTietKiemAm, khoaSoTietKiem } from "@/lib/tiet-kiem/vi-tu-so-tie
  * `CashMovement_loan_savings_loai_tru` dưới DB cấm một dòng mang cả hai khoá.
  *
  * Mọi action ở đây PHẢI nằm trong `DUONG_GHI` của `tests/khoa-bao-tri-duong-ghi.test.ts` — phép quét
- * AST chỉ đọc THÂN HÀM export nên `dangPhucHoi()` phải gọi trực tiếp ở đây, KHÔNG uỷ quyền.
+ * AST chỉ đọc THÂN HÀM export nên `vaoCuaGhi()` phải gọi trực tiếp ở đây, KHÔNG uỷ quyền.
  *
  * ĐÃ BẬT NỢ PHẢI TRẢ (mốc M): dòng gửi/nhận ngày < M đã chốt vào điều chỉnh mở sổ ⇒ tạo / dời / đổi số tiền /
  * xoá dòng tiền ngày < M bị từ chối qua MỘT cổng `chanDongTienTruocM`. Thứ tự khoá mọi transaction:
@@ -87,54 +87,58 @@ export async function taoSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = soTietKiemSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const d = parsed.data;
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const id = await chayCoRetry(() =>
-      prisma.$transaction(async (tx) => {
-        await khoaChiaSeBatNoPhaiTra(tx);
-        await chanDongTienTruocM(
-          tx,
-          { loai: "TAO", ngay: [d.startDate] },
-          { cau: cauGuiTruocM, field: "startDate" }
-        );
-        const so = await tx.soTietKiem.create({
-          data: {
-            name: d.name,
-            bank: d.bank,
-            principal: d.principal,
-            startDate: d.startDate,
-            termMonths: d.termMonths,
-            maturityDate: d.maturityDate,
-            annualRateBp: d.annualRateBp,
-            loanId: d.loanId,
-            note: d.note,
-          },
-        });
-        // Ngày dòng gửi = ĐÚNG `startDate` của sổ: số dư quỹ đếm theo NGÀY DÒNG TIỀN, lệch một ngày
-        // là tháng đó hụt/phồng đúng 200tr mà không chỗ nào giải thích.
-        await tx.cashMovement.create({
-          data: {
-            date: d.startDate,
-            kind: "SAVINGS_OUT",
-            amount: d.principal,
-            savingsId: so.id,
-            description: `Gửi tiết kiệm ${d.name}`,
-          },
-        });
-        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_TAO", doiTuong: { loai: "SoTietKiem", id: so.id } });
-        return so.id;
-      }, OPT_TX_DONG_TIEN)
-    );
+    const parsed = soTietKiemSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const d = parsed.data;
 
-    lamMoiTrang();
-    return { ok: true, data: { id } };
-  } catch (e) {
-    return { ok: false, ...loiSoTietKiem(e, "Lỗi khi ghi sổ tiết kiệm") };
+    try {
+      const id = await chayCoRetry(() =>
+        prisma.$transaction(async (tx) => {
+          await khoaChiaSeBatNoPhaiTra(tx);
+          await chanDongTienTruocM(
+            tx,
+            { loai: "TAO", ngay: [d.startDate] },
+            { cau: cauGuiTruocM, field: "startDate" }
+          );
+          const so = await tx.soTietKiem.create({
+            data: {
+              name: d.name,
+              bank: d.bank,
+              principal: d.principal,
+              startDate: d.startDate,
+              termMonths: d.termMonths,
+              maturityDate: d.maturityDate,
+              annualRateBp: d.annualRateBp,
+              loanId: d.loanId,
+              note: d.note,
+            },
+          });
+          // Ngày dòng gửi = ĐÚNG `startDate` của sổ: số dư quỹ đếm theo NGÀY DÒNG TIỀN, lệch một ngày
+          // là tháng đó hụt/phồng đúng 200tr mà không chỗ nào giải thích.
+          await tx.cashMovement.create({
+            data: {
+              date: d.startDate,
+              kind: "SAVINGS_OUT",
+              amount: d.principal,
+              savingsId: so.id,
+              description: `Gửi tiết kiệm ${d.name}`,
+            },
+          });
+          await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_TAO", doiTuong: { loai: "SoTietKiem", id: so.id } });
+          return so.id;
+        }, OPT_TX_DONG_TIEN)
+      );
+
+      lamMoiTrang();
+      return { ok: true, data: { id } };
+    } catch (e) {
+      return { ok: false, ...loiSoTietKiem(e, "Lỗi khi ghi sổ tiết kiệm") };
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -153,123 +157,127 @@ export async function suaSoTietKiem(input: unknown): Promise<ActionResult<{ id: 
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  // Hai lượt parse riêng: `soTietKiemSchema` kết thúc bằng `.transform` (ZodEffects) nên không
-  // `.extend({ id })` được. Object schema của zod bỏ qua field thừa, nên `id` đi kèm vẫn parse sạch.
-  const parsedId = idSchema.safeParse(input);
-  if (!parsedId.success) return { ok: false, ...mapZodError(parsedId.error) };
-  const parsed = soTietKiemSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { id } = parsedId.data;
-  const d = parsed.data;
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await chayCoRetry(() =>
-      prisma.$transaction(async (tx) => {
-        await khoaChiaSeBatNoPhaiTra(tx);
-        await khoaSoTietKiem(tx, id);
-        const so = await tx.soTietKiem.findUnique({
-          where: { id },
-          select: { closedAt: true, principal: true, startDate: true },
-        });
-        if (!so) throw new LoiHopDong("Không tìm thấy sổ tiết kiệm");
-        if (so.closedAt !== null) {
-          throw new LoiHopDong("Sổ đã tất toán — mở lại trước khi sửa");
-        }
+    // Hai lượt parse riêng: `soTietKiemSchema` kết thúc bằng `.transform` (ZodEffects) nên không
+    // `.extend({ id })` được. Object schema của zod bỏ qua field thừa, nên `id` đi kèm vẫn parse sạch.
+    const parsedId = idSchema.safeParse(input);
+    if (!parsedId.success) return { ok: false, ...mapZodError(parsedId.error) };
+    const parsed = soTietKiemSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { id } = parsedId.data;
+    const d = parsed.data;
 
-        const doiNenTang =
-          d.principal !== so.principal ||
-          d.startDate.getTime() !== startOfDay(so.startDate).getTime();
+    try {
+      await chayCoRetry(() =>
+        prisma.$transaction(async (tx) => {
+          await khoaChiaSeBatNoPhaiTra(tx);
+          await khoaSoTietKiem(tx, id);
+          const so = await tx.soTietKiem.findUnique({
+            where: { id },
+            select: { closedAt: true, principal: true, startDate: true },
+          });
+          if (!so) throw new LoiHopDong("Không tìm thấy sổ tiết kiệm");
+          if (so.closedAt !== null) {
+            throw new LoiHopDong("Sổ đã tất toán — mở lại trước khi sửa");
+          }
 
-        // Dòng gửi đọc SAU khoá (cả phần tiền lẫn khoá cha) — cổng trước mốc xét đúng bản sắp bị sửa.
-        const dongGui = doiNenTang
-          ? await tx.cashMovement.findMany({
-              where: { savingsId: id, kind: "SAVINGS_OUT" },
-              select: {
-                id: true,
-                date: true,
-                amount: true,
-                kind: true,
-                loanId: true,
-                savingsId: true,
-                cardId: true,
-                phieuNhapId: true,
-                viAdsId: true,
-              },
-              orderBy: { date: "asc" },
-            })
-          : [];
-        // Bất biến "1 sổ = 1 dòng gửi" (§7.1). Sổ lỡ có nhiều dòng thì app KHÔNG đoán sửa dòng
-        // nào — ném ⇒ rollback trọn.
-        if (dongGui.length > 1) {
-          throw new LoiHopDong(
-            "Sổ này có nhiều hơn một dòng gửi — xoá dòng ghi tay ở bảng Khoản tiền khác " +
-              "(tab Dòng tiền) trước, rồi sửa số tiền / ngày gửi"
-          );
-        }
-        const moiGui = { amount: d.principal, date: d.startDate };
-        if (doiNenTang) {
-          // Đã bật nợ phải trả: không đổi số tiền / ngày của dòng gửi < M, không dời dòng gửi về trước M. Sửa
-          // dòng có sẵn dùng câu chung (nói rõ "chỉ sửa được mô tả"); dựng lại dòng đã mất dùng câu của lượt tạo.
-          if (dongGui.length === 1) {
-            await chanDongTienTruocM(
-              tx,
-              { loai: "SUA", cu: dongGui[0], moi: { ...dongGui[0], ...moiGui } },
-              { field: "startDate" }
-            );
-          } else {
-            await chanDongTienTruocM(
-              tx,
-              { loai: "TAO", ngay: [moiGui.date] },
-              { cau: cauGuiTruocM, field: "startDate" }
+          const doiNenTang =
+            d.principal !== so.principal ||
+            d.startDate.getTime() !== startOfDay(so.startDate).getTime();
+
+          // Dòng gửi đọc SAU khoá (cả phần tiền lẫn khoá cha) — cổng trước mốc xét đúng bản sắp bị sửa.
+          const dongGui = doiNenTang
+            ? await tx.cashMovement.findMany({
+                where: { savingsId: id, kind: "SAVINGS_OUT" },
+                select: {
+                  id: true,
+                  date: true,
+                  amount: true,
+                  kind: true,
+                  loanId: true,
+                  savingsId: true,
+                  cardId: true,
+                  phieuNhapId: true,
+                  viAdsId: true,
+                },
+                orderBy: { date: "asc" },
+              })
+            : [];
+          // Bất biến "1 sổ = 1 dòng gửi" (§7.1). Sổ lỡ có nhiều dòng thì app KHÔNG đoán sửa dòng
+          // nào — ném ⇒ rollback trọn.
+          if (dongGui.length > 1) {
+            throw new LoiHopDong(
+              "Sổ này có nhiều hơn một dòng gửi — xoá dòng ghi tay ở bảng Khoản tiền khác " +
+                "(tab Dòng tiền) trước, rồi sửa số tiền / ngày gửi"
             );
           }
-        }
-
-        await tx.soTietKiem.update({
-          where: { id },
-          data: {
-            name: d.name,
-            bank: d.bank,
-            principal: d.principal,
-            startDate: d.startDate,
-            termMonths: d.termMonths,
-            maturityDate: d.maturityDate,
-            annualRateBp: d.annualRateBp,
-            loanId: d.loanId,
-            note: d.note,
-          },
-        });
-
-        if (doiNenTang) {
-          const data = moiGui;
-          if (dongGui.length === 1) {
-            await tx.cashMovement.update({ where: { id: dongGui[0].id }, data });
-          } else {
-            // Hàng rào cuối cho sổ lỡ mất dòng gửi (xoá tay ở bảng Khoản tiền khác): dựng lại thay
-            // vì để sổ khai 200tr mà quỹ không trừ đồng nào.
-            await tx.cashMovement.create({
-              data: {
-                ...data,
-                kind: "SAVINGS_OUT",
-                savingsId: id,
-                description: `Gửi tiết kiệm ${d.name}`,
-              },
-            });
+          const moiGui = { amount: d.principal, date: d.startDate };
+          if (doiNenTang) {
+            // Đã bật nợ phải trả: không đổi số tiền / ngày của dòng gửi < M, không dời dòng gửi về trước M. Sửa
+            // dòng có sẵn dùng câu chung (nói rõ "chỉ sửa được mô tả"); dựng lại dòng đã mất dùng câu của lượt tạo.
+            if (dongGui.length === 1) {
+              await chanDongTienTruocM(
+                tx,
+                { loai: "SUA", cu: dongGui[0], moi: { ...dongGui[0], ...moiGui } },
+                { field: "startDate" }
+              );
+            } else {
+              await chanDongTienTruocM(
+                tx,
+                { loai: "TAO", ngay: [moiGui.date] },
+                { cau: cauGuiTruocM, field: "startDate" }
+              );
+            }
           }
-        }
 
-        await chanSoDuTietKiemAm(tx, id);
-        // Câu CUỐI, cùng transaction giữ khoá dòng `SoTietKiem`: nhật ký ném ⇒ bản sửa rollback.
-        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_SUA", doiTuong: { loai: "SoTietKiem", id } });
-      }, OPT_TX_DONG_TIEN)
-    );
+          await tx.soTietKiem.update({
+            where: { id },
+            data: {
+              name: d.name,
+              bank: d.bank,
+              principal: d.principal,
+              startDate: d.startDate,
+              termMonths: d.termMonths,
+              maturityDate: d.maturityDate,
+              annualRateBp: d.annualRateBp,
+              loanId: d.loanId,
+              note: d.note,
+            },
+          });
 
-    lamMoiTrang();
-    return { ok: true, data: { id } };
-  } catch (e) {
-    return { ok: false, ...loiSoTietKiem(e, "Lỗi khi sửa sổ tiết kiệm") };
+          if (doiNenTang) {
+            const data = moiGui;
+            if (dongGui.length === 1) {
+              await tx.cashMovement.update({ where: { id: dongGui[0].id }, data });
+            } else {
+              // Hàng rào cuối cho sổ lỡ mất dòng gửi (xoá tay ở bảng Khoản tiền khác): dựng lại thay
+              // vì để sổ khai 200tr mà quỹ không trừ đồng nào.
+              await tx.cashMovement.create({
+                data: {
+                  ...data,
+                  kind: "SAVINGS_OUT",
+                  savingsId: id,
+                  description: `Gửi tiết kiệm ${d.name}`,
+                },
+              });
+            }
+          }
+
+          await chanSoDuTietKiemAm(tx, id);
+          // Câu CUỐI, cùng transaction giữ khoá dòng `SoTietKiem`: nhật ký ném ⇒ bản sửa rollback.
+          await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_SUA", doiTuong: { loai: "SoTietKiem", id } });
+        }, OPT_TX_DONG_TIEN)
+      );
+
+      lamMoiTrang();
+      return { ok: true, data: { id } };
+    } catch (e) {
+      return { ok: false, ...loiSoTietKiem(e, "Lỗi khi sửa sổ tiết kiệm") };
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -289,67 +297,71 @@ export async function xoaSoTietKiem(input: unknown): Promise<ActionResult<null>>
   const c = await congAction("tai-chinh-so-quy:sua");
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = idSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { id } = parsed.data;
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await chayCoRetry(() =>
-      prisma.$transaction(async (tx) => {
-        await khoaChiaSeBatNoPhaiTra(tx);
-        await khoaSoTietKiem(tx, id);
-        const so = await tx.soTietKiem.findUnique({ where: { id }, select: { closedAt: true } });
-        if (!so) throw new LoiHopDong("Không tìm thấy sổ tiết kiệm");
+    const parsed = idSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { id } = parsed.data;
 
-        const [soThuNhap, soDongGui, soDongKhac] = await Promise.all([
-          tx.thuNhap.count({ where: { savingsId: id } }),
-          tx.cashMovement.count({ where: { savingsId: id, kind: "SAVINGS_OUT" } }),
-          tx.cashMovement.count({ where: { savingsId: id, kind: { not: "SAVINGS_OUT" } } }),
-        ]);
+    try {
+      await chayCoRetry(() =>
+        prisma.$transaction(async (tx) => {
+          await khoaChiaSeBatNoPhaiTra(tx);
+          await khoaSoTietKiem(tx, id);
+          const so = await tx.soTietKiem.findUnique({ where: { id }, select: { closedAt: true } });
+          if (!so) throw new LoiHopDong("Không tìm thấy sổ tiết kiệm");
 
-        const lyDo = lyDoKhongXoaSoTietKiem({
-          daTatToan: so.closedAt !== null,
-          coThuNhap: soThuNhap > 0,
-          coDongGhiTay: soDongKhac > 0 || soDongGui > 1,
-        });
-        if (lyDo !== null) throw new LoiHopDong(lyDo);
+          const [soThuNhap, soDongGui, soDongKhac] = await Promise.all([
+            tx.thuNhap.count({ where: { savingsId: id } }),
+            tx.cashMovement.count({ where: { savingsId: id, kind: "SAVINGS_OUT" } }),
+            tx.cashMovement.count({ where: { savingsId: id, kind: { not: "SAVINGS_OUT" } } }),
+          ]);
 
-        // THÙNG RÁC — chụp cả cụm sau khi mọi cổng đã qua, trước câu xoá đầu tiên. Cổng trên chỉ cho
-        // xoá sổ chưa có dòng lãi nào, nhưng vẫn chụp `ThuNhap` (danh sách rỗng) để ảnh chụp không
-        // phụ thuộc vào cổng: nới cổng sau này mà quên chỗ này là lãi mất không dấu vết.
-        const banGhi = await tx.soTietKiem.findUniqueOrThrow({ where: { id } });
-        const dongTien = await tx.cashMovement.findMany({ where: { savingsId: id } });
-        const dongLai = await tx.thuNhap.findMany({ where: { savingsId: id } });
-        // Đã bật nợ phải trả: không xoá dòng tiền nào ngày < M. Kiểm TRƯỚC câu chụp thùng rác.
-        await chanDongTienTruocM(tx, {
-          loai: "XOA",
-          ngay: [...dongTien.map((m) => m.date), ...dongLai.map((t) => t.date)],
-        });
-        await chupVaoThungRac(tx, {
-          bang: "SoTietKiem",
-          banGhi,
-          cashMovements: dongTien,
-          thuNhap: dongLai,
-        });
+          const lyDo = lyDoKhongXoaSoTietKiem({
+            daTatToan: so.closedAt !== null,
+            coThuNhap: soThuNhap > 0,
+            coDongGhiTay: soDongKhac > 0 || soDongGui > 1,
+          });
+          if (lyDo !== null) throw new LoiHopDong(lyDo);
 
-        // FK `onDelete: Restrict` là hàng rào cuối: dọn dòng gửi TRƯỚC rồi mới xoá hồ sơ.
-        await tx.cashMovement.deleteMany({ where: { savingsId: id } });
-        await tx.soTietKiem.delete({ where: { id } });
-        await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_XOA", doiTuong: { loai: "SoTietKiem", id } });
-      }, OPT_TX_DONG_TIEN)
-    );
+          // THÙNG RÁC — chụp cả cụm sau khi mọi cổng đã qua, trước câu xoá đầu tiên. Cổng trên chỉ cho
+          // xoá sổ chưa có dòng lãi nào, nhưng vẫn chụp `ThuNhap` (danh sách rỗng) để ảnh chụp không
+          // phụ thuộc vào cổng: nới cổng sau này mà quên chỗ này là lãi mất không dấu vết.
+          const banGhi = await tx.soTietKiem.findUniqueOrThrow({ where: { id } });
+          const dongTien = await tx.cashMovement.findMany({ where: { savingsId: id } });
+          const dongLai = await tx.thuNhap.findMany({ where: { savingsId: id } });
+          // Đã bật nợ phải trả: không xoá dòng tiền nào ngày < M. Kiểm TRƯỚC câu chụp thùng rác.
+          await chanDongTienTruocM(tx, {
+            loai: "XOA",
+            ngay: [...dongTien.map((m) => m.date), ...dongLai.map((t) => t.date)],
+          });
+          await chupVaoThungRac(tx, {
+            bang: "SoTietKiem",
+            banGhi,
+            cashMovements: dongTien,
+            thuNhap: dongLai,
+          });
 
-    lamMoiTrang();
-    return { ok: true, data: null };
-  } catch (e) {
-    await ghiNhatKyLoi({
-      actor: nguoiDung,
-      hanhDong: "TIET_KIEM_XOA",
-      doiTuong: { loai: "SoTietKiem", id },
-      ghiChu: { lyDo: maLoiNhatKy(e) },
-    });
-    return { ok: false, ...loiSoTietKiem(e, "Lỗi khi xoá sổ tiết kiệm") };
+          // FK `onDelete: Restrict` là hàng rào cuối: dọn dòng gửi TRƯỚC rồi mới xoá hồ sơ.
+          await tx.cashMovement.deleteMany({ where: { savingsId: id } });
+          await tx.soTietKiem.delete({ where: { id } });
+          await ghiNhatKy(tx, { actor: nguoiDung, hanhDong: "TIET_KIEM_XOA", doiTuong: { loai: "SoTietKiem", id } });
+        }, OPT_TX_DONG_TIEN)
+      );
+
+      lamMoiTrang();
+      return { ok: true, data: null };
+    } catch (e) {
+      await ghiNhatKyLoi({
+        actor: nguoiDung,
+        hanhDong: "TIET_KIEM_XOA",
+        doiTuong: { loai: "SoTietKiem", id },
+        ghiChu: { lyDo: maLoiNhatKy(e) },
+      });
+      return { ok: false, ...loiSoTietKiem(e, "Lỗi khi xoá sổ tiết kiệm") };
+    }
+  } finally {
+    cua.ra();
   }
 }

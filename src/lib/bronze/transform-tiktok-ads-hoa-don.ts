@@ -2,7 +2,13 @@ import { mapHoaDonTiktok, type TruongHoaDonTho } from "@/lib/ingest/tiktok-ads-h
 import { upsertOneHoaDonTiktok } from "@/lib/ingest/tiktok-ads-hoa-don-upsert";
 import { prisma } from "@/lib/prisma";
 
-import { chamMoc, type TransformOptions, type TransformStats } from "./transform-raw-helpers";
+import {
+  chamMoc,
+  mocPhienBanSql,
+  thuTuPhienBanSql,
+  type TransformOptions,
+  type TransformStats,
+} from "./transform-raw-helpers";
 
 /**
  * Nhánh hoá đơn quảng cáo TikTok (`tiktokbusiness/invoice`) → Silver `TiktokAdsHoaDon`. Gọi từ
@@ -20,6 +26,8 @@ type HoaDonThoRow = {
   payload: unknown;
   /** Trường cấp một của payload, giá trị là CHUỖI rút bằng `#>> '{}'` — lossless cho int64 lẫn tiền. */
   truong: TruongHoaDonTho | null;
+  /** Mốc phiên bản của dòng kho thô (`mocPhienBanSql`) — chốt CAS `TiktokAdsHoaDon.nguonFetchedAt`. */
+  mocPhienBan: Date;
 };
 
 /**
@@ -51,10 +59,11 @@ async function docHoaDonMoiNhat(filter: { shopId?: string; externalIds?: string[
       "shopId", "externalId", payload,
       CASE WHEN jsonb_typeof(payload) = 'object'
         THEN (SELECT jsonb_object_agg(e.k, e.v #>> '{}') FROM jsonb_each(payload) AS e(k, v))
-      END AS truong
+      END AS truong,
+      ${mocPhienBanSql("RawTiktokBusinessInvoice")} AS "mocPhienBan"
     FROM "RawTiktokBusinessInvoice"
     ${where}
-    ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
+    ORDER BY "shopId", "externalId", ${thuTuPhienBanSql("RawTiktokBusinessInvoice")}
     `,
     ...params,
   );
@@ -77,6 +86,6 @@ export async function transformTiktokAdsHoaDon(
       warnings.push(`Bỏ qua hoá đơn TikTok ${row.externalId}: ${m.loi}`);
       continue;
     }
-    await upsertOneHoaDonTiktok(m.hoaDon, row.payload, stats, warnings);
+    await upsertOneHoaDonTiktok(m.hoaDon, row.payload, row.mocPhienBan, stats, warnings);
   }
 }

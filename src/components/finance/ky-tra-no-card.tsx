@@ -22,6 +22,7 @@ import { formatVnd } from "@/lib/format";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { laLaiNhapGoc, type DeXuatKy } from "@/lib/so-quy/lich-tra-no";
 import { gocDeXuatKep, tienGuiSeNhanLai } from "@/lib/so-quy/tien-ky-tra-no";
+import { MAX_AMOUNT_INPUT } from "@/lib/format-amount-input";
 
 import { KyTraNoInputs } from "./ky-tra-no-inputs";
 
@@ -53,12 +54,16 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
   const [goc, setGoc] = useState(() => gocDeXuatKep({ gocDeXuat: ky.goc, duNoHienTai: loan.duNo }));
   const [tienGui, setTienGui] = useState(ky.tienGui);
   const [dangGhi, setDangGhi] = useState(false);
+  // Gõ quá trần 2 tỷ ở ô nào cũng báo đỏ tại ô (KyTraNoInputs) và khoá hai nút ghi — action vẫn chặn.
+  const vuotTran = [lai, goc, tienGui].some((v) => v > MAX_AMOUNT_INPUT);
   const [moGhi, setMoGhi] = useState(false);
   const [moBoQua, setMoBoQua] = useState(false);
 
   const thauChi = loan.kind === "OVERDRAFT";
   const nhanKy = thauChi ? "kỳ lãi" : "kỳ";
-  const tre = differenceInCalendarDays(new Date(), ky.denNgay) > NGAY_COI_LA_TRE;
+  // So theo ngày lịch VN (khoá ngày VN dựng lại mốc 12:00 UTC) — không phụ thuộc múi giờ máy, cùng khuôn `laDaoHanTre`.
+  const ngayVn = (d: Date) => new Date(`${formatNgayVn(d, "yyyy-MM-dd")}T12:00:00Z`);
+  const tre = differenceInCalendarDays(ngayVn(new Date()), ngayVn(ky.denNgay)) > NGAY_COI_LA_TRE;
   // Trừ trên dư nợ HIỆN TẠI, không phải dư nợ đầu kỳ: giữa kỳ có thể đã trả bớt gốc bằng tay, lúc
   // đó hai số lệch nhau và hộp xác nhận sẽ hứa một con số dư nợ không bao giờ xảy ra.
   // Khoản thấu chi LÃI NHẬP GỐC: lãi kỳ này CỘNG vào dư nợ (ngân hàng không trừ tài khoản) nên dư nợ
@@ -189,7 +194,7 @@ export function KyTraNoCard({ loan }: { loan: KhoanVayRow & { kyCho: DeXuatKy } 
             )}
             <DialogFooter>
               <DialogClose render={<Button variant="outline">Huỷ</Button>} />
-              <Button type="button" disabled={dangGhi} onClick={() => ghi(false)}>
+              <Button type="button" disabled={dangGhi || vuotTran} onClick={() => ghi(false)}>
                 {dangGhi ? "Đang ghi…" : "Ghi vào sổ"}
               </Button>
             </DialogFooter>

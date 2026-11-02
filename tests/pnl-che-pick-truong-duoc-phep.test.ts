@@ -72,9 +72,9 @@ describe("cheChannelPnl / cheDailySeries / coLaiKenh", () => {
     expect(coLaiKenh(kenh)).toBe(true);
   });
 
-  it("chuỗi ngày che chỉ date + revenue", () => {
-    const [p] = cheDailySeries([{ date: "2026-10-01", revenue: 1, netProfit: 7331117 }]);
-    expect(p).toEqual({ date: "2026-10-01", revenue: 1 });
+  it("chuỗi ngày che chỉ date + revenue + orderCount (chi phí gồm giá vốn ⇒ bỏ)", () => {
+    const [p] = cheDailySeries([{ date: "2026-10-01", revenue: 1, netProfit: 7331117, chiPhi: 6221117, orderCount: 3 }]);
+    expect(p).toEqual({ date: "2026-10-01", revenue: 1, orderCount: 3 });
   });
 });
 

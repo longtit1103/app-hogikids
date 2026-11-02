@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import type { KetQuaKiemTra } from "@/lib/ket-noi/kiem-tra-types";
 import { lyDoTuChoiDichN8n } from "@/lib/n8n/kiem-dich-den-n8n";
 import { kiemTraN8n } from "@/lib/n8n/provision/kiem-tra-va-trang-thai-n8n";
@@ -47,40 +47,44 @@ export async function luuKetNoiN8n(values: {
   // Kết nối n8n thuộc "khoá kết nối" — owner-only (spec phân quyền §1.1).
   const cong = await congChuShopAction();
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const canGhi: Array<[string, string]> = [];
-  for (const key of ["n8nBaseUrl", "n8nWebhookPublicBase"] as const) {
-    const tho = values[key];
-    if (tho === undefined || tho.trim() === "") continue;
-    const parsed = urlSchema.safeParse(tho);
-    if (!parsed.success) return { ok: false, error: `Ô ${key} không hợp lệ — ${parsed.error.issues[0]?.message}`, field: key };
-    // Chuẩn hoá NGAY LÚC GHI: bỏ userinfo/query/fragment, một dạng duy nhất trong kho — URL này
-    // là ĐÍCH mà lượt Cài gửi credential tới, chuỗi lạ lưu vào là gửi nhầm chỗ về sau.
-    const u = new URL(parsed.data);
-    canGhi.push([key, `${u.origin}${u.pathname.replace(/\/+$/, "")}`]);
-  }
-  if (values.n8nApiKey !== undefined && values.n8nApiKey.trim() !== "") {
-    const parsed = apiKeySchema.safeParse(values.n8nApiKey);
-    if (!parsed.success) return { ok: false, error: "API key không hợp lệ (một dòng, tối đa 1000 ký tự)", field: "n8nApiKey" };
-    canGhi.push(["n8nApiKey", parsed.data]);
-  }
-  if (canGhi.length === 0) return { ok: false, error: "Chưa nhập giá trị nào để lưu" };
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      for (const [key, value] of canGhi) {
-        await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
-      }
-      // Chỉ SỐ ô đã lưu — không tên khoá, không giá trị.
-      await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.N8N_LUU_KET_NOI, ghiChu: { soDong: canGhi.length } });
-    });
-  } catch {
-    return { ok: false, error: "Lỗi khi lưu vào kho" };
-  }
+    const canGhi: Array<[string, string]> = [];
+    for (const key of ["n8nBaseUrl", "n8nWebhookPublicBase"] as const) {
+      const tho = values[key];
+      if (tho === undefined || tho.trim() === "") continue;
+      const parsed = urlSchema.safeParse(tho);
+      if (!parsed.success) return { ok: false, error: `Ô ${key} không hợp lệ — ${parsed.error.issues[0]?.message}`, field: key };
+      // Chuẩn hoá NGAY LÚC GHI: bỏ userinfo/query/fragment, một dạng duy nhất trong kho — URL này
+      // là ĐÍCH mà lượt Cài gửi credential tới, chuỗi lạ lưu vào là gửi nhầm chỗ về sau.
+      const u = new URL(parsed.data);
+      canGhi.push([key, `${u.origin}${u.pathname.replace(/\/+$/, "")}`]);
+    }
+    if (values.n8nApiKey !== undefined && values.n8nApiKey.trim() !== "") {
+      const parsed = apiKeySchema.safeParse(values.n8nApiKey);
+      if (!parsed.success) return { ok: false, error: "API key không hợp lệ (một dòng, tối đa 1000 ký tự)", field: "n8nApiKey" };
+      canGhi.push(["n8nApiKey", parsed.data]);
+    }
+    if (canGhi.length === 0) return { ok: false, error: "Chưa nhập giá trị nào để lưu" };
 
-  revalidatePath("/cai-dat");
-  return { ok: true, data: { daLuu: canGhi.length } };
+    try {
+      await prisma.$transaction(async (tx) => {
+        for (const [key, value] of canGhi) {
+          await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+        }
+        // Chỉ SỐ ô đã lưu — không tên khoá, không giá trị.
+        await ghiNhatKy(tx, { actor: cong.nguoiDung, hanhDong: HANH_DONG.N8N_LUU_KET_NOI, ghiChu: { soDong: canGhi.length } });
+      });
+    } catch {
+      return { ok: false, error: "Lỗi khi lưu vào kho" };
+    }
+
+    revalidatePath("/cai-dat");
+    return { ok: true, data: { daLuu: canGhi.length } };
+  } finally {
+    cua.ra();
+  }
 }
 
 /** Chỉ ĐỌC kho + GET danh sách workflow — không ghi gì nên không chặn lúc phục hồi. */
@@ -106,25 +110,29 @@ export type KetQuaCaiWorkflows =
 export async function caiWorkflowsN8n(opts?: { xacNhanDoiHaTang?: boolean }): Promise<ActionResult<KetQuaCaiWorkflows>> {
   const cong = await congChuShopAction();
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  let ketQua: KetQuaProvision;
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    ketQua = await provisionN8n({ xacNhanDoiHaTang: opts?.xacNhanDoiHaTang });
-  } catch (e) {
-    // Chưa ghi gì — chỉ hỏi lại người dùng ⇒ không có gì để ghi nhật ký.
-    if (e instanceof CanXacNhanDoiHaTang) {
-      return { ok: true, data: { loai: "can-xac-nhan", chiTiet: e.chiTiet } };
+    let ketQua: KetQuaProvision;
+    try {
+      ketQua = await provisionN8n({ xacNhanDoiHaTang: opts?.xacNhanDoiHaTang });
+    } catch (e) {
+      // Chưa ghi gì — chỉ hỏi lại người dùng ⇒ không có gì để ghi nhật ký.
+      if (e instanceof CanXacNhanDoiHaTang) {
+        return { ok: true, data: { loai: "can-xac-nhan", chiTiet: e.chiTiet } };
+      }
+      // Provision ghi nhiều bước (Setting, n8n) không chung một transaction ⇒ hỏng giữa chừng vẫn có
+      // thể đã đổi một phần — để lại dấu vết LOI.
+      await ghiNhatKyLoi({ actor: cong.nguoiDung, hanhDong: HANH_DONG.N8N_CAI_WORKFLOWS, ghiChu: { lyDo: "that-bai" } });
+      // Message của tầng provision/client cam kết không chứa secret — hiện nguyên văn để lần được lỗi.
+      return { ok: false, error: e instanceof Error ? e.message : "Cài workflows thất bại" };
     }
-    // Provision ghi nhiều bước (Setting, n8n) không chung một transaction ⇒ hỏng giữa chừng vẫn có
-    // thể đã đổi một phần — để lại dấu vết LOI.
-    await ghiNhatKyLoi({ actor: cong.nguoiDung, hanhDong: HANH_DONG.N8N_CAI_WORKFLOWS, ghiChu: { lyDo: "that-bai" } });
-    // Message của tầng provision/client cam kết không chứa secret — hiện nguyên văn để lần được lỗi.
-    return { ok: false, error: e instanceof Error ? e.message : "Cài workflows thất bại" };
+    // Provision tự quản các lượt ghi của nó (nhiều transaction + gọi n8n) ⇒ nhật ký ghi ngay sau khi
+    // xong, NGOÀI `try` ở trên: nhật ký hỏng là lỗi hệ thống, không được báo nhầm thành "Cài thất bại".
+    await ghiNhatKy(prisma, { actor: cong.nguoiDung, hanhDong: HANH_DONG.N8N_CAI_WORKFLOWS });
+    revalidatePath("/cai-dat");
+    return { ok: true, data: { loai: "xong", ketQua } };
+  } finally {
+    cua.ra();
   }
-  // Provision tự quản các lượt ghi của nó (nhiều transaction + gọi n8n) ⇒ nhật ký ghi ngay sau khi
-  // xong, NGOÀI `try` ở trên: nhật ký hỏng là lỗi hệ thống, không được báo nhầm thành "Cài thất bại".
-  await ghiNhatKy(prisma, { actor: cong.nguoiDung, hanhDong: HANH_DONG.N8N_CAI_WORKFLOWS });
-  revalidatePath("/cai-dat");
-  return { ok: true, data: { loai: "xong", ketQua } };
 }

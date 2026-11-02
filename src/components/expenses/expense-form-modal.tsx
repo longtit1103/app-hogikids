@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format, getDate } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -10,16 +9,18 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { XacNhanHopThoai } from "@/components/ui/xac-nhan-hop-thoai";
 import { createExpense, stopRecurring, updateExpense } from "@/lib/actions/expenses";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { DINH_KY_TRUNG_MAU_DANG_CHAY as MA_DINH_KY_TRUNG } from "@/lib/expenses/mau-dinh-ky-trung";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
-import { loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 
 const NONE = "__none__"; // sentinel: Select không nhận value="" cho "Không gắn kênh"
 // Danh mục Lãi vay — server (`src/lib/actions/expenses.ts`) chặn MỌI dòng danh mục này mang kênh.
 const DANH_MUC_LAI_VAY = "interest";
-const QUERY_DATE_FORMAT = "yyyy-MM-dd";
+const QUERY_DATE_FORMAT = "yyyy-MM-dd" as const;
 
 const ADS_SOURCE_OPTIONS: { value: string; label: string }[] = [
   { value: "META", label: "Meta" },
@@ -76,7 +77,7 @@ type FormState = {
 function buildInitialState(expense: ExpenseRow | undefined, preset: ExpenseFormModalProps["preset"]): FormState {
   if (expense) {
     return {
-      date: format(expense.date, QUERY_DATE_FORMAT),
+      date: formatNgayVn(expense.date, QUERY_DATE_FORMAT),
       categoryId: expense.categoryId,
       adsSource: expense.adsSource ?? "",
       amount: expense.amount,
@@ -87,7 +88,7 @@ function buildInitialState(expense: ExpenseRow | undefined, preset: ExpenseFormM
     };
   }
   return {
-    date: format(new Date(), QUERY_DATE_FORMAT),
+    date: formatNgayVn(new Date(), QUERY_DATE_FORMAT),
     categoryId: preset?.categoryId ?? "",
     adsSource: preset?.adsSource ?? "",
     amount: 0,
@@ -134,7 +135,7 @@ export function ExpenseFormModal({
 }: ExpenseFormModalProps) {
   const router = useRouter();
   const isEdit = Boolean(expense);
-  const todayStr = format(new Date(), QUERY_DATE_FORMAT);
+  const todayStr = formatNgayVn(new Date(), QUERY_DATE_FORMAT);
 
   const [date, setDate] = useState(todayStr);
   const [categoryId, setCategoryId] = useState("");
@@ -188,14 +189,20 @@ export function ExpenseFormModal({
   });
   const canhBaoTrung = canhBaoDaNhan?.anhChup === anhChupHienTai ? canhBaoDaNhan.cau : null;
 
+  const [hoiBoThayDoi, setHoiBoThayDoi] = useState(false);
+
   function isDirty(): boolean {
     const current: FormState = { date, categoryId, adsSource, amount, channelId, description, recurringMonthly, cardId };
     return JSON.stringify(current) !== initialSnapshotRef.current;
   }
 
   function handleOpenChange(next: boolean) {
+    // Hộp "Bỏ thay đổi?" đang hiện: yêu cầu đóng form lúc này là Esc/bấm ngoài đi lên từ hộp con — hộp tự
+    // xử lý lần đóng của nó. Hỏi lại ở đây sẽ bật lại hộp ngay sau khi người dùng vừa chọn "Tiếp tục sửa".
+    if (!next && hoiBoThayDoi) return;
     if (!next && isDirty()) {
-      if (!window.confirm("Bỏ thay đổi?")) return;
+      setHoiBoThayDoi(true);
+      return;
     }
     onOpenChange(next);
   }
@@ -414,7 +421,7 @@ export function ExpenseFormModal({
             <div className="relative">
               <Input
                 inputMode="numeric"
-                value={amount ? new Intl.NumberFormat("vi-VN").format(amount) : ""}
+                value={formatAmountInput(amount)}
                 onChange={(e) => setAmount(parseAmountInput(e.target.value))}
                 placeholder="0"
                 className="pr-8 text-right"
@@ -489,7 +496,7 @@ export function ExpenseFormModal({
                 <p className="text-sm text-ink">Lặp lại hàng tháng</p>
                 {recurringMonthly && Boolean(date) && (
                   <p className="text-xs text-muted-foreground">
-                    Tự ghi vào ngày {getDate(new Date(`${date}T00:00:00+07:00`))} hàng tháng
+                    Tự ghi vào ngày {Number(formatNgayVn(new Date(`${date}T00:00:00+07:00`), "dd"))} hàng tháng
                   </p>
                 )}
               </div>
@@ -523,6 +530,17 @@ export function ExpenseFormModal({
             {saving ? "Đang lưu…" : canhBaoTrung ? "Vẫn lưu" : "Lưu"}
           </Button>
         </DialogFooter>
+        {/* Hộp xác nhận LỒNG trong DialogContent: Base UI nhận dialog con theo cây React nên bấm vào nó
+            không bị form coi là "bấm ra ngoài" (khác `xacNhan()` toàn cục, chỉ hợp khi không có dialog cha). */}
+        <XacNhanHopThoai
+          open={hoiBoThayDoi}
+          onOpenChange={setHoiBoThayDoi}
+          onDongY={() => onOpenChange(false)}
+          tieuDe="Bỏ thay đổi?"
+          noiDung="Bạn có thay đổi chưa lưu. Đóng form sẽ mất các thay đổi đó."
+          nhanDongY="Bỏ thay đổi"
+          nhanHuy="Tiếp tục sửa"
+        />
       </DialogContent>
     </Dialog>
   );

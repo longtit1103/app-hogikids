@@ -4,18 +4,14 @@
  * `channel-compare-table.tsx` để không lặp code format.
  */
 
-/** "6,5%" — 1 chữ số thập phân kiểu Việt (dấu phẩy). Dùng cho Hoàn/Bom, Tỷ suất LN. */
-export function formatPct1(n: number): string {
-  return `${n.toFixed(1).replace(".", ",")}%`;
-}
+import { formatPercent } from "@/lib/format";
 
 /** "3,2x" — ROAS 1 chữ số thập phân kiểu Việt + hậu tố "x". */
 export function formatRoas(n: number): string {
   return `${n.toFixed(1).replace(".", ",")}x`;
 }
 
-/** "Phí sàn 6,5%" — số nguyên bỏ thập phân, số lẻ 1 chữ số kiểu Việt (dấu phẩy). */
+/** "Phí sàn 6,5%" — cùng kiểu tỷ lệ với toàn app (`formatPercent`: bỏ ",0" thừa, không hữu hạn thì "—"). */
 export function feeBadgeLabel(pct: number): string {
-  const rounded = Number.isInteger(pct) ? String(pct) : pct.toFixed(1).replace(".", ",");
-  return `Phí sàn ${rounded}%`;
+  return `Phí sàn ${formatPercent(pct)}`;
 }

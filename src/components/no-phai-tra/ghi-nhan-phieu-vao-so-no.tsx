@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -19,8 +18,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ghiNhanPhieuVaoSoNo } from "@/lib/actions/phieu-nhap-no";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 import type { PhieuChoGhiNo } from "@/lib/no-phai-tra/doc-phieu-cho-ghi-no";
 
 /**
@@ -72,7 +72,7 @@ export function GhiNhanPhieuVaoSoNo({
   choPhepTraNgay?: boolean;
 }) {
   const router = useRouter();
-  const homNay = format(new Date(), "yyyy-MM-dd");
+  const homNay = formatNgayVn(new Date(), "yyyy-MM-dd");
   const [hienCu, setHienCu] = useState(false);
   const [mo, setMo] = useState(false);
   const [dangChay, setDangChay] = useState(false);
@@ -95,6 +95,9 @@ export function GhiNhanPhieuVaoSoNo({
   // Lỗi chặn nút ghi, theo từng phiếu đang CHỌN (câu hiện ngay dưới dòng).
   function loiCua(p: PhieuChoGhiNo): string | null {
     const d = dong[p.uuid];
+    // Gõ quá trần 2 tỷ ở ô tiền nào cũng báo ngay dưới dòng + khoá nút (server vẫn chặn).
+    const loiTran = loiVuotTranAmount(d.daTraTruoc ?? 0) ?? (d.traNgay ? loiVuotTranAmount(d.soTienTraNgay ?? 0) : null);
+    if (loiTran) return loiTran;
     if (canLyDoLech(p, d)) {
       if (!laChuShop) return "Số khác số Sổ chi phí chỉ chủ shop ghi được.";
       if (d.lyDoLech.trim().length < 3) return "Ghi lý do lệch (tối thiểu 3 ký tự).";
@@ -193,7 +196,7 @@ export function GhiNhanPhieuVaoSoNo({
                       onCheckedChange={() => sua(p.uuid, { chon: !d.chon })}
                     />
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-ink">{format(p.ngay, "dd/MM/yyyy")}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-ink">{formatNgayVn(p.ngay, "dd/MM/yyyy")}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-ink">
                     {nhanPhieu(p)}
                     {p.lechLuoiKiem && (

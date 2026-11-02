@@ -4,15 +4,23 @@ import { join } from "node:path";
 
 import { format } from "date-fns";
 
+import { chayMienCong, choDrain, docBoDem, laLoiCongGhiDangKhoa } from "@/lib/backup/cong-ghi-toan-cuc";
 import { chuanBiThuMucRiengTu, ghiFileRiengTu } from "@/lib/backup/ghi-file-rieng-tu";
 import {
   dangPhucHoi,
   giaHanKhoaPhucHoi,
   laChuKhoaPhucHoi,
   LoiMatKhoaPhucHoi,
+  type ThePhienPhucHoi,
   thuGiuKhoaPhucHoi,
   traKhoaPhucHoi,
 } from "@/lib/backup/khoa-bao-tri";
+import {
+  giuDocQuyenRestore,
+  type KhoaDocQuyenRestore,
+  type PhienGiuKhoa,
+  TIEN_TO_APP_RESTORE,
+} from "@/lib/backup/khoa-chung-cli";
 import {
   giaHanKhoa,
   giuKhoaViecNang,
@@ -36,6 +44,7 @@ import { ghiNhatKy, ghiNhatKyLoi, type ActorNhatKy } from "@/lib/nhat-ky/ghi-nha
 import { HANH_DONG } from "@/lib/nhat-ky/hanh-dong";
 import { prisma } from "@/lib/prisma";
 import { congChuShopRoute } from "@/lib/quyen/cong-route";
+import { cauHinhClientKhoa } from "@/lib/tao-prisma-client";
 
 const KEEP_PRE_RESTORE = 3;
 
@@ -94,16 +103,27 @@ const VIEC_PHUC_HOI = "phục hồi dữ liệu từ bản sao lưu";
  *   401 (không phiên) / 403 (không phải chủ shop) → cap size 200MB (413, chưa đọc bytes) → detect (chưa đụng
  *   DB) → (plain-gzip) gunzip HEAD bounded + assertNotArchive (chặn .tar.gz
  *   toàn-server TRƯỚC mọi DROP) → guard schema (400) rồi cổng "dump đời trước phân quyền" (422), cả hai
- *   chỉ đọc file → GIÀNH KHOÁ BẢO TRÌ (409 nếu bận) → GIÀNH KHOÁ
- *   VIỆC NẶNG (409 kèm tên việc nếu một writer chạy dài còn sống thật — xem (3b)) →
- *   DRAIN SyncLog: còn lượt đồng bộ đang chạy thì 409 (khoá chỉ chặn request MỚI,
- *   lượt vào trước vẫn đang ghi) → pre-restore backup (không có bản lùi thì KHÔNG
- *   restore) → runRestore.
+ *   chỉ đọc file → LEASE VIỆC NẶNG (409 kèm tên việc nếu một writer chạy dài còn sống thật) →
+ *   KHOÁ GHI CHUNG X (409 kèm phiên CLI đang giữ) → CỜ BẢO TRÌ (409 nếu lượt khác đang chạy) →
+ *   DRAIN cổng ghi (chờ request/action/op lẻ đã vào trước cờ chạy trọn; quá hạn 409) → cổng
+ *   SyncLog (409) → fencing → pre-restore backup (không có bản lùi thì KHÔNG restore) → fencing
+ *   (+ X còn giữ + lease) → runRestore (chốt cuối trước phá huỷ) → fencing → thu hồi phiên →
+ *   `finally`: trả cờ → nhả X → trả lease.
  *
- * KHOÁ BẢO TRÌ giữ suốt pre-backup → phục hồi xong (xem `khoa-bao-tri.ts`): hai lượt
+ * Mọi lối dừng TRƯỚC lệnh phá huỷ đầu tiên trả 409 "chưa thay đổi gì" (riêng pre-backup hỏng: 500
+ * "đã hủy phục hồi"). Từ lúc giữ cờ, câu ghi của chính lượt phục hồi đi LỐI MIỄN cổng ghi.
+ *
+ * KHOÁ BẢO TRÌ giữ suốt drain → phục hồi xong (xem `khoa-bao-tri.ts`): hai lượt
  * phục hồi chồng nhau sẽ xen vào đúng lúc schema bị drop/tạo lại (dữ liệu lai, hoặc
  * bản lùi của lượt này chụp trạng thái dở của lượt kia), và mọi đường ghi khác
- * (webhook, n8n, nút bấm) bị trả 503 trong cửa sổ đó thay vì ghi vào schema sắp mất.
+ * (webhook, n8n, nút bấm) bị cửa ghi trả 503 / lỗi "đang phục hồi" trong cửa sổ đó.
+ *
+ * PHẠM VI LOẠI TRỪ (nói đúng, không hơn): (1) mọi đường ghi của CHÍNH tiến trình app này (cửa ghi +
+ * lưới cấp op + drain); (2) mọi script/seed CLI dựng client qua `@/lib/prisma` / `taoPrismaClient`
+ * (khoá ghi chung X — 409 kèm phiên + nút cắt phiên). KHÔNG loại trừ: `next dev` trên Mac trỏ DB prod
+ * (tiến trình Next khác — cờ là RAM của container này, nó không giữ khoá CLI), Prisma Studio, `psql`
+ * tay, hay bất kỳ client nào không đi qua `taoPrismaClient` ⇒ phải tắt chúng trước khi phục hồi. Nhân
+ * sự thao tác qua app thì không cần báo ngừng nhập.
  *
  * KIỂM QUYỀN SỞ HỮU XEN GIỮA (fencing) — giữ được khoá lúc VÀO không có nghĩa là còn giữ lúc chạy
  * tới lệnh nạp. Cờ có TTL, mà mấy bước chờ ở đây (`coLuotDangChay()` là truy vấn Prisma không hạn,
@@ -125,10 +145,53 @@ export async function POST(request: Request): Promise<Response> {
 
   // Nhật ký ghi SAU khi `phucHoi` trả về — lúc đó `finally` của nó đã nhả khoá bảo trì + khoá việc
   // nặng. Kết cục thu hồi phiên đi qua `vet.thuHoiPhien` (không suy từ mã HTTP). Xem `ghiNhatKyPhucHoi`.
+  // Restore khô (seam CHỈ bản build e2e, `docRestoreKhoE2e`) dừng trước bản lùi, không đổi dữ liệu ⇒
+  // KHÔNG ghi nhật ký phục hồi.
+  const khoE2e = docRestoreKhoE2e(request);
+  if (khoE2e instanceof Response) return khoE2e;
   const vet: VetPhucHoi = { thuHoiPhien: "KHONG_TOI" };
-  const response = await phucHoi(request, vet);
+  const response = await phucHoi(request, vet, khoE2e);
+  if (khoE2e) return response;
   await ghiNhatKyPhucHoi(response, vet, { id: cong.nguoiDung.id, email: cong.nguoiDung.email });
   return response;
+}
+
+/** Lượt phục hồi nạp gì: file tải lên (lượt thật) hoặc restore khô (seam e2e — dừng trước bản lùi). */
+type NguonPhucHoi = { loai: "file"; fileBuf: Buffer } | { loai: "kho-e2e"; hanDrainMs: number };
+
+/**
+ * SEAM "RESTORE KHÔ" — CHỈ cho e2e cổng ghi trên bản build (`tests/e2e/cong-ghi-prod.spec.ts`). Trả hạn
+ * drain khi request này là restore khô; `null` ở mọi trường hợp khác (luôn luôn trên bản build prod).
+ * Request ĐÃ đăng ký mà hạn không hợp lệ ⇒ `Response` 400 — KHÔNG BAO GIỜ rơi về lối phục hồi thật:
+ * request do route chỉ-test dựng ra không được có đường nào tới bản lùi / lệnh phá huỷ.
+ *
+ * Restore khô đi ĐÚNG chuỗi thật của lượt phục hồi — cổng chủ shop → origin → lease → X → cờ → drain →
+ * cổng SyncLog → fencing — rồi DỪNG trước bản lùi: không đọc file, không `pg_dump`/`pg_restore`, không
+ * đụng dữ liệu, không ghi nhật ký. Bật khi CẢ HAI cùng đúng:
+ *  1. `E2E_CONG_GHI=1` lúc chạy (chỉ `playwright.cong-ghi-prod.config.ts` đặt; mẫu `.env` không có biến này);
+ *  2. CHÍNH object `request` này đã được đăng ký vào bảng neo `globalThis`. Chỉ route chỉ-test
+ *     `src/app/api/e2e-cong-ghi/route.e2e.ts` đăng ký (qua `src/lib/backup/cong-ghi-e2e-chi-test.ts`), và
+ *     Next chỉ build file đó khi `E2E_CONG_GHI_BUILD=1` (`pageExtensions` ở `next.config.ts`). Khoá của
+ *     bảng là object trong RAM — không HTTP client nào tạo được mục, nên bản build prod (kể cả lỡ đặt
+ *     biến ở (1)) không có đường nào bật seam.
+ * Đọc bảng bằng chuỗi `Symbol.for` viết TẠI CHỖ, KHÔNG import module chỉ-test (import là kéo nó vào bundle
+ * prod). Lưới `tests/luoi/file-chi-build-e2e.test.ts` khoá chuỗi hai bên trùng nhau.
+ */
+function docRestoreKhoE2e(request: Request): { hanDrainMs: number } | Response | null {
+  if (process.env.E2E_CONG_GHI !== "1") return null;
+  const bang = (globalThis as unknown as Record<symbol, WeakMap<Request, { hanDrainMs: unknown }> | undefined>)[
+    Symbol.for("hogikids.e2eCongGhi.restoreKho")
+  ];
+  const muc = bang?.get(request);
+  if (!muc) return null;
+  const han = muc.hanDrainMs;
+  if (typeof han !== "number" || !Number.isInteger(han) || han < 1 || han > HAN_DRAIN_GHI_MS) {
+    return Response.json(
+      { error: `Restore khô: hạn drain phải là số nguyên 1..${HAN_DRAIN_GHI_MS} — chưa làm gì.` },
+      { status: 400 },
+    );
+  }
+  return { hanDrainMs: han };
 }
 
 /**
@@ -216,13 +279,34 @@ async function ghiNhatKyPhucHoi(response: Response, vet: VetPhucHoi, actor: Acto
   });
 }
 
-/** Thân phục hồi (sau cổng chủ shop). Ghi `vet` để `POST` ghi nhật ký sau khi khoá đã nhả. */
-async function phucHoi(request: Request, vet: VetPhucHoi): Promise<Response> {
+/**
+ * Thân phục hồi (sau cổng chủ shop). Ghi `vet` để `POST` ghi nhật ký sau khi khoá đã nhả. `khoE2e` khác
+ * `null` CHỈ ở restore khô của bản build e2e (`docRestoreKhoE2e`): bỏ bước nhận + kiểm file, mọi bước
+ * giành khoá / drain / fencing phía sau là đúng mã của lượt thật.
+ */
+async function phucHoi(request: Request, vet: VetPhucHoi, khoE2e: { hanDrainMs: number } | null): Promise<Response> {
   // Next KHÔNG tự so Origin/Host cho Route Handler (chỉ cho Server Action) — route phá huỷ nhất
   // của app phải tự gác. Xem lý do đầy đủ ở `chanRequestKhacOrigin`.
   const khacOrigin = chanRequestKhacOrigin(request);
   if (khacOrigin) return khacOrigin;
 
+  let nguon: NguonPhucHoi;
+  if (khoE2e) {
+    nguon = { loai: "kho-e2e", hanDrainMs: khoE2e.hanDrainMs };
+  } else {
+    const file = await nhanVaKiemFileTaiLen(request, vet);
+    if (file instanceof Response) return file;
+    nguon = { loai: "file", fileBuf: file };
+  }
+
+  return giuKhoaRoiPhucHoi(nguon, vet);
+}
+
+/**
+ * Nhận file tải lên + TOÀN BỘ guard chỉ-đọc-file (bước 1–2b) — CHƯA giành khoá, CHƯA đụng DB. Trả
+ * `Buffer` khi file hợp lệ, `Response` (400/413/422) khi phải dừng.
+ */
+async function nhanVaKiemFileTaiLen(request: Request, vet: VetPhucHoi): Promise<Buffer | Response> {
   // Chặn theo `Content-Length` TRƯỚC khi chạm thân request — xem `MAX_UPLOAD_ENVELOPE_BYTES`.
   const khaiDoDai = Number(request.headers.get("content-length"));
   if (Number.isFinite(khaiDoDai) && khaiDoDai > MAX_UPLOAD_ENVELOPE_BYTES) {
@@ -301,65 +385,48 @@ async function phucHoi(request: Request, vet: VetPhucHoi): Promise<Response> {
     return Response.json({ error: message }, { status: 400 });
   }
 
-  // (3) KHOÁ BẢO TRÌ — giành TRƯỚC pre-backup. Giành sau sẽ để hai lượt cùng chụp
-  // bản lùi rồi cùng nạp. Lượt thứ hai nhận 409 (xung đột trạng thái) chứ không xếp
-  // hàng: phục hồi là thao tác tay, chờ mù hàng chục giây rồi mới biết là tệ hơn.
-  //
-  // Giữ THẺ PHIÊN để `finally` chỉ trả đúng cờ của lượt này: nếu lượt này treo quá TTL rồi mới
-  // tỉnh, cờ lúc đó có thể đã thuộc về một lượt phục hồi khác đang chạy dở (xem `khoa-bao-tri.ts`).
-  const thePhien = thuGiuKhoaPhucHoi();
-  if (!thePhien) {
-    return Response.json(
-      { error: "Đang có một lượt phục hồi khác chạy — chờ xong rồi thử lại." },
-      { status: 409 },
-    );
-  }
+  return fileBuf;
+}
 
-  // Thẻ khoá việc nặng của lượt này — gán TRONG try (sau khi giành thắng), đọc ở finally để trả
-  // best-effort. Để `null` khi giành trượt: finally tuyệt đối không đụng khoá của việc khác.
+/**
+ * Bước (3) trở đi: giành lease → X → cờ, rồi chạy phần còn lại TRONG lối miễn cổng ghi; `finally` nhả
+ * ngược cờ → X → lease. Dùng chung cho lượt thật và restore khô (seam e2e) — một mã duy nhất.
+ */
+async function giuKhoaRoiPhucHoi(nguon: NguonPhucHoi, vet: VetPhucHoi): Promise<Response> {
+  // (3) CHỐT SỚM "lượt phục hồi khác đang chạy" — TRƯỚC mọi câu ghi: lease việc nặng ở (3a) là câu ghi
+  // ngoài ngữ cảnh cửa, cờ đang bật thì cổng ghi chặn nó. Chốt THẬT vẫn là `thuGiuKhoaPhucHoi()` ở (3c).
+  if (dangPhucHoi()) return traLoiLuotKhacDangChay();
+
+  // Ba khoá giành THEO THỨ TỰ lease → X → cờ, nhả NGƯỢC lại ở `finally` (cờ → X → lease). Lý do thứ tự:
+  //  - lease + X giành TRƯỚC cờ: hai cổng này trượt là chuyện thường (việc nặng/CLI đang ghi) — trả 409
+  //    khi chưa bật cờ thì app không bị khoá ghi oan một giây nào.
+  //  - cờ bật SAU X: từ lúc này mọi writer trong tiến trình bị cửa từ chối, mọi CLI bị X chặn ở lần ghi
+  //    đầu; drain chỉ còn chờ lượt ĐÃ vào.
+  // Thẻ/khoá gán TRONG try sau khi giành thắng; `null` = chưa giành ⇒ finally không đụng khoá của ai.
   let khoaViec: TheKhoa | null = null;
+  let khoaX: KhoaDocQuyenRestore | null = null;
+  let thePhien: ThePhienPhucHoi | null = null;
 
   try {
-    // (3b) DRAIN LỚP 1 — GIÀNH KHOÁ VIỆC NẶNG. Cổng SyncLog ở (3b') đoán sống/chết bằng TUỔI
-    // (RUNNING > 15' coi như app chết), nên một lượt "dựng lại từ kho thô" chạy quá 15' trở nên VÔ
-    // HÌNH đúng lúc nó vẫn đang ghi — rebuild đã đo 492s/476 đơn, dữ liệu lớn dần là vượt trần, và
-    // lúc đó bản lùi pre-restore sẽ chụp đúng trạng thái dựng dở rồi DROP schema đè lên nó. Cả 3
-    // việc nặng giữ khoá này TƯƠI bằng checkpoint tiến độ thật (mỗi 25 dòng ghi, hạn 5' —
-    // `khoa-viec-nang.ts`), nên "giành trượt" = việc đó CÒN SỐNG THẬT chứ không phải đoán tuổi; việc
-    // đã chết thì khoá hết hạn ≤5' và restore giành thắng — DR còn nhanh hơn chờ cửa sổ 15'.
+    // (3a) KHOÁ VIỆC NẶNG. Cổng SyncLog ở (4) đoán sống/chết bằng TUỔI (RUNNING > 15' coi như app
+    // chết), nên một lượt "dựng lại từ kho thô" chạy quá 15' trở nên VÔ HÌNH đúng lúc nó vẫn đang
+    // ghi. Cả 3 việc nặng giữ lease này TƯƠI bằng checkpoint tiến độ thật (mỗi 25 dòng ghi, hạn 5' —
+    // `khoa-viec-nang.ts`), nên "giành trượt" = việc đó CÒN SỐNG THẬT.
     //
-    // ⚠️ Khoá nằm trong chính `app."Setting"` mà lượt phục hồi sẽ thay sạch ⇒ với lượt phục hồi nó
-    // CHỈ là cổng chặn TRƯỚC vùng phá huỷ, KHÔNG phải hàng rào xuyên suốt: sau khi chuỗi phá huỷ
-    // bắt đầu thì không gia hạn/không fence bằng nó nữa, và trả khoá ở finally là best-effort.
-    // Giới hạn ghi nhận (chưa vá): script CLI khởi động GIỮA lúc phục hồi, sau khi schema đã bị
-    // thay — chặn thật cần khoá sống NGOÀI schema app (advisory lock), để dành khi cần.
-    const luotGianh = await giuKhoaViecNang(VIEC_PHUC_HOI);
-    if (luotGianh.the) khoaViec = luotGianh.the;
-
-    // (3b') DRAIN LỚP 2 — cổng SyncLog, giữ nguyên cho các lượt ingest NGẮN không cầm khoá việc
-    // nặng: khoá bảo trì ở trên chỉ chặn request MỚI; một lượt ingest vào TRƯỚC đó vẫn đang ghi
-    // (land 1 trang được cấp tới 60s). Phải giành khoá RỒI mới soi: soi trước thì giữa lúc soi và
-    // lúc giành, một lượt mới vẫn kịp bắt đầu và kết luận "không còn ai ghi" thành vô nghĩa.
-    // Gọi KHÔNG truyền kind = soi mọi luồng: lượt phục hồi thay sạch schema nên ads, TikTok Shop và
-    // lượt dựng lại tay đều đang ghi vào schema sắp mất, không riêng lượt kéo đơn.
-    // Từ chối sớm chứ không xếp hàng — cùng lý do như cổng 409 ở trên, và để không đốt một suất
-    // trong 3 bản lùi `pre-restore-*.dump` cho một request rốt cuộc không phục hồi gì.
-    // HẠN CHẾ ĐÃ BIẾT: cổng này chỉ thấy writer đi qua `withSyncLog`. Writer nhập tay (nút bấm,
-    // import file) không ghi `SyncLog` — chúng bị chặn bằng `dangPhucHoi()` ở từng server action,
-    // và người đang bấm phục hồi chính là chủ shop nên không tự bấm chồng lên mình.
-    // Trượt lease thì khỏi soi — đằng nào cũng 409, không tốn thêm một câu quét SyncLog không index.
-    const conLuotDangGhi = luotGianh.the ? await coLuotDangChay() : false;
-
-    // (3c) FENCING sau các bước chờ KHÔNG CÓ HẠN ở trên (hai câu Prisma). Hỏi quyền sở hữu TRƯỚC KHI
-    // đọc kết quả drain: nếu lượt này vừa treo quá TTL thì nguyên nhân dừng thật sự là "mất khoá",
-    // nói "đang có lượt đồng bộ" là chỉ sai hướng điều tra.
+    // ⚠️ Lease nằm trong chính `app."Setting"` mà lượt phục hồi sẽ thay sạch ⇒ nó CHỈ là cổng chặn
+    // TRƯỚC vùng phá huỷ, không phải hàng rào xuyên suốt: sau khi phá huỷ bắt đầu thì không fence bằng
+    // nó nữa, và trả lease ở finally là best-effort. Hàng rào xuyên suốt với tiến trình ngoài app là
+    // khoá X ở (3b) — sống ngoài schema app.
     //
-    // MỘT cổng duy nhất: `giaHanKhoaPhucHoi` tự kiểm quyền rồi mới đẩy mốc, nên nó vừa là câu hỏi
-    // vừa là câu trả lời. Tách thành "kiểm rồi gia hạn, bỏ qua kết quả gia hạn" là tự mở lại đúng
-    // khe TOCTOU mình đang bịt: TTL có thể hết GIỮA hai lời gọi ⇒ kiểm trả `true`, gia hạn trả
-    // `false`, và lượt này đi tiếp với một cái cờ đã thuộc về người khác.
-    if (!giaHanKhoaPhucHoi(thePhien)) return traLoiMatKhoa("dò lượt đồng bộ đang chạy");
-
+    // Lỗi DB / cổng ghi chặn (một lượt phục hồi khác vừa bật cờ giữa chốt (3) và đây) ⇒ 409, chưa đụng gì.
+    let luotGianh: Awaited<ReturnType<typeof giuKhoaViecNang>>;
+    try {
+      luotGianh = await giuKhoaViecNang(VIEC_PHUC_HOI);
+    } catch (err) {
+      if (laLoiCongGhiDangKhoa(err)) return traLoiLuotKhacDangChay();
+      console.error("Không giành được khoá việc nặng trước lượt phục hồi (lỗi DB):", err);
+      return traLoiChuaDoiGi("Không kiểm được khoá việc nặng — cơ sở dữ liệu không phản hồi.");
+    }
     if (!luotGianh.the) {
       return Response.json(
         {
@@ -371,170 +438,44 @@ async function phucHoi(request: Request, vet: VetPhucHoi): Promise<Response> {
         { status: 409 },
       );
     }
-    // Từ đây thẻ chắc chắn có — cầm bản non-null để gia hạn ở các mốc dưới.
+    khoaViec = luotGianh.the;
     const theViec = luotGianh.the;
 
-    if (conLuotDangGhi) {
-      return Response.json(
-        { error: "Đang có lượt đồng bộ chạy — chờ xong rồi phục hồi lại." },
-        { status: 409 },
-      );
-    }
-
-    // (3d) Gia hạn lease việc nặng sau bước chờ drain — cùng kỷ luật mốc-tiến-độ như (3c) nhưng cho
-    // khoá trong DB (`giaHanKhoa` kiểm quyền + đẩy hạn trong MỘT câu ghi nguyên tử). Trượt = lease
-    // hết hạn giữa chừng và một việc nặng đã giành mất, tức nó ĐANG GHI — dừng ngay.
-    if (!(await giaHanKhoaViecNangAnToan(theViec))) {
-      return traLoiMatKhoaViecNang("dò lượt đồng bộ đang chạy");
-    }
-
-    // (4) Pre-restore backup: chụp DB hiện tại TRƯỚC khi phục hồi. Lỗi → 500,
-    // KHÔNG restore (không phá khi chưa có bản lùi).
+    // (3b) KHOÁ GHI CHUNG X — loại trừ mọi tiến trình CLI (script/seed ngoài Next giữ shared ở lần ghi
+    // đầu, `khoa-chung-cli.ts`). Trượt ⇒ 409 kèm phiên đang giữ (pid, application_name, backend_start)
+    // để chủ shop biết script nào còn chạy, hoặc cắt phiên mồ côi (`catPhienGiuKhoaChung`).
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl) return traLoiChuaDoiGi("DATABASE_URL chưa được cấu hình.");
+    let x: Awaited<ReturnType<typeof giuDocQuyenRestore>>;
     try {
-      const preRestore = await runPgDump();
-      const thuMuc = thuMucBackup();
-      // 0700 kể cả thư mục bind-mount ĐÃ có sẵn 0755 (xem `ghi-file-rieng-tu.ts`).
-      await chuanBiThuMucRiengTu(thuMuc);
-      // Giây + hậu tố ngẫu nhiên: mốc giây một mình KHÔNG đủ tách hai lượt phục hồi
-      // (khoá bảo trì cho phép lượt sau chạy ngay khi lượt trước xong, vẫn có thể rơi
-      // vào cùng giây) — trùng tên là ghi đè mất đúng điểm rollback vừa tạo. Tên vẫn
-      // giữ tiền tố thời gian nên sort lexicographic vẫn ra thứ tự thời gian.
-      const preName = `pre-restore-${format(new Date(), "yyyyMMdd-HHmmss")}-${randomBytes(3).toString("hex")}.dump`;
-      await ghiFileRiengTu(join(thuMuc, preName), preRestore); // 0600, wx
-      await prunePreRestoreBackups(thuMuc);
+      x = await giuDocQuyenRestore(cauHinhClientKhoa(dbUrl, TIEN_TO_APP_RESTORE));
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Không tạo được bản lùi trước khi phục hồi.";
-      return Response.json(
-        { error: `Không tạo được bản sao lưu trước phục hồi — đã hủy phục hồi: ${message}` },
-        { status: 500 },
-      );
+      console.error("Không giành được khoá ghi chung (lỗi kết nối):", err);
+      return traLoiChuaDoiGi("Không giành được khoá ghi chung — cơ sở dữ liệu không phản hồi.");
     }
+    if (!x.ok) return traLoiCliDangGhi(x.nguoiGiu);
+    khoaX = x.khoa;
+    const khoaGhiChung = x.khoa;
 
-    // (4b) FENCING lần 2 — ngay sau khi chụp bản lùi (bước dài nhất trước lệnh phá huỷ: `pg_dump`
-    // được cấp tới 10 phút, cộng ghi file + dọn bản cũ). Cùng một cổng nguyên tử như (3c). Kèm gia
-    // hạn lease việc nặng: `pg_dump` dài hơn hạn khoá 5' là chuyện BÌNH THƯỜNG — hạn qua đi mà chưa
-    // ai giành thì `giaHanKhoa` vẫn thắng (token còn nguyên); chỉ khi một việc nặng ĐÃ giành trong
-    // lúc đó thì trượt, và lúc ấy nó đang ghi thật — dừng trước khi phá huỷ.
-    if (!giaHanKhoaPhucHoi(thePhien)) return traLoiMatKhoa("chụp bản lùi trước phục hồi");
-    if (!(await giaHanKhoaViecNangAnToan(theViec))) {
-      return traLoiMatKhoaViecNang("chụp bản lùi trước phục hồi");
-    }
+    // (3c) KHOÁ BẢO TRÌ (cờ) — từ đây cửa ghi từ chối writer mới. Lượt thứ hai nhận 409 chứ không xếp
+    // hàng: phục hồi là thao tác tay, chờ mù hàng chục giây rồi mới biết là tệ hơn. Giữ THẺ PHIÊN để
+    // `finally` chỉ trả đúng cờ của lượt này (xem `khoa-bao-tri.ts`).
+    thePhien = thuGiuKhoaPhucHoi();
+    if (!thePhien) return traLoiLuotKhacDangChay();
+    const the = thePhien;
 
-    // (5) Phục hồi thật. runRestore lặp lại detect + assertNotArchive nội bộ (an
-    // toàn 2 lớp) nhưng lúc này head đã được xác thực.
-    try {
-      // FENCING lần 3, đặt SÂU BÊN TRONG `runRestore` — chốt (4b) ở trên KHÔNG đủ: giữa nó và lệnh
-      // phá huỷ đầu tiên còn `writeFile`, `gunzipAsync`, `pg_restore -l`, mà mấy bước file/zlib đó
-      // không có hạn ở tầng Node. Treo đủ lâu là TTL nhả cờ, lượt khác giành khoá, rồi lượt này
-      // tỉnh dậy vẫn drop + nạp chồng lên. Callback chạy ngay trước lệnh phá huỷ đầu tiên; ném ở đó
-      // là an toàn vì tới lúc ấy chưa có gì trong DB bị đụng. Sau chốt thì KHÔNG fence nữa — nửa
-      // chuỗi phá huỷ bị bỏ dở còn tệ hơn chạy trọn.
-      const { format: restoredFormat } = await runRestore(fileBuf, {
-        truocKhiPhaHuy: async () => {
-          // THỨ TỰ SỐNG-CÒN: câu chờ DB đứng TRƯỚC, cổng đồng bộ đứng CUỐI. `giaHanKhoa` là một
-          // câu ghi Prisma KHÔNG có hạn (statement_timeout prod = 0) — một phiên khác giữ dòng
-          // khoá là nó chờ vô hạn. Để nó SAU cổng khoá bảo trì là tự chèn một bước chờ không hạn
-          // vào đúng khe giữa chốt fencing cuối và lệnh phá huỷ: chờ quá TTL thì cờ bảo trì tự
-          // nhả, mọi đường ghi mở lại, rồi câu chờ xong xuôi và ta DROP schema lên đúng dữ liệu
-          // đang được ghi. Cổng đồng bộ (micro giây, không thể bị xen) đứng cuối thì cú treo đó
-          // bị chính nó bắt: mất cờ ⇒ ném ⇒ 409, chưa phá gì.
-          //
-          // Đây cũng là chốt CUỐI CÙNG lease việc nặng còn tác dụng: sau lệnh phá huỷ đầu tiên,
-          // bảng `Setting` chứa khoá bị thay sạch nên không fence bằng nó nữa (xem (3b)). Mất
-          // lease ở đây = một việc nặng đang ghi, drop lên nó là đúng thảm hoạ cổng này chặn.
-          if (!(await giaHanKhoaViecNangAnToan(theViec))) throw new MatKhoaViecNang(VIEC_PHUC_HOI);
-          // Cổng nguyên tử — xem (3c). Ở đây khe TOCTOU nguy hiểm nhất: lọt qua là drop + nạp thật.
-          if (!giaHanKhoaPhucHoi(thePhien)) throw new LoiMatKhoaPhucHoi("chuẩn bị file để nạp");
-        },
-      });
-
-      // Phục hồi nạp lại CẢ cột `User.sessionEpoch` đời backup ⇒ mốc phiên từng người bị LÙI, nên
-      // cookie cấp trong khoảng thời gian đó lại khớp mốc và vào được. Đẩy mốc MỌI người sang giá trị
-      // mới để mọi thiết bị phải đăng nhập lại. Đây KHÔNG phải vá bảo mật: `User.passwordHash` cũng bị lùi nên mật khẩu đời backup
-      // sống lại — chủ shop phải tự đổi mật khẩu, xem cảnh báo ở modal phục hồi.
-      //
-      // Lỗi ở bước này KHÔNG được biến lượt phục hồi thành công thành 500 (dữ liệu đã nạp xong rồi;
-      // Prisma còn có thể đang giữ plan cũ của các bảng vừa bị drop/tạo lại). Trả kèm cảnh báo.
-      //
-      // FENCING lần 4, và từ đây CỐ Ý KHÔNG trả 409 nữa: bước nạp đã chạy xong, dữ liệu đã bị thay —
-      // trả 409 ("bận, chưa làm gì") là nói dối theo hướng nguy hiểm nhất, chủ shop sẽ bấm phục hồi
-      // lại lần nữa. Mất khoá ở đây thì bỏ luôn `thuHoiMoiPhienCoHan()` (đẩy `User.sessionEpoch` của
-      // MỌI người): nó là một câu GHI, mà mất khoá nghĩa là có thể một lượt khác đang drop + nạp
-      // chính schema đó — ghi thêm vào là đúng kiểu xen kẽ khoá này sinh ra để chặn. Trả `ok` kèm cảnh báo nói thẳng cả hai chuyện: phiên chưa
-      // thu hồi, VÀ dữ liệu vừa nạp có thể đã bị lượt khác đè.
-      //
-      // GIA HẠN (không chỉ kiểm) trước khi bắt đầu: giữa lệnh nạp và đây còn `unlink` file tạm và
-      // bước cấp lại quyền n8n, mà bản thân lời gọi dưới đây có thể tốn tới `maxWait + timeout`.
-      // Chỉ kiểm suông thì lượt này được phép khởi động một câu GHI khi lease chỉ còn vài mili
-      // giây — nó hết hạn giữa chừng, lượt B giành cờ và bắt đầu drop, còn ta thì đang upsert vào
-      // schema của họ. Cổng nguyên tử + mốc mới cho ta trọn một cửa sổ TTL để làm nốt.
-      //
-      // Kiểm khoá LẦN NỮA SAU khi bước thu hồi phiên trả về (cả nhánh chạy được lẫn nhánh lỗi):
-      // câu kiểm phía trên chỉ nói về thời điểm TRƯỚC `await`, mà chính lời gọi đó có thể treo lâu
-      // rồi mới xong — lúc quay lại, khoá có thể đã sang lượt khác và mốc phiên ta vừa đẩy đè lên
-      // schema của họ. `HAN_THU_HOI_PHIEN_MS` cắt ngắn cửa sổ đó, nhưng ĐỪNG đọc thành "không thể
-      // treo": `statement_timeout` chỉ cứu được khi server còn trả lời, socket nửa chết thì vẫn
-      // phải chờ tới TTL. Vì thế câu kiểm này mới là chốt, không phải cái hạn kia.
-      let canhBao: string | undefined;
-      if (!giaHanKhoaPhucHoi(thePhien)) {
-        console.error(
-          "Lượt phục hồi nạp xong nhưng đã MẤT khoá bảo trì trước bước thu hồi phiên — nó treo quá " +
-            "TTL giữa chừng nên cờ tự nhả và có thể đã sang lượt khác. Bỏ qua thu hồi phiên để không " +
-            "ghi vào schema mà lượt kia đang thay. Kiểm log phía trên xem treo ở đâu.",
-        );
-        canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
-        vet.thuHoiPhien = "MAT_KHOA";
-      } else {
-        try {
-          await thuHoiMoiPhienCoHan();
-          if (laChuKhoaPhucHoi(thePhien)) {
-            vet.thuHoiPhien = "XONG";
-          } else {
-            canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
-            vet.thuHoiPhien = "MAT_KHOA";
-          }
-        } catch {
-          if (laChuKhoaPhucHoi(thePhien)) {
-            canhBao =
-              "Đã phục hồi xong nhưng KHÔNG đẩy được mốc thu hồi phiên — thiết bị khác có thể còn đăng nhập. " +
-              "Khởi động lại container app rồi đổi mật khẩu ngay.";
-            vet.thuHoiPhien = "LOI";
-          } else {
-            canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
-            vet.thuHoiPhien = "MAT_KHOA";
-          }
-        }
-      }
-
-      return Response.json({ ok: true, format: restoredFormat, canhBao });
-    } catch (err) {
-      // Mất khoá ở một chốt fencing BÊN TRONG `runRestore` = đã dừng TRƯỚC lệnh phá huỷ đầu tiên
-      // ⇒ dữ liệu còn nguyên, trả 409 như hai chốt kia. Rơi vào nhánh 500 bên dưới là xui chủ shop
-      // đi lùi về `pre-restore-*.dump` trong khi chẳng mất gì. Lease việc nặng cùng ngữ nghĩa: chốt
-      // duy nhất ném nó nằm trước lệnh phá huỷ đầu tiên.
-      if (err instanceof LoiMatKhoaPhucHoi) return traLoiMatKhoa(err.buoc);
-      if (err instanceof MatKhoaViecNang) return traLoiMatKhoaViecNang("chuẩn bị file để nạp");
-      // Dump chụp trước migration phân quyền: `runRestore` từ chối TRƯỚC chốt phá huỷ ⇒ dữ liệu còn
-      // nguyên. 422 (file hợp lệ nhưng không nạp qua giao diện được) kèm lối đi quy trình trên host.
-      // Cổng (2b) đã chặn trường hợp này trước khi chụp bản lùi; nhánh này là lớp phòng thủ thứ hai.
-      if (err instanceof LoiBackupTruocPhanQuyen) {
-        return Response.json({ error: err.message }, { status: 422 });
-      }
-
-      const message = err instanceof Error ? err.message : "Phục hồi thất bại.";
-      return Response.json(
-        {
-          error: `Phục hồi thất bại: ${message}. Dùng bản lùi pre-restore-*.dump hoặc chạy deploy/restore.sh (xem hướng dẫn deploy).`,
-        },
-        { status: 500 },
-      );
-    }
+    // Từ khi giữ cờ, MỌI câu ghi của chính lượt phục hồi (gia hạn lease, thu hồi phiên) đi LỐI MIỄN
+    // cổng ghi — không thì cổng chặn chính nó. Lượt phục hồi KHÔNG được đếm vào drain.
+    return await chayMienCong("restore", () =>
+      phaHuyCoKiemSoat({ nguon, vet, the, theViec, khoaGhiChung }),
+    );
   } finally {
-    // Trả cờ bảo trì (RAM, đồng bộ) TRƯỚC MỌI I/O: bước trả lease dưới đây là một câu ghi DB có
-    // thể TREO (không chỉ ném) — để nó đứng trước thì một cú treo giữ cả app ở chế độ chỉ-đọc tới
-    // hết TTL (~50') và response không bao giờ về tay chủ shop. Cờ RAM trả xong thì cú treo (nếu có)
-    // chỉ còn kéo dài response, app đã ghi lại được, và lease tự hết hạn sau tối đa 5'.
-    traKhoaPhucHoi(thePhien);
+    // Trả cờ bảo trì (RAM, đồng bộ) TRƯỚC MỌI I/O: các bước nhả dưới đây là I/O có thể TREO — để
+    // chúng đứng trước thì một cú treo giữ cả app ở chế độ chỉ-đọc tới hết TTL (~50') và response
+    // không bao giờ về tay chủ shop.
+    if (thePhien) traKhoaPhucHoi(thePhien);
+    // Nhả X sau cờ: CLI chỉ chạy lại khi app cũng đã ghi lại được. `nha()` không ném.
+    if (khoaX) await khoaX.nha();
     if (khoaViec) {
       // Best-effort: restore chết giữa vùng phá huỷ thì bảng `Setting` có thể không tồn tại lúc
       // này — lỗi trả khoá TUYỆT ĐỐI không được che response gốc (nhất là 500 của chính lượt nạp).
@@ -543,6 +484,11 @@ async function phucHoi(request: Request, vet: VetPhucHoi): Promise<Response> {
       // (kể cả bản `pre-restore-*.dump` do chính route này tạo — nó chụp SAU khi ta giành lease)
       // mang dòng khoá còn hạn tối đa 5'. Chấp nhận: khoá ma đó tự hết hạn ≤5' và lần giành sau
       // thắng nó — câu 409 đã nói rõ để chủ shop khỏi hoang mang.
+      //
+      // `traKhoaViecNang` tự đi LỐI MIỄN cổng ghi: cờ có thể đang thuộc một lượt khác (lượt này treo
+      // quá TTL) — trả lease của CHÍNH mình (xoá đúng token) không được để cổng chặn, không thì lease
+      // kẹt tới hết hạn 5'. Không đè lên lượt phá huỷ của ai: lượt kia phải giành lease rồi X trước
+      // khi bật cờ, cả hai đều còn trong tay lượt này cho tới các dòng ngay trên.
       try {
         await traKhoaViecNang(khoaViec);
       } catch (err) {
@@ -554,6 +500,265 @@ async function phucHoi(request: Request, vet: VetPhucHoi): Promise<Response> {
       }
     }
   }
+}
+
+/**
+ * Hạn chờ DRAIN — request/action/op lẻ đã vào TRƯỚC cờ chạy cho xong. Một trang ingest được cấp tới
+ * 60s cho bước land cộng bước transform; 2 phút đủ rộng cho đường thường mà vẫn nhỏ hơn nhiều so với
+ * TTL cờ. Quá hạn ⇒ 409 "chưa thay đổi gì", cờ nhả, lượt vào trước chạy tiếp bình thường.
+ */
+const HAN_DRAIN_GHI_MS = 120_000;
+
+/** Lượt phục hồi mất khoá ghi chung X ở một chốt trước phá huỷ — dữ liệu còn nguyên (409). */
+class MatKhoaGhiChung extends Error {
+  constructor(public readonly buoc: string) {
+    super(`Lượt phục hồi đã mất khoá ghi chung ở bước "${buoc}" — dừng trước khi đụng vào dữ liệu.`);
+    this.name = "MatKhoaGhiChung";
+  }
+}
+
+/**
+ * Phần còn lại của lượt phục hồi SAU khi đã giữ đủ lease + X + cờ, chạy TRONG lối miễn cổng ghi:
+ * drain → cổng SyncLog → fencing → pre-backup → fencing (+ X + lease) → nạp (chốt cuối trong
+ * `runRestore`) → fencing → thu hồi phiên. Mọi nhánh lỗi TRƯỚC lệnh phá huỷ đầu tiên ⇒ 409 "chưa
+ * thay đổi gì"; riêng pre-backup hỏng giữ 500 "đã hủy phục hồi" (hợp đồng cũ, dữ liệu cũng còn nguyên).
+ */
+async function phaHuyCoKiemSoat(p: {
+  nguon: NguonPhucHoi;
+  vet: VetPhucHoi;
+  the: ThePhienPhucHoi;
+  theViec: TheKhoa;
+  khoaGhiChung: KhoaDocQuyenRestore;
+}): Promise<Response> {
+  const { nguon, vet, the: thePhien, theViec, khoaGhiChung } = p;
+
+  // (3d) DRAIN — chờ request/action/op lẻ/tx lẻ đã vào TRƯỚC cờ chạy TRỌN (đếm về 0). Cờ đã bật nên
+  // không writer mới nào vào thêm; drain trước khi bật cờ là để writer mới lọt khe. Hạn chỉ khác mặc
+  // định ở restore khô của e2e (đo nhánh quá hạn mà không phải chờ 2 phút).
+  const hanDrainMs = nguon.loai === "kho-e2e" ? nguon.hanDrainMs : HAN_DRAIN_GHI_MS;
+  const sach = await choDrain(hanDrainMs);
+  if (!sach) {
+    await inGiaoDichDangMoChanDoan();
+    const dem = docBoDem();
+    return traLoiChuaDoiGi(
+      `Còn ${dem.soRequest} lượt ghi trong app và ${dem.soOpLe} câu ghi lẻ chưa xong sau ` +
+        `${hanDrainMs / 1000} giây.`,
+    );
+  }
+
+  // (4) CỔNG SyncLog — giữ cho lượt đồng bộ NHIỀU request (n8n đẩy từng trang): cửa chỉ đếm từng
+  // request, giữa hai trang của cùng một lượt bộ đếm có thể về 0. Gọi KHÔNG truyền kind = soi mọi
+  // luồng: lượt phục hồi thay sạch schema nên ads, TikTok Shop và lượt dựng lại tay đều đang ghi vào
+  // schema sắp mất. Từ chối sớm chứ không xếp hàng, để không đốt một suất trong 3 bản lùi.
+  const conLuotDangGhi = await coLuotDangChay();
+
+  // FENCING (chốt 1) sau các bước chờ ở trên. Hỏi quyền sở hữu TRƯỚC KHI đọc kết quả cổng SyncLog:
+  // lượt này vừa treo quá TTL thì nguyên nhân dừng thật là "mất khoá", nói "đang có lượt đồng bộ" là
+  // chỉ sai hướng điều tra. MỘT cổng duy nhất: `giaHanKhoaPhucHoi` tự kiểm quyền rồi mới đẩy mốc —
+  // ĐỪNG tách thành "kiểm rồi gia hạn": TTL có thể hết GIỮA hai lời gọi.
+  if (!giaHanKhoaPhucHoi(thePhien)) return traLoiMatKhoa("dò lượt đồng bộ đang chạy");
+
+  if (conLuotDangGhi) {
+    return Response.json(
+      { error: "Đang có lượt đồng bộ chạy — chờ xong rồi phục hồi lại." },
+      { status: 409 },
+    );
+  }
+
+  // Gia hạn lease việc nặng sau bước chờ — `giaHanKhoa` kiểm quyền + đẩy hạn trong MỘT câu ghi nguyên
+  // tử. Trượt = lease hết hạn giữa chừng và một việc nặng đã giành mất, tức nó ĐANG GHI — dừng ngay.
+  if (!(await giaHanKhoaViecNangAnToan(theViec))) {
+    return traLoiMatKhoaViecNang("dò lượt đồng bộ đang chạy");
+  }
+
+  // Restore khô (seam e2e — `docRestoreKhoE2e`): DỪNG ở đây. Đã đi trọn lease → X → cờ → drain → cổng
+  // SyncLog → fencing; CHƯA chụp bản lùi, chưa đụng dữ liệu. `finally` của `giuKhoaRoiPhucHoi` nhả
+  // cờ → X → lease như lượt thật. `boDem` chụp lúc cờ còn bật (đối chiếu "drain xong khi cờ còn giữ").
+  if (nguon.loai === "kho-e2e") {
+    return Response.json({ ok: true, khoE2e: "da-drain", luc: Date.now(), boDem: docBoDem() });
+  }
+  const { fileBuf } = nguon;
+
+  // (5) Pre-restore backup: chụp DB hiện tại TRƯỚC khi phục hồi. Lỗi → 500, KHÔNG restore (không phá
+  // khi chưa có bản lùi).
+  try {
+    const preRestore = await runPgDump();
+    const thuMuc = thuMucBackup();
+    // 0700 kể cả thư mục bind-mount ĐÃ có sẵn 0755 (xem `ghi-file-rieng-tu.ts`).
+    await chuanBiThuMucRiengTu(thuMuc);
+    // Giây + hậu tố ngẫu nhiên: mốc giây một mình KHÔNG đủ tách hai lượt phục hồi (khoá bảo trì cho
+    // phép lượt sau chạy ngay khi lượt trước xong, vẫn có thể rơi vào cùng giây) — trùng tên là ghi đè
+    // mất đúng điểm rollback vừa tạo. Tên vẫn giữ tiền tố thời gian nên sort vẫn ra thứ tự thời gian.
+    const preName = `pre-restore-${format(new Date(), "yyyyMMdd-HHmmss")}-${randomBytes(3).toString("hex")}.dump`;
+    await ghiFileRiengTu(join(thuMuc, preName), preRestore); // 0600, wx
+    await prunePreRestoreBackups(thuMuc);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Không tạo được bản lùi trước khi phục hồi.";
+    return Response.json(
+      { error: `Không tạo được bản sao lưu trước phục hồi — đã hủy phục hồi: ${message}` },
+      { status: 500 },
+    );
+  }
+
+  // FENCING (chốt 2) — ngay sau bản lùi (bước dài nhất trước lệnh phá huỷ: `pg_dump` được cấp tới 10
+  // phút). Kèm kiểm khoá X còn giữ (kết nối khoá chết giữa `pg_dump` ⇒ CLI có thể đã giành shared và
+  // đang ghi) và gia hạn lease việc nặng.
+  if (!giaHanKhoaPhucHoi(thePhien)) return traLoiMatKhoa("chụp bản lùi trước phục hồi");
+  if (!(await khoaGhiChung.conGiu())) return traLoiMatKhoaGhiChung("chụp bản lùi trước phục hồi");
+  if (!(await giaHanKhoaViecNangAnToan(theViec))) {
+    return traLoiMatKhoaViecNang("chụp bản lùi trước phục hồi");
+  }
+
+  // (6) Phục hồi thật. runRestore lặp lại detect + assertNotArchive nội bộ (an toàn 2 lớp).
+  try {
+    // FENCING (chốt 3), đặt SÂU BÊN TRONG `runRestore` — giữa chốt 2 và lệnh phá huỷ đầu tiên còn
+    // `writeFile`, `gunzipAsync`, `pg_restore -l` không có hạn ở tầng Node. Callback chạy ngay trước
+    // lệnh phá huỷ đầu tiên; ném ở đó là an toàn vì chưa có gì trong DB bị đụng. Sau chốt thì KHÔNG
+    // fence nữa — nửa chuỗi phá huỷ bị bỏ dở còn tệ hơn chạy trọn.
+    const { format: restoredFormat } = await runRestore(fileBuf, {
+      truocKhiPhaHuy: async () => {
+        // THỨ TỰ SỐNG-CÒN: các câu chờ DB đứng TRƯỚC, cổng đồng bộ đứng CUỐI. `giaHanKhoa` và
+        // `conGiu()` là câu DB có thể chờ lâu — để chúng SAU cổng khoá bảo trì là tự chèn một bước chờ
+        // vào đúng khe giữa chốt fencing cuối và lệnh phá huỷ: chờ quá TTL thì cờ tự nhả, mọi đường
+        // ghi mở lại, rồi ta DROP schema lên đúng dữ liệu đang được ghi. Cổng đồng bộ đứng cuối thì cú
+        // treo đó bị chính nó bắt: mất cờ ⇒ ném ⇒ 409, chưa phá gì.
+        if (!(await giaHanKhoaViecNangAnToan(theViec))) throw new MatKhoaViecNang(VIEC_PHUC_HOI);
+        if (!(await khoaGhiChung.conGiu())) throw new MatKhoaGhiChung("chuẩn bị file để nạp");
+        if (!giaHanKhoaPhucHoi(thePhien)) throw new LoiMatKhoaPhucHoi("chuẩn bị file để nạp");
+      },
+    });
+
+    // Phục hồi nạp lại CẢ cột `User.sessionEpoch` đời backup ⇒ mốc phiên từng người bị LÙI. Đẩy mốc
+    // MỌI người để mọi thiết bị phải đăng nhập lại. Đây KHÔNG phải vá bảo mật: `User.passwordHash`
+    // cũng bị lùi nên mật khẩu đời backup sống lại — chủ shop phải tự đổi mật khẩu (modal phục hồi).
+    //
+    // Lỗi ở bước này KHÔNG được biến lượt phục hồi thành công thành 500 (dữ liệu đã nạp xong rồi).
+    //
+    // FENCING (chốt 4), và từ đây CỐ Ý KHÔNG trả 409 nữa: bước nạp đã xong, dữ liệu đã bị thay — trả
+    // 409 ("bận, chưa làm gì") là nói dối theo hướng nguy hiểm nhất. Mất khoá ở đây thì bỏ luôn
+    // `thuHoiMoiPhienCoHan()` (một câu GHI — có thể một lượt khác đang drop + nạp chính schema đó).
+    // GIA HẠN (không chỉ kiểm) trước khi bắt đầu để có trọn một cửa sổ TTL cho câu ghi đó; kiểm khoá
+    // LẦN NỮA sau khi nó trả về (nó có thể treo lâu rồi mới xong).
+    let canhBao: string | undefined;
+    if (!giaHanKhoaPhucHoi(thePhien)) {
+      console.error(
+        "Lượt phục hồi nạp xong nhưng đã MẤT khoá bảo trì trước bước thu hồi phiên — nó treo quá " +
+          "TTL giữa chừng nên cờ tự nhả và có thể đã sang lượt khác. Bỏ qua thu hồi phiên để không " +
+          "ghi vào schema mà lượt kia đang thay. Kiểm log phía trên xem treo ở đâu.",
+      );
+      canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
+      vet.thuHoiPhien = "MAT_KHOA";
+    } else {
+      try {
+        await thuHoiMoiPhienCoHan();
+        if (laChuKhoaPhucHoi(thePhien)) {
+          vet.thuHoiPhien = "XONG";
+        } else {
+          canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
+          vet.thuHoiPhien = "MAT_KHOA";
+        }
+      } catch {
+        if (laChuKhoaPhucHoi(thePhien)) {
+          canhBao =
+            "Đã phục hồi xong nhưng KHÔNG đẩy được mốc thu hồi phiên — thiết bị khác có thể còn đăng nhập. " +
+            "Khởi động lại container app rồi đổi mật khẩu ngay.";
+          vet.thuHoiPhien = "LOI";
+        } else {
+          canhBao = CANH_BAO_MAT_KHOA_SAU_NAP;
+          vet.thuHoiPhien = "MAT_KHOA";
+        }
+      }
+    }
+
+    return Response.json({ ok: true, format: restoredFormat, canhBao });
+  } catch (err) {
+    // Mất khoá ở một chốt BÊN TRONG `runRestore` = đã dừng TRƯỚC lệnh phá huỷ đầu tiên ⇒ dữ liệu còn
+    // nguyên, trả 409 như các chốt kia. Rơi vào nhánh 500 bên dưới là xui chủ shop đi lùi về
+    // `pre-restore-*.dump` trong khi chẳng mất gì.
+    if (err instanceof LoiMatKhoaPhucHoi) return traLoiMatKhoa(err.buoc);
+    if (err instanceof MatKhoaViecNang) return traLoiMatKhoaViecNang("chuẩn bị file để nạp");
+    if (err instanceof MatKhoaGhiChung) return traLoiMatKhoaGhiChung(err.buoc);
+    // Dump chụp trước migration phân quyền: `runRestore` từ chối TRƯỚC chốt phá huỷ ⇒ dữ liệu còn
+    // nguyên. 422 kèm lối đi quy trình trên host (lớp phòng thủ thứ hai sau cổng (2b)).
+    if (err instanceof LoiBackupTruocPhanQuyen) {
+      return Response.json({ error: err.message }, { status: 422 });
+    }
+
+    const message = err instanceof Error ? err.message : "Phục hồi thất bại.";
+    return Response.json(
+      {
+        error: `Phục hồi thất bại: ${message}. Dùng bản lùi pre-restore-*.dump hoặc chạy deploy/restore.sh (xem hướng dẫn deploy).`,
+      },
+      { status: 500 },
+    );
+  }
+}
+
+/**
+ * Chẩn đoán khi drain quá hạn: in các phiên DB đang mở GIAO DỊCH GHI (`backend_xid` có giá trị) trên
+ * DB hiện tại — chỉ để đọc log biết ai đang giữ, KHÔNG dùng làm điều kiện (phiên của tiến trình khác
+ * đã bị X/cổng chặn ở lần ghi kế tiếp). Lỗi truy vấn bị nuốt.
+ */
+async function inGiaoDichDangMoChanDoan(): Promise<void> {
+  try {
+    const dong = await prisma.$queryRaw<
+      { pid: number; application_name: string | null; state: string | null; backend_xid: string | null; xact_start: Date | null }[]
+    >`SELECT pid, application_name, state, backend_xid::text AS backend_xid, xact_start
+        FROM pg_stat_activity
+       WHERE datname = current_database() AND backend_xid IS NOT NULL AND pid <> pg_backend_pid()`;
+    console.error("[phuc-hoi] drain quá hạn — bộ đếm:", docBoDem(), "— phiên đang mở giao dịch ghi:", dong);
+  } catch (err) {
+    console.error("[phuc-hoi] drain quá hạn — không đọc được pg_stat_activity:", err);
+  }
+}
+
+/** 409 chung cho mọi lối dừng TRƯỚC phá huỷ không thuộc nhóm "mất khoá": dữ liệu còn nguyên. */
+function traLoiChuaDoiGi(lyDo: string): Response {
+  return Response.json(
+    { error: `${lyDo} Đã DỪNG trước khi thay đổi bất cứ thứ gì — dữ liệu hiện tại còn nguyên. Thử lại sau.` },
+    { status: 409 },
+  );
+}
+
+function traLoiLuotKhacDangChay(): Response {
+  return Response.json(
+    { error: "Đang có một lượt phục hồi khác chạy — chờ xong rồi thử lại." },
+    { status: 409 },
+  );
+}
+
+/**
+ * 409 khi tiến trình CLI (script/seed) đang giữ khoá ghi chung. Kèm danh sách phiên để chủ shop biết
+ * script nào còn chạy, hoặc cắt phiên mồ côi (Mac ngủ giữ khoá tới ~2h11') — `catPhienGiuKhoaChung`.
+ */
+function traLoiCliDangGhi(nguoiGiu: PhienGiuKhoa[]): Response {
+  return Response.json(
+    {
+      error:
+        "Đang có script chạy ngoài app giữ khoá ghi dữ liệu — chờ script xong (hoặc dừng nó) rồi thử " +
+        "lại. Đã DỪNG trước khi thay đổi bất cứ thứ gì, dữ liệu hiện tại còn nguyên.",
+      phienDangGiu: nguoiGiu.map((p) => ({
+        pid: p.pid,
+        applicationName: p.applicationName,
+        backendStart: p.backendStart,
+        mode: p.mode,
+        // Role + "cắt được": modal chỉ hiện nút cắt cho phiên CÙNG role app (lối cắt chỉ cắt được các
+        // phiên đó); phiên role khác hiện kèm câu lệnh cắt tay bằng superuser.
+        usename: p.usename,
+        catDuoc: p.catDuoc,
+      })),
+    },
+    { status: 409 },
+  );
+}
+
+/** Mất khoá ghi chung X ở một chốt TRƯỚC phá huỷ — CLI có thể đã giành lại; dữ liệu còn nguyên. */
+function traLoiMatKhoaGhiChung(buoc: string): Response {
+  console.error(
+    `Lượt phục hồi MẤT khoá ghi chung (X) ở bước "${buoc}" — kết nối giữ khoá đã đứt, script ngoài app ` +
+      `có thể đã giành lại. ĐÃ DỪNG trước mọi lệnh phá huỷ.`,
+  );
+  return traLoiChuaDoiGi("Mất khoá ghi chung giữa chừng (kết nối giữ khoá bị đứt).");
 }
 
 /**

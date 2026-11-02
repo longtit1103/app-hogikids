@@ -17,8 +17,8 @@ import { formatVnd } from "@/lib/format";
 import { lyDoKhongSuaTienTruocMoc } from "@/lib/no-phai-tra/sua-tien-truoc-moc";
 import { docSoTrang } from "@/lib/pagination";
 import { cn } from "@/lib/utils";
+import { PAGE_SIZE } from "@/lib/page-size";
 
-const PAGE_SIZE = 20;
 
 /** Route "Xem log" cho dòng ADS_API — mục Kết nối màn Cài đặt (SyncLog, phase 6). */
 const ADS_LOG_HREF = "/cai-dat#ket-noi";

@@ -72,6 +72,6 @@ describe("loiVuotTranAmount", () => {
   it("trong trần ⇒ null; vượt ⇒ câu lỗi nêu đúng trần", () => {
     expect(loiVuotTranAmount(MAX_AMOUNT_INPUT)).toBeNull();
     expect(loiVuotTranAmount(0)).toBeNull();
-    expect(loiVuotTranAmount(MAX_AMOUNT_INPUT + 1)).toBe("Số tiền tối đa 2.000.000.000 đ");
+    expect(loiVuotTranAmount(MAX_AMOUNT_INPUT + 1)).toBe("Số tiền tối đa 2.000.000.000 ₫");
   });
 });

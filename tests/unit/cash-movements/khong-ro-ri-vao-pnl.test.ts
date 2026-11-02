@@ -89,8 +89,12 @@ const FILE_CAM = [
   "src/components/bao-cao/report-export-buttons.tsx",
   "src/components/bao-cao/trend-chart.tsx",
   "src/components/bao-cao/trend-tab.tsx",
-  "src/components/dashboard/kpi-cards.tsx",
-  "src/components/dashboard/revenue-profit-chart.tsx",
+  // Trang chủ mới (11/2026) thay hàng KPI + biểu đồ cũ: gộp field `PnlBreakdown` thành "tiền đi đâu", thẻ số
+  // và biểu đồ theo ngày — cùng nhóm bị canh.
+  "src/lib/trang-chu/chia-chi-phi.ts",
+  "src/lib/trang-chu/tai-du-lieu-trang-chu.ts",
+  "src/components/trang-chu/tien-di-dau.tsx",
+  "src/components/trang-chu/chi-so-dang-chon.tsx",
   "src/lib/reports/voucher-breakdown.ts",
   // Phân quyền (10/2026): DTO che lãi/COGS chiếu từ `PnlBreakdown` + sheet Excel dựng ở server.
   "src/lib/reports/pnl-che.ts",
@@ -112,6 +116,8 @@ const THU_MUC_PNL = [
   "src/lib/reports",
   "src/components/bao-cao",
   "src/components/dashboard",
+  "src/lib/trang-chu",
+  "src/components/trang-chu",
   "src/components/kenh",
   "src/app/api/export/bao-cao",
 ];

@@ -17,7 +17,9 @@
  *
  * PDF in dư nợ ÂM khi đang nợ (`-23,681,959`) ⇒ `duNoKyTruoc`/`duNoCuoiKy` đổi dấu: DƯƠNG = đang nợ.
  * Cột Ghi nợ/Ghi có không phân biệt được trong text (chỉ còn một con số) ⇒ ghi có nhận diện bằng
- * diễn giải ("Thanh toan no the", "Hoan phi…"); phân loại sai thì CỔNG CHẶN tổng bắt được.
+ * diễn giải ("Thanh toan no the", "Hoan phi…"); phân loại sai thì CỔNG CHẶN tổng bắt được. Từ khoá hoàn chỉ
+ * xét ở phần LOẠI giao dịch (đầu diễn giải / trước "Thẻ/Card No"), không xét tên merchant — merchant
+ * "… HOAN KIEM HA NOI" không được biến lần mua thành ghi có (Σ lệch ⇒ từ chối cả file).
  *
  * CỔNG CHẶN (từng đồng): Σ ghiNo = tongGhiNo ∧ Σ ghiCo = tongGhiCo ∧
  * duNoKyTruoc + tongGhiNo − tongGhiCo = duNoCuoiKy. Mọi chỗ không đọc chắc ⇒ `ok:false` + lý do,
@@ -95,6 +97,22 @@ function hong(loi: string): never {
 const RE_THANH_TOAN_NO_THE = /thanh toan no the/i;
 /** Dòng phí ngân hàng (kể cả hoàn phí) — không phải giao dịch TikTok dù diễn giải nhắc tên TikTok. */
 const RE_DONG_PHI = /^(?:hoan\s+)?phi\b/i;
+/** Cụm loại giao dịch HOÀN (ghi có): "Hoan phi …", "Hoan tien …", "Hoan tra …", "Refund". Không phải từ đơn "hoan". */
+const RE_CUM_HOAN = /\b(?:hoan\s+(?:phi|tien|tra)|refund)\b/i;
+/** Ranh giới loại giao dịch ↔ merchant trên dòng mua bằng thẻ: "… Số Thẻ/Card No: 0000...9999 <merchant>". */
+const RE_SO_THE = /the\/card no/i;
+
+/**
+ * Dòng hoàn (ghi có) theo PHẦN LOẠI giao dịch của diễn giải đã bỏ dấu:
+ *  - có "Thẻ/Card No" ⇒ chỉ xét đoạn TRƯỚC nó (merchant đứng sau — tên merchant không quyết loại giao dịch);
+ *  - không có ⇒ cụm hoàn phải đứng ĐẦU diễn giải (mẫu đo: "Hoan phi thuong nien …").
+ */
+function laDongHoan(k: string): boolean {
+  const iThe = k.search(RE_SO_THE);
+  if (iThe >= 0) return RE_CUM_HOAN.test(k.slice(0, iThe));
+  const m = k.match(RE_CUM_HOAN);
+  return m !== null && m.index === 0;
+}
 
 /**
  * Dòng là thanh toán nợ thẻ — theo diễn giải. Dùng chung cho parser và cho dòng sao kê ĐÃ LƯU (`DongSaoKeThe` không có
@@ -196,7 +214,7 @@ function docDongGiaoDich(vung: string[]): DongSaoKe[] {
     const dg = dienGiai.join(" ").replace(/\s+/g, " ").trim();
     const k = boDau(dg);
     const laThanhToanNo = RE_THANH_TOAN_NO_THE.test(k);
-    const laGhiCo = laThanhToanNo || /\bhoan\b/i.test(k);
+    const laGhiCo = laThanhToanNo || laDongHoan(k);
     const ghiNo = laGhiCo ? 0 : soTien;
     return {
       ...d,

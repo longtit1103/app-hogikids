@@ -96,11 +96,11 @@ export function coLaiKenh(c: ChannelPnl | ChannelPnlChe): c is ChannelPnl {
   return "netProfit" in c;
 }
 
-/** Điểm biểu đồ ngày chỉ doanh thu. */
-export type DailyPointChe = { date: string; revenue: number } & DaChe;
+/** Điểm biểu đồ ngày chỉ doanh thu + số đơn (không lãi, không chi phí — chi phí gồm giá vốn). */
+export type DailyPointChe = { date: string; revenue: number; orderCount: number } & DaChe;
 
 export function cheDailySeries(points: readonly DailyPoint[]): DailyPointChe[] {
-  return points.map((p) => ({ date: p.date, revenue: p.revenue }) as DailyPointChe);
+  return points.map((p) => ({ date: p.date, revenue: p.revenue, orderCount: p.orderCount }) as DailyPointChe);
 }
 
 // ─── Chiếu theo quyền — page gọi `calcPnl`/`computeChannelPnl`/`computeDailySeries` như cũ rồi qua đây ──

@@ -13,6 +13,9 @@ function tenMucMenu(ten: string): RegExp {
   return new RegExp(`^${ten}(?: \\d+)?$`);
 }
 
+/** Tháng xa quá khứ, chắc chắn không có đơn/chi phí ⇒ tab Lãi/Lỗ hiện màn "Chưa có dữ liệu tháng…" kèm nút đồng bộ chữ. */
+const URL_THANG_LOI_LO_TRONG = "/tai-chinh?tab=loi-lo&tu=2001-01-01&den=2001-01-31";
+
 const TRANG_MENU: ReadonlyArray<readonly [string, string]> = [
   ["/", "Dashboard"],
   ["/don-hang", "Đơn hàng"],
@@ -62,11 +65,12 @@ test.describe("PageTitle", () => {
   test("máy tính 1280: tiêu đề trong nội dung hiện đủ 8 trang", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await dangNhap(page);
-    for (const [url, ten] of TRANG_MENU) {
+    for (const [url, tenMenu] of TRANG_MENU) {
       await page.goto(url);
       const tieuDe = page.locator('main [data-slot="page-title"]');
       await expect(tieuDe, url).toBeVisible();
-      await expect(tieuDe.getByRole("heading", { level: 1 }), url).toHaveText(ten);
+      // Trang chủ: mục menu vẫn là "Dashboard" nhưng tiêu đề trong trang là "Tổng quan" (spec trang chủ).
+      await expect(tieuDe.getByRole("heading", { level: 1 }), url).toHaveText(url === "/" ? "Tổng quan" : tenMenu);
     }
     await page.goto("/san-pham");
     // Máy tính: số SKU đã có trong dòng mô tả của tiêu đề ⇒ chú thích trong thẻ ẩn.
@@ -75,10 +79,13 @@ test.describe("PageTitle", () => {
 });
 test.describe("Nút đồng bộ", () => {
   test.use({ viewport: KHUNG_IPHONE });
-  test("mobile: nút ở Topbar là icon có tên, vùng bấm ≥ 44×44; nút trong thẻ Dashboard giữ chữ", async ({ page }) => {
+  test("mobile: nút ở Topbar là icon có tên, vùng bấm ≥ 44×44; nút trong nội dung (tháng Lãi/Lỗ chưa có dữ liệu) giữ chữ", async ({
+    page,
+  }) => {
     await datInset(page, INSET_IPHONE);
     await dangNhap(page);
-    // Thẻ "Tình trạng đồng bộ" ở Dashboard cũng có SyncNowButton (giữ nút chữ) ⇒ khoanh vào header.
+    // Trang chủ không còn thẻ "Tình trạng đồng bộ" (spec trang chủ §2) ⇒ nút CHỮ trong nội dung nay chỉ còn ở
+    // màn "Chưa có dữ liệu tháng…" của tab Lãi/Lỗ. Khoanh nút Topbar vào header.
     const nut = page.locator("header").getByRole("button", { name: "Đồng bộ ngay" });
     await expect(nut).toHaveCount(1);
     await expect(nut).toBeVisible();
@@ -86,6 +93,7 @@ test.describe("Nút đồng bộ", () => {
     expect(box.width).toBeGreaterThanOrEqual(44);
     expect(box.height).toBeGreaterThanOrEqual(44);
     await expect(nut).not.toContainText("Đồng bộ ngay"); // chỉ icon — tên nằm ở aria-label
+    await page.goto(URL_THANG_LOI_LO_TRONG);
     await expect(page.locator("main").getByRole("button", { name: "Đồng bộ ngay" }).first()).toContainText(
       "Đồng bộ ngay",
     );
@@ -200,29 +208,36 @@ test.describe("Thẻ KPI", () => {
   test.use({ viewport: KHUNG_IPHONE });
   const hop = async (l: import("@playwright/test").Locator) => (await l.boundingBox())!;
 
-  test("Dashboard: nhãn hôm nay, thứ tự DOM = thứ tự nhìn, số tiền rộng 2 cột", async ({ page }) => {
+  test("Dashboard: 4 thẻ số lưới 2×2, thứ tự DOM = thứ tự nhìn", async ({ page }) => {
     await dangNhap(page);
-    const doanhThu = page.getByText("Doanh thu gộp hôm nay", { exact: true }).locator("xpath=ancestor::a[1]");
-    const don = page.getByText("Đơn hợp lệ hôm nay", { exact: true }).locator("xpath=ancestor::a[1]");
-    const hoan = page.getByText("Tỷ lệ hoàn/bom tháng", { exact: true }).locator("xpath=ancestor::a[1]");
-    const loiNhuan = page
-      .getByText("LN ròng ước tính tháng", { exact: true })
-      .locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
-    const [a, b, c, d] = [await hop(doanhThu), await hop(don), await hop(hoan), await hop(loiNhuan)];
-    expect(Math.abs(b.y - c.y)).toBeLessThan(2); // Đơn | Tỷ lệ hoàn cùng hàng
-    expect(c.x).toBeGreaterThan(b.x);
-    expect(a.width).toBeGreaterThan(b.width * 1.8); // Doanh thu đủ 2 cột
-    expect(d.width).toBeGreaterThan(b.width * 1.8); // LN ròng đủ 2 cột
+    const the = (ten: string) => page.locator("main").getByRole("button", { name: new RegExp(`^${ten}`) });
+    const [a, b, c, d] = [
+      await hop(the("Doanh số")),
+      await hop(the("Chi phí")),
+      await hop(the("Lợi nhuận")),
+      await hop(the("Đơn hợp lệ")),
+    ];
+    // Hàng trên: Doanh số | Chi phí; hàng dưới: Lợi nhuận | Đơn hợp lệ.
+    expect(Math.abs(a.y - b.y)).toBeLessThan(2);
+    expect(Math.abs(c.y - d.y)).toBeLessThan(2);
+    expect(b.x).toBeGreaterThan(a.x);
+    expect(d.x).toBeGreaterThan(c.x);
+    expect(c.y).toBeGreaterThan(a.y + a.height - 2);
+    // Hai cột đều nhau (2×2), không thẻ nào chiếm đủ hàng.
+    expect(Math.abs(a.width - b.width)).toBeLessThan(2);
+    expect(a.width).toBeLessThan(KHUNG_IPHONE.width * 0.6);
     // Thứ tự nhìn (trên→dưới, trái→phải) phải trùng thứ tự DOM ⇒ VoiceOver đọc đúng.
-    expect(a.y).toBeLessThan(b.y);
-    expect(c.y).toBeLessThan(d.y);
-    const thuTuDom = await page.locator("main").evaluate((m) =>
-      ["Doanh thu gộp hôm nay", "Đơn hợp lệ hôm nay", "Tỷ lệ hoàn/bom tháng", "LN ròng ước tính tháng"].map((t) =>
-        (m as HTMLElement).innerText.indexOf(t),
-      ),
-    );
-    expect([...thuTuDom].sort((x, y) => x - y)).toEqual(thuTuDom);
-    await expect(page.getByText("bộ chọn kỳ chỉ áp dụng cho biểu đồ và phân tích bên dưới")).toBeVisible();
+    const thuTuDom = await page.locator("main").evaluate((m) => {
+      const ten = ["Doanh số", "Chi phí", "Lợi nhuận", "Đơn hợp lệ"];
+      const nut = ten.map((t) => [...m.querySelectorAll("button[aria-pressed]")].find((e) => (e.textContent ?? "").trim().startsWith(t))!);
+      return nut.slice(1).map((e, i) => Boolean(nut[i].compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING));
+    });
+    expect(thuTuDom).toEqual([true, true, true]);
+    // Điện thoại không có h1 trong nội dung nhưng vẫn phải thấy mốc của huy hiệu %: "so với <kỳ>".
+    await expect(page.getByTestId("nhan-ky-so-sanh")).toBeVisible();
+    await expect(page.getByTestId("nhan-ky-so-sanh")).toContainText("so với");
+    // Bộ chọn kỳ nay điều khiển MỌI số trên trang — dòng chú thích cũ không còn.
+    await expect(page.getByText("bộ chọn kỳ chỉ áp dụng cho biểu đồ và phân tích bên dưới")).toHaveCount(0);
   });
 
   test("Tồn kho: SKU | tồn cùng hàng, vốn tồn + dưới ngưỡng rộng 2 cột", async ({ page }) => {
@@ -365,7 +380,16 @@ test.describe("Thanh tab dưới", () => {
       // trang hiện tại" trong khi đang ở Sản phẩm); trạng thái mở/đóng đã có aria-expanded. Vẫn tô
       // màu nhấn để mắt thấy mình đang ở nhóm mục phụ.
       await expect(them).not.toHaveAttribute("aria-current");
-      expect(await them.evaluate((e) => getComputedStyle(e).color)).toBe("rgb(204, 120, 92)");
+      // So với token nhấn `--primary` đọc lúc chạy (không ghi cứng mã màu: token đổi theo chuẩn tương phản).
+      const mauNhan = await page.evaluate(() => {
+        const d = document.createElement("span");
+        d.style.color = "var(--primary)";
+        document.body.appendChild(d);
+        const c = getComputedStyle(d).color;
+        d.remove();
+        return c;
+      });
+      expect(await them.evaluate((e) => getComputedStyle(e).color)).toBe(mauNhan);
     });
 
     test("dòng cuối trang không bị tab bar che", async ({ page }) => {
@@ -421,31 +445,24 @@ for (const [ten, khung, inset] of [
 }
 
 test.describe("Máy tính hẹp / xoay ngang (sau khi Topbar xuống dòng dưới xl)", () => {
-  test("1024: thẻ Tình trạng đồng bộ trong Dashboard vẫn hiện dòng trạng thái", async ({ page }) => {
+  test("1024: nút đồng bộ trong nội dung vẫn hiện dòng trạng thái (màn tháng Lãi/Lỗ chưa có dữ liệu)", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await dangNhap(page);
+    await page.goto(URL_THANG_LOI_LO_TRONG);
     // Chỉ Topbar ẩn dòng "Đồng bộ lúc…" ở md–xl (hàng chật); nút trong nội dung KHÔNG được mất nó.
     await expect(page.locator("main").getByText(/^(Đồng bộ lúc|Chưa đồng bộ)/).first()).toBeVisible();
     await expect(page.locator("header").getByText(/^(Đồng bộ lúc|Chưa đồng bộ)/)).toBeHidden();
   });
 
-  test("1024: Dashboard KHÔNG tràn ngang khi thẻ đồng bộ đã hiện 'Đồng bộ lúc…' + nhãn OK", async ({ page }) => {
-    // Smoke "không tràn ngang" đo ngay sau goto — TRƯỚC khi Server Action lấy lượt đồng bộ gần nhất
-    // về ⇒ xanh giả (đo 28/09: 1024 lúc goto, 1099 sau 1,5s). Ở đây tạo sẵn lượt OK rồi CHỜ dòng
-    // "Đồng bộ lúc…" hiện mới đo.
-    const db = testPrisma();
-    const log = await db.syncLog.create({
-      data: { kind: "PANCAKE", status: "OK", startedAt: new Date(), finishedAt: new Date() },
-    });
-    try {
-      await page.setViewportSize({ width: 1024, height: 768 });
-      await dangNhap(page);
-      await expect(page.locator("main").getByText(/^Đồng bộ lúc/).first()).toBeVisible();
-      const [rong, khungNhin] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
-      expect(rong).toBeLessThanOrEqual(khungNhin);
-    } finally {
-      await db.syncLog.delete({ where: { id: log.id } });
-    }
+  test("1024: Dashboard KHÔNG tràn ngang sau khi biểu đồ và các khối đã vẽ", async ({ page }) => {
+    // Smoke "không tràn ngang" đo ngay sau goto có thể xanh giả khi phần nội dung đến muộn (client component
+    // vẽ sau hydrate). Ở đây CHỜ biểu đồ theo ngày hiện rồi mới đo.
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await dangNhap(page);
+    await expect(page.getByTestId("khoi-bieu-do-theo-ngay")).toBeVisible();
+    await expect(page.getByTestId("khoi-tinh-trang-don")).toBeVisible();
+    const [rong, khungNhin] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+    expect(rong).toBeLessThanOrEqual(khungNhin);
   });
 
   test.describe("xoay ngang 844×390", () => {

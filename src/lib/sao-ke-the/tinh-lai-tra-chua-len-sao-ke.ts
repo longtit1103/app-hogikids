@@ -11,7 +11,7 @@ import { khoaThe } from "@/lib/no-phai-tra/the-tin-dung-queries";
 import { khoaNgayVn } from "@/lib/so-quy/dong-chay-so-quy";
 import { OPT_TX_DONG_TIEN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 
-import { SO_NGAY_GHI_SO_TRE_MAC_DINH } from "./doi-chieu-sao-ke-the";
+import { lyDoTraTheMoHo, SO_NGAY_GHI_SO_TRE_MAC_DINH } from "./doi-chieu-sao-ke-the";
 import { ghepChiTraVoiSaoKe, LECH_NGAY_GHEP_THE, type GiaoDichAppGhiCo } from "./ghep-chi-tra-the-voi-sao-ke";
 import { laThanhToanNoThe, type DongSaoKe } from "./techcombank-sao-ke-parser";
 
@@ -45,6 +45,8 @@ export type KetQuaTinhLai = {
   /** `CARD_PAY` ngày ∈ (D − 5, D] không thấy trên sao kê ⇒ chưa lên sao kê. */
   traChuaLen: GiaoDichAppGhiCo[];
   tong: number;
+  /** Trả thẻ ghép MƠ HỒ (cùng luật chặn lúc chốt) ⇒ P không tính chắc được, KHÔNG ghi; null = không mơ hồ. */
+  moHo: string | null;
 };
 
 const COT_KY = {
@@ -117,6 +119,7 @@ async function tinhChoKy(db: DbTinhLai, ky: KyPdf, ctx: NguCanhLoc): Promise<Ket
     neoTruSaoKeVaBill: ky.soDu - saoKeSoDu - bill,
     traChuaLen: kq.traChuaLenSaoKe,
     tong: kq.traChuaLenSaoKe.reduce((s, g) => s + g.soTien, 0),
+    moHo: lyDoTraTheMoHo(kq),
   };
 }
 
@@ -169,6 +172,10 @@ export async function ghiTraChuaLenChoCacKy(
         continue;
       }
       const t = await tinhChoKy(tx, ky, ctx);
+      if (t.moHo !== null) {
+        kq.boQua.push({ kyId: id, lyDo: t.moHo });
+        continue;
+      }
       await tx.kySaoKeThe.update({ where: { id }, data: { saoKeTraChuaLen: t.tong } });
       await ghiNhatKy(tx, {
         actor,

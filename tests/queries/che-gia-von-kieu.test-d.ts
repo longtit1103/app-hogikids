@@ -71,5 +71,7 @@ describe("kiểu DTO che giá vốn", () => {
     void kenhChe.netProfit;
     // @ts-expect-error — điểm ngày che không có LN ròng
     void ngayChe.netProfit;
+    // @ts-expect-error — điểm ngày che không có chi phí (gồm giá vốn)
+    void ngayChe.chiPhi;
   });
 });

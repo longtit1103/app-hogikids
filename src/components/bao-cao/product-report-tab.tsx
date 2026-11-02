@@ -11,8 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ProductReport, ProductReportRowChe } from "@/lib/reports/product-report";
 import { cn } from "@/lib/utils";
+import { PAGE_SIZE } from "@/lib/page-size";
 
-const PAGE_SIZE = 20;
 const ALL_CHANNELS = "__all__";
 
 type SubTab = "ban_chay" | "cham_ban" | "lai_gop";

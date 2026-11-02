@@ -48,6 +48,8 @@ describe("groupByWeek", () => {
     date,
     revenue,
     netProfit,
+    chiPhi: 0,
+    orderCount: 0,
   });
 
   it("groups exactly 7-day buckets, summing the given keys and keeping the first date", () => {

@@ -1,10 +1,10 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   docTrangThaiWebhookPancake,
   LOC_SU_KIEN_CHUNG_MINH_CON_SONG,
 } from "@/lib/ket-noi/webhook-pancake-info";
-import { WEBHOOK_PANCAKE_PATH } from "@/lib/n8n/provision/doc-goi-workflow-tu-repo";
+import { KHOA_SETTING_DUONG_DAN_WEBHOOK, VAI_WEBHOOK_PANCAKE } from "@/lib/n8n/provision/duong-dan-webhook-pancake";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -20,29 +20,66 @@ const BASE_MONG_DOI = "https://n8n.example.com";
 const PAYLOAD = `{"test":"webhook-info-${Date.now()}"}`;
 let idSeed: string | null = null;
 
+/** Path GIẢ đúng dạng 32 hex — đứng thay path thật của instance trong `Setting`. */
+const DUONG_DAN_GIA = {
+  kho: "0123456789abcdef0123456789abcdef",
+  shopee: "fedcba9876543210fedcba9876543210",
+  tiktok: "00112233445566778899aabbccddeeff",
+} as const;
+const KHOA_PATH = VAI_WEBHOOK_PANCAKE.map((v) => KHOA_SETTING_DUONG_DAN_WEBHOOK[v]);
+
+async function ghiDuongDanGia() {
+  for (const vai of VAI_WEBHOOK_PANCAKE) {
+    const key = KHOA_SETTING_DUONG_DAN_WEBHOOK[vai];
+    await prisma.setting.upsert({ where: { key }, create: { key, value: DUONG_DAN_GIA[vai] }, update: { value: DUONG_DAN_GIA[vai] } });
+  }
+}
+
+// DB test dùng chung: giữ nguyên trạng thái 3 khoá path trước file này để trả lại y nguyên.
+let truocFile: Array<{ key: string; value: string }> = [];
+beforeAll(async () => {
+  truocFile = await prisma.setting.findMany({ where: { key: { in: KHOA_PATH } }, select: { key: true, value: true } });
+  await ghiDuongDanGia();
+});
+
 afterAll(async () => {
   if (idSeed) await prisma.rawPancakeWebhookEvent.deleteMany({ where: { id: idSeed } });
+  await prisma.setting.deleteMany({ where: { key: { in: KHOA_PATH } } });
+  for (const r of truocFile) await prisma.setting.create({ data: r });
 });
 
 describe("docTrangThaiWebhookPancake", () => {
-  it("đủ 3 shop, URL ghép từ base + ĐÚNG path của chính workflow n8n", async () => {
+  it("đủ 3 shop, URL ghép từ base + ĐÚNG path của shop đó trong Setting", async () => {
     const ds = await docTrangThaiWebhookPancake();
     expect(ds.map((d) => d.ten)).toEqual(["Shop Kho Tổng", "Shop Shopee", "Shop TikTok"]);
 
-    // Suy kỳ vọng TỪ NGUỒN SỰ THẬT (`WEBHOOK_PANCAKE_PATH`, rút từ chính file workflow) chứ KHÔNG
-    // ghi cứng chuỗi path. Hai lý do, cả hai đều đã cắn thật:
-    //  1. Path webhook bị XOAY khi cần (lần gần nhất 21/09 sau audit bảo mật). Ghi cứng nghĩa là
-    //     mỗi lượt xoay lại vỡ test ở một chỗ chẳng liên quan gì tới thứ test này bảo vệ.
-    //  2. Path đang dùng là thứ KHÔNG nên rải thêm bản sao trong repo — càng nhiều chỗ chép lại,
-    //     càng nhiều cửa để nó rò ra bản public (đúng lỗ hổng H-03 của đợt audit).
-    // Thứ đáng khoá ở đây là PHÉP GHÉP (base + "/webhook/" + path của đúng shop đó), không phải
-    // giá trị path — nếu ai nối nhầm shop hoặc bỏ mất đoạn "/webhook/" thì test này đỏ.
-    for (const [i, vai] of (["kho", "shopee", "tiktok"] as const).entries()) {
-      expect(WEBHOOK_PANCAKE_PATH[vai]).not.toBe(""); // rút path hỏng ⇒ URL cụt, phải đỏ
-      expect(ds[i].url).toBe(`${BASE_MONG_DOI}/webhook/${WEBHOOK_PANCAKE_PATH[vai]}`);
+    // Path đọc từ `Setting` (dữ liệu của instance) — CÙNG nguồn với lượt "Cài / cập nhật workflows".
+    // Thứ khoá ở đây là PHÉP GHÉP (base + "/webhook/" + path của ĐÚNG shop): nối nhầm shop hoặc mất
+    // đoạn "/webhook/" là đỏ. Path giả, không phải path thật — path thật không được nằm trong repo.
+    for (const [i, vai] of VAI_WEBHOOK_PANCAKE.entries()) {
+      expect(ds[i].url).toBe(`${BASE_MONG_DOI}/webhook/${DUONG_DAN_GIA[vai]}`);
+      expect(ds[i].loi).toBeNull();
     }
     // 3 shop PHẢI có 3 path khác nhau — gán trùng là 3 shop đổ chung một hộp thư.
     expect(new Set(ds.map((d) => d.url)).size).toBe(3);
+  });
+
+  it("Setting THIẾU / HỎNG path một shop → shop đó KHÔNG có URL (không hiện placeholder), lỗi nêu đúng khoá", async () => {
+    await prisma.setting.deleteMany({ where: { key: KHOA_SETTING_DUONG_DAN_WEBHOOK.shopee } });
+    await prisma.setting.update({ where: { key: KHOA_SETTING_DUONG_DAN_WEBHOOK.tiktok }, data: { value: "__DUONG_DAN_WEBHOOK_TIKTOK__" } });
+    try {
+      const ds = await docTrangThaiWebhookPancake();
+      const theoTen = new Map(ds.map((d) => [d.ten, d]));
+      expect(theoTen.get("Shop Shopee")?.url).toBeNull();
+      expect(theoTen.get("Shop Shopee")?.loi).toContain(KHOA_SETTING_DUONG_DAN_WEBHOOK.shopee);
+      expect(theoTen.get("Shop TikTok")?.url).toBeNull();
+      expect(theoTen.get("Shop TikTok")?.loi).toContain(KHOA_SETTING_DUONG_DAN_WEBHOOK.tiktok);
+      // Shop còn path vẫn hiện URL — thiếu một shop không được làm sập cả khối.
+      expect(theoTen.get("Shop Kho Tổng")?.url).toBe(`${BASE_MONG_DOI}/webhook/${DUONG_DAN_GIA.kho}`);
+      expect(JSON.stringify(ds)).not.toContain("__DUONG_DAN_");
+    } finally {
+      await ghiDuongDanGia();
+    }
   });
 
   it("shop vừa nhận sự kiện live → mốc gần nhất hiện dạng tương đối", async () => {

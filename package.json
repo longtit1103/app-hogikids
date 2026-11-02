@@ -9,6 +9,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:prod": "playwright test -c playwright.prod.config.ts",
+    "test:e2e:prod:cong-ghi": "playwright test -c playwright.cong-ghi-prod.config.ts",
     "preview": "bash scripts/preview-local.sh",
     "setup": "tsx scripts/setup-clone.ts"
   },
@@ -31,6 +32,7 @@
     "iron-session": "^9.0.1",
     "lucide-react": "^1.51.0",
     "next": "16.4.2",
+    "pg": "^8.16.3",
     "prisma": "^7.10.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -49,6 +51,7 @@
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^24",
+    "@types/pg": "^8.16.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.1",

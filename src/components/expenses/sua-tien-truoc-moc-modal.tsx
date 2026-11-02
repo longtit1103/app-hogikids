@@ -11,7 +11,7 @@ import { suaSoTienTruocMoc } from "@/lib/actions/sua-tien-truoc-moc";
 import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
 import { formatVnd } from "@/lib/format";
-import { loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 import type { KetQuaSuaTienTruocMoc } from "@/lib/no-phai-tra/sua-tien-truoc-moc";
 
 const TRAN_LY_DO = 120; // khớp trần server (`lyDo` trim 1..120)
@@ -137,7 +137,7 @@ export function SuaTienTruocMocModal({ open, onOpenChange, expense, mocM }: SuaT
             <Input
               id={idSoTien}
               inputMode="numeric"
-              value={amountMoi ? new Intl.NumberFormat("vi-VN").format(amountMoi) : ""}
+              value={formatAmountInput(amountMoi)}
               onChange={(e) => setAmountMoi(parseAmountInput(e.target.value))}
               placeholder="0"
               className="pr-8 text-right"

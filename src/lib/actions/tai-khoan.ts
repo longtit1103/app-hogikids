@@ -17,7 +17,8 @@ import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { kiemKhongPhucHoiTrongTx, LoiDangPhucHoiTrongTx } from "@/lib/backup/kiem-khong-phuc-hoi-trong-tx";
 import { chuanHoaEmail } from "@/lib/chuan-hoa-email";
 import { ghiNhatKy, ghiNhatKyLoi, type ActorNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
@@ -92,49 +93,54 @@ const taoTaiKhoanSchema = z.object({
 export async function taoTaiKhoan(formData: FormData): Promise<ActionResult<{ id: string; matKhauTam: string }>> {
   const c = await congChuShopAction();
   if (!c.ok) return c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  const actor = actorCua(c.nguoiDung);
-
-  const parsed = taoTaiKhoanSchema.safeParse({
-    email: formData.get("email"),
-    tenHienThi: formData.get("tenHienThi") ?? "",
-    quyen: formData.getAll("quyen"),
-  });
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { email, tenHienThi } = parsed.data;
-  const quyen = chuanHoaQuyen(parsed.data.quyen);
-  if (!quyen.ok) return thatBai("TO_HOP_QUYEN_SAI", quyen.error);
-
-  const matKhauTam = sinhMatKhauTam();
-  // scrypt tốn hàng trăm ms — băm XONG rồi mới mở transaction.
-  const passwordHash = await hashPassword(matKhauTam);
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const id = await prisma.$transaction(async (tx) => {
-      const { id } = await tx.user.create({
-        data: {
-          email,
-          passwordHash,
-          role: "STAFF",
-          tenHienThi,
-          quyen: quyen.quyen,
-          mustChangePassword: true,
-          // Epoch ngẫu nhiên ngay từ đầu (không để mặc định "0"): cookie đời cũ không mang `mocPhien`
-          // quy về "0" — tài khoản mới không có lý do gì để khớp dạng đó.
-          sessionEpoch: sinhMocPhien(),
-        },
-        select: { id: true },
-      });
-      kiemKhongPhucHoiTrongTx(); // sau câu ghi đầu — lượt phục hồi bắt đầu giữa chừng ⇒ cuộn lại
-      await ghiNhatKy(tx, { actor, hanhDong: HANH_DONG.TAI_KHOAN_TAO, doiTuong: { loai: "User", id, moTa: email } });
-      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
-      return id;
+    const actor = actorCua(c.nguoiDung);
+
+    const parsed = taoTaiKhoanSchema.safeParse({
+      email: formData.get("email"),
+      tenHienThi: formData.get("tenHienThi") ?? "",
+      quyen: formData.getAll("quyen"),
     });
-    return { ok: true, data: { id, matKhauTam } };
-  } catch (loi) {
-    // Đã cuộn lại vì lượt phục hồi: không ghi nhật ký lỗi (sẽ rơi vào schema sắp bị thay), không lộ mật khẩu tạm.
-    if (loi instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
-    return xuLyLoi(actor, HANH_DONG.TAI_KHOAN_TAO, loi, { moTa: email });
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { email, tenHienThi } = parsed.data;
+    const quyen = chuanHoaQuyen(parsed.data.quyen);
+    if (!quyen.ok) return thatBai("TO_HOP_QUYEN_SAI", quyen.error);
+
+    const matKhauTam = sinhMatKhauTam();
+    // scrypt tốn hàng trăm ms — băm XONG rồi mới mở transaction.
+    const passwordHash = await hashPassword(matKhauTam);
+
+    try {
+      const id = await prisma.$transaction(async (tx) => {
+        const { id } = await tx.user.create({
+          data: {
+            email,
+            passwordHash,
+            role: "STAFF",
+            tenHienThi,
+            quyen: quyen.quyen,
+            mustChangePassword: true,
+            // Epoch ngẫu nhiên ngay từ đầu (không để mặc định "0"): cookie đời cũ không mang `mocPhien`
+            // quy về "0" — tài khoản mới không có lý do gì để khớp dạng đó.
+            sessionEpoch: sinhMocPhien(),
+          },
+          select: { id: true },
+        });
+        kiemKhongPhucHoiTrongTx(); // sau câu ghi đầu — lượt phục hồi bắt đầu giữa chừng ⇒ cuộn lại
+        await ghiNhatKy(tx, { actor, hanhDong: HANH_DONG.TAI_KHOAN_TAO, doiTuong: { loai: "User", id, moTa: email } });
+        kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
+        return id;
+      });
+      return { ok: true, data: { id, matKhauTam } };
+    } catch (loi) {
+      // Đã cuộn lại vì lượt phục hồi: không ghi nhật ký lỗi (sẽ rơi vào schema sắp bị thay), không lộ mật khẩu tạm.
+      if (loi instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
+      return await xuLyLoi(actor, HANH_DONG.TAI_KHOAN_TAO, loi, { moTa: email });
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -187,7 +193,7 @@ async function capNhatTaiKhoanDich<T>(
     return { ok: true, data };
   } catch (loi) {
     if (loi instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
-    return xuLyLoi(actor, hanhDong, loi, { id });
+    return await xuLyLoi(actor, hanhDong, loi, { id });
   }
 }
 
@@ -200,39 +206,51 @@ const danhSachQuyenSchema = z.array(z.string().max(64)).max(100);
 export async function suaQuyenTaiKhoan(id: string, quyen: string[]): Promise<ActionResult> {
   const c = await congChuShopAction();
   if (!c.ok) return c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    const parsed = danhSachQuyenSchema.safeParse(quyen);
+    if (!parsed.success) return thatBai("TO_HOP_QUYEN_SAI");
+    const chuan = chuanHoaQuyen(parsed.data);
+    if (!chuan.ok) return thatBai("TO_HOP_QUYEN_SAI", chuan.error);
 
-  const parsed = danhSachQuyenSchema.safeParse(quyen);
-  if (!parsed.success) return thatBai("TO_HOP_QUYEN_SAI");
-  const chuan = chuanHoaQuyen(parsed.data);
-  if (!chuan.ok) return thatBai("TO_HOP_QUYEN_SAI", chuan.error);
-
-  return capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_SUA_QUYEN, async (tx, dong) => {
-    await tx.user.update({ where: { id: dong.id }, data: { quyen: chuan.quyen } });
-  });
+    return await capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_SUA_QUYEN, async (tx, dong) => {
+      await tx.user.update({ where: { id: dong.id }, data: { quyen: chuan.quyen } });
+    });
+  } finally {
+    cua.ra();
+  }
 }
 
 /** Khoá: `isActive=false` + thu hồi mọi phiên của người đó, cùng transaction. */
 export async function khoaTaiKhoan(id: string): Promise<ActionResult> {
   const c = await congChuShopAction();
   if (!c.ok) return c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  return capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_KHOA, async (tx, dong) => {
-    await tx.user.update({ where: { id: dong.id }, data: { isActive: false } });
-    await thuHoiPhienCuaNguoi(tx, dong.id);
-  });
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    return await capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_KHOA, async (tx, dong) => {
+      await tx.user.update({ where: { id: dong.id }, data: { isActive: false } });
+      await thuHoiPhienCuaNguoi(tx, dong.id);
+    });
+  } finally {
+    cua.ra();
+  }
 }
 
 /** Mở khoá: `isActive=true`, KHÔNG đổi epoch — phiên đã bị thu hồi lúc khoá vẫn chết, phải đăng nhập lại. */
 export async function moKhoaTaiKhoan(id: string): Promise<ActionResult> {
   const c = await congChuShopAction();
   if (!c.ok) return c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  return capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_MO_KHOA, async (tx, dong) => {
-    await tx.user.update({ where: { id: dong.id }, data: { isActive: true } });
-  });
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    return await capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_MO_KHOA, async (tx, dong) => {
+      await tx.user.update({ where: { id: dong.id }, data: { isActive: true } });
+    });
+  } finally {
+    cua.ra();
+  }
 }
 
 /**
@@ -243,11 +261,15 @@ export async function moKhoaTaiKhoan(id: string): Promise<ActionResult> {
 export async function xoaTaiKhoan(id: string): Promise<ActionResult> {
   const c = await congChuShopAction();
   if (!c.ok) return c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  return capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_XOA, async (tx, dong) => {
-    await tx.user.delete({ where: { id: dong.id } });
-  });
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    return await capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_XOA, async (tx, dong) => {
+      await tx.user.delete({ where: { id: dong.id } });
+    });
+  } finally {
+    cua.ra();
+  }
 }
 
 /**
@@ -258,16 +280,21 @@ export async function xoaTaiKhoan(id: string): Promise<ActionResult> {
 export async function datLaiMatKhau(id: string): Promise<ActionResult<{ matKhauTam: string }>> {
   const c = await congChuShopAction();
   if (!c.ok) return c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  if (!laIdHopLe(id)) return thatBai("KHONG_TIM_THAY");
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
+  try {
+    if (!laIdHopLe(id)) return thatBai("KHONG_TIM_THAY");
 
-  const matKhauTam = sinhMatKhauTam();
-  // scrypt tốn hàng trăm ms — băm XONG rồi mới khoá dòng.
-  const passwordHash = await hashPassword(matKhauTam);
+    const matKhauTam = sinhMatKhauTam();
+    // scrypt tốn hàng trăm ms — băm XONG rồi mới khoá dòng.
+    const passwordHash = await hashPassword(matKhauTam);
 
-  return capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_DAT_LAI_MK, async (tx, dong) => {
-    await tx.user.update({ where: { id: dong.id }, data: { passwordHash, mustChangePassword: true } });
-    await thuHoiPhienCuaNguoi(tx, dong.id);
-    return { matKhauTam };
-  });
+    return await capNhatTaiKhoanDich(c.nguoiDung, id, HANH_DONG.TAI_KHOAN_DAT_LAI_MK, async (tx, dong) => {
+      await tx.user.update({ where: { id: dong.id }, data: { passwordHash, mustChangePassword: true } });
+      await thuHoiPhienCuaNguoi(tx, dong.id);
+      return { matKhauTam };
+    });
+  } finally {
+    cua.ra();
+  }
 }

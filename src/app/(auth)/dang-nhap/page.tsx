@@ -1,12 +1,13 @@
 import Image from "next/image";
 import { redirect } from "next/navigation";
 
+import { chuanHoaSearchParams, type SearchParamsTho } from "@/lib/chuan-hoa-search-params";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { isSafeRedirectPath } from "@/lib/safe-redirect-path";
 import { LoginForm } from "./login-form";
 
 type LoginPageProps = {
-  searchParams: Promise<{ redirect?: string }>;
+  searchParams: Promise<SearchParamsTho<{ redirect: string }>>;
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
@@ -23,7 +24,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   // Only allow same-origin relative paths — never forward an absolute URL,
   // protocol-relative ("//evil.com"), or backslash ("/\evil.com") value from
   // the query string (open-redirect guard).
-  const { redirect: redirectParam } = await searchParams;
+  // `?redirect=a&redirect=b` cho MẢNG — chuẩn hoá về phần tử đầu để `isSafeRedirectPath` không nhận mảng (500).
+  const { redirect: redirectParam } = chuanHoaSearchParams(await searchParams);
   const redirectTo = redirectParam && isSafeRedirectPath(redirectParam) ? redirectParam : "/";
 
   return (

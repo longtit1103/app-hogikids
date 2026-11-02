@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { suaKhoanVay, taoKhoanVay } from "@/lib/actions/khoan-vay";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 import { ngayTruocMoSo } from "@/lib/so-quy/ngay-truoc-mo-so";
 
@@ -127,7 +127,23 @@ export function KhoanVayFormModal({
   const khoaNen = Boolean(loan && (loan.lastDueHandled !== null || loan.coTraGoc));
   // Cảnh báo riêng ở ô "Ngày trả kỳ đầu" — hẹp hơn `khoaNen`, chỉ xét con dấu, không đụng `coTraGoc`.
   const daDuyetKy = Boolean(loan && loan.lastDueHandled !== null);
+  // Gõ quá trần 2 tỷ: báo đỏ tại đúng ô (chỉ ô đang hiện theo chế độ) + khoá nút Lưu; action vẫn chặn.
+  const loiTran: Record<string, string> = {};
+  const datLoiTran = (khoa: string, v: number) => {
+    const c = loiVuotTranAmount(v);
+    if (c) loiTran[khoa] = c;
+  };
+  if (dungCheDoMoi) datLoiTran("soTienGiaiNgan", f.soTienGiaiNgan);
+  else datLoiTran("duNoMoSo", f.duNoMoSo);
+  if (laGocCuoiKy) {
+    // Ô "Lãi cố định mỗi kỳ" chỉ hiện khi KHÔNG tính theo %/năm — bật %/năm thì số cũ còn trong state
+    // không được khoá nút Lưu (ô đã ẩn, không có dòng đỏ nào để người dùng sửa).
+    if (!f.laiTheoNam) datLoiTran("laiCoDinhMoiKy", f.laiCoDinh);
+    datLoiTran("tienGuiBatBuocMoiKy", f.tienGuiMoiKy);
+  }
+  const loiHienThi = { ...loiTran, ...loi };
   const canSave =
+    Object.keys(loiTran).length === 0 &&
     f.name.trim().length > 0 &&
     Boolean(ngayNen) &&
     (dungCheDoMoi ? f.soTienGiaiNgan > 0 : f.duNoMoSo > 0) &&
@@ -211,7 +227,7 @@ export function KhoanVayFormModal({
           <KhoanVayFormFields
             f={f}
             setF={setF}
-            loi={loi}
+            loi={loiHienThi}
             khoaNen={khoaNen}
             khoaCheDo={isEdit}
             daDuyetKy={daDuyetKy}

@@ -5,26 +5,17 @@ import { useState } from "react";
 import { format, parse } from "date-fns";
 
 import type { TrangThaiLechGiaVon } from "@/lib/gia-von/trang-thai-lech-gia-von";
-import { cauNhacPhieuNhap, type TrangThaiPhieuNhap } from "@/lib/nhap-hang/trang-thai-phieu-nhap";
+import {
+  cauNhacPhieuNhap,
+  type TrangThaiPhieuNhap,
+} from "@/lib/nhap-hang/trang-thai-phieu-nhap";
 import type { CanhBaoSapCan } from "@/lib/so-quy/du-bao-quy-types";
 
 import { BannerLuiBan } from "./banner-lui-ban";
 import { BottomTabBar } from "./bottom-tab-bar";
+import { DaiNhacViec, DongNhacViec } from "./dong-nhac-viec";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
-
-const LOP_BANNER_GIA_VON =
-  "flex flex-col gap-0.5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-ink shadow-sm";
-
-/** Banner lệch giá vốn: link sang trang duyệt khi người xem vào được, khối tĩnh khi không. */
-function BannerGiaVon({ coLink, children }: { coLink: boolean; children: React.ReactNode }) {
-  if (!coLink) return <div className={LOP_BANNER_GIA_VON}>{children}</div>;
-  return (
-    <Link href="/san-pham/dong-bo-gia-von" className={`${LOP_BANNER_GIA_VON} transition hover:bg-warning/15`}>
-      {children}
-    </Link>
-  );
-}
 
 /**
  * Giữ state mở/đóng ngăn kéo điều hướng mobile để tab "Thêm" (trong `BottomTabBar`) và nội dung
@@ -135,156 +126,174 @@ export function ShellChrome({
             cần phục hồi. Chỉ hiện MỘT câu để banner không thành khối chữ bị lướt qua.
           */}
           {/*
-            MỘT vùng sticky chung cho MỌI banner, không để từng banner tự `sticky top-2`.
+            MỘT vùng sticky chung cho banner ĐỎ "hệ đang hỏng" (và lùi bản), không để từng banner tự
+            `sticky top-2`. Nhắc việc VÀNG nằm ở dải gọn KHÔNG sticky ngay dưới (chủ shop chốt 02/11:
+            hộp vàng bám theo khi cuộn che nội dung) — xem `dong-nhac-viec.tsx`.
             Đo thật trên Chromium (2026-09-07): hai banner cùng `sticky top-2 z-20` thì từ
             scrollY ≈ 200 chúng TRÙNG KHÍT — banner vàng (nền 10% alpha) in đè chữ lên banner đỏ,
             và vì cả hai là <Link>, cú bấm vào banner đỏ bị banner vàng NUỐT: chủ shop bấm cảnh báo
             "số liệu có thể sai" lại bị đưa sang trang giá vốn. Tức tín hiệu ưu tiên cao nhất bị
             tín hiệu thấp hơn chặn đường, ngay trên cơ chế dựng ra để chống hỏng lặng.
           */}
-          <div className="sticky top-2 z-20 flex flex-col gap-2 empty:hidden [&:not(:empty)]:mb-4">
-          {/* Đứng ĐẦU: trạng thái sau lùi bản là lỗi vận hành trên máy chủ, không tự hết. */}
-          {dangLuiBanTu && <BannerLuiBan tu={dangLuiBanTu} />}
-          {(syncHasBacklog || dataSyncHasError || saoLuuCoVanDe) && (
-            <Link
-              href="/cai-dat"
-              className="flex flex-col gap-0.5 rounded-lg border border-error bg-error p-3 text-sm text-white shadow-sm transition hover:brightness-95"
-            >
-              {syncHasBacklog ? (
-                <span className="font-semibold">
-                  Bronze còn backlog — số liệu có thể thiếu (doanh thu hoặc &quot;Tiền đã về&quot;). Mở Cài đặt để
-                  xem cách xử lý.
+          <div className="sticky top-2 z-20 flex flex-col gap-2 empty:hidden [&:not(:empty)]:mb-6">
+            {/* Đứng ĐẦU: trạng thái sau lùi bản là lỗi vận hành trên máy chủ, không tự hết. */}
+            {dangLuiBanTu && <BannerLuiBan tu={dangLuiBanTu} />}
+            {(syncHasBacklog || dataSyncHasError || saoLuuCoVanDe) && (
+              <Link
+                href="/cai-dat"
+                className="flex flex-col gap-0.5 rounded-lg border border-error bg-error p-3 text-sm text-white shadow-sm transition hover:brightness-95"
+              >
+                {syncHasBacklog ? (
+                  <span className="font-semibold">
+                    Bronze còn backlog — số liệu có thể thiếu (doanh thu hoặc
+                    &quot;Tiền đã về&quot;). Mở Cài đặt để xem cách xử lý.
+                  </span>
+                ) : dataSyncHasError ? (
+                  <span className="font-semibold">
+                    Đồng bộ gần đây có lỗi — số liệu có thể thiếu (doanh thu,
+                    chi tiêu quảng cáo hoặc &quot;Tiền đã về&quot;). Mở Cài đặt
+                    để kiểm tra.
+                  </span>
+                ) : (
+                  <span className="font-semibold">
+                    Sao lưu đang có vấn đề — số liệu vẫn đủ, nhưng có thể không
+                    còn điểm phục hồi mới. Mở Cài đặt để xem chi tiết.
+                  </span>
+                )}
+                <span className="text-white/85">
+                  Nhấn để mở trang Cài đặt &amp; Đồng bộ →
                 </span>
-              ) : dataSyncHasError ? (
-                <span className="font-semibold">
-                  Đồng bộ gần đây có lỗi — số liệu có thể thiếu (doanh thu, chi tiêu quảng cáo hoặc
-                  &quot;Tiền đã về&quot;). Mở Cài đặt để kiểm tra.
-                </span>
-              ) : (
-                <span className="font-semibold">
-                  Sao lưu đang có vấn đề — số liệu vẫn đủ, nhưng có thể không còn điểm phục hồi mới.
-                  Mở Cài đặt để xem chi tiết.
-                </span>
-              )}
-              <span className="text-white/85">Nhấn để mở trang Cài đặt &amp; Đồng bộ →</span>
-            </Link>
-          )}
-          {/*
-            NHẮC VIỆC giá vốn — KHÁC hẳn ba câu đỏ ở trên nên cố ý là banner RIÊNG, màu vàng:
-            ba câu kia nói "số liệu có thể SAI/THIẾU, hệ đang hỏng"; câu này nói "hệ chạy đúng,
-            có việc chờ bạn duyệt". Trộn vào chuỗi đỏ là làm loãng tín hiệu hỏng thật.
-
-            Vì sao KHÔNG nhét vào /cai-dat: `Variant.costPrice` là APP-OWNED nên giá Pancake không
-            tự chảy vào; trước 2026-09-07 cách duy nhất để biết lệch là chủ shop NHỚ mà báo rồi chạy
-            CLI — chủ shop phàn nàn đúng, quy trình dựa vào trí nhớ thì kiểu gì cũng hỏng. Cảnh báo
-            nằm trong tab Cài đặt là lặp lại y hệt vấn đề đó (repo có 0 kênh báo ra ngoài app).
-
-            `tre` = quá 26 giờ chưa đếm lại ⇒ CON SỐ ĐANG CẦM ĐÃ CŨ. Phải nói thẳng, vì báo "n mã
-            lệch" bằng số của ba hôm trước làm chủ shop tin là mình đang nhìn hiện tại.
-          */}
-          {lechGiaVon.muc !== "khop" && (
-            <BannerGiaVon coLink={choPhepDuyetGiaVon}>
-              {lechGiaVon.muc === "co-lech" ? (
-                <span className="font-semibold">
-                  {lechGiaVon.soLech} mã có giá vốn lệch với Pancake — lãi đang tính theo giá cũ.
-                </span>
-              ) : lechGiaVon.muc === "tre" ? (
-                <span className="font-semibold">
-                  Đã hơn một ngày chưa đối chiếu được giá vốn với Pancake — con số đang hiển thị có
-                  thể đã cũ.
-                </span>
-              ) : (
-                /*
-                  `chua-kiem` = lượt đêm CHƯA LẦN NÀO ghi được mốc. Ca này bắt buộc phải kêu, dù
-                  nghe như "chưa có gì xảy ra": mốc chưa từng có thì lưới "quá 26 giờ" KHÔNG BAO GIỜ
-                  bật (nó xét mốc-có-hợp-lệ trước), nên im ở đây là im VĨNH VIỄN. Đúng ngay sau
-                  deploy prod cũng rơi vào mức này — đo 07/09: hai ô Setting còn vắng.
-                */
-                <span className="font-semibold">
-                  Chưa đối chiếu giá vốn với Pancake lần nào — kiểm lượt đồng bộ đêm ở Cài đặt.
-                </span>
-              )}
-              {choPhepDuyetGiaVon && (
-                <span className="text-muted-foreground">Nhấn để xem danh sách và duyệt →</span>
-              )}
-            </BannerGiaVon>
-          )}
-          {/*
-            NHẮC VIỆC khoản vay — cùng hạng với banner giá vốn (vàng, "có việc chờ bạn duyệt"), KHÔNG
-            phải hạng đỏ "hệ đang hỏng". Kỳ tới hạn chưa ghi làm SAI CẢ HAI trục cùng lúc: Lãi/Lỗ
-            thiếu tiền lãi, quỹ thiếu tiền gốc đã chuyển đi — nên câu phải nói thẳng là số đang lạc
-            quan hơn thực tế, đừng chỉ nói "có kỳ chờ".
-          */}
-          {soKhoanVayCoKyCho > 0 && (
-            <Link
-              href="/tai-chinh?tab=dong-tien#khoan-vay"
-              className="flex flex-col gap-0.5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-ink shadow-sm transition hover:bg-warning/15"
-            >
-              <span className="font-semibold">
-                {soKhoanVayCoKyCho} khoản vay có kỳ trả nợ tới hạn chưa ghi — lợi nhuận và quỹ đang
-                lạc quan hơn thực tế.
-              </span>
-              <span className="text-muted-foreground">Nhấn để xem danh sách và duyệt →</span>
-            </Link>
-          )}
-          {/*
-            NHẮC VIỆC chi phí nhập hàng — cùng hạng vàng "có việc chờ bạn duyệt". Đặt SAU khoản vay
-            cố ý: kỳ vay quá hạn làm sai CẢ Lãi/Lỗ lẫn quỹ, còn phiếu nhập chưa ghi chỉ làm quỹ cao
-            hơn thực tế (danh mục "Nhập hàng" không vào P&L) — nặng hơn thì nằm trên.
-
-            Nằm TRONG vùng sticky chung ở trên, TUYỆT ĐỐI không tự `sticky top-2`: đo thật trên
-            Chromium 07/09 — hai banner cùng `sticky top-2 z-20` thì từ scrollY ≈ 200 chúng TRÙNG
-            KHÍT và banner này NUỐT cú bấm của banner kia.
-          */}
-          {phieuNhapChuaGhi.muc !== "khop" && (
-            <Link
-              href="/tai-chinh/chi-phi-nhap-hang"
-              className="flex flex-col gap-0.5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-ink shadow-sm transition hover:bg-warning/15"
-            >
-              {phieuNhapChuaGhi.muc === "co-lech" ? (
-                /*
-                  Câu do hàm THUẦN `cauNhacPhieuNhap` sinh: "3 phiếu chờ ghi" và "1 phiếu đã ghi nay
-                  bị huỷ bên Pancake" là HAI việc khác nhau, lệch quỹ hai chiều NGƯỢC nhau. Gộp một
-                  con số rồi in câu "chưa vào Sổ chi phí" là làm chủ shop bấm vào rồi không thấy gì
-                  để duyệt — lần sau họ lướt qua banner.
-                */
-                <span className="font-semibold">{cauNhacPhieuNhap(phieuNhapChuaGhi)}</span>
-              ) : phieuNhapChuaGhi.muc === "tre" ? (
-                <span className="font-semibold">
-                  Đã hơn một ngày chưa đối chiếu phiếu nhập hàng với Pancake — con số đang hiển thị
-                  có thể đã cũ.
-                </span>
-              ) : (
-                /* `chua-kiem` = lượt đêm CHƯA LẦN NÀO ghi được mốc; im ở đây là im VĨNH VIỄN vì
-                   lưới "quá 26 giờ" xét mốc-có-hợp-lệ trước. Xem banner giá vốn ngay trên. */
-                <span className="font-semibold">
-                  Chưa đối chiếu phiếu nhập hàng với Pancake lần nào — kiểm lượt đồng bộ đêm ở Cài đặt.
-                </span>
-              )}
-              <span className="text-muted-foreground">Nhấn để xem danh sách và duyệt →</span>
-            </Link>
-          )}
-          {/*
-            NHẮC VIỆC quỹ sắp cạn — cùng hạng vàng "có việc chờ bạn xem", KHÔNG phải "hệ đang hỏng".
-            `docCanhBaoSapCan()` (lib) tự bắt lỗi và trả null khi hỏng nên layout không cần bọc thêm ở
-            đây — null cũng là trạng thái bình thường "không chạm ngưỡng trong 30 ngày tới".
-          */}
-          {canhBaoSapCanQuy && (
-            <Link
-              href="/tai-chinh?tab=so-quy"
-              className="flex flex-col gap-0.5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-ink shadow-sm transition hover:bg-warning/15"
-              data-testid="banner-du-bao-quy-sap-can"
-            >
-              {/* Chưa đặt ngưỡng (= 0) thì "chạm" nghĩa là quỹ dự báo ÂM — nói thẳng như vậy; câu chi tiết
-                  hơn (quỹ đã dưới mức ngay hôm nay…) nằm ở khối cảnh báo tab Sổ quỹ. */}
-              <span className="font-semibold">
-                {canhBaoSapCanQuy.nguongDaDat ? "Dự báo quỹ chạm mức tối thiểu ngày " : "Dự báo quỹ ÂM ngày "}
-                {format(parse(canhBaoSapCanQuy.ngay, "yyyy-MM-dd", new Date()), "dd/MM")} — xem Sổ quỹ
-              </span>
-              <span className="text-muted-foreground">Nhấn để xem chi tiết →</span>
-            </Link>
-          )}
+              </Link>
+            )}
           </div>
+          {/* Nhắc việc vàng: KHÔNG sticky, một dải gọn — xem `dong-nhac-viec.tsx`. */}
+          <DaiNhacViec>
+            {/*
+              NHẮC VIỆC giá vốn — KHÁC hẳn ba câu đỏ ở trên nên cố ý là banner RIÊNG, màu vàng:
+              ba câu kia nói "số liệu có thể SAI/THIẾU, hệ đang hỏng"; câu này nói "hệ chạy đúng,
+              có việc chờ bạn duyệt". Trộn vào chuỗi đỏ là làm loãng tín hiệu hỏng thật.
+
+              Vì sao KHÔNG nhét vào /cai-dat: `Variant.costPrice` là APP-OWNED nên giá Pancake không
+              tự chảy vào; trước 2026-09-07 cách duy nhất để biết lệch là chủ shop NHỚ mà báo rồi chạy
+              CLI — chủ shop phàn nàn đúng, quy trình dựa vào trí nhớ thì kiểu gì cũng hỏng. Cảnh báo
+              nằm trong tab Cài đặt là lặp lại y hệt vấn đề đó (repo có 0 kênh báo ra ngoài app).
+
+              `tre` = quá 26 giờ chưa đếm lại ⇒ CON SỐ ĐANG CẦM ĐÃ CŨ. Phải nói thẳng, vì báo "n mã
+              lệch" bằng số của ba hôm trước làm chủ shop tin là mình đang nhìn hiện tại.
+            */}
+            {lechGiaVon.muc !== "khop" && (
+              <DongNhacViec
+                href={
+                  choPhepDuyetGiaVon ? "/san-pham/dong-bo-gia-von" : undefined
+                }
+                nhanHanhDong="Duyệt"
+              >
+                {lechGiaVon.muc === "co-lech" ? (
+                  <span className="font-medium">
+                    {lechGiaVon.soLech} mã có giá vốn lệch với Pancake — lãi
+                    đang tính theo giá cũ.
+                  </span>
+                ) : lechGiaVon.muc === "tre" ? (
+                  <span className="font-medium">
+                    Đã hơn một ngày chưa đối chiếu được giá vốn với Pancake —
+                    con số đang hiển thị có thể đã cũ.
+                  </span>
+                ) : (
+                  /*
+                    `chua-kiem` = lượt đêm CHƯA LẦN NÀO ghi được mốc. Ca này bắt buộc phải kêu, dù
+                    nghe như "chưa có gì xảy ra": mốc chưa từng có thì lưới "quá 26 giờ" KHÔNG BAO GIỜ
+                    bật (nó xét mốc-có-hợp-lệ trước), nên im ở đây là im VĨNH VIỄN. Đúng ngay sau
+                    deploy prod cũng rơi vào mức này — đo 07/09: hai ô Setting còn vắng.
+                  */
+                  <span className="font-medium">
+                    Chưa đối chiếu giá vốn với Pancake lần nào — kiểm lượt đồng
+                    bộ đêm ở Cài đặt.
+                  </span>
+                )}
+              </DongNhacViec>
+            )}
+            {/*
+              NHẮC VIỆC khoản vay — cùng hạng với banner giá vốn (vàng, "có việc chờ bạn duyệt"), KHÔNG
+              phải hạng đỏ "hệ đang hỏng". Kỳ tới hạn chưa ghi làm SAI CẢ HAI trục cùng lúc: Lãi/Lỗ
+              thiếu tiền lãi, quỹ thiếu tiền gốc đã chuyển đi — nên câu phải nói thẳng là số đang lạc
+              quan hơn thực tế, đừng chỉ nói "có kỳ chờ".
+            */}
+            {soKhoanVayCoKyCho > 0 && (
+              <DongNhacViec
+                href="/tai-chinh?tab=dong-tien#khoan-vay"
+                nhanHanhDong="Duyệt"
+              >
+                <span className="font-medium">
+                  {soKhoanVayCoKyCho} khoản vay có kỳ trả nợ tới hạn chưa ghi —
+                  lợi nhuận và quỹ đang lạc quan hơn thực tế.
+                </span>
+              </DongNhacViec>
+            )}
+            {/*
+              NHẮC VIỆC chi phí nhập hàng — cùng hạng vàng "có việc chờ bạn duyệt". Đặt SAU khoản vay
+              cố ý: kỳ vay quá hạn làm sai CẢ Lãi/Lỗ lẫn quỹ, còn phiếu nhập chưa ghi chỉ làm quỹ cao
+              hơn thực tế (danh mục "Nhập hàng" không vào P&L) — nặng hơn thì nằm trên.
+
+              Nằm trong dải nhắc việc KHÔNG sticky (02/11). TUYỆT ĐỐI không tự `sticky top-2`: đo thật
+              trên Chromium 07/09 — hai banner cùng `sticky top-2 z-20` thì từ scrollY ≈ 200 chúng TRÙNG
+              KHÍT và banner này NUỐT cú bấm của băng đỏ.
+            */}
+            {phieuNhapChuaGhi.muc !== "khop" && (
+              <DongNhacViec
+                href="/tai-chinh/chi-phi-nhap-hang"
+                nhanHanhDong="Duyệt"
+              >
+                {phieuNhapChuaGhi.muc === "co-lech" ? (
+                  /*
+                    Câu do hàm THUẦN `cauNhacPhieuNhap` sinh: "3 phiếu chờ ghi" và "1 phiếu đã ghi nay
+                    bị huỷ bên Pancake" là HAI việc khác nhau, lệch quỹ hai chiều NGƯỢC nhau. Gộp một
+                    con số rồi in câu "chưa vào Sổ chi phí" là làm chủ shop bấm vào rồi không thấy gì
+                    để duyệt — lần sau họ lướt qua banner.
+                  */
+                  <span className="font-medium">
+                    {cauNhacPhieuNhap(phieuNhapChuaGhi)}
+                  </span>
+                ) : phieuNhapChuaGhi.muc === "tre" ? (
+                  <span className="font-medium">
+                    Đã hơn một ngày chưa đối chiếu phiếu nhập hàng với Pancake —
+                    con số đang hiển thị có thể đã cũ.
+                  </span>
+                ) : (
+                  /* `chua-kiem` = lượt đêm CHƯA LẦN NÀO ghi được mốc; im ở đây là im VĨNH VIỄN vì
+                     lưới "quá 26 giờ" xét mốc-có-hợp-lệ trước. Xem banner giá vốn ngay trên. */
+                  <span className="font-medium">
+                    Chưa đối chiếu phiếu nhập hàng với Pancake lần nào — kiểm
+                    lượt đồng bộ đêm ở Cài đặt.
+                  </span>
+                )}
+              </DongNhacViec>
+            )}
+            {/*
+              NHẮC VIỆC quỹ sắp cạn — cùng hạng vàng "có việc chờ bạn xem", KHÔNG phải "hệ đang hỏng".
+              `docCanhBaoSapCan()` (lib) tự bắt lỗi và trả null khi hỏng nên layout không cần bọc thêm ở
+              đây — null cũng là trạng thái bình thường "không chạm ngưỡng trong 30 ngày tới".
+            */}
+            {canhBaoSapCanQuy && (
+              <DongNhacViec
+                href="/tai-chinh?tab=so-quy"
+                nhanHanhDong="Xem"
+                data-testid="banner-du-bao-quy-sap-can"
+              >
+                {/* Chưa đặt ngưỡng (= 0) thì "chạm" nghĩa là quỹ dự báo ÂM — nói thẳng như vậy; câu chi tiết
+                    hơn (quỹ đã dưới mức ngay hôm nay…) nằm ở khối cảnh báo tab Sổ quỹ. */}
+                <span className="font-medium">
+                  {canhBaoSapCanQuy.nguongDaDat
+                    ? "Dự báo quỹ chạm mức tối thiểu ngày "
+                    : "Dự báo quỹ ÂM ngày "}
+                  {format(
+                    parse(canhBaoSapCanQuy.ngay, "yyyy-MM-dd", new Date()),
+                    "dd/MM",
+                  )}{" "}
+                  — xem Sổ quỹ
+                </span>
+              </DongNhacViec>
+            )}
+          </DaiNhacViec>
           {children}
         </main>
       </div>

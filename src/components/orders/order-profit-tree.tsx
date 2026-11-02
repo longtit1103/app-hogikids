@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
  * ĐÚNG 1 đơn nên bung hết ngay từ đầu tiết kiệm cú bấm nhất).
  */
 function rowBandClass(item: PnlLineItem): string {
-  if (item.kind === "total") return item.value < 0 ? "bg-surface-dark text-error" : "bg-surface-dark text-on-dark";
+  if (item.kind === "total") return item.value < 0 ? "bg-surface-dark text-error-on-dark" : "bg-surface-dark text-on-dark";
   if (item.kind === "subtotal") return "bg-surface-cream-strong text-ink";
   if (item.kind === "group") return "border-t-2 border-t-hairline bg-surface-soft text-ink";
   return "";

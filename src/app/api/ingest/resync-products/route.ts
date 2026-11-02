@@ -1,4 +1,4 @@
-import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
 import { isBronzeOnly } from "@/lib/bronze/bronze-only";
 import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
@@ -41,9 +41,11 @@ export async function POST(req: Request): Promise<Response> {
   const unauthorized = requireIngestSecret(req);
   if (unauthorized) return unauthorized;
 
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  return routeQuaCua(() => xuLyPost());
+}
 
+/** Thân POST sau cửa ghi (đếm suốt request — lượt phục hồi chờ nó xong). */
+async function xuLyPost(): Promise<Response> {
   return withSyncLog("PANCAKE", async (warnings) => {
     // BRONZE_ONLY = "Silver đứng yên, chờ rebuild tay". Chạy transform ở đây là lách công tắc đó.
     if (isBronzeOnly()) {

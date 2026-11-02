@@ -7,7 +7,7 @@ import { PnlMonthPicker } from "@/components/bao-cao/pnl-month-picker";
 import { SyncNowButton } from "@/components/shell/sync-now-button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatVnd } from "@/lib/format";
 import {
   buildPnlLineItems,
   computePnlLineDelta,
@@ -26,16 +26,15 @@ import type { VoucherBreakdown } from "@/lib/reports/voucher-breakdown";
 import { cn } from "@/lib/utils";
 
 function formatPct(n: number | null): string {
-  if (n === null) return "—";
-  return `${n.toLocaleString("vi-VN", { maximumFractionDigits: 1, minimumFractionDigits: 0 })}%`;
+  return n === null ? "—" : formatPercent(n);
 }
 
 /** Nội dung ô "So tháng trước" — DÙNG CHUNG cho cột máy tính và dòng phụ mobile (không tính lại). */
-function DeltaText({ delta }: { delta: PnlLineDelta }) {
+function DeltaText({ delta, tenNenToi = false }: { delta: PnlLineDelta; tenNenToi?: boolean }) {
   if (delta.kind === "new") return <Badge variant="outline">Mới</Badge>;
   if (delta.kind === "flat") {
     return (
-      <span className="text-muted-foreground">
+      <span className={tenNenToi ? "text-muted-on-dark" : "text-muted-foreground"}>
         <span aria-hidden="true">—</span>
         <span className="sr-only">không đổi</span>
       </span>
@@ -43,19 +42,24 @@ function DeltaText({ delta }: { delta: PnlLineDelta }) {
   }
   const up = delta.pct > 0;
   return (
-    <span className={cn("tabular-nums", up ? "text-success" : "text-error")}>
+    <span
+      className={cn(
+        "tabular-nums",
+        up ? (tenNenToi ? "text-success-on-dark" : "text-success") : tenNenToi ? "text-error-on-dark" : "text-error",
+      )}
+    >
       <span aria-hidden="true">{up ? "▲" : "▼"} </span>
       <span className="sr-only">{up ? "tăng " : "giảm "}</span>
-      {Math.abs(delta.pct).toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%
+      {formatPercent(Math.abs(delta.pct))}
     </span>
   );
 }
 
 /** Ẩn dưới md — giá trị xuống dòng phụ trong ô "Số tiền"; bản in hiện lại tường minh. */
-function DeltaCell({ delta }: { delta: PnlLineDelta }) {
+function DeltaCell({ delta, tenNenToi = false }: { delta: PnlLineDelta; tenNenToi?: boolean }) {
   return (
     <TableCell className="hidden text-right text-xs md:table-cell print:table-cell">
-      <DeltaText delta={delta} />
+      <DeltaText delta={delta} tenNenToi={tenNenToi} />
     </TableCell>
   );
 }
@@ -74,7 +78,7 @@ function DeltaCell({ delta }: { delta: PnlLineDelta }) {
  * thành cầu vồng, mất luôn tác dụng phân tầng.
  */
 function rowBandClass(item: PnlLineItem, netProfitNegative: boolean): string {
-  if (item.kind === "total") return netProfitNegative ? "bg-surface-dark text-error" : "bg-surface-dark text-on-dark";
+  if (item.kind === "total") return netProfitNegative ? "bg-surface-dark text-error-on-dark" : "bg-surface-dark text-on-dark";
   if (item.kind === "subtotal") return "bg-surface-cream-strong text-ink";
   // Nhóm mở đầu một khối ⇒ kẻ vạch trên đậm hơn để mắt thấy ranh giới khối ngay
   // cả khi khối đang bung dài; nền nhạt hơn mốc kết quả vì nó là "đầu khối", chưa
@@ -287,17 +291,17 @@ export function PnlTab({
                         {formatPct(pct)}
                         <span aria-hidden="true"> · </span>
                         <span className="sr-only">. So tháng trước: </span>
-                        <DeltaText delta={delta} />
+                        <DeltaText delta={delta} tenNenToi={item.kind === "total"} />
                       </div>
                     </TableCell>
                     <TableCell className="hidden text-right tabular-nums text-xs opacity-80 md:table-cell print:table-cell">
                       {formatPct(pct)}
                     </TableCell>
-                    <DeltaCell delta={delta} />
+                    <DeltaCell delta={delta} tenNenToi={item.kind === "total"} />
                   </TableRow>
                   {item.id === idNeoCanhBaoTinDung && (
                     <TableRow>
-                      <TableCell colSpan={4} className="whitespace-normal py-1 text-xs text-warning">
+                      <TableCell colSpan={4} className="whitespace-normal py-1 text-sm text-warning">
                         <p data-testid="pnl-canh-bao-tin-dung-tiktok">{canhBaoTinDungTiktok}</p>
                       </TableCell>
                     </TableRow>
@@ -311,7 +315,7 @@ export function PnlTab({
 
       <div className="flex flex-col gap-1 text-xs text-muted-foreground">
         {canhBaoTinDungTiktok !== null && idNeoCanhBaoTinDung === null && (
-          <p className="text-warning" data-testid="pnl-canh-bao-tin-dung-tiktok">
+          <p className="text-sm text-warning" data-testid="pnl-canh-bao-tin-dung-tiktok">
             {canhBaoTinDungTiktok}
           </p>
         )}

@@ -18,7 +18,7 @@ import type { KetQuaChe, QuyenGiaVon } from "@/lib/queries/che-gia-von-types";
  * không khớp", cogs 0 + stock 0, keyed theo productName.
  */
 
-const UNMATCHED_PRODUCT_ID = "sku-khong-khop";
+export const UNMATCHED_PRODUCT_ID = "sku-khong-khop";
 const UNMATCHED_PRODUCT_NAME = "SKU không khớp";
 
 /** Dòng SKU không giá vốn/lãi — danh sách trường được phép (pick). */

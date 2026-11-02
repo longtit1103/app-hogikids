@@ -9,6 +9,14 @@ import tiktokBusinessNightly from "../../../../n8n/tiktok-business-nightly.json"
 import tiktokshopAnalyticsNightly from "../../../../n8n/tiktokshop-analytics-nightly.json";
 import tiktokshopNightly from "../../../../n8n/tiktokshop-nightly.json";
 
+import {
+  TIEN_TO_PLACEHOLDER_DUONG_DAN,
+  ThieuDuongDanWebhook,
+  laDuongDanWebhookHopLe,
+  vaiTheoPlaceholder,
+  type DuongDanWebhookPancake,
+} from "./duong-dan-webhook-pancake";
+
 /**
  * Đóng gói 10 workflow từ `n8n/*.json` (import TĨNH — bundle vào build, ảnh Docker standalone
  * không chép thư mục `n8n/`) thành body gửi n8n Public API.
@@ -19,6 +27,8 @@ import tiktokshopNightly from "../../../../n8n/tiktokshop-nightly.json";
  *    gửi lên là 400 tuỳ bản n8n) — NHƯNG file repo vẫn giữ chúng cho đường import tay.
  *  - Credential ref trong repo là placeholder của instance cũ — phải gắn id credential THẬT của
  *    instance đích (mỗi n8n một bộ id riêng).
+ *  - Path 3 webhook Pancake trong repo là PLACEHOLDER (`__DUONG_DAN_WEBHOOK_<VAI>__`) — path thật là
+ *    dữ liệu của từng instance trong `Setting` (`duong-dan-webhook-pancake.ts`), thay vào lúc đóng gói.
  */
 
 type NodeN8n = {
@@ -77,17 +87,6 @@ function timWebhookPath(raw: unknown): string | null {
   return null;
 }
 
-/**
- * Path webhook lấy TỪ chính JSON (một nguồn sự thật) — `webhook-pancake-info.ts` hiển thị URL cho
- * chủ shop dán vào Pancake, lệch path với workflow thật là webhook chết mà UI vẫn "chưa nhận sự
- * kiện" (không phân biệt được với chưa cấu hình).
- */
-export const WEBHOOK_PANCAKE_PATH = {
-  kho: timWebhookPath(pancakeWebhookKho) ?? "",
-  shopee: timWebhookPath(pancakeWebhookShopee) ?? "",
-  tiktok: timWebhookPath(pancakeWebhookTiktok) ?? "",
-} as const;
-
 export const SYNC_NOW_WEBHOOK_PATH = timWebhookPath(pancakeSyncNow) ?? "";
 
 /**
@@ -122,7 +121,12 @@ export type BodyDaDongGoi = {
   settings: Record<string, unknown>;
 };
 
-export function dongGoiWorkflow(slug: string, creds: CredentialGan): BodyDaDongGoi {
+/**
+ * `duongDanWebhook` = path thật của instance (đọc từ `Setting` bằng `docDuongDanWebhookBatBuoc`).
+ * Placeholder nào không có path hợp lệ tương ứng ⇒ NÉM, tuyệt đối không đóng gói placeholder: n8n sẽ
+ * đăng ký đúng chuỗi placeholder làm path, path thật Pancake đang bắn trả 404 (realtime chết câm).
+ */
+export function dongGoiWorkflow(slug: string, creds: CredentialGan, duongDanWebhook: Partial<DuongDanWebhookPancake>): BodyDaDongGoi {
   const muc = THO.find(([s]) => s === slug);
   if (!muc) throw new Error(`Không có workflow slug "${slug}" trong repo.`);
   const tho = chuanHoa(muc[1]);
@@ -140,6 +144,14 @@ export function dongGoiWorkflow(slug: string, creds: CredentialGan): BodyDaDongG
       n.parameters = { ...n.parameters, authentication: "headerAuth" };
       n.credentials = { httpHeaderAuth: { id: creds.headerAuth.id, name: creds.headerAuth.name } };
     }
+    if (n.type === "n8n-nodes-base.webhook" && n.parameters?.path) {
+      const vai = vaiTheoPlaceholder(n.parameters.path);
+      if (vai) {
+        const p = duongDanWebhook[vai];
+        if (!laDuongDanWebhookHopLe(p)) throw new ThieuDuongDanWebhook([vai]);
+        n.parameters = { ...n.parameters, path: p };
+      }
+    }
   }
 
   const settings: Record<string, unknown> = {};
@@ -147,5 +159,10 @@ export function dongGoiWorkflow(slug: string, creds: CredentialGan): BodyDaDongG
     if (SETTINGS_API_HOP_LE.has(k)) settings[k] = v;
   }
 
-  return { name: tho.name, nodes, connections: tho.connections, settings };
+  const body: BodyDaDongGoi = { name: tho.name, nodes, connections: tho.connections, settings };
+  // Lưới cuối: placeholder lọt ở BẤT KỲ đâu trong body (node mới, field khác ngoài `path`) là dừng.
+  if (JSON.stringify(body).includes(TIEN_TO_PLACEHOLDER_DUONG_DAN)) {
+    throw new Error(`Workflow "${slug}" còn placeholder đường dẫn webhook sau khi đóng gói — không gửi lên n8n.`);
+  }
+  return body;
 }

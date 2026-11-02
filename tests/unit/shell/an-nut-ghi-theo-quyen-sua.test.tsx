@@ -9,7 +9,6 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-import { KpiCards, type KpiCardsDuLieu } from "@/components/dashboard/kpi-cards";
 import { ExpenseTable } from "@/components/expenses/expense-table";
 import { CashMovementAddButton } from "@/components/finance/cash-movement-add-button";
 import { SoDuChotThangButton } from "@/components/finance/so-du-chot-thang-button";
@@ -17,11 +16,11 @@ import { SoDuChotThangCard } from "@/components/finance/so-du-chot-thang-card";
 import { SoQuyCard } from "@/components/finance/so-quy-card";
 import { DuyetChiPhiNhapHang } from "@/components/nhap-hang/duyet-chi-phi-nhap-hang";
 import { SyncNowButton } from "@/components/shell/sync-now-button";
+import { TienDiDau } from "@/components/trang-chu/tien-di-dau";
 import type { ExpenseRow } from "@/lib/expenses/expense-queries";
-import type { PnlBreakdown } from "@/lib/reports/pnl";
-import type { PnlChe } from "@/lib/reports/pnl-che";
 import type { DoiChieuSoDuChot } from "@/lib/so-quy/doi-chieu-so-du-chot";
 import type { SoQuyThangDayDu } from "@/lib/so-quy/so-quy-queries";
+import type { ChiaChiPhi } from "@/lib/trang-chu/chia-chi-phi";
 
 /**
  * Nút GHI chỉ hiện khi server truyền cờ quyền `:sua` (hoặc quyền xem đích của link). Cổng thật nằm ở
@@ -145,35 +144,24 @@ describe("ExpenseTable — Sửa/Xóa dòng theo chi-phi:sua", () => {
   });
 });
 
-describe("KpiCards — thẻ doanh thu / LN ròng chỉ link Lãi/Lỗ khi xem được tab đó", () => {
-  const che = {
-    revenue: 1_000_000,
+describe("TienDiDau — link Lãi/Lỗ chỉ khi xem được tab đó", () => {
+  const du: ChiaChiPhi = {
+    doanhSo: 100,
     voucher: 0,
-    platformFee: 0,
-    netRevenue: 900_000,
-    ads: 0,
-    orderCount: 3,
-    returnBomOrderCount: 0,
-  } as PnlChe;
-  const duChe: KpiCardsDuLieu = { coQuyenGiaVon: false, today: che, thisMonth: che, lastMonthSameDays: che };
+    giaVon: 40,
+    quangCao: 20,
+    phiSan: 10,
+    vanHanhKhac: 10,
+    chiPhi: 80,
+    thuNhapTaiChinh: 0,
+    loiNhuan: 20,
+    mauSo: 100,
+  };
 
-  it("nhánh che giá vốn ⇒ không link /tai-chinh?tab=loi-lo (kể cả khi lỡ truyền cờ)", () => {
-    const html = renderToStaticMarkup(<KpiCards du={duChe} />);
-    expect(html).toContain("Doanh thu gộp hôm nay");
-    expect(html).not.toContain("tab=loi-lo");
-    expect(renderToStaticMarkup(<KpiCards du={duChe} choPhepXemLoiLo />)).not.toContain("tab=loi-lo");
-  });
-
-  it("đủ giá vốn nhưng thiếu cờ xem Lãi/Lỗ ⇒ không link; có cờ ⇒ link", () => {
-    const day = {
-      ...che,
-      netProfit: 100_000,
-      financialIncome: 0,
-      skuMissingCount: 0,
-      skuUnknownLineCount: 0,
-    } as unknown as PnlBreakdown;
-    const duDay: KpiCardsDuLieu = { coQuyenGiaVon: true, today: day, thisMonth: day, lastMonthSameDays: day };
-    expect(renderToStaticMarkup(<KpiCards du={duDay} />)).not.toContain("tab=loi-lo");
-    expect(renderToStaticMarkup(<KpiCards du={duDay} choPhepXemLoiLo />)).toContain("tab=loi-lo");
+  it("thiếu cờ xem Lãi/Lỗ ⇒ không link /tai-chinh?tab=loi-lo; có cờ ⇒ link", () => {
+    const an = renderToStaticMarkup(<TienDiDau du={du} choPhepXemLoiLo={false} />);
+    expect(an).toContain("Tiền bán hàng đi đâu");
+    expect(an).not.toContain("tab=loi-lo");
+    expect(renderToStaticMarkup(<TienDiDau du={du} choPhepXemLoiLo />)).toContain("tab=loi-lo");
   });
 });

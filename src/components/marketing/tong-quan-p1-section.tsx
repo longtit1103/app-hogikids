@@ -1,9 +1,8 @@
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatSoDem as soGon, formatVnd } from "@/lib/format";
 import type { AffiliateTheoKy } from "@/lib/reports/marketing/affiliate-pancake";
 import type { HoanHuyTach } from "@/lib/reports/marketing/hoan-huy-tach";
 import type { KhachTheoKy } from "@/lib/reports/marketing/khach-tiktok";
 
-import { formatPct1 } from "@/components/kenh/channel-format";
 
 /**
  * Ba khối "đã có sẵn dữ liệu" của tab Tổng quan `/marketing` (spec §5.1b).
@@ -20,10 +19,6 @@ import { formatPct1 } from "@/components/kenh/channel-format";
  * — đo 24/08), khối hoàn/hủy lấy mọi kênh. Đổi phạm vi ở page thì PHẢI đổi tiêu đề ở đây, nếu không
  * màn hình sẽ khai sai đang đếm những đơn nào.
  */
-
-function soGon(n: number): string {
-  return new Intl.NumberFormat("vi-VN").format(n);
-}
 
 /** Chia an toàn: mẫu 0 ⇒ null (KHÔNG trả 0 — "0%" đọc ra là "đo được và bằng 0"). */
 function tiLe(tu: number, mau: number): number | null {
@@ -55,7 +50,7 @@ export function KhoiAffiliate({ d }: { d: AffiliateTheoKy }) {
         <OChiSo
           nhan="Đơn có hoa hồng"
           giaTri={`${soGon(d.soDonCoHoaHong)} / ${soGon(d.tongSoDonHopLe)} đơn`}
-          phu={pct === null ? "Kỳ này chưa có đơn hợp lệ nào." : `${formatPct1(pct)} số đơn hợp lệ trong kỳ`}
+          phu={pct === null ? "Kỳ này chưa có đơn hợp lệ nào." : `${formatPercent(pct)} số đơn hợp lệ trong kỳ`}
         />
         <OChiSo nhan="Doanh thu gộp (nhóm đơn có hoa hồng)" giaTri={formatVnd(d.doanhThuDonCoHoaHong)} />
         <OChiSo nhan="Hoa hồng đã trả" giaTri={formatVnd(d.tongHoaHong)} />
@@ -90,12 +85,12 @@ function KhoiKhach({ d }: { d: KhachTheoKy }) {
           phu={
             pctMoi === null
               ? "Kỳ này chưa đọc được khách nào."
-              : `${soGon(d.khachTrongKy)} khách trong kỳ · ${formatPct1(pctMoi)} là khách mới`
+              : `${soGon(d.khachTrongKy)} khách trong kỳ · ${formatPercent(pctMoi)} là khách mới`
           }
         />
         <OChiSo
           nhan="Tỉ lệ khách đã mua ≥ 2 lần (theo số lần mua trọn đời Pancake ghi nhận, không cắt theo kỳ)"
-          giaTri={pctLifetime === null ? "—" : formatPct1(pctLifetime)}
+          giaTri={pctLifetime === null ? "—" : formatPercent(pctLifetime)}
           phu={
             pctLifetime === null
               ? "Kỳ này không khách nào có số lần mua lifetime để tính."

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { datQuyToiThieu } from "@/lib/actions/so-quy-quy-toi-thieu";
 import { formatVnd } from "@/lib/format";
-import { formatAmountInput, parseSignedAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseSignedAmountInput } from "@/lib/format-amount-input";
 
 /**
  * Ô "Quỹ tối thiểu" của khối dự báo — hiện ngưỡng đang dùng (đọc từ Setting qua `docDuBaoQuy`), bấm
@@ -98,6 +98,10 @@ export function SoQuyQuyToiThieuForm({
     );
   }
 
+  // Gõ quá trần 2 tỷ: báo đỏ tại ô + khoá nút Lưu (zod ở action vẫn chặn).
+  const loiTran = loiVuotTranAmount(Math.abs(parseSignedAmountInput(raw)));
+  const loiHienThi = error ?? loiTran;
+
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2">
@@ -107,20 +111,20 @@ export function SoQuyQuyToiThieuForm({
           placeholder="0"
           value={raw}
           aria-label="Quỹ tối thiểu"
-          aria-invalid={!!error}
+          aria-invalid={!!loiHienThi}
           data-testid="so-quy-quy-toi-thieu-input"
           onChange={(e) => setRaw(hienNguong(e.target.value))}
         />
-        <Button type="button" size="sm" disabled={saving} onClick={handleSave}>
+        <Button type="button" size="sm" disabled={saving || Boolean(loiTran)} onClick={handleSave}>
           {saving ? "Đang lưu…" : "Lưu"}
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={() => setEditing(false)} disabled={saving}>
           Hủy
         </Button>
       </div>
-      {error && (
+      {loiHienThi && (
         <p className="text-xs text-error" data-testid="so-quy-quy-toi-thieu-error">
-          {error}
+          {loiHienThi}
         </p>
       )}
     </div>

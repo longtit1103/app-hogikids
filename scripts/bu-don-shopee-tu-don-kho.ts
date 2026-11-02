@@ -140,6 +140,9 @@ async function main(): Promise<void> {
     settlementsUpserted: 0,
     adsUpserted: 0,
     paymentsUpserted: 0,
+    settlementsSkippedStale: 0,
+    adsSkippedStale: 0,
+    paymentsSkippedStale: 0,
     shopeeUpserted: 0,
     adsExpensesUpserted: 0,
   };

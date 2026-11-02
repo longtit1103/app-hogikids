@@ -1,5 +1,6 @@
 import { addMonths, format } from "date-fns";
 
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import type { KhoanVayRow } from "@/lib/so-quy/khoan-vay-queries";
 
 import { NGAY, type KhoanVayFormState } from "./khoan-vay-form-fields";
@@ -9,7 +10,7 @@ import { NGAY, type KhoanVayFormState } from "./khoan-vay-form-fields";
  * đó dưới 200 dòng. Thuần suy diễn từ `KhoanVayRow`, không cần React/state.
  */
 export function trangThaiBanDau(loan: KhoanVayRow | undefined): KhoanVayFormState {
-  const homNay = format(new Date(), NGAY);
+  const homNay = formatNgayVn(new Date(), NGAY);
   if (!loan) {
     return {
       name: "",
@@ -23,7 +24,7 @@ export function trangThaiBanDau(loan: KhoanVayRow | undefined): KhoanVayFormStat
       coLich: true,
       laiSuat: "",
       termMonths: "",
-      firstDueDate: format(addMonths(new Date(), 1), NGAY),
+      firstDueDate: format(addMonths(new Date(`${homNay}T00:00:00`), 1), NGAY),
       note: "",
       laiTheoNam: false,
       laiCoDinh: 0,
@@ -31,7 +32,7 @@ export function trangThaiBanDau(loan: KhoanVayRow | undefined): KhoanVayFormStat
       laiNhapGoc: false,
     };
   }
-  const ngayNen = format(loan.startDate, NGAY);
+  const ngayNen = formatNgayVn(loan.startDate, NGAY);
   const thauChi = loan.kind === "OVERDRAFT";
   const gocCuoiKy = loan.kind === "BULLET";
   return {
@@ -52,7 +53,9 @@ export function trangThaiBanDau(loan: KhoanVayRow | undefined): KhoanVayFormStat
     coLich: loan.firstDueDate !== null && (thauChi || loan.termMonths !== null),
     laiSuat: loan.annualRateBp ? (loan.annualRateBp / 100).toLocaleString("vi-VN") : "",
     termMonths: loan.termMonths === null ? "" : String(loan.termMonths),
-    firstDueDate: loan.firstDueDate === null ? format(addMonths(loan.startDate, 1), NGAY) : format(loan.firstDueDate, NGAY),
+    firstDueDate: loan.firstDueDate === null
+        ? format(addMonths(new Date(`${ngayNen}T00:00:00`), 1), NGAY)
+        : formatNgayVn(loan.firstDueDate, NGAY),
     note: loan.note,
     // NULL = đang khai theo %/năm như cũ (xem `KhoanVayLich.laiCoDinhMoiKy`).
     laiTheoNam: gocCuoiKy ? loan.laiCoDinhMoiKy === null : false,

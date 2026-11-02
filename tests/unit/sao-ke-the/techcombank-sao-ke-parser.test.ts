@@ -124,6 +124,46 @@ describe("parseSaoKeTechcombank — dòng hoàn tiền TikTok (ghi có)", () => 
   });
 });
 
+/**
+ * Từ khoá hoàn chỉ xét ở PHẦN LOẠI giao dịch: merchant mang chữ "HOAN" (phố Hoàn Kiếm) không biến lần mua thành ghi có —
+ * trước đây cả file bị từ chối vì Σ ghi nợ lệch Tóm tắt. Merchant tổng hợp, số tiền giữ nguyên nên cổng tổng vẫn khớp.
+ */
+describe("parseSaoKeTechcombank — merchant có chữ HOAN vẫn là ghi nợ", () => {
+  const MERCHANT_GOC = "DICH VU B *GOI THUE BAO DICHVUB.COM\nUS";
+
+  it("lần mua + phí ngoại tệ tại merchant 'PHO HOAN KIEM' ⇒ vẫn ghi nợ, file đọc được", () => {
+    const text = TEXT_1020.split(MERCHANT_GOC).join("PHO HOAN KIEM\nHA NOI VN");
+    expect(text).not.toBe(TEXT_1020);
+    const khac = parseOk(text).dong.filter((d) => !d.laTiktok && d.ghiNo > 0);
+    expect(khac.map((d) => [d.ngayGiaoDich, d.ghiNo, d.ghiCo])).toEqual([
+      ["2026-09-26", 978_000, 0],
+      ["2026-09-26", 14_000, 0],
+    ]);
+    expect(khac[0].dienGiai).toMatch(/PHO HOAN KIEM HA NOI VN$/);
+  });
+
+  it("dòng phí không có số thẻ, chữ HOAN nằm giữa diễn giải ⇒ vẫn ghi nợ", () => {
+    const text = TEXT_0918.replace("14/09/2026 821,000 Phí thường niên/Annual Fee", "14/09/2026 821,000 Phi dich vu tai HOAN KIEM");
+    expect(text).not.toBe(TEXT_0918);
+    const sk = parseOk(text);
+    expect(sk.dong.filter((d) => d.dienGiai.includes("HOAN KIEM")).map((d) => [d.ngayGiaoDich, d.ghiNo, d.ghiCo])).toEqual([
+      ["2026-09-14", 821_000, 0],
+    ]);
+    expect(sk.tongGhiCo).toBe(0);
+  });
+
+  it("hoàn dạng 'Giao dịch hoàn tiền/Refund - Số Thẻ/Card No …' (cụm hoàn TRƯỚC số thẻ) ⇒ ghi có, laTiktok", () => {
+    const text = TEXT_1020.replace(
+      "19/10/2026 821,000 Hoan phi thuong nien nam 01 the\n...9999 theo uu dai chi tieu",
+      "19/10/2026 821,000 Giao dịch hoàn tiền/Refund - Số\nThẻ/Card No: 0000...9999\n9PAY*TikTok Ads HA NOI VN",
+    );
+    expect(text).not.toBe(TEXT_1020);
+    const hoan = parseOk(text).dong.filter((d) => d.ghiCo > 0 && !d.laThanhToan);
+    expect(hoan).toHaveLength(1);
+    expect(hoan[0]).toMatchObject({ ngayGiaoDich: "2026-10-19", ghiCo: 821_000, ghiNo: 0, laTiktok: true });
+  });
+});
+
 describe("parseSaoKeTechcombank — sao kê 18/09/2026", () => {
   const sk = parseOk(TEXT_0918);
 

@@ -2,6 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 
 import { mauTimKiemIlike } from "@/lib/escape-ilike";
 import { prisma } from "@/lib/prisma";
+import { PAGE_SIZE } from "@/lib/page-size";
 
 import type { KetQuaChe, QuyenGiaVon } from "./che-gia-von-types";
 
@@ -56,7 +57,6 @@ export type VariantListPage = KetQuaChe<
 
 export type VariantExport = KetQuaChe<{ rows: VariantRow[] }, { rows: VariantRowChe[] }>;
 
-const PAGE_SIZE = 20;
 
 /** Ngưỡng cảnh báo mặc định (Setting.defaultLowStockThreshold; parse int, fallback 5). Dùng cho placeholder UI + biểu thức lọc. */
 export async function getDefaultThreshold(): Promise<number> {
@@ -285,6 +285,20 @@ export async function hasLowStockVariants(): Promise<boolean> {
       SELECT 1 FROM "Variant" v WHERE v.stock <= COALESCE(v."lowStockThreshold", ${d})
     ) AS "exists"`;
   return rows[0]?.exists ?? false;
+}
+
+/**
+ * `productId` có ≥1 biến thể dưới ngưỡng cảnh báo — CÙNG điều kiện `hasLowStockVariants`/`getLowStockPreview`
+ * (`stock <= COALESCE(lowStockThreshold, ngưỡng mặc định)`). Trang chủ tô đỏ cột Tồn của khối "Lãi nhiều –
+ * nên đẩy" theo tập này (`LowStockPreviewRow` chỉ có 5 dòng và không mang `productId`).
+ */
+export async function docSanPhamCoBienTheTonThap(): Promise<Set<string>> {
+  const d = await getDefaultThreshold();
+  const rows = await prisma.$queryRaw<{ productId: string }[]>`
+    SELECT DISTINCT v."productId" AS "productId"
+    FROM "Variant" v
+    WHERE v.stock <= COALESCE(v."lowStockThreshold", ${d})`;
+  return new Set(rows.map((r) => r.productId));
 }
 
 /** Số dòng mỗi trang danh sách tồn kho — trang `/ton-kho` cần để kẹp `?trang=` vượt cuối. */

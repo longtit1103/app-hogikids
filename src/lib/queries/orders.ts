@@ -5,6 +5,7 @@ import { sumPnlPlatformFee } from "@/lib/orders/order-list-totals";
 import { prisma } from "@/lib/prisma";
 import { tachChiTietPhiTuRaw, type PlatformFeeComponent } from "@/lib/reports/platform-fee-breakdown";
 import { layQuyetToanDon, type QuyetToanDon } from "@/lib/reports/tiktok-quyet-toan-don";
+import { PAGE_SIZE } from "@/lib/page-size";
 
 import type { KetQuaChe, QuyenGiaVon } from "./che-gia-von-types";
 
@@ -103,7 +104,6 @@ export type OrderDetail = Omit<OrderDetailChe, "items"> & { items: OrderDetailIt
 /** Kết quả `getOrderDetail` theo quyền — drawer narrow bằng `order.coQuyenGiaVon`. */
 export type OrderDetailTheoQuyen = KetQuaChe<OrderDetail, OrderDetailChe>;
 
-const PAGE_SIZE = 20;
 
 /** Mới nhất trước; `id` cùng chiều làm khoá phân xử cuối để phân trang bằng `OFFSET` ổn định. */
 export const ORDER_LIST_ORDER_BY: Prisma.OrderOrderByWithRelationInput[] = [{ orderedAt: "desc" }, { id: "desc" }];

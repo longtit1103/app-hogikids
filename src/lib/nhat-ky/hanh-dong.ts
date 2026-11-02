@@ -75,6 +75,9 @@ export const HANH_DONG = {
   // dòng trong `ANH_XA_ACTION_HANH_DONG`).
   SAO_LUU_TAI: "SAO_LUU_TAI",
   PHUC_HOI: "PHUC_HOI",
+  // Cắt phiên script giữ khoá ghi chung (route `/api/restore/cat-phien`) — tách khỏi PHUC_HOI để màn nhật ký
+  // không hiện nhầm "phục hồi dữ liệu".
+  PHUC_HOI_CAT_PHIEN: "PHUC_HOI_CAT_PHIEN",
   // Nợ phải trả — phiếu nhập (P3)
   NHAP_HANG_GHI_NO: "NHAP_HANG_GHI_NO",
   NHAP_HANG_SUA_NO: "NHAP_HANG_SUA_NO",
@@ -94,6 +97,9 @@ export const HANH_DONG = {
   VI_ADS_SUA: "VI_ADS_SUA",
   VI_ADS_XOA: "VI_ADS_XOA",
   NO_PHAI_TRA_BAT: "NO_PHAI_TRA_BAT",
+  // Nợ phải trả — Business Center TikTok "không dùng thẻ" (cổng chốt sao kê bỏ BC khỏi tập xét)
+  BC_TIKTOK_DANH_DAU_KHONG_DUNG: "BC_TIKTOK_DANH_DAU_KHONG_DUNG",
+  BC_TIKTOK_BO_DANH_DAU_KHONG_DUNG: "BC_TIKTOK_BO_DANH_DAU_KHONG_DUNG",
 } as const;
 
 export type HanhDong = (typeof HANH_DONG)[keyof typeof HANH_DONG];
@@ -188,4 +194,6 @@ export const ANH_XA_ACTION_HANH_DONG: Record<string, HanhDong> = {
   suaViAds: HANH_DONG.VI_ADS_SUA,
   xoaViAds: HANH_DONG.VI_ADS_XOA,
   xacNhanBatNoPhaiTra: HANH_DONG.NO_PHAI_TRA_BAT,
+  danhDauBcTiktokKhongDung: HANH_DONG.BC_TIKTOK_DANH_DAU_KHONG_DUNG,
+  boDanhDauBcTiktokKhongDung: HANH_DONG.BC_TIKTOK_BO_DANH_DAU_KHONG_DUNG,
 };

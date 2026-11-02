@@ -95,7 +95,7 @@ export function TheTinDungSection({
         )}
       </div>
       {canhBaoHoaDonTiktok !== null && (
-        <p className="mt-2 text-xs font-medium text-warning" data-testid="the-canh-bao-hoa-don-tiktok">
+        <p className="mt-2 text-sm font-medium text-warning" data-testid="the-canh-bao-hoa-don-tiktok">
           Chưa có hoá đơn TikTok trừ thẻ từ {nhanNgay(canhBaoHoaDonTiktok.tuNgay)} — dư nợ ước tính đang THIẾU (kiểm quyền
           finance BC / chạy dựng lại Silver hoá đơn)
         </p>
@@ -130,7 +130,7 @@ export function TheTinDungSection({
                       {t.nganHang || "—"} · chốt ngày {t.ngayChotSaoKe}, hạn ngày {t.ngayHanTra}
                     </p>
                     {t.chuaChotKyGanNhat && (
-                      <p className="mt-0.5 text-xs text-warning" data-testid="the-nhac-chot-sao-ke">
+                      <p className="mt-0.5 text-sm text-warning" data-testid="the-nhac-chot-sao-ke">
                         Chưa chốt sao kê kỳ gần nhất
                       </p>
                     )}

@@ -5,7 +5,8 @@ import { z } from "zod";
 
 import type { ActionResult } from "@/lib/actions/action-result";
 import { kiemQuyenXemGiaVon } from "@/lib/actions/cong-gia-von";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { kiemKhongPhucHoiTrongTx, LoiDangPhucHoiTrongTx } from "@/lib/backup/kiem-khong-phuc-hoi-trong-tx";
 import type { CostImportRow } from "@/lib/import/cost-excel";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
@@ -58,24 +59,29 @@ export async function updateVariantCost(variantId: string, costPrice: number): P
   if (!cong.ok) return cong;
   const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
   if (!giaVon.ok) return giaVon;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  const parsed = money.safeParse(costPrice);
-  if (!parsed.success) return { ok: false, error: "Giá vốn không hợp lệ", field: "costPrice" };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.variant.update({ where: { id: variantId }, data: { costPrice: parsed.data } });
-      kiemKhongPhucHoiTrongTx(); // sau khoá dòng (UPDATE) — cờ bật giữa chừng ⇒ cuộn lại
-      await ghiNhatKy(tx, {
-        actor: cong.nguoiDung,
-        hanhDong: HANH_DONG.GIA_VON_SUA,
-        doiTuong: { loai: "Variant", id: variantId },
+    const parsed = money.safeParse(costPrice);
+    if (!parsed.success) return { ok: false, error: "Giá vốn không hợp lệ", field: "costPrice" };
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.variant.update({ where: { id: variantId }, data: { costPrice: parsed.data } });
+        kiemKhongPhucHoiTrongTx(); // sau khoá dòng (UPDATE) — cờ bật giữa chừng ⇒ cuộn lại
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.GIA_VON_SUA,
+          doiTuong: { loai: "Variant", id: variantId },
+        });
+        kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
       });
-      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
-    });
-    revalidateViews();
-    return { ok: true, data: undefined };
-  } catch (e) {
-    return loiSuaBienThe(e, "updateVariantCost", "Không lưu được giá vốn — lỗi hệ thống, thử lại sau.");
+      revalidateViews();
+      return { ok: true, data: undefined };
+    } catch (e) {
+      return loiSuaBienThe(e, "updateVariantCost", "Không lưu được giá vốn — lỗi hệ thống, thử lại sau.");
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -84,22 +90,27 @@ export async function updateVariantThreshold(variantId: string, threshold: numbe
   // Ngưỡng tồn không phải dữ liệu giá vốn ⇒ chỉ cần `san-pham:sua` (không kèm quyền xem giá vốn).
   const cong = await congAction("san-pham:sua");
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  const parsed = thresholdValue.nullable().safeParse(threshold);
-  if (!parsed.success) return { ok: false, error: "Ngưỡng không hợp lệ", field: "threshold" };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.variant.update({ where: { id: variantId }, data: { lowStockThreshold: parsed.data } });
-      await ghiNhatKy(tx, {
-        actor: cong.nguoiDung,
-        hanhDong: HANH_DONG.NGUONG_TON_SUA,
-        doiTuong: { loai: "Variant", id: variantId },
+    const parsed = thresholdValue.nullable().safeParse(threshold);
+    if (!parsed.success) return { ok: false, error: "Ngưỡng không hợp lệ", field: "threshold" };
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.variant.update({ where: { id: variantId }, data: { lowStockThreshold: parsed.data } });
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.NGUONG_TON_SUA,
+          doiTuong: { loai: "Variant", id: variantId },
+        });
       });
-    });
-    revalidateViews();
-    return { ok: true, data: undefined };
-  } catch (e) {
-    return loiSuaBienThe(e, "updateVariantThreshold", "Không lưu được ngưỡng tồn — lỗi hệ thống, thử lại sau.");
+      revalidateViews();
+      return { ok: true, data: undefined };
+    } catch (e) {
+      return loiSuaBienThe(e, "updateVariantThreshold", "Không lưu được ngưỡng tồn — lỗi hệ thống, thử lại sau.");
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -116,33 +127,38 @@ export async function updateProductCost(
   if (!cong.ok) return cong;
   const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
   if (!giaVon.ok) return giaVon;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  const parsed = money.safeParse(costPrice);
-  if (!parsed.success) return { ok: false, error: "Giá vốn không hợp lệ", field: "costPrice" };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const count = await prisma.$transaction(async (tx) => {
-      const { count: n } = await tx.variant.updateMany({ where: { productId }, data: { costPrice: parsed.data } });
-      kiemKhongPhucHoiTrongTx(); // sau lượt ghi (đã khoá dòng) — cờ phục hồi bật giữa chừng ⇒ cuộn lại
-      // Không dòng nào đổi ⇒ không có thao tác nào để ghi nhật ký.
-      if (n > 0) {
-        await ghiNhatKy(tx, {
-          actor: cong.nguoiDung,
-          hanhDong: HANH_DONG.GIA_VON_SUA,
-          doiTuong: { loai: "Product", id: productId },
-          ghiChu: { soDong: n },
-        });
-      }
-      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
-      return n;
-    });
-    // count=0 = sản phẩm không có biến thể nào (vd đã bị gỡ khi đồng bộ) → báo lỗi, tránh "thành công ảo".
-    if (count === 0) return { ok: false, error: "Không tìm thấy biến thể để áp giá vốn" };
-    revalidateViews();
-    return { ok: true, data: { updated: count } };
-  } catch (e) {
-    if (e instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
-    console.error("updateProductCost failed", e);
-    return { ok: false, error: "Không áp được giá vốn" };
+    const parsed = money.safeParse(costPrice);
+    if (!parsed.success) return { ok: false, error: "Giá vốn không hợp lệ", field: "costPrice" };
+    try {
+      const count = await prisma.$transaction(async (tx) => {
+        const { count: n } = await tx.variant.updateMany({ where: { productId }, data: { costPrice: parsed.data } });
+        kiemKhongPhucHoiTrongTx(); // sau lượt ghi (đã khoá dòng) — cờ phục hồi bật giữa chừng ⇒ cuộn lại
+        // Không dòng nào đổi ⇒ không có thao tác nào để ghi nhật ký.
+        if (n > 0) {
+          await ghiNhatKy(tx, {
+            actor: cong.nguoiDung,
+            hanhDong: HANH_DONG.GIA_VON_SUA,
+            doiTuong: { loai: "Product", id: productId },
+            ghiChu: { soDong: n },
+          });
+        }
+        kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
+        return n;
+      });
+      // count=0 = sản phẩm không có biến thể nào (vd đã bị gỡ khi đồng bộ) → báo lỗi, tránh "thành công ảo".
+      if (count === 0) return { ok: false, error: "Không tìm thấy biến thể để áp giá vốn" };
+      revalidateViews();
+      return { ok: true, data: { updated: count } };
+    } catch (e) {
+      if (e instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
+      console.error("updateProductCost failed", e);
+      return { ok: false, error: "Không áp được giá vốn" };
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -154,31 +170,36 @@ export async function updateProductThreshold(
   // Ngưỡng tồn không phải dữ liệu giá vốn ⇒ chỉ cần `san-pham:sua` (không kèm quyền xem giá vốn).
   const cong = await congAction("san-pham:sua");
   if (!cong.ok) return cong;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  const parsed = thresholdValue.nullable().safeParse(threshold);
-  if (!parsed.success) return { ok: false, error: "Ngưỡng không hợp lệ", field: "threshold" };
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const count = await prisma.$transaction(async (tx) => {
-      const { count: n } = await tx.variant.updateMany({
-        where: { productId },
-        data: { lowStockThreshold: parsed.data },
-      });
-      if (n > 0) {
-        await ghiNhatKy(tx, {
-          actor: cong.nguoiDung,
-          hanhDong: HANH_DONG.NGUONG_TON_SUA,
-          doiTuong: { loai: "Product", id: productId },
-          ghiChu: { soDong: n },
+    const parsed = thresholdValue.nullable().safeParse(threshold);
+    if (!parsed.success) return { ok: false, error: "Ngưỡng không hợp lệ", field: "threshold" };
+    try {
+      const count = await prisma.$transaction(async (tx) => {
+        const { count: n } = await tx.variant.updateMany({
+          where: { productId },
+          data: { lowStockThreshold: parsed.data },
         });
-      }
-      return n;
-    });
-    if (count === 0) return { ok: false, error: "Không tìm thấy biến thể để áp ngưỡng" };
-    revalidateViews();
-    return { ok: true, data: { updated: count } };
-  } catch (e) {
-    console.error("updateProductThreshold failed", e);
-    return { ok: false, error: "Không áp được ngưỡng" };
+        if (n > 0) {
+          await ghiNhatKy(tx, {
+            actor: cong.nguoiDung,
+            hanhDong: HANH_DONG.NGUONG_TON_SUA,
+            doiTuong: { loai: "Product", id: productId },
+            ghiChu: { soDong: n },
+          });
+        }
+        return n;
+      });
+      if (count === 0) return { ok: false, error: "Không tìm thấy biến thể để áp ngưỡng" };
+      revalidateViews();
+      return { ok: true, data: { updated: count } };
+    } catch (e) {
+      console.error("updateProductThreshold failed", e);
+      return { ok: false, error: "Không áp được ngưỡng" };
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -232,40 +253,45 @@ export async function importCostPrices(
   if (!cong.ok) return cong;
   const giaVon = await kiemQuyenXemGiaVon(cong.nguoiDung);
   if (!giaVon.ok) return giaVon;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-  // Trần phòng cạn bộ nhớ khi validate mảng lớn (zod < 4.6.6); file giá vốn lớn nhất đã import < 1000 dòng.
-  const parsed = z.array(importRowSchema).max(5000).safeParse(rows);
-  if (!parsed.success) return { ok: false, error: "Dữ liệu import không hợp lệ" };
-  const clean = parsed.data;
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const out = await prisma.$transaction(async (tx) => {
-      let updatedVariants = 0;
-      const multiSkus: string[] = [];
-      const notFound: string[] = [];
-      for (const r of clean) {
-        const data: { costPrice: number; lowStockThreshold?: number } = { costPrice: r.costPrice };
-        if (r.lowStockThreshold !== null) data.lowStockThreshold = r.lowStockThreshold; // null = giữ nguyên ngưỡng
-        const { count } = await tx.variant.updateMany({ where: { sku: r.sku }, data });
-        kiemKhongPhucHoiTrongTx(); // sau lượt ghi đầu (và mọi lượt sau) — cờ bật giữa chừng ⇒ cuộn lại cả lượt
-        if (count === 0) notFound.push(r.sku);
-        else {
-          updatedVariants += count;
-          if (count > 1) multiSkus.push(r.sku);
+    // Trần phòng cạn bộ nhớ khi validate mảng lớn (zod < 4.6.6); file giá vốn lớn nhất đã import < 1000 dòng.
+    const parsed = z.array(importRowSchema).max(5000).safeParse(rows);
+    if (!parsed.success) return { ok: false, error: "Dữ liệu import không hợp lệ" };
+    const clean = parsed.data;
+
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        let updatedVariants = 0;
+        const multiSkus: string[] = [];
+        const notFound: string[] = [];
+        for (const r of clean) {
+          const data: { costPrice: number; lowStockThreshold?: number } = { costPrice: r.costPrice };
+          if (r.lowStockThreshold !== null) data.lowStockThreshold = r.lowStockThreshold; // null = giữ nguyên ngưỡng
+          const { count } = await tx.variant.updateMany({ where: { sku: r.sku }, data });
+          kiemKhongPhucHoiTrongTx(); // sau lượt ghi đầu (và mọi lượt sau) — cờ bật giữa chừng ⇒ cuộn lại cả lượt
+          if (count === 0) notFound.push(r.sku);
+          else {
+            updatedVariants += count;
+            if (count > 1) multiSkus.push(r.sku);
+          }
         }
-      }
-      await ghiNhatKy(tx, {
-        actor: cong.nguoiDung,
-        hanhDong: HANH_DONG.GIA_VON_IMPORT,
-        ghiChu: { soDong: updatedVariants },
+        await ghiNhatKy(tx, {
+          actor: cong.nguoiDung,
+          hanhDong: HANH_DONG.GIA_VON_IMPORT,
+          ghiChu: { soDong: updatedVariants },
+        });
+        kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
+        return { updatedVariants, multiSkus, notFound };
       });
-      kiemKhongPhucHoiTrongTx(); // câu cuối, ngay trước COMMIT
-      return { updatedVariants, multiSkus, notFound };
-    });
-    revalidateViews();
-    return { ok: true, data: out };
-  } catch (e) {
-    if (e instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
-    return { ok: false, error: "Lỗi khi áp giá vốn" };
+      revalidateViews();
+      return { ok: true, data: out };
+    } catch (e) {
+      if (e instanceof LoiDangPhucHoiTrongTx) return { ok: false, error: LOI_DANG_PHUC_HOI };
+      return { ok: false, error: "Lỗi khi áp giá vốn" };
+    }
+  } finally {
+    cua.ra();
   }
 }

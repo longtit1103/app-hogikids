@@ -2,8 +2,9 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LoiVuotTranTien, thuocTinhLoiVuotTran } from "@/components/ui/loi-vuot-tran-tien";
 import { formatVnd } from "@/lib/format";
-import { formatAmountInput, parseAmountInput, parseSignedAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, MAX_AMOUNT_INPUT, parseAmountInput, parseSignedAmountInput } from "@/lib/format-amount-input";
 import type { KetQuaDocChenhLech } from "@/lib/no-phai-tra/doc-chenh-lech-tai-m";
 import type { DongDieuChinh, LuaChonDieuChinh } from "@/lib/no-phai-tra/tinh-chenh-lech-tai-m";
 import { CAU_TRU_NHAM_THAU_CHI, laTruNhamThauChi } from "@/lib/so-quy/canh-bao-tru-nham-thau-chi";
@@ -78,6 +79,9 @@ export function BuocDoiChieu({
   onDieuChinh: (ds: DongDieuChinh[]) => void;
   nhanTruocM: string;
 }) {
+  // Số gõ vượt trần 2 tỷ: báo đỏ tại ô (LoiVuotTranTien) và khoá nút tính — action vẫn chặn lần nữa.
+  const vuotTranKhai =
+    Math.abs(parseSignedAmountInput(bankRaw)) > MAX_AMOUNT_INPUT || tienMat > MAX_AMOUNT_INPUT;
   const sua = (i: number, thay: Partial<DongDieuChinh>) =>
     onDieuChinh(dieuChinh.map((d, j) => (j === i ? { ...d, ...thay } : d)));
 
@@ -96,27 +100,31 @@ export function BuocDoiChieu({
           Số dư ngân hàng
           <Input
             id="bat-so-du-bank"
+            {...thuocTinhLoiVuotTran(Math.abs(parseSignedAmountInput(bankRaw)), "bat-so-du-bank-loi")}
             inputMode="numeric"
             placeholder="0"
             className="text-right"
             value={bankRaw}
             onChange={(e) => onBankRaw(hienSoCoDau(e.target.value))}
           />
+          <LoiVuotTranTien value={Math.abs(parseSignedAmountInput(bankRaw))} id="bat-so-du-bank-loi" />
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="bat-tien-mat">
           Tiền mặt
           <Input
             id="bat-tien-mat"
+            {...thuocTinhLoiVuotTran(tienMat, "bat-tien-mat-loi")}
             inputMode="numeric"
             placeholder="0"
             className="text-right"
             value={formatAmountInput(tienMat)}
             onChange={(e) => onTienMat(parseAmountInput(e.target.value))}
           />
+          <LoiVuotTranTien value={tienMat} id="bat-tien-mat-loi" />
         </label>
       </div>
       <div>
-        <Button type="button" variant="secondary" disabled={!coTheTinh || dangTinh} onClick={onTinh}>
+        <Button type="button" variant="secondary" disabled={!coTheTinh || dangTinh || vuotTranKhai} onClick={onTinh}>
           {dangTinh ? "Đang tính…" : ketQua ? "Tính lại chênh lệch" : "Tính chênh lệch"}
         </Button>
         {!coTheTinh && <p className="mt-1 text-xs text-muted-foreground">Khai đủ bước 1 trước.</p>}
@@ -207,14 +215,18 @@ export function BuocDoiChieu({
                   <option value="IN">Vào quỹ</option>
                   <option value="OUT">Ra quỹ</option>
                 </select>
-                <Input
-                  aria-label="Số tiền điều chỉnh"
-                  inputMode="numeric"
-                  className="text-right"
-                  readOnly={luaChon !== "tu-go"}
-                  value={formatAmountInput(d.soTien)}
-                  onChange={(e) => sua(i, { soTien: parseAmountInput(e.target.value) })}
-                />
+                <div className="flex flex-col gap-1">
+                  <Input
+                    aria-label="Số tiền điều chỉnh"
+                    {...thuocTinhLoiVuotTran(d.soTien, `bat-dieu-chinh-${i}-loi`)}
+                    inputMode="numeric"
+                    className="text-right"
+                    readOnly={luaChon !== "tu-go"}
+                    value={formatAmountInput(d.soTien)}
+                    onChange={(e) => sua(i, { soTien: parseAmountInput(e.target.value) })}
+                  />
+                  <LoiVuotTranTien value={d.soTien} id={`bat-dieu-chinh-${i}-loi`} />
+                </div>
                 <Input
                   aria-label="Mô tả điều chỉnh"
                   maxLength={200}

@@ -1,6 +1,9 @@
 "use client";
 
+import { useId } from "react";
+
 import { Input } from "@/components/ui/input";
+import { LoiVuotTranTien, thuocTinhLoiVuotTran } from "@/components/ui/loi-vuot-tran-tien";
 import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
 import { formatVnd } from "@/lib/format";
 import { tongChuyenNganHang } from "@/lib/so-quy/tien-ky-tra-no";
@@ -52,6 +55,7 @@ export function KyTraNoInputs({
   tienGuiSeNhanLai,
   laiNhapGoc,
 }: Props) {
+  const idCoSo = useId();
   const tongChuyen = tongChuyenNganHang({ lai, goc, tienGui, tienGuiSeNhanLai, laiNhapGoc });
   return (
     <div
@@ -63,10 +67,12 @@ export function KyTraNoInputs({
           <Input
             inputMode="numeric"
             aria-label="Lãi"
+            {...thuocTinhLoiVuotTran(lai, `${idCoSo}-lai`)}
             value={formatAmountInput(lai)}
             onChange={(e) => setLai(parseAmountInput(e.target.value))}
             className="text-right"
           />
+          <LoiVuotTranTien value={lai} id={`${idCoSo}-lai`} />
         </label>
       </div>
       <div className="flex flex-col gap-1">
@@ -75,10 +81,12 @@ export function KyTraNoInputs({
           <Input
             inputMode="numeric"
             aria-label="Gốc"
+            {...thuocTinhLoiVuotTran(goc, `${idCoSo}-goc`)}
             value={formatAmountInput(goc)}
             onChange={(e) => setGoc(parseAmountInput(e.target.value))}
             className="text-right"
           />
+          <LoiVuotTranTien value={goc} id={`${idCoSo}-goc`} />
         </label>
         <p className="text-xs text-muted-foreground">
           {laiNhapGoc
@@ -97,10 +105,12 @@ export function KyTraNoInputs({
             <Input
               inputMode="numeric"
               aria-label="Tiền gửi"
+              {...thuocTinhLoiVuotTran(tienGui, `${idCoSo}-tien-gui`)}
               value={formatAmountInput(tienGui)}
               onChange={(e) => setTienGui(parseAmountInput(e.target.value))}
               className="text-right"
             />
+            <LoiVuotTranTien value={tienGui} id={`${idCoSo}-tien-gui`} />
           </label>
           <p className="text-xs text-muted-foreground">
             tiền của anh, ngân hàng giữ hộ — không tính vào Lãi/Lỗ, hoàn lại thành một dòng thu riêng

@@ -92,18 +92,17 @@ test.describe("Phase 5 smoke — Dashboard / Báo cáo / Kênh", () => {
     await login(page);
   });
 
-  test("Dashboard hiện 4 KPI card + card Tình trạng đồng bộ", async ({ page }) => {
-    // Neo vào ĐÚNG nhãn "Doanh thu gộp hôm nay" (thêm "hôm nay" 26/09). Bản cũ neo `getByText("Doanh thu", { exact: true })`
-    // — chú giải biểu đồ bên dưới cũng có đúng chuỗi "Doanh thu", nên phép kiểm đó vẫn XANH kể
-    // cả khi card KPI đổi nhãn hay biến mất hoàn toàn; `.first()` chỉ giấu chuyện đó kỹ hơn.
-    await expect(page.getByText("Doanh thu gộp hôm nay", { exact: true })).toBeVisible();
-    // Dòng đối chiếu Pancake: `netRevenue` (gộp − phí sàn − voucher), cùng nhãn với bảng Lãi/Lỗ
-    // và ứng với ô "Doanh thu" bên Pancake POS. Mất dòng ⇒ chủ shop lại so hai màn ra hai số lệch.
-    await expect(page.getByText(/^Thực nhận từ sàn:/)).toBeVisible();
-    await expect(page.getByText("Đơn hợp lệ hôm nay", { exact: true })).toBeVisible();
-    await expect(page.getByText("LN ròng ước tính tháng")).toBeVisible();
-    await expect(page.getByText("Tỷ lệ hoàn/bom tháng")).toBeVisible();
-    await expect(page.getByText("Tình trạng đồng bộ")).toBeVisible();
+  test("Dashboard hiện 4 thẻ số + tròn tình trạng đơn", async ({ page }) => {
+    // Thẻ số là <button aria-pressed> — neo bằng role để chữ "Doanh số" ở nơi khác (khối Tiền đi đâu, Theo kênh)
+    // không làm phép kiểm xanh kể cả khi hàng thẻ biến mất.
+    for (const ten of ["Doanh số", "Chi phí", "Lợi nhuận", "Đơn hợp lệ"]) {
+      await expect(page.getByRole("button", { name: new RegExp(`^${ten}`) })).toBeVisible();
+    }
+    await expect(page.getByText("Tình trạng đơn", { exact: true })).toBeVisible();
+    await expect(page.getByText("Tiền bán hàng đi đâu", { exact: true })).toBeVisible();
+    await expect(page.getByText("Theo kênh", { exact: true })).toBeVisible();
+    // Thẻ đồng bộ đã rời trang chủ (chỉ còn ở /cai-dat).
+    await expect(page.getByText("Tình trạng đồng bộ")).toHaveCount(0);
   });
 
   test("/tai-chinh?tab=loi-lo hiện dòng LN ròng + badge tạm tính", async ({ page }) => {

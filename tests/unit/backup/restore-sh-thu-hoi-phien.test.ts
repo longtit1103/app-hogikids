@@ -191,9 +191,13 @@ describe("restore.sh — main nối bước thu hồi phiên", () => {
  * hồi: mã thoát của nó phải thành mã thoát của script, và dòng ✓ chỉ in khi thật sự xong. So chuỗi
  * lệnh trong file (indexOf) mù với `thu_hoi_phien_sau_phuc_hoi … || true`.
  *
- * `docker` giả: lượt kiểm cột (`information_schema.columns`) in `$COT`; lượt `-c` khác (dọn schema, trả
- * quyền) thành công; lượt đọc stdin là file thu hồi (nhận ra bằng dòng đầu) thì ghi lại và thành
- * công/hỏng theo `$THU_HOI`; stdin khác (nạp SQL) nuốt và thành công. Mọi lời gọi ghi vào `calls`.
+ * `docker` giả: lượt kiểm cột (`information_schema.columns`) in `$COT`; ba câu hỏi của bước loại trừ
+ * phiên role app (đọc `datacl`, quyền CONNECT hiệu lực, đếm phiên) trả lời "DB nháp sạch"; lượt `-c` khác
+ * (dọn schema, trả quyền, REVOKE/trả ACL, cắt phiên) thành công; lượt đọc stdin là file thu hồi (nhận ra
+ * bằng dòng đầu) thì ghi lại và thành công/hỏng theo `$THU_HOI`; stdin khác (nạp SQL) nuốt và thành
+ * công. Mọi lời gọi ghi vào `calls`. Hành vi loại trừ ở mọi lối thoát khoá riêng tại
+ * `restore-sh-loai-tru-cap-db.test.ts`; `HOME`/`RESTORE_TEP_DANG_DO` trỏ thư mục tạm để tệp đánh dấu
+ * không bao giờ rơi vào `~/docker/backups` của máy chạy test.
  */
 function chayTronRestore(p: { cot: string; thuHoi: "ok" | "loi" }): KetQua {
   const d = taoThuMucTam();
@@ -204,6 +208,9 @@ function chayTronRestore(p: { cot: string; thuHoi: "ok" | "loi" }): KetQua {
     `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$LOG/calls"
 if [[ "$*" == *information_schema.columns* ]]; then printf '%s\\n' "$COT"; exit 0; fi
+if [[ "$*" == *"COALESCE(datacl::text"* ]]; then echo NULL; exit 0; fi
+if [[ "$*" == *has_database_privilege* ]]; then echo f; exit 0; fi
+if [[ "$*" == *"count(*) FROM pg_catalog.pg_stat_activity"* ]]; then echo 0; exit 0; fi
 if [[ " $* " == *" -c "* ]]; then exit 0; fi
 than=$(cat)
 if [[ "$than" == "-- thu-hoi-phien-sau-phuc-hoi.sql"* ]]; then
@@ -219,7 +226,15 @@ exit 0
   const r = spawnSync("bash", [RESTORE_SH, dump, DB_DICH, "app"], {
     encoding: "utf8",
     input: "y\n",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, LOG: d, COT: p.cot, THU_HOI: p.thuHoi },
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      HOME: d,
+      RESTORE_TEP_DANG_DO: path.join(d, ".restore-dang-do"),
+      LOG: d,
+      COT: p.cot,
+      THU_HOI: p.thuHoi,
+    },
   });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, log: d };
 }

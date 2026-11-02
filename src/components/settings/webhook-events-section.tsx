@@ -7,6 +7,7 @@ import {
 } from "@/lib/gia-von/trang-thai-lech-gia-von";
 import { GIO_COI_LA_TRE, type TinhTrangVaTonKho } from "@/lib/ingest/stock-resync-status";
 import { KET_CUC_CAN_XEM } from "@/lib/ingest/webhook-processor";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 
 /**
  * Khối "Webhook Pancake" trong section Kết nối & Đồng bộ.
@@ -63,15 +64,8 @@ export type SuKienCanXem = {
   processedNote: string | null;
 };
 
-function lucVN(d: Date): string {
-  return d.toLocaleString("vi-VN", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+/** "HH:mm dd/MM" giờ VN (một nguồn: `formatNgayVn`). */
+const lucVN = (d: Date): string => formatNgayVn(d, "HH:mm dd/MM");
 
 export function WebhookEventsSection({
   demTheoKetCuc,

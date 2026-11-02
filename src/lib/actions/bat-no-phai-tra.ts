@@ -7,7 +7,7 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { LoiHopDong } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { docMocM, KEY_NO_PHAI_TRA_TU_NGAY, khoaDocQuyenBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docChenhLechTaiMTuDb, type KetQuaDocChenhLech } from "@/lib/no-phai-tra/doc-chenh-lech-tai-m";
@@ -110,68 +110,72 @@ export async function xacNhanBatNoPhaiTra(input: unknown): Promise<KetQuaActionB
   const c = await congChuShopAction();
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = xacNhanSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const d = parsed.data;
-  // Vân tay trên dữ liệu ĐÃ chuẩn hoá (khoá ngày VN, mô tả đã trim, bỏ dòng 0).
-  const bam = bamNoiDung({
-    mocM: khoaNgayVn(d.mocM),
-    the: d.the.map((t) => ({
-      cardId: t.cardId,
-      duNo: t.duNoCuoiMTru1,
-      saoKe:
-        t.saoKeCuoi === null
-          ? null
-          : { ...t.saoKeCuoi, ngayChot: khoaNgayVn(t.saoKeCuoi.ngayChot), hanTra: khoaNgayVn(t.saoKeCuoi.hanTra) },
-    })),
-    viAds: d.viAds,
-    xacNhanViShopeeChuaTheoDoi: d.xacNhanViShopeeChuaTheoDoi,
-    vanTayQuy: d.vanTayQuy,
-    dieuChinh: d.dieuChinh.filter((x) => x.soTien > 0),
-  });
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const kq = await prisma.$transaction(async (tx) => {
-      await khoaDocQuyenBatNoPhaiTra(tx);
-      const giu = await giuYeuCau(tx, { id: d.yeuCauId, loai: LOAI_YEU_CAU_BAT, bam });
-      if (giu !== "MOI") {
-        if (giu.cu.bamNoiDung !== bam) throw new LoiHopDong("Mã yêu cầu đã dùng cho nội dung khác");
-        if (giu.cu.ketQua === null) throw new Error(`YeuCauGhi ${d.yeuCauId}: yêu cầu chưa hoàn tất`);
-        return { daGhiRoi: true as const, data: (giu.cu.ketQua as { data: KetQuaKhoiTao }).data };
+    const parsed = xacNhanSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const d = parsed.data;
+    // Vân tay trên dữ liệu ĐÃ chuẩn hoá (khoá ngày VN, mô tả đã trim, bỏ dòng 0).
+    const bam = bamNoiDung({
+      mocM: khoaNgayVn(d.mocM),
+      the: d.the.map((t) => ({
+        cardId: t.cardId,
+        duNo: t.duNoCuoiMTru1,
+        saoKe:
+          t.saoKeCuoi === null
+            ? null
+            : { ...t.saoKeCuoi, ngayChot: khoaNgayVn(t.saoKeCuoi.ngayChot), hanTra: khoaNgayVn(t.saoKeCuoi.hanTra) },
+      })),
+      viAds: d.viAds,
+      xacNhanViShopeeChuaTheoDoi: d.xacNhanViShopeeChuaTheoDoi,
+      vanTayQuy: d.vanTayQuy,
+      dieuChinh: d.dieuChinh.filter((x) => x.soTien > 0),
+    });
+
+    try {
+      const kq = await prisma.$transaction(async (tx) => {
+        await khoaDocQuyenBatNoPhaiTra(tx);
+        const giu = await giuYeuCau(tx, { id: d.yeuCauId, loai: LOAI_YEU_CAU_BAT, bam });
+        if (giu !== "MOI") {
+          if (giu.cu.bamNoiDung !== bam) throw new LoiHopDong("Mã yêu cầu đã dùng cho nội dung khác");
+          if (giu.cu.ketQua === null) throw new Error(`YeuCauGhi ${d.yeuCauId}: yêu cầu chưa hoàn tất`);
+          return { daGhiRoi: true as const, data: (giu.cu.ketQua as { data: KetQuaKhoiTao }).data };
+        }
+
+        const data = await ghiKhoiTaoNoPhaiTra(tx, {
+          mocM: d.mocM,
+          yeuCauId: d.yeuCauId,
+          the: d.the,
+          viAds: d.viAds,
+          dieuChinh: d.dieuChinh,
+          xacNhanViShopeeChuaTheoDoi: d.xacNhanViShopeeChuaTheoDoi,
+          vanTayQuyDaThay: d.vanTayQuy,
+        });
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "NO_PHAI_TRA_BAT",
+          doiTuong: { loai: "Setting", id: KEY_NO_PHAI_TRA_TU_NGAY, moTa: moTaNhatKyBat(data) },
+          ghiChu: { ky: data.mocM, soDong: data.dieuChinh.length },
+        });
+        await ghiKetQua(tx, d.yeuCauId, { ok: true, data });
+        return { daGhiRoi: false as const, data };
+      }, OPT_TX_DONG_TIEN);
+
+      if (kq.daGhiRoi) return { ok: true, data: kq.data, code: "DA_GHI_ROI" };
+      lamMoiTrang();
+      return { ok: true, data: kq.data };
+    } catch (e) {
+      // Unique có thể vỡ: `(cardId, ngayChot)` của kỳ sao kê — thẻ đã có dòng ở đúng ngày đó.
+      if (rangBuocTrungKhoa(e) !== undefined) {
+        return { ok: false, error: "Thẻ đã có kỳ/neo ở ngày khai — tải lại trang rồi kiểm lại", field: "the" };
       }
-
-      const data = await ghiKhoiTaoNoPhaiTra(tx, {
-        mocM: d.mocM,
-        yeuCauId: d.yeuCauId,
-        the: d.the,
-        viAds: d.viAds,
-        dieuChinh: d.dieuChinh,
-        xacNhanViShopeeChuaTheoDoi: d.xacNhanViShopeeChuaTheoDoi,
-        vanTayQuyDaThay: d.vanTayQuy,
-      });
-      await ghiNhatKy(tx, {
-        actor: nguoiDung,
-        hanhDong: "NO_PHAI_TRA_BAT",
-        doiTuong: { loai: "Setting", id: KEY_NO_PHAI_TRA_TU_NGAY, moTa: moTaNhatKyBat(data) },
-        ghiChu: { ky: data.mocM, soDong: data.dieuChinh.length },
-      });
-      await ghiKetQua(tx, d.yeuCauId, { ok: true, data });
-      return { daGhiRoi: false as const, data };
-    }, OPT_TX_DONG_TIEN);
-
-    if (kq.daGhiRoi) return { ok: true, data: kq.data, code: "DA_GHI_ROI" };
-    lamMoiTrang();
-    return { ok: true, data: kq.data };
-  } catch (e) {
-    // Unique có thể vỡ: `(cardId, ngayChot)` của kỳ sao kê — thẻ đã có dòng ở đúng ngày đó.
-    if (rangBuocTrungKhoa(e) !== undefined) {
-      return { ok: false, error: "Thẻ đã có kỳ/neo ở ngày khai — tải lại trang rồi kiểm lại", field: "the" };
+      const r = loiThe(e, "Lỗi khi bật theo dõi nợ phải trả");
+      if (r.error === "Lỗi khi bật theo dõi nợ phải trả") console.error("[bat-no-phai-tra]", e);
+      return { ok: false, ...r };
     }
-    const r = loiThe(e, "Lỗi khi bật theo dõi nợ phải trả");
-    if (r.error === "Lỗi khi bật theo dõi nợ phải trả") console.error("[bat-no-phai-tra]", e);
-    return { ok: false, ...r };
+  } finally {
+    cua.ra();
   }
 }
 

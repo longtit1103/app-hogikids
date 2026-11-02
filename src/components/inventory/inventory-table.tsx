@@ -7,8 +7,8 @@ import { formatVnd } from "@/lib/format";
 import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
 import type { VariantRow, VariantRowChe } from "@/lib/queries/variants";
 import { cn } from "@/lib/utils";
+import { PAGE_SIZE } from "@/lib/page-size";
 
-const PAGE_SIZE = 20;
 
 type GiaVonDong = { costPrice: number; stockValue: number } | null;
 

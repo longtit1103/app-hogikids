@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { EB_Garamond, Inter, JetBrains_Mono } from "next/font/google";
 import { connection } from "next/server";
 import { Toaster } from "sonner";
+
+import { XacNhanHost } from "@/components/ui/xac-nhan-hop-thoai";
 import "./globals.css";
 
 // Display/heading serif — weight 400 with negative tracking (claude-DESIGN.md display tokens)
@@ -66,6 +68,8 @@ export default async function RootLayout({
         className={`${ebGaramond.variable} ${inter.variable} ${jetbrainsMono.variable} antialiased`}
       >
         {children}
+        {/* Hộp xác nhận dùng chung cho `xacNhan()` — thay hộp confirm gốc của trình duyệt (bị chặn trong PWA/iOS). */}
+        <XacNhanHost />
         <Toaster
           position="top-right"
           // PWA iPhone: toast `fixed` không hưởng đệm safe-area của body — giữ lề mặc định của sonner
@@ -90,8 +94,8 @@ export default async function RootLayout({
               description: "text-on-dark/80",
               // Nền surface-dark dùng chung → phân biệt thành công/lỗi bằng viền trái màu
               // ngữ nghĩa (bỏ `richColors` nên không còn màu nền phân biệt sẵn).
-              success: "border-l-4 border-success",
-              error: "border-l-4 border-error",
+              success: "border-l-4 border-success-on-dark",
+              error: "border-l-4 border-error-on-dark",
             },
           }}
         />

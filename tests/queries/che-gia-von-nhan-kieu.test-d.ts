@@ -1,6 +1,5 @@
 import { describe, it } from "vitest";
 
-import type { KpiCardsDuLieu } from "@/components/dashboard/kpi-cards";
 import type { SoSanhKenhDuLieu } from "@/components/kenh/channel-comparison-section";
 import type { KpiKenhDuLieu } from "@/components/kenh/channel-kpi-cards";
 import type { DailyPoint } from "@/lib/reports/daily-series";
@@ -16,6 +15,7 @@ import {
   type DailySeriesTheoQuyen,
   type PnlChe,
 } from "@/lib/reports/pnl-che";
+import type { DuLieuTheVaBieuDo, SoSanh, TheoKenh } from "@/lib/trang-chu/kieu-du-lieu-trang-chu";
 
 /**
  * Lưới KIỂU cho NHÃN "đã che": bản đầy đủ (`PnlBreakdown`, `ChannelPnl[]`, `DailyPoint[]`) KHÔNG được
@@ -42,8 +42,6 @@ describe("nhãn kiểu DTO che", () => {
     const c: DailyPointChe[] = diem;
 
     // Đúng ba mẫu page từng viết tay — nay tsc đỏ nếu quên chiếu che.
-    // @ts-expect-error — hàng KPI Dashboard nhánh che nhận P&L đầy đủ
-    const kpi: KpiCardsDuLieu = { coQuyenGiaVon: false, today: pnl, thisMonth: pnl, lastMonthSameDays: pnl };
     // @ts-expect-error — so sánh kênh nhánh che nhận danh sách kênh đầy đủ
     const soSanh: SoSanhKenhDuLieu = { coQuyenGiaVon: false, channels: kenh, prevChannels: kenh };
     // @ts-expect-error — KPI một kênh nhánh che nhận P&L đầy đủ
@@ -55,10 +53,65 @@ describe("nhãn kiểu DTO che", () => {
     const d: PnlChe = chePnl(pnl);
     const e: ChannelPnlChe[] = cheChannelPnl(kenh);
     const f: DailyPointChe[] = cheDailySeries(diem);
-    const g: KpiCardsDuLieu = boPnlTheoQuyen({ today: pnl, thisMonth: pnl, lastMonthSameDays: pnl }, { coQuyenGiaVon: false });
     const h: SoSanhKenhDuLieu = boChannelPnlTheoQuyen({ channels: kenh, prevChannels: kenh }, { coQuyenGiaVon: false });
     const i: KpiKenhDuLieu = boPnlTheoQuyen({ current: pnl, previous: pnl }, { coQuyenGiaVon: true });
 
-    void [a, b, c, kpi, soSanh, kpiKenh, chuoi, d, e, f, g, h, i];
+    void [a, b, c, soSanh, kpiKenh, chuoi, d, e, f, h, i];
+  });
+});
+
+declare const so: SoSanh;
+declare const theVaBieuDo: DuLieuTheVaBieuDo;
+declare const theoKenh: TheoKenh;
+
+describe("trang chủ — nhánh che không mang chi phí / lợi nhuận ở kiểu", () => {
+  it("thẻ + biểu đồ ngày: chỉ đọc được chiPhi / loiNhuan sau khi narrow coQuyenGiaVon", () => {
+    // @ts-expect-error — chưa narrow: nhánh che không có chiPhi
+    const chuaNarrow = theVaBieuDo.the.chiPhi;
+
+    if (theVaBieuDo.coQuyenGiaVon) {
+      const day: SoSanh = theVaBieuDo.the.chiPhi;
+      const diemDay: number = theVaBieuDo.bieuDo[0].hienTai.loiNhuan;
+      void [day, diemDay];
+    } else {
+      // @ts-expect-error — nhánh che không có chiPhi
+      const a = theVaBieuDo.the.chiPhi;
+      // @ts-expect-error — nhánh che không có loiNhuan ở thẻ
+      const b = theVaBieuDo.the.loiNhuan;
+      // @ts-expect-error — điểm biểu đồ nhánh che không có loiNhuan
+      const c = theVaBieuDo.bieuDo[0].hienTai.loiNhuan;
+      void [a, b, c];
+    }
+
+    // Dựng nhánh che có thêm chiPhi ở thẻ ⇒ lỗi trường thừa.
+    const thua: DuLieuTheVaBieuDo = {
+      nhanKySoSanh: "x",
+      motNgay: false,
+      coQuyenGiaVon: false,
+      the: {
+        doanhSo: so,
+        donHang: so,
+        tbMoiDon: null,
+        tyLeHoanHuy: null,
+        // @ts-expect-error — nhánh che không được mang chiPhi
+        chiPhi: so,
+      },
+      bieuDo: [],
+    };
+    void [chuaNarrow, thua];
+  });
+
+  it("theo kênh: lợi nhuận kênh chỉ có ở nhánh đủ quyền", () => {
+    // @ts-expect-error — chưa narrow: dòng kênh nhánh che không có loiNhuan
+    const chuaNarrow = theoKenh.rows[0].loiNhuan;
+    if (theoKenh.coQuyenGiaVon) {
+      const ln: number = theoKenh.rows[0].loiNhuan;
+      void ln;
+    } else {
+      // @ts-expect-error — nhánh che không có loiNhuan
+      const ln = theoKenh.rows[0].loiNhuan;
+      void ln;
+    }
+    void chuaNarrow;
   });
 });

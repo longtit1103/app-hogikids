@@ -6,6 +6,8 @@ name: CI
 #   unit       — Vitest (Postgres tạm: tạo schema app + migrate deploy trước, rồi vitest)
 #   e2e        — Playwright (Postgres tạm + browser; global-setup tự migrate + seed user)
 #   docker     — dựng ảnh y như lúc deploy (không push ảnh); ba job trên đều MÙ với lỗi chỉ vỡ trong ảnh
+#   e2e-cong-ghi-prod — E2E cổng ghi toàn cục trên bản BUILD (`next build && next start`); chỉ chạy
+#                khi PR/push đụng đúng đường cổng ghi (lọc trong job), hoặc bấm tay (workflow_dispatch)
 # CI KHÔNG bao giờ đụng DB minipc/prod — mỗi job dựng Postgres tạm riêng, xong vứt.
 # TZ ép Asia/Ho_Chi_Minh (bất biến #3): assert P&L neo theo ngày giờ VN, runner UTC sẽ lệch.
 # Node 24: harness e2e nạp .ts động (global-setup import src/lib/password) → cần Node có
@@ -237,6 +239,133 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  e2e-cong-ghi-prod:
+    name: E2E cổng ghi toàn cục (bản build prod)
+    runs-on: ubuntu-latest
+    # Ước ~6–8 phút khi chạy đủ (npm ci ~25 s · playwright install ~50 s · next build ~40 s · spec ~2 phút);
+    # webServer của config tự giới hạn build+start 10 phút ⇒ quá 25 phút là treo.
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: hogikids_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d hogikids_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TZ: Asia/Ho_Chi_Minh
+      # Cùng khuôn job e2e: global-setup tự migrate + seed user; DATABASE_URL khác TEST (guard) + schema app có sẵn.
+      # Không secret nào: mọi giá trị là hằng của CI, Postgres tạm vứt sau job ⇒ chạy được ở cả repo public.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/postgres?schema=app
+      TEST_DATABASE_URL: postgresql://ci:ci@localhost:5432/hogikids_test?schema=app
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Cần đủ lịch sử để so file đổi giữa base và head; job không ghi gì lên repo.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Xác định có đụng đường cổng ghi không
+        id: duong
+        # VÌ SAO LỌC TRONG JOB: `paths:` của GitHub là mức WORKFLOW, mà các job còn lại phải chạy với mọi
+        # PR (trừ docs). Repo không dùng action lọc đường của bên thứ ba ⇒ tự so file đổi tại đây; các
+        # bước sau đọc `steps.duong.outputs.chay`. Job vẫn xanh khi bỏ qua (chỉ tốn vài chục giây).
+        # Chạy luôn (không lọc): bấm tay (workflow_dispatch), hoặc không xác định được khoảng so sánh
+        # (push nhánh mới/force-push ⇒ `before` rỗng hoặc không còn trong lịch sử) — thà chạy thừa còn hơn bỏ sót.
+        # Bản public chạy thêm sự kiện push (script publish chèn): `before`..`sha`; PR: merge-base(base, head)..head.
+        env:
+          SU_KIEN: ${{ github.event_name }}
+          SHA_BASE_PR: ${{ github.event.pull_request.base.sha }}
+          SHA_HEAD_PR: ${{ github.event.pull_request.head.sha }}
+          SHA_TRUOC_PUSH: ${{ github.event.before }}
+          SHA_HIEN_TAI: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          chay() { echo "chay=$1" >> "$GITHUB_OUTPUT"; echo "▸ $2"; exit 0; }
+          TU=""; DEN=""; DAU=""
+          case "$SU_KIEN" in
+            workflow_dispatch) chay true "Bấm tay ⇒ chạy." ;;
+            pull_request) TU="$SHA_BASE_PR"; DEN="$SHA_HEAD_PR"; DAU="..." ;;
+            push) TU="$SHA_TRUOC_PUSH"; DEN="$SHA_HIEN_TAI"; DAU=".." ;;
+            *) chay true "Sự kiện $SU_KIEN không lọc được ⇒ chạy." ;;
+          esac
+          if [ -z "$TU" ] || [ -z "${TU//0/}" ] || ! git cat-file -e "$TU^{commit}" 2>/dev/null; then
+            chay true "Không có điểm so sánh ('$TU') ⇒ chạy."
+          fi
+          FILES=$(git diff --name-only "$TU$DAU$DEN")
+          # Mỗi dòng một mẫu (grep -E). Đổi danh sách này PHẢI sửa cùng danh sách ở docs/chuan-code-va-quy-trinh-dev.md.
+          MAU=$(cat <<'DANH_SACH'
+          ^src/lib/backup/cong-ghi-
+          ^src/lib/backup/khoa-bao-tri\.ts$
+          ^src/lib/backup/khoa-chung-cli\.ts$
+          ^src/lib/prisma\.ts$
+          ^src/lib/tao-prisma-client\.ts$
+          ^src/app/api/restore/
+          ^next\.config\.ts$
+          ^src/app/.*\.e2e\.[^/]*$
+          ^tests/e2e/cong-ghi-prod\.spec\.ts$
+          ^playwright\.cong-ghi-prod\.config\.ts$
+          ^tests/helpers/khoa-doc-quyen-db-test\.ts$
+          ^playwright\.config\.ts$
+          ^tests/e2e/global-setup\.ts$
+          ^tests/e2e/test-database-url\.ts$
+          ^package-lock\.json$
+          DANH_SACH
+          )
+          TRUNG=$(printf '%s\n' "$FILES" | grep -E -e "$MAU" || true)
+          if [ -n "$TRUNG" ]; then
+            echo "$TRUNG"
+            chay true "Có file đụng đường cổng ghi ⇒ chạy."
+          fi
+          chay false "Không đụng đường cổng ghi ⇒ bỏ qua các bước còn lại."
+      - uses: actions/setup-node@v7
+        if: steps.duong.outputs.chay == 'true'
+        with:
+          node-version: 24
+          cache: npm
+      - if: steps.duong.outputs.chay == 'true'
+        run: npm ci
+      - if: steps.duong.outputs.chay == 'true'
+        run: npx prisma generate
+      - name: Tạo schema app trong DB test
+        if: steps.duong.outputs.chay == 'true'
+        # Prisma 7 bỏ cờ `--url` của `db execute` — URL đi qua `prisma.config.ts` (đọc DATABASE_URL).
+        run: echo 'CREATE SCHEMA IF NOT EXISTS app;' | npx prisma db execute --stdin
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/hogikids_test?schema=app
+      - name: Migrate + seed reference data (Channel/Category/Setting) vào DB test
+        if: steps.duong.outputs.chay == 'true'
+        run: |
+          npx prisma migrate deploy
+          npx prisma db seed
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/hogikids_test?schema=app
+          INIT_EMAIL: ci-seed@hogikids.test
+          INIT_PASSWORD: ci-seed-password
+      - name: Cài Playwright browser (chromium)
+        if: steps.duong.outputs.chay == 'true'
+        run: npx playwright install --with-deps chromium
+      - name: E2E cổng ghi trên bản build
+        if: steps.duong.outputs.chay == 'true'
+        # Config tự dựng bản build có route chỉ-test rồi khởi động server ở cổng 3200; biến bật route
+        # chỉ-test do config đặt, KHÔNG khai ở workflow (lưới tests/luoi/file-chi-build-e2e.test.ts cấm
+        # nó trong mọi file workflow — build prod thật không được thấy biến đó).
+        run: npm run test:e2e:prod:cong-ghi
+      - name: Lưu kết quả khi lỗi
+        uses: actions/upload-artifact@v7
+        if: ${{ failure() && steps.duong.outputs.chay == 'true' }}
+        with:
+          name: e2e-cong-ghi-prod-ket-qua
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   audit:
     name: Audit phụ thuộc (npm audit, không chặn)

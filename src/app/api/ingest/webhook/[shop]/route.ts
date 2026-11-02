@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { chanRouteKhiDangPhucHoi } from "@/lib/backup/khoa-bao-tri";
+import { routeQuaCua } from "@/lib/backup/cong-ghi-toan-cuc";
 import { docBodyCoTran } from "@/lib/ingest/doc-body-co-tran";
 import { requireIngestSecret } from "@/lib/ingest/ingest-auth";
 import { catNote, xuLySuKienWebhook, type KetQuaXuLy } from "@/lib/ingest/webhook-processor";
@@ -38,9 +38,11 @@ export async function POST(
 
   // Đang phục hồi DB ⇒ hộp thư cũng KHÔNG ghi được (schema đang bị thay). Trả 503 để Pancake/n8n
   // biết là tạm bận. Không mất dữ liệu vĩnh viễn: lượt API nightly vét lại đơn trong cửa sổ.
-  const dangPhucHoi = chanRouteKhiDangPhucHoi();
-  if (dangPhucHoi) return dangPhucHoi;
+  // Request đã qua cửa được đếm tới khi xong — lượt phục hồi chờ nó.
+  return routeQuaCua(() => xuLyPost(req, params));
+}
 
+async function xuLyPost(req: Request, params: Promise<{ shop: string }>): Promise<Response> {
   const { shop } = await params;
   // Whitelist slug TĨNH — slug lạ là request hỏng/bịa, chặn 400 không đụng DB.
   if (!laShopSlug(shop)) {

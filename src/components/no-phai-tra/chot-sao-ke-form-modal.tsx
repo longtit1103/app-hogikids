@@ -9,8 +9,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { chotSaoKe } from "@/lib/actions/chot-sao-ke";
 import { docUocTinhSaoKe } from "@/lib/actions/uoc-tinh-sao-ke";
+import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
 import { formatVnd } from "@/lib/format";
-import { formatAmountInput, parseAmountInput } from "@/lib/format-amount-input";
+import { formatAmountInput, loiVuotTranAmount, parseAmountInput } from "@/lib/format-amount-input";
 import { ngayHoaDonTiktokDuVe } from "@/lib/sao-ke-the/cong-chot-sao-ke";
 
 import { OCoNhan } from "./o-nhap-co-nhan";
@@ -23,11 +24,6 @@ type Uoc = number | null | undefined | "loi";
  * đang tính / không tính được.
  */
 type HoaDonNgayChot = { soLan: number; tong: number; viTra?: number } | null;
-
-/** Khoá ngày `yyyy-MM-dd` giờ VN (UTC+7 cố định, không DST) — không lệ thuộc múi giờ trình duyệt. */
-function khoaNgayVn(d: Date): string {
-  return new Date(d.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-}
 
 /**
  * Cảnh báo CHỐT SỚM: hoá đơn TikTok tạo chiều/tối ngày chốt D chỉ về app ở lượt kéo đêm D+2 (API hoá đơn trễ 6–11h).
@@ -138,8 +134,10 @@ export function ChotSaoKeFormModal({
   }, [open, the.id, ngayChot]);
 
   const hanSauChot = hanTra !== "" && ngayChot !== "" && hanTra > ngayChot;
-  const chotSom = ngayChot === "" ? null : canhBaoChotSom(ngayChot, khoaNgayVn(new Date()));
-  const hopLe = yeuCauId !== "" && ngayChot !== "" && ngayChot >= mocM && soDu !== null && hanSauChot && !dangLuu;
+  const chotSom = ngayChot === "" ? null : canhBaoChotSom(ngayChot, formatNgayVn(new Date(), "yyyy-MM-dd"));
+  // Gõ quá trần 2 tỷ: báo đỏ tại ô số dư + khoá nút Chốt (server vẫn chặn — đây chỉ là báo trước).
+  const loiTran = soDu === null ? null : loiVuotTranAmount(soDu);
+  const hopLe = yeuCauId !== "" && ngayChot !== "" && ngayChot >= mocM && soDu !== null && !loiTran && hanSauChot && !dangLuu;
 
   async function luu(e: React.FormEvent) {
     e.preventDefault();
@@ -205,7 +203,7 @@ export function ChotSaoKeFormModal({
           <OCoNhan
             id="sao-ke-so-du"
             nhan="Số dư trên sao kê (dư nợ cuối ngày chốt)"
-            loi={loi.soDu}
+            loi={loi.soDu ?? loiTran ?? undefined}
             ghiChu="Gõ dư nợ trên sao kê ngân hàng cuối ngày chốt (kể cả khi đã trả một phần) — xem nhắc về các lần TikTok trừ trong ngày chốt bên dưới."
           >
             <Input

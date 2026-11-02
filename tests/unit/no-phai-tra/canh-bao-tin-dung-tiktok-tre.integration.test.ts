@@ -19,6 +19,7 @@ const BAY_GIO = vn("2026-11-20", "09:00:00");
 async function donSach(): Promise<void> {
   await truncateBusinessTables();
   await prisma.rawTiktokBusinessCost.deleteMany();
+  await prisma.rawTiktokBusinessReport.deleteMany();
 }
 
 beforeAll(async () => {
@@ -156,5 +157,118 @@ describe("docCanhBaoTinDungTiktokTre — độ tươi THEO TỪNG Business Cente
     const c = await docCanhBaoTinDungTiktokTre(BAY_GIO);
     expect(c).toStrictEqual({ tuNgay: "2026-11-17" });
     expect(cauCanhBaoTinDungTiktokTre(c!)).not.toContain(BC_SONG);
+  });
+});
+
+/**
+ * BC NGHỈ HẲN: BC ngừng land ảnh chụp mà chi tiêu TikTok 3 ngày gần nhất quy hết về BC khác (refId → báo cáo thô →
+ * advertiser → BC theo `TiktokAdsTinDung`) ⇒ không còn bị báo "tín dụng chưa về" mãi. Chi tiêu không quy được ⇒ xét
+ * mọi BC như cũ.
+ */
+describe("docCanhBaoTinDungTiktokTre — BC nghỉ hẳn", () => {
+  const BC_SONG = "7129545797879726081";
+  const BC_NGHI = "7200000000000000002";
+  const ADV_SONG = "7300000000000000001";
+  const ADV_NGHI = "7300000000000000002";
+
+  /** Dòng `Expense` ads TikTok đúng khuôn refId của đường ingest (GMV Max hoặc auction). */
+  async function chiTieu(ngay: string, campaign: string, auction = false): Promise<void> {
+    await prisma.expense.create({
+      data: {
+        date: vn(ngay),
+        categoryId: "ads",
+        adsSource: "TIKTOK_ADS",
+        channelId: "tiktok",
+        amount: 800_000,
+        description: `Chiến dịch ${campaign}`,
+        source: "ADS_API",
+        refId: auction ? `TIKTOK_ADS:auction:${ngay}:${campaign}` : `TIKTOK_ADS:${ngay}:${campaign}`,
+      },
+    });
+  }
+
+  /**
+   * Báo cáo thô của advertiser: `externalId` đúng khuôn `streams.ts` (`[auction:]<campaign>:<ngày>`), land tối chính
+   * ngày đó (mặc định) — `fetchedAt` tường minh vì hàm chỉ đọc kho thô từ đầu cửa sổ chi tiêu − 1 ngày.
+   */
+  async function baoCaoTho(
+    advertiserId: string,
+    ngay: string,
+    campaign: string,
+    auction = false,
+    fetchedAt: Date = vn(ngay, "23:00:00")
+  ): Promise<void> {
+    await prisma.rawTiktokBusinessReport.create({
+      data: {
+        shopId: advertiserId,
+        externalId: `${auction ? "auction:" : ""}${campaign}:${ngay}`,
+        payloadHash: `bc-${advertiserId}-${campaign}-${ngay}`,
+        payload: { dimensions: { campaign_id: campaign, stat_time_day: `${ngay} 00:00:00` } },
+        fetchedAt,
+      },
+    });
+  }
+
+  /** Một ngày tín dụng đã ghi — chỉ để biết advertiser thuộc BC nào. */
+  async function advertiserCuaBc(advertiserId: string, bcId: string, ngay: string): Promise<void> {
+    await prisma.tiktokAdsTinDung.create({
+      data: { advertiserId, ngay: vn(ngay), bcId, grantExVat: 0, cashExVat: 1_000, amountExVat: 1_000, grantGomVat: 0 },
+    });
+  }
+
+  async function nenHaiBc(): Promise<void> {
+    await anhChup(vn("2026-11-20", "01:20:00"), BC_SONG);
+    await anhChup(vn("2026-10-30", "01:20:00"), BC_NGHI);
+    await advertiserCuaBc(ADV_SONG, BC_SONG, "2026-11-18");
+    await advertiserCuaBc(ADV_NGHI, BC_NGHI, "2026-10-28");
+  }
+
+  it("BC ngừng land từ 30/10, chi tiêu 18–19/11 đều của advertiser BC còn sống ⇒ KHÔNG cảnh báo", async () => {
+    await nenHaiBc();
+    await chiTieu("2026-11-18", "c-song-1");
+    await chiTieu("2026-11-19", "c-song-2", true);
+    await baoCaoTho(ADV_SONG, "2026-11-18", "c-song-1");
+    await baoCaoTho(ADV_SONG, "2026-11-19", "c-song-2", true);
+    expect(await docCanhBaoTinDungTiktokTre(BAY_GIO)).toBeNull();
+  });
+
+  it("advertiser của BC đã ngừng land vẫn chi tiêu ⇒ VẪN cảnh báo, nêu đúng BC đó", async () => {
+    await nenHaiBc();
+    await chiTieu("2026-11-19", "c-song");
+    await chiTieu("2026-11-19", "c-nghi");
+    await baoCaoTho(ADV_SONG, "2026-11-19", "c-song");
+    await baoCaoTho(ADV_NGHI, "2026-11-19", "c-nghi");
+    expect(await docCanhBaoTinDungTiktokTre(BAY_GIO)).toEqual({ tuNgay: "2026-10-30", bcIds: [BC_NGHI] });
+  });
+
+  it("có chi tiêu KHÔNG quy được về BC (campaign chưa có báo cáo thô) ⇒ xét mọi BC như cũ", async () => {
+    await nenHaiBc();
+    await chiTieu("2026-11-19", "c-song");
+    await chiTieu("2026-11-19", "c-la");
+    await baoCaoTho(ADV_SONG, "2026-11-19", "c-song");
+    expect(await docCanhBaoTinDungTiktokTre(BAY_GIO)).toEqual({ tuNgay: "2026-10-30", bcIds: [BC_NGHI] });
+  });
+
+  it("advertiser chi tiêu chưa từng có ảnh chụp tín dụng (không biết BC) ⇒ xét mọi BC như cũ", async () => {
+    await nenHaiBc();
+    await chiTieu("2026-11-19", "c-moi");
+    await baoCaoTho("7300000000000000009", "2026-11-19", "c-moi");
+    expect(await docCanhBaoTinDungTiktokTre(BAY_GIO)).toEqual({ tuNgay: "2026-10-30", bcIds: [BC_NGHI] });
+  });
+
+  it("advertiser chỉ thuộc BC đã nghỉ theo ánh xạ CŨ (> 30 ngày), nay chi tiêu không rõ BC ⇒ xét mọi BC như cũ", async () => {
+    await anhChup(vn("2026-11-20", "01:20:00"), BC_SONG);
+    await anhChup(vn("2026-10-01", "01:20:00"), BC_NGHI);
+    await advertiserCuaBc(ADV_NGHI, BC_NGHI, "2026-10-01");
+    await chiTieu("2026-11-19", "c-cu");
+    await baoCaoTho(ADV_NGHI, "2026-11-19", "c-cu");
+    expect(await docCanhBaoTinDungTiktokTre(BAY_GIO)).toEqual({ tuNgay: "2026-10-01", bcIds: [BC_NGHI] });
+  });
+
+  it("báo cáo thô land TRƯỚC cửa sổ chi tiêu − 1 ngày không được đọc (không quét cả kho) ⇒ không quy được ⇒ xét mọi BC", async () => {
+    await nenHaiBc();
+    await chiTieu("2026-11-19", "c-song");
+    await baoCaoTho(ADV_SONG, "2026-11-19", "c-song", false, vn("2026-11-10"));
+    expect(await docCanhBaoTinDungTiktokTre(BAY_GIO)).toEqual({ tuNgay: "2026-10-30", bcIds: [BC_NGHI] });
   });
 });

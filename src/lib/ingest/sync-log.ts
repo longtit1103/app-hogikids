@@ -1,5 +1,6 @@
 import type { SyncKind } from "@/generated/prisma/client";
 
+import { chayMienCong } from "@/lib/backup/cong-ghi-toan-cuc";
 import { prisma } from "@/lib/prisma";
 
 const STALE_MS = 15 * 60_000; // RUNNING treo > 15' = app crash giữa ingest
@@ -52,11 +53,14 @@ export async function coLuotDangChay(kind?: SyncKind): Promise<boolean> {
  * ERROR. Cần cho đường nào phải nhận ra "dòng này là bước X" bất kể kết cục — vd bước cuối của
  * "Đồng bộ ngay" (`stats.mode`), mốc kết thúc mà nút bấm chờ. Không truyền thì hành vi y như cũ
  * (RUNNING/ERROR không có `stats` trừ khi có cảnh báo).
+ *
+ * `dauKhiLoi` (tuỳ chọn): gọi ĐÚNG lúc `fn` ném (nhánh 500), trả vài trường gộp SAU `dauNhanDien` vào `stats` của dòng
+ * ERROR — vd `mode` nói lượt hỏng ở bước nào. Hàm (không phải giá trị) vì bước hỏng chỉ biết lúc ném.
  */
 export async function withSyncLog(
   kind: SyncKind,
   fn: (warnings: string[], syncLogId: string) => Promise<Record<string, unknown>>,
-  opts: { dauNhanDien?: Record<string, string> } = {},
+  opts: { dauNhanDien?: Record<string, string>; dauKhiLoi?: () => Record<string, string> } = {},
 ): Promise<Response> {
   const dau = opts.dauNhanDien;
   await prisma.syncLog.updateMany({
@@ -70,24 +74,35 @@ export async function withSyncLog(
     const { loiSauKhiGhi, ...result } = await fn(warnings, log.id);
     const stats = { ...dau, ...result, warnings: capWarnings(warnings) };
     const loi = typeof loiSauKhiGhi === "string" && loiSauKhiGhi ? loiSauKhiGhi : null;
-    await prisma.syncLog.update({
-      where: { id: log.id },
-      data: loi
-        ? { status: "ERROR", finishedAt: new Date(), error: loi, stats }
-        : { status: "OK", finishedAt: new Date(), stats },
-    });
+    const ghiKetCuc = () =>
+      prisma.syncLog.update({
+        where: { id: log.id },
+        data: loi
+          ? { status: "ERROR", finishedAt: new Date(), error: loi, stats }
+          : { status: "OK", finishedAt: new Date(), stats },
+      });
+    // Kết cục ERROR đi LỐI MIỄN cổng ghi (cả khi lượt phục hồi đã bật cờ): một lượt bị cắt phải để
+    // lại dấu ERROR thay vì mất im lặng. Kết cục OK thì không — nó không phải dấu vết của lượt hỏng.
+    await (loi ? chayMienCong("sync-log-error", ghiKetCuc) : ghiKetCuc());
     return Response.json(loi ? { ok: true, stats, loiSauKhiGhi: loi } : { ok: true, stats });
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
+    const dauLoi = opts.dauKhiLoi ? { ...dau, ...opts.dauKhiLoi() } : dau;
     // GIỮ warnings đã thu được, đừng vứt. Chúng là thứ nói ĐƠN NÀO hỏng và vì sao — mà lượt hỏng
     // mới đúng là lượt cần chẩn đoán nhất. Trước đây nhánh này chỉ ghi `error`, nên một thông báo
     // kiểu "xem cảnh báo trong cùng lượt này" trỏ tới chỗ không tồn tại.
     const stats =
-      warnings.length || dau ? { ...dau, ...(warnings.length ? { warnings: capWarnings(warnings) } : {}) } : undefined;
-    await prisma.syncLog.update({
-      where: { id: log.id },
-      data: { status: "ERROR", finishedAt: new Date(), error, ...(stats ? { stats } : {}) },
-    });
+      warnings.length || dauLoi
+        ? { ...dauLoi, ...(warnings.length ? { warnings: capWarnings(warnings) } : {}) }
+        : undefined;
+    // Lối miễn cổng ghi — xem nhánh `loi` ở trên: lượt bị cổng cắt giữa chừng (`LoiCongGhiDangKhoa`)
+    // vẫn ghi được dòng ERROR này.
+    await chayMienCong("sync-log-error", () =>
+      prisma.syncLog.update({
+        where: { id: log.id },
+        data: { status: "ERROR", finishedAt: new Date(), error, ...(stats ? { stats } : {}) },
+      }),
+    );
     return Response.json({ ok: false, error, ...(stats ? { stats } : {}) }, { status: 500 });
   }
 }

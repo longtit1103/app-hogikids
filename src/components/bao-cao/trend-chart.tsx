@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { formatVnd, formatVndShort } from "@/lib/format";
+import { formatPercent, formatVnd, formatVndShort } from "@/lib/format";
 import type { MonthlyTrendRow, MonthlyTrendRowChe } from "@/lib/reports/monthly-trend";
-import { formatPct1, monthLabel } from "@/lib/reports/trend-format";
+import { monthLabel } from "@/lib/reports/trend-format";
 import { cn } from "@/lib/utils";
 
 // Màu SVG dùng HEX trực tiếp (không var(--token)) — cùng lý do đã ghi ở
@@ -93,7 +93,7 @@ export function TrendChart({ rows, coLai }: { rows: MonthlyTrendRow[] | MonthlyT
             <Tooltip
               labelFormatter={(label) => `Tháng ${monthLabel(String(label))}`}
               formatter={(value, name) => [
-                name === "Tỷ lệ hoàn/bom" ? formatPct1(Number(value)) : formatVnd(Number(value)),
+                name === "Tỷ lệ hoàn/bom" ? formatPercent(Number(value)) : formatVnd(Number(value)),
                 name,
               ]}
               contentStyle={{ borderRadius: 8, border: "1px solid #e6dfd8", backgroundColor: "#faf9f5", fontSize: 12 }}

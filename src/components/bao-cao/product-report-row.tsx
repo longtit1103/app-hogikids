@@ -4,7 +4,7 @@ import { Fragment } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { TableCell, TableRow } from "@/components/ui/table";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatVnd } from "@/lib/format";
 import type { ProductReportRowChe } from "@/lib/reports/product-report";
 
 /** Phần COGS/lãi của một dòng — null ở nhánh che (server không tính). `skus` khớp chỉ số với `row.skus`. */
@@ -14,10 +14,6 @@ export type GiaVonDongSanPham = {
   marginPct: number | null;
   skus: { cogs: number; grossProfit: number }[];
 };
-
-function formatPct(n: number | null): string {
-  return n === null ? "—" : `${n.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`;
-}
 
 /**
  * 1 sản phẩm (+ dòng SKU con khi mở rộng) trong bảng tab Sản phẩm. Tách khỏi
@@ -59,7 +55,7 @@ export function ProductReportRow({
         {giaVon && <TableCell className="text-right tabular-nums">{formatVnd(giaVon.cogs)}</TableCell>}
         {giaVon && <TableCell className="text-right tabular-nums">{formatVnd(giaVon.grossProfit)}</TableCell>}
         {giaVon && (
-          <TableCell className="text-right tabular-nums text-muted-foreground">{formatPct(giaVon.marginPct)}</TableCell>
+          <TableCell className="text-right tabular-nums text-muted-foreground">{giaVon.marginPct === null ? "—" : formatPercent(giaVon.marginPct)}</TableCell>
         )}
         <TableCell className="text-right tabular-nums">{row.currentStock.toLocaleString("vi-VN")}</TableCell>
       </TableRow>

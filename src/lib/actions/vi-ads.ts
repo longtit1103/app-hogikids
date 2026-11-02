@@ -7,7 +7,7 @@ import type { ActionResult } from "@/lib/actions/action-result";
 import { LoiHopDong } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { formatVnd } from "@/lib/format";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { docMocM, khoaChiaSeBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
@@ -87,53 +87,57 @@ export async function taoViAds(input: unknown): Promise<ActionResult<{ id: strin
   const c = await congChuShopAction();
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = taoViSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { nenTang, nguonNap, note } = parsed.data;
-  const homQua = dauNgayVn(subDays(new Date(), 1));
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    const id = await prisma.$transaction(async (tx) => {
-      await khoaChiaSeBatNoPhaiTra(tx);
-      const mocM = await docMocM(tx);
-      let soDuNeo: number;
-      let ngayNeo: Date;
-      if (mocM === null) {
-        // Hồ sơ chuẩn bị: số tạm, bước bật ghi đè = số dư thật cuối M − 1.
-        soDuNeo = parsed.data.soDuNeo ?? 0;
-        ngayNeo = parsed.data.ngayNeo ? dauNgayVn(parsed.data.ngayNeo) : homQua;
-        if (khoaNgayVn(ngayNeo) > khoaNgayVn(homQua)) {
-          throw new LoiHopDong("Ngày của số dư ví phải trước hôm nay (số dư cuối ngày)", "ngayNeo");
-        }
-      } else {
-        // Sau khi bật: neo HÔM QUA, số dư PHẢI = 0 (không gửi ⇒ 0). Không điều chỉnh quỹ — xem
-        // `LOI_NEO_VI_PHAI_BANG_0`. Ngày gửi lên bị bỏ qua: neo luôn là hôm qua.
-        if ((parsed.data.soDuNeo ?? 0) !== 0) throw new LoiTheCoMa("NEO_KHAC_0", LOI_NEO_VI_PHAI_BANG_0, "soDuNeo");
-        soDuNeo = 0;
-        ngayNeo = homQua;
-      }
-      const vi = await tx.viAdsTraTruoc.create({ data: { nenTang, nguonNap, soDuNeo, ngayNeo, note } });
-      await ghiNhatKy(tx, {
-        actor: nguoiDung,
-        hanhDong: "VI_ADS_TAO",
-        doiTuong: {
-          loai: "ViAdsTraTruoc",
-          id: vi.id,
-          moTa: `${nenTang} · nguồn ${nguonNap} · số dư ${formatVnd(soDuNeo)} cuối ${ngayVn(ngayNeo)}${mocM === null ? " (tạm, bước bật ghi đè)" : ""}`,
-        },
-      });
-      return vi.id;
-    }, OPT_TX_DONG_TIEN);
+    const parsed = taoViSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { nenTang, nguonNap, note } = parsed.data;
+    const homQua = dauNgayVn(subDays(new Date(), 1));
 
-    lamMoiTrang();
-    return { ok: true, data: { id } };
-  } catch (e) {
-    if (rangBuocTrungKhoa(e) !== undefined) {
-      return { ok: false, error: `${nenTang} đã có hồ sơ ví — mỗi nền tảng một ví`, field: "nenTang" };
+    try {
+      const id = await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        const mocM = await docMocM(tx);
+        let soDuNeo: number;
+        let ngayNeo: Date;
+        if (mocM === null) {
+          // Hồ sơ chuẩn bị: số tạm, bước bật ghi đè = số dư thật cuối M − 1.
+          soDuNeo = parsed.data.soDuNeo ?? 0;
+          ngayNeo = parsed.data.ngayNeo ? dauNgayVn(parsed.data.ngayNeo) : homQua;
+          if (khoaNgayVn(ngayNeo) > khoaNgayVn(homQua)) {
+            throw new LoiHopDong("Ngày của số dư ví phải trước hôm nay (số dư cuối ngày)", "ngayNeo");
+          }
+        } else {
+          // Sau khi bật: neo HÔM QUA, số dư PHẢI = 0 (không gửi ⇒ 0). Không điều chỉnh quỹ — xem
+          // `LOI_NEO_VI_PHAI_BANG_0`. Ngày gửi lên bị bỏ qua: neo luôn là hôm qua.
+          if ((parsed.data.soDuNeo ?? 0) !== 0) throw new LoiTheCoMa("NEO_KHAC_0", LOI_NEO_VI_PHAI_BANG_0, "soDuNeo");
+          soDuNeo = 0;
+          ngayNeo = homQua;
+        }
+        const vi = await tx.viAdsTraTruoc.create({ data: { nenTang, nguonNap, soDuNeo, ngayNeo, note } });
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "VI_ADS_TAO",
+          doiTuong: {
+            loai: "ViAdsTraTruoc",
+            id: vi.id,
+            moTa: `${nenTang} · nguồn ${nguonNap} · số dư ${formatVnd(soDuNeo)} cuối ${ngayVn(ngayNeo)}${mocM === null ? " (tạm, bước bật ghi đè)" : ""}`,
+          },
+        });
+        return vi.id;
+      }, OPT_TX_DONG_TIEN);
+
+      lamMoiTrang();
+      return { ok: true, data: { id } };
+    } catch (e) {
+      if (rangBuocTrungKhoa(e) !== undefined) {
+        return { ok: false, error: `${nenTang} đã có hồ sơ ví — mỗi nền tảng một ví`, field: "nenTang" };
+      }
+      return { ok: false, ...loiVi(e, "Lỗi khi tạo hồ sơ ví") };
     }
-    return { ok: false, ...loiVi(e, "Lỗi khi tạo hồ sơ ví") };
+  } finally {
+    cua.ra();
   }
 }
 
@@ -142,28 +146,32 @@ export async function suaViAds(id: string, input: unknown): Promise<ActionResult
   const c = await congChuShopAction();
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  const parsed = suaViSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await khoaViAds(tx, id);
-      const vi = await tx.viAdsTraTruoc.findUnique({ where: { id }, select: { nenTang: true } });
-      if (!vi) throw new LoiHopDong("Không tìm thấy hồ sơ ví");
-      await tx.viAdsTraTruoc.update({ where: { id }, data: parsed.data });
-      await ghiNhatKy(tx, {
-        actor: nguoiDung,
-        hanhDong: "VI_ADS_SUA",
-        doiTuong: { loai: "ViAdsTraTruoc", id, moTa: `${vi.nenTang} · nguồn ${parsed.data.nguonNap}` },
-      });
-    }, OPT_TX_DONG_TIEN);
+    const parsed = suaViSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
 
-    lamMoiTrang();
-    return { ok: true, data: undefined };
-  } catch (e) {
-    return { ok: false, ...loiVi(e, "Lỗi khi sửa hồ sơ ví") };
+    try {
+      await prisma.$transaction(async (tx) => {
+        await khoaViAds(tx, id);
+        const vi = await tx.viAdsTraTruoc.findUnique({ where: { id }, select: { nenTang: true } });
+        if (!vi) throw new LoiHopDong("Không tìm thấy hồ sơ ví");
+        await tx.viAdsTraTruoc.update({ where: { id }, data: parsed.data });
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "VI_ADS_SUA",
+          doiTuong: { loai: "ViAdsTraTruoc", id, moTa: `${vi.nenTang} · nguồn ${parsed.data.nguonNap}` },
+        });
+      }, OPT_TX_DONG_TIEN);
+
+      lamMoiTrang();
+      return { ok: true, data: undefined };
+    } catch (e) {
+      return { ok: false, ...loiVi(e, "Lỗi khi sửa hồ sơ ví") };
+    }
+  } finally {
+    cua.ra();
   }
 }
 
@@ -172,43 +180,47 @@ export async function xoaViAds(id: string): Promise<ActionResult> {
   const c = await congChuShopAction();
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    await prisma.$transaction(async (tx) => {
-      await khoaChiaSeBatNoPhaiTra(tx);
-      await khoaViAds(tx, id);
-      const vi = await tx.viAdsTraTruoc.findUnique({ where: { id } });
-      if (!vi) throw new LoiHopDong("Không tìm thấy hồ sơ ví");
-      const mocM = await docMocM(tx);
-      const sauNeo = new Date(dauNgayVn(vi.ngayNeo).getTime() + 86_400_000);
-      const [soLanNap, soChiSauNeo] = await Promise.all([
-        tx.cashMovement.count({ where: { viAdsId: id } }),
-        mocM === null
-          ? Promise.resolve(0)
-          : tx.expense.count({ where: { adsSource: vi.nenTang, cardId: null, date: { gte: sauNeo } } }),
-      ]);
-      const lyDo = lyDoKhongXoaViAds({
-        soLanNap,
-        daBat: mocM !== null,
-        thamGiaBuocBat: mocM !== null && khoaNgayVn(vi.ngayNeo) < khoaNgayVn(mocM),
-        soChiSauNeo,
-      });
-      if (lyDo !== null) throw new LoiTheCoMa("KHONG_XOA_DUOC_VI", lyDo);
+    try {
+      await prisma.$transaction(async (tx) => {
+        await khoaChiaSeBatNoPhaiTra(tx);
+        await khoaViAds(tx, id);
+        const vi = await tx.viAdsTraTruoc.findUnique({ where: { id } });
+        if (!vi) throw new LoiHopDong("Không tìm thấy hồ sơ ví");
+        const mocM = await docMocM(tx);
+        const sauNeo = new Date(dauNgayVn(vi.ngayNeo).getTime() + 86_400_000);
+        const [soLanNap, soChiSauNeo] = await Promise.all([
+          tx.cashMovement.count({ where: { viAdsId: id } }),
+          mocM === null
+            ? Promise.resolve(0)
+            : tx.expense.count({ where: { adsSource: vi.nenTang, cardId: null, date: { gte: sauNeo } } }),
+        ]);
+        const lyDo = lyDoKhongXoaViAds({
+          soLanNap,
+          daBat: mocM !== null,
+          thamGiaBuocBat: mocM !== null && khoaNgayVn(vi.ngayNeo) < khoaNgayVn(mocM),
+          soChiSauNeo,
+        });
+        if (lyDo !== null) throw new LoiTheCoMa("KHONG_XOA_DUOC_VI", lyDo);
 
-      await chupVaoThungRac(tx, { bang: "ViAdsTraTruoc", banGhi: vi });
-      await tx.viAdsTraTruoc.delete({ where: { id } });
-      await ghiNhatKy(tx, {
-        actor: nguoiDung,
-        hanhDong: "VI_ADS_XOA",
-        doiTuong: { loai: "ViAdsTraTruoc", id, moTa: vi.nenTang },
-      });
-    }, OPT_TX_DONG_TIEN);
+        await chupVaoThungRac(tx, { bang: "ViAdsTraTruoc", banGhi: vi });
+        await tx.viAdsTraTruoc.delete({ where: { id } });
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "VI_ADS_XOA",
+          doiTuong: { loai: "ViAdsTraTruoc", id, moTa: vi.nenTang },
+        });
+      }, OPT_TX_DONG_TIEN);
 
-    lamMoiTrang();
-    return { ok: true, data: undefined };
-  } catch (e) {
-    return { ok: false, ...loiVi(e, "Lỗi khi xoá hồ sơ ví") };
+      lamMoiTrang();
+      return { ok: true, data: undefined };
+    } catch (e) {
+      return { ok: false, ...loiVi(e, "Lỗi khi xoá hồ sơ ví") };
+    }
+  } finally {
+    cua.ra();
   }
 }
 

@@ -12,7 +12,7 @@
       ],
       "parameters": {
         "httpMethod": "POST",
-        "path": "duong-dan-webhook-tiktok",
+        "path": "__DUONG_DAN_WEBHOOK_TIKTOK__",
         "responseMode": "onReceived",
         "options": {
           "rawBody": true

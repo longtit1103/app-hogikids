@@ -4,9 +4,9 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { DeltaLine } from "@/components/kenh/channel-card-metric";
-import { formatPct1, formatRoas } from "@/components/kenh/channel-format";
+import { formatRoas } from "@/components/kenh/channel-format";
 import { Switch } from "@/components/ui/switch";
-import { formatVnd } from "@/lib/format";
+import { formatPercent, formatVnd } from "@/lib/format";
 import type { KetQuaChe } from "@/lib/queries/che-gia-von-types";
 import type { PnlBreakdown } from "@/lib/reports/pnl";
 import type { PnlChe, PnlCheTruong } from "@/lib/reports/pnl-che";
@@ -146,13 +146,13 @@ export function ChannelKpiCards({ du, adsTinDungTang = 0 }: { du: KpiKenhDuLieu;
         />
         <KpiCard
           label="Hoàn/Bom"
-          valueText={`${r.returnBomRatePct === null ? "—" : formatPct1(r.returnBomRatePct)} · ${current.returnBomOrderCount.toLocaleString("vi-VN")} đơn`}
+          valueText={`${r.returnBomRatePct === null ? "—" : formatPercent(r.returnBomRatePct)} · ${current.returnBomOrderCount.toLocaleString("vi-VN")} đơn`}
           current={r.returnBomRatePct}
           previous={prevR.returnBomRatePct}
           previousText={
             prevR.returnBomRatePct === null
               ? "—"
-              : `${formatPct1(prevR.returnBomRatePct)} · ${previous.returnBomOrderCount.toLocaleString("vi-VN")} đơn`
+              : `${formatPercent(prevR.returnBomRatePct)} · ${previous.returnBomOrderCount.toLocaleString("vi-VN")} đơn`
           }
           direction="lower-better"
           compareOn={compareOn}

@@ -61,6 +61,7 @@ function xemTruoc(o: Partial<XemTruocSaoKe> = {}): XemTruocSaoKe {
       traKhongThayTrenSaoKe: [],
       traSaiNgay: [],
       thanhToanChuaGhi: [],
+      traMoHo: [],
       tongChiTayChuaLenSaoKe: 0,
       tongTraChuaLenSaoKe: 0,
       soKhopHoan: 0,
@@ -120,6 +121,22 @@ describe("NhapSaoKeTheModal", () => {
     expect(screen.getByTestId("sao-ke-pdf-dong-khac").textContent).toContain("DICH VU B");
     expect((screen.getByLabelText("Số chốt") as HTMLInputElement).value).toBe("34.839.000");
     expect((screen.getByLabelText("Hạn trả") as HTMLInputElement).value).toBe("2026-11-05");
+  });
+
+  it("ô Hạn trả CHỈ ĐỌC, hiện hạn in trên sao kê; chốt gửi đúng hạn đó", async () => {
+    xemTruocSaoKeThe.mockResolvedValue({ ok: true, data: xemTruoc() });
+    chotSaoKeTuPdf.mockResolvedValue({ ok: true, data: { id: "k1" } });
+    mo();
+    chonFile(pdf());
+    await screen.findByTestId("sao-ke-pdf-so-de-xuat");
+    const o = screen.getByLabelText("Hạn trả") as HTMLInputElement;
+    expect(o.readOnly).toBe(true);
+    fireEvent.change(o, { target: { value: "2026-11-10" } });
+    expect(o.value).toBe("2026-11-05");
+    expect(screen.getByText("Theo hạn in trên sao kê")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Chốt sao kê với số này" }));
+    await waitFor(() => expect(chotSaoKeTuPdf).toHaveBeenCalled());
+    expect((chotSaoKeTuPdf.mock.calls[0][0] as FormData).get("hanTra")).toBe("2026-11-05");
   });
 
   it("file không phải .pdf ⇒ báo lỗi (role=alert), không gọi server", async () => {
@@ -263,5 +280,39 @@ describe("NhapSaoKeTheModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Chốt sao kê với số này" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("xem trước lại")));
     expect(screen.getByRole("button", { name: "Xem lại" })).toBeTruthy();
+  });
+
+  it("chốt xong mà server báo hạn trả lệch hạn in trên sao kê ⇒ modal ở lại, hiện câu cảnh báo, bấm Đóng mới đóng", async () => {
+    const canhBao = "Hạn trả nhập 10/11/2026 khác hạn in trên sao kê 05/11/2026 — đã dùng hạn trên sao kê";
+    const onOpenChange = vi.fn();
+    xemTruocSaoKeThe.mockResolvedValue({ ok: true, data: xemTruoc() });
+    chotSaoKeTuPdf.mockResolvedValue({ ok: true, data: { id: "k1", canhBaoHanTra: canhBao } });
+    render(
+      <NhapSaoKeTheModal open onOpenChange={onOpenChange} the={[{ id: "t1", ten: "Techcombank 9999" }]} cardIdMacDinh="t1" />,
+    );
+    chonFile(pdf());
+    await screen.findByTestId("sao-ke-pdf-so-de-xuat");
+    fireEvent.click(screen.getByRole("button", { name: "Chốt sao kê với số này" }));
+
+    const chu = await screen.findByTestId("sao-ke-pdf-canh-bao-han-tra");
+    expect(chu.textContent).toBe(canhBao);
+    expect(chu.className).toContain("text-warning");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Đóng" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("chốt xong không có cảnh báo hạn trả ⇒ đóng ngay như cũ", async () => {
+    const onOpenChange = vi.fn();
+    xemTruocSaoKeThe.mockResolvedValue({ ok: true, data: xemTruoc() });
+    chotSaoKeTuPdf.mockResolvedValue({ ok: true, data: { id: "k1" } });
+    render(
+      <NhapSaoKeTheModal open onOpenChange={onOpenChange} the={[{ id: "t1", ten: "Techcombank 9999" }]} cardIdMacDinh="t1" />,
+    );
+    chonFile(pdf());
+    await screen.findByTestId("sao-ke-pdf-so-de-xuat");
+    fireEvent.click(screen.getByRole("button", { name: "Chốt sao kê với số này" }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(screen.queryByTestId("sao-ke-pdf-canh-bao-han-tra")).toBeNull();
   });
 });

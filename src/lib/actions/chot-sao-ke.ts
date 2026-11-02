@@ -6,7 +6,7 @@ import { z } from "zod";
 import { LoiHopDong } from "@/lib/actions/khoan-vay-chung";
 import { lamMoiTrang } from "@/lib/actions/lam-moi-trang";
 import { mapZodError } from "@/lib/actions/map-zod-error";
-import { dangPhucHoi, LOI_DANG_PHUC_HOI } from "@/lib/backup/khoa-bao-tri";
+import { vaoCuaGhi } from "@/lib/backup/cong-ghi-toan-cuc";
 import { formatVnd } from "@/lib/format";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
 import { daBatNoPhaiTra } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
@@ -88,67 +88,71 @@ export async function chotSaoKe(input: unknown): Promise<KetQuaActionChotSaoKe> 
   const c = await congChuShopAction();
   if (!c.ok) return c;
   const { nguoiDung } = c;
-  if (dangPhucHoi()) return { ok: false, error: LOI_DANG_PHUC_HOI };
-
-  let mocM: Date;
+  const cua = vaoCuaGhi();
+  if (!cua.ok) return cua.loi;
   try {
-    mocM = await daBatNoPhaiTra();
-  } catch (e) {
-    // `LoiChuaBat` ⇒ code `CHUA_BAT_NO_PHAI_TRA`; Setting hỏng ⇒ câu chung (không thành 500).
-    return { ok: false, ...loiThe(e, "Lỗi khi đọc mốc bật theo dõi nợ") };
-  }
-
-  const parsed = chotSaoKeSchema(mocM).safeParse(input);
-  if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
-  const { yeuCauId, cardId, soDu, note } = parsed.data;
-  const ngayChot = dauNgayVn(parsed.data.ngayChot);
-  const hanTra = dauNgayVn(parsed.data.hanTra);
-  const khoaChot = khoaNgayVn(ngayChot);
-  // Vân tay trên dữ liệu ĐÃ chuẩn hoá (khoá ngày, không giờ): gửi lại cùng ngày khác giờ vẫn là cùng nội dung.
-  const bam = bamNoiDung({ cardId, ngayChot: khoaChot, soDu, hanTra: khoaNgayVn(hanTra), note });
-
-  try {
-    const kq = await prisma.$transaction(async (tx) => {
-      const giu = await giuYeuCau(tx, { id: yeuCauId, loai: LOAI_YEU_CAU, bam });
-      if (giu !== "MOI") {
-        if (giu.cu.bamNoiDung !== bam) throw new LoiHopDong("Mã yêu cầu đã dùng cho nội dung khác");
-        // Đã commit mà không có kết quả = đường ghi quên `ghiKetQua` — nổ, KHÔNG coi là "đã ghi rồi".
-        if (giu.cu.ketQua === null) throw new Error(`YeuCauGhi ${yeuCauId}: yêu cầu chưa hoàn tất`);
-        return { daGhiRoi: true as const, data: (giu.cu.ketQua as { data: KetQuaChotSaoKe }).data };
-      }
-
-      const the = await khoaVaDocTheMo(tx, cardId);
-      // Lõi ghi chung: ước tính TRƯỚC khi chèn neo mới (duNo cuối ngày chốt theo neo cũ) rồi chèn kỳ.
-      const { kyId, uocTinh } = await ghiKySaoKe(tx, { cardId, ngayChot, hanTra, soDu, note });
-      const chenh = uocTinh === null ? null : soDu - uocTinh;
-      const data: KetQuaChotSaoKe = { id: kyId, cardId, ngayChot: khoaChot, soDu, uocTinh, chenh };
-
-      // `ghiChu` nhật ký chỉ nhận khoá allowlist (không có ô tiền) ⇒ ba con số đi vào `moTa`.
-      await ghiNhatKy(tx, {
-        actor: nguoiDung,
-        hanhDong: "THE_CHOT_SAO_KE",
-        doiTuong: {
-          loai: "KySaoKeThe",
-          id: kyId,
-          moTa:
-            `${the.ten} ${format(ngayChot, "dd/MM/yyyy")}: sao kê ${formatVnd(soDu)}` +
-            (uocTinh === null ? " · chưa có ước tính" : ` · ước tính ${formatVnd(uocTinh)} · chênh ${formatVnd(chenh ?? 0)}`),
-        },
-        ghiChu: { ky: khoaChot },
-      });
-      await ghiKetQua(tx, yeuCauId, { ok: true, data });
-      return { daGhiRoi: false as const, data };
-    }, OPT_TX_DONG_TIEN);
-
-    if (kq.daGhiRoi) return { ok: true, data: kq.data, code: "DA_GHI_ROI" };
-    lamMoiTrang();
-    return { ok: true, data: kq.data };
-  } catch (e) {
-    // Unique DUY NHẤT có thể vỡ trong transaction này là `(cardId, ngayChot)` — bước giữ mã dùng ON CONFLICT.
-    // Dòng trùng có thể là kỳ sao kê HOẶC neo mở sổ của thẻ thêm sau khi bật (cùng bảng) ⇒ câu báo nói cả hai.
-    if (rangBuocTrungKhoa(e) !== undefined) {
-      return { ok: false, error: `Thẻ đã có kỳ/neo ở ngày này (${format(ngayChot, "dd/MM/yyyy")})`, field: "ngayChot" };
+    let mocM: Date;
+    try {
+      mocM = await daBatNoPhaiTra();
+    } catch (e) {
+      // `LoiChuaBat` ⇒ code `CHUA_BAT_NO_PHAI_TRA`; Setting hỏng ⇒ câu chung (không thành 500).
+      return { ok: false, ...loiThe(e, "Lỗi khi đọc mốc bật theo dõi nợ") };
     }
-    return { ok: false, ...loiThe(e, "Lỗi khi chốt sao kê") };
+
+    const parsed = chotSaoKeSchema(mocM).safeParse(input);
+    if (!parsed.success) return { ok: false, ...mapZodError(parsed.error) };
+    const { yeuCauId, cardId, soDu, note } = parsed.data;
+    const ngayChot = dauNgayVn(parsed.data.ngayChot);
+    const hanTra = dauNgayVn(parsed.data.hanTra);
+    const khoaChot = khoaNgayVn(ngayChot);
+    // Vân tay trên dữ liệu ĐÃ chuẩn hoá (khoá ngày, không giờ): gửi lại cùng ngày khác giờ vẫn là cùng nội dung.
+    const bam = bamNoiDung({ cardId, ngayChot: khoaChot, soDu, hanTra: khoaNgayVn(hanTra), note });
+
+    try {
+      const kq = await prisma.$transaction(async (tx) => {
+        const giu = await giuYeuCau(tx, { id: yeuCauId, loai: LOAI_YEU_CAU, bam });
+        if (giu !== "MOI") {
+          if (giu.cu.bamNoiDung !== bam) throw new LoiHopDong("Mã yêu cầu đã dùng cho nội dung khác");
+          // Đã commit mà không có kết quả = đường ghi quên `ghiKetQua` — nổ, KHÔNG coi là "đã ghi rồi".
+          if (giu.cu.ketQua === null) throw new Error(`YeuCauGhi ${yeuCauId}: yêu cầu chưa hoàn tất`);
+          return { daGhiRoi: true as const, data: (giu.cu.ketQua as { data: KetQuaChotSaoKe }).data };
+        }
+
+        const the = await khoaVaDocTheMo(tx, cardId);
+        // Lõi ghi chung: ước tính TRƯỚC khi chèn neo mới (duNo cuối ngày chốt theo neo cũ) rồi chèn kỳ.
+        const { kyId, uocTinh } = await ghiKySaoKe(tx, { cardId, ngayChot, hanTra, soDu, note });
+        const chenh = uocTinh === null ? null : soDu - uocTinh;
+        const data: KetQuaChotSaoKe = { id: kyId, cardId, ngayChot: khoaChot, soDu, uocTinh, chenh };
+
+        // `ghiChu` nhật ký chỉ nhận khoá allowlist (không có ô tiền) ⇒ ba con số đi vào `moTa`.
+        await ghiNhatKy(tx, {
+          actor: nguoiDung,
+          hanhDong: "THE_CHOT_SAO_KE",
+          doiTuong: {
+            loai: "KySaoKeThe",
+            id: kyId,
+            moTa:
+              `${the.ten} ${format(ngayChot, "dd/MM/yyyy")}: sao kê ${formatVnd(soDu)}` +
+              (uocTinh === null ? " · chưa có ước tính" : ` · ước tính ${formatVnd(uocTinh)} · chênh ${formatVnd(chenh ?? 0)}`),
+          },
+          ghiChu: { ky: khoaChot },
+        });
+        await ghiKetQua(tx, yeuCauId, { ok: true, data });
+        return { daGhiRoi: false as const, data };
+      }, OPT_TX_DONG_TIEN);
+
+      if (kq.daGhiRoi) return { ok: true, data: kq.data, code: "DA_GHI_ROI" };
+      lamMoiTrang();
+      return { ok: true, data: kq.data };
+    } catch (e) {
+      // Unique DUY NHẤT có thể vỡ trong transaction này là `(cardId, ngayChot)` — bước giữ mã dùng ON CONFLICT.
+      // Dòng trùng có thể là kỳ sao kê HOẶC neo mở sổ của thẻ thêm sau khi bật (cùng bảng) ⇒ câu báo nói cả hai.
+      if (rangBuocTrungKhoa(e) !== undefined) {
+        return { ok: false, error: `Thẻ đã có kỳ/neo ở ngày này (${format(ngayChot, "dd/MM/yyyy")})`, field: "ngayChot" };
+      }
+      return { ok: false, ...loiThe(e, "Lỗi khi chốt sao kê") };
+    }
+  } finally {
+    cua.ra();
   }
 }
