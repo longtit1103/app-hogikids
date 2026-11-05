@@ -29,13 +29,15 @@ const RESTORE_SH = path.join(repoRoot, "deploy/restore.sh");
  * chặn lệnh `docker` bằng một hàm cùng tên để in đúng tham số cuối (chuỗi SQL của `psql -c`).
  * Phải render chứ không so chuỗi trên file: khối SQL nằm trong chuỗi nháy kép của bash, chỉ bản
  * đã nội suy mới chứng minh `\$\$` ra `$$` và `$schema`/role vào đúng chỗ.
+ * Hậu kỳ chạy qua vỏ dấu chốt hoàn tất (`chay_co_dau_chot`, đọc stdout của docker exec) ⇒ stub in SQL ra
+ * fd 3 (nối về stdout) và trả dấu chốt mã 0 trên stdout.
  */
 function sqlHauKy(): string {
   return execFileSync(
     "bash",
     [
       "-c",
-      'source "$1"; docker() { printf "%s\\n" "${@: -1}"; }; reassign_owner_scoped postgres app',
+      'source "$1"; docker() { printf "%s\\n" "${@: -1}" >&3; echo "${DAU_CHOT_TIEN_TO}0"; }; reassign_owner_scoped postgres app 3>&1',
       "bash",
       RESTORE_SH,
     ],

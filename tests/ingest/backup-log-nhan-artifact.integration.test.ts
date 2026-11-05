@@ -146,6 +146,38 @@ describe("docTrangThaiSaoLuu — đọc theo artifact từ SyncLog thật", () =
     expect(tt.muc).toBe("qua-han");
   });
 
+  it("dump app chạy đều hơn 36 giờ mà tarball chưa từng có log → tarball qua-han (đường đọc DB)", async () => {
+    // Dump app 2 lượt/ngày suốt ~3 ngày, tarball không một dòng nào ⇒ cron tarball chết câm.
+    await prisma.syncLog.createMany({
+      data: [1, 14, 25, 38, 50, 62].map((gio) => ({
+        kind: "BACKUP" as const,
+        status: "OK" as const,
+        startedAt: gioTruoc(gio),
+        finishedAt: gioTruoc(gio),
+        stats: { artifact: "APP_DUMP_REMOTE", file: "a.dump.age", sizeBytes: 10, drivePath: "gdrive:b/a.dump.age" },
+      })),
+    });
+    const tt = await docTrangThaiSaoLuu();
+    expect(tt.appDump.muc).toBe("ok");
+    expect(tt.fullServer.muc).toBe("qua-han");
+    expect(tt.muc).toBe("qua-han");
+  });
+
+  it("dump app mới chạy chưa tới 36 giờ, tarball chưa có log → chua-co (máy mới cài không bị đỏ oan)", async () => {
+    await prisma.syncLog.createMany({
+      data: [1, 14].map((gio) => ({
+        kind: "BACKUP" as const,
+        status: "OK" as const,
+        startedAt: gioTruoc(gio),
+        finishedAt: gioTruoc(gio),
+        stats: { artifact: "APP_DUMP_REMOTE", file: "a.dump.age", sizeBytes: 10, drivePath: "gdrive:b/a.dump.age" },
+      })),
+    });
+    const tt = await docTrangThaiSaoLuu();
+    expect(tt.fullServer.muc).toBe("chua-co");
+    expect(tt.muc).toBe("chua-co");
+  });
+
   it("hàm thuần cho cùng kết quả với đường đọc DB", async () => {
     expect(tinhTrangSaoLuu(chonLogTheoArtifact([]), new Date()).muc).toBe("chua-co");
     expect((await docTrangThaiSaoLuu()).muc).toBe("chua-co");

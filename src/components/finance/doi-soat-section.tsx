@@ -42,7 +42,7 @@ function ODemDoiSoat({
     <div className="rounded-lg bg-surface-soft px-3 py-2">
       <p className={cn("font-serif text-lg tabular-nums", canhBao && so > 0 ? "text-error" : "text-ink")}>{so}</p>
       <p className="text-xs text-muted-foreground">{nhan}</p>
-      {mo && <p className="text-[11px] text-muted-foreground/80">{mo}</p>}
+      {mo && <p className="text-[11px] text-muted-foreground">{mo}</p>}
     </div>
   );
 }
@@ -324,14 +324,14 @@ export function DoiSoatSection({
       <DoiSoatSanChuaGhiDoanhThu danhSach={sanChuaGhiDoanhThu} tongDoanhThuApp={tongDoanhThuSanChuaGhi} />
 
       {chuaThay > 0 && (
-        <p className="mt-3 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+        <p className="mt-3 rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">
           ⚠️ {chuaThay} đơn đã giao xong và quá {CUA_SO_CHO_QUYET_TOAN_NGAY} ngày mà sàn vẫn chưa có giao dịch
           quyết toán nào.
         </p>
       )}
 
       {treoChuaGiao > 0 && (
-        <p className="mt-3 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+        <p className="mt-3 rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">
           ⚠️ {treoChuaGiao} đơn quá {CUA_SO_CHO_QUYET_TOAN_NGAY} ngày mà vẫn chưa giao xong — nhiều khả năng
           Pancake chưa cập nhật trạng thái, không phải sàn thiếu tiền.
         </p>

@@ -44,7 +44,7 @@ export function DongNhacViec({
     <>
       <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-warning" />
       <span className="min-w-0 flex-1">{children}</span>
-      {href ? <span className="shrink-0 text-[12px] font-medium text-primary">{nhanHanhDong} →</span> : null}
+      {href ? <span className="shrink-0 text-[12px] font-medium text-primary-active">{nhanHanhDong} →</span> : null}
     </>
   );
   const lop = "flex items-center gap-2 px-3 py-2 text-[13px] leading-snug text-ink";

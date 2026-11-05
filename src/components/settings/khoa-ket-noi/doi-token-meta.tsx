@@ -46,7 +46,7 @@ export function DoiTokenMeta() {
         <li>
           Mở{" "}
           <a
-            className="text-primary underline underline-offset-2"
+            className="text-primary-active underline underline-offset-2"
             href="https://developers.facebook.com/tools/explorer/"
             target="_blank"
             rel="noreferrer"

@@ -8,6 +8,12 @@
  * HogiKids brand tokens — source of truth: claude-DESIGN.md
  * Exact hex values per Task 1 brief. Do not hand-edit hex here without
  * updating claude-DESIGN.md first.
+ *
+ * Tương phản (WCAG AA 4,5:1 cho chữ thường): các token dùng làm CHỮ (`muted`, `error`, `warning`,
+ * `success`) và nền nút `primary` (chữ trắng) đã được hạ sáng tới khi đạt AA trên canvas/soft/card
+ * và trên nền tint 10–15% của chính màu (bg-warning/10, bg-error/15…) đặt trên canvas/soft/card (cream-strong: tint 10%). Bảng đo trước/sau: docs/huong-dan-thiet-ke.md mục "Tương phản".
+ * Muốn màu sáng hơn cho nền/biểu đồ thì dùng `--accent-amber`/`--accent-teal` hoặc hex cố định,
+ * ĐỪNG nâng lại các token này — chữ cảnh báo/thành công sẽ rớt dưới 3:1.
  */
 :root {
   --canvas: #faf9f5;
@@ -18,28 +24,28 @@
   --surface-dark-elevated: #252320;
   --ink: #141413;
   --body: #3d3d3a;
-  --muted: #6c6a64;
+  --muted: #64625c;
   --hairline: #e6dfd8;
-  --primary: #cc785c;
-  --primary-active: #a9583e;
+  --primary: #b0553a;
+  --primary-active: #8f4530;
   --primary-disabled: #e6dfd8;
   --on-primary: #ffffff;
   --on-dark: #faf9f5;
   --accent-teal: #5db8a6;
   --accent-amber: #e8a55a;
-  --success: #5db872;
-  --warning: #d4a017;
-  --error: #c64545;
+  --success: #1f6335;
+  --warning: #705300;
+  --error: #9b2a2a;
 
   /*
-   * Bản CHỮ dành cho nền TỐI (`surface-dark` / `surface-dark-elevated`). Chữ đặt trên `bg-surface-dark` dùng
-   * cặp `*-on-dark` này thay vì token chữ nền be, để sau này đổi màu chữ nền be không kéo theo nền tối.
-   * Hiện giá trị trùng token gốc tương ứng.
+   * Bản CHỮ cho nền TỐI (`surface-dark` #181715 / `surface-dark-elevated` #252320): bốn token chữ ở trên đã hạ
+   * sáng cho nền be nên trên nền tối chỉ còn 2,5–2,9:1. Chữ đặt trên `bg-surface-dark` PHẢI dùng cặp `*-on-dark`
+   * này (≥ 4,5:1 trên cả hai nền tối) — khoá ở tests/unit/ui/token-mau-tuong-phan.test.ts.
    */
-  --error-on-dark: #c64545;
-  --warning-on-dark: #d4a017;
-  --success-on-dark: #5db872;
-  --muted-on-dark: #6c6a64;
+  --error-on-dark: #f08a80;
+  --warning-on-dark: #e8b84a;
+  --success-on-dark: #6fcf8f;
+  --muted-on-dark: #a8a69e;
 
   /* shadcn/ui semantic slots, wired to the brand tokens above.
    * Note: shadcn's --muted is a *background* role (e.g. hover states,

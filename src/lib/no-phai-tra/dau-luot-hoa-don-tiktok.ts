@@ -140,7 +140,11 @@ const thanKetThuc = z.strictObject({
   bcId: z.string().regex(BC_ID_TIKTOK_HOP_LE),
   giaiDoan: z.literal("ket-thuc"),
   phamVi: phamViSchema.optional(),
-  /** `page_info.total_page` nguồn báo ở trang GET cuối; null = nguồn không báo (cổng chặn — không kiểm được đủ trang). */
+  /**
+   * `page_info.total_page` LỚN NHẤT nguồn báo qua các trang GET của lượt (nguồn co danh sách giữa lượt thì trang sau
+   * báo ít hơn — số trang cuối không còn nói đủ); null = trang GET cuối không báo (cổng chặn — không kiểm được đủ trang).
+   * Workflow bản trước khai số của trang GET cuối — cùng khuôn, app nhận cả hai.
+   */
   tongTrangNguon: z.number().int().min(0).max(10_000).nullable(),
   /** Số trang GET được (`code = 0`). */
   soTrangDaGet: soTrang,
@@ -151,8 +155,9 @@ const thanKetThuc = z.strictObject({
   /** Số trang có hoá đơn mà POST land hỏng (400/413/5xx/timeout…). */
   soTrangLoi: soTrang,
   /**
-   * `page_info.total_number` nguồn báo ở trang GET cuối; null = nguồn không báo (bỏ qua phép đối số hoá đơn, các phép
-   * đối số trang vẫn áp).
+   * `page_info.total_number` LỚN NHẤT nguồn báo qua các trang GET của lượt (như `tongTrangNguon`); null = KHÔNG trang
+   * nào báo (bỏ qua phép đối số hoá đơn, các phép đối số trang vẫn áp). Khác `tongTrangNguon`: trang cuối vắng khoá thì
+   * workflow giữ số trang trước đã báo — null ở đây NỚI phép chặn nên không được sinh ra chỉ vì trang cuối thiếu.
    */
   tongHoaDonNguon: z.number().int().min(0).max(TRAN_TONG_HOA_DON_NGUON).nullable(),
   /** Số hoá đơn nằm trên các trang land OK (POST 2xx) — trang land hỏng không cộng. */

@@ -44,7 +44,7 @@ export function ChannelInactiveAccordion({ channels }: { channels: ChannelPnlChe
               </span>
               <span className="flex items-center gap-3">
                 <span className="text-sm text-ink">{formatVnd(c.revenue)}</span>
-                <Link href={`/kenh/${c.channelId}`} className="text-xs text-primary hover:underline">
+                <Link href={`/kenh/${c.channelId}`} className="text-xs text-primary-active hover:underline">
                   Xem chi tiết →
                 </Link>
               </span>

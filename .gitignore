@@ -122,3 +122,6 @@ gha-creds-*.json
 
 # Bản mẫu tạm của công cụ brainstorm (không commit)
 .superpowers/
+
+# Báo cáo review toàn dự án (giữ local, không vào git/public)
+/review-du-an/

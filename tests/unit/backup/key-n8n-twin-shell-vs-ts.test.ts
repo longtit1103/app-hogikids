@@ -32,13 +32,14 @@ const RESTORE_SH = path.join(repoRoot, "deploy/restore.sh");
 /**
  * Chạy `reassign_owner_scoped` với `docker` bị thay bằng hàm giả CHỈ IN tham số cuối (câu SQL).
  * Nhờ vậy test soi đúng văn bản sẽ được gửi vào psql, không phải một bản dựng lại gần giống.
+ * Hậu kỳ chạy qua vỏ dấu chốt hoàn tất ⇒ stub in SQL ra fd 3 và trả dấu chốt mã 0 trên stdout.
  */
 function sqlHauKyCuaShell(schema = "app"): string {
   return execFileSync(
     "bash",
     [
       "-c",
-      'source "$1"; docker() { printf "%s" "${@: -1}"; }; reassign_owner_scoped postgres "$2" 2>/dev/null',
+      'source "$1"; docker() { printf "%s" "${@: -1}" >&3; echo "${DAU_CHOT_TIEN_TO}0"; }; reassign_owner_scoped postgres "$2" 3>&1 2>/dev/null',
       "bash",
       RESTORE_SH,
       schema,

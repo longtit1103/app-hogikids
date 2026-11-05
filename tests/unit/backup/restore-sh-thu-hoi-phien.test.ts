@@ -18,7 +18,8 @@ import { afterEach, describe, expect, it } from "vitest";
  * Hành vi SQL của file đã chứng minh trên Postgres thật ở
  * `tests/migration/script-sql-phan-quyen.integration.test.ts`; ở đây khoá phần bash: gọi gì, bằng
  * role nào, stdin là file nào, lỗi thì dừng. `docker` giả là hàm bash (source restore.sh — file tự
- * chặn `main()` khi được source), ghi tham số + stdin ra thư mục tạm.
+ * chặn `main()` khi được source), ghi tham số + stdin ra thư mục tạm. Lượt nạp file thu hồi đi qua vỏ dấu
+ * chốt hoàn tất (`chay_co_dau_chot`); hàm giả bóc vỏ, ghi tham số của lệnh BÊN TRONG, in dấu chốt.
  */
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
@@ -60,6 +61,14 @@ function chayThuHoi(p: { cot: string; thuHoi: "ok" | "loi"; schema?: string }): 
       `source "$1"
 LOG="$2"
 docker() {
+  # Vỏ dấu chốt hoàn tất (exec -i <container> sh -c <vỏ> sh <lệnh…>): chạy lệnh bên trong rồi in dấu chốt
+  # như shell trong container — stdout của lệnh sang stderr, stdout chỉ mang dấu chốt.
+  if [[ "$4" == sh && "$5" == -c ]]; then
+    local rc=0
+    docker "$1" "$2" "$3" "\${@:8}" 1>&2 || rc=$?
+    echo "\${DAU_CHOT_TIEN_TO}$rc"
+    return "$rc"
+  fi
   if [[ " $* " == *" -c "* ]]; then
     printf '%s\\n' "$*" > "$LOG/kiem.args"
     [[ "$COT" == loi ]] && { echo "psql: error: connection refused" >&2; return 2; }
@@ -207,6 +216,9 @@ function chayTronRestore(p: { cot: string; thuHoi: "ok" | "loi" }): KetQua {
     path.join(bin, "docker"),
     `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$LOG/calls"
+# Vỏ dấu chốt hoàn tất: chạy ĐÚNG chuỗi vỏ bằng sh thật, lệnh bên trong là chính stub này.
+a=("$@"); i=1; [[ "\${a[1]:-}" == -i ]] && i=2
+if [[ "\${a[i+1]:-}" == sh && "\${a[i+2]:-}" == -c ]]; then exec sh -c "\${a[i+3]}" sh "$0" "\${a[@]:0:i+1}" "\${a[@]:i+5}"; fi
 if [[ "$*" == *information_schema.columns* ]]; then printf '%s\\n' "$COT"; exit 0; fi
 if [[ "$*" == *"COALESCE(datacl::text"* ]]; then echo NULL; exit 0; fi
 if [[ "$*" == *has_database_privilege* ]]; then echo f; exit 0; fi

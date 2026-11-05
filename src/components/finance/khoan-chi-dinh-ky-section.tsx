@@ -63,13 +63,13 @@ export function KhoanChiDinhKySection({
       </summary>
 
       {boQuaNhapHang > 0 && (
-        <p data-testid="dinh-ky-bo-qua-nhap-hang" className="mt-3 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+        <p data-testid="dinh-ky-bo-qua-nhap-hang" className="mt-3 rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">
           Đã bật theo dõi nợ nên mẫu Nhập hàng không sinh nữa, mọi ngày (bỏ qua {boQuaNhapHang} lần) — tiền hàng giờ ghi
           nhận qua phiếu nợ và trả bằng &quot;Trả tiền hàng&quot; ở tab Dòng tiền. Nên dừng mẫu này.
         </p>
       )}
       {boQuaTruocM > 0 && (
-        <p data-testid="dinh-ky-bo-qua-truoc-m" className="mt-3 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+        <p data-testid="dinh-ky-bo-qua-truoc-m" className="mt-3 rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">
           {boQuaTruocM} lần đến hạn trước ngày bật theo dõi nợ chưa có trong sổ và sẽ không được ghi bù — số dư mở sổ
           đã chốt theo tiền thật trước ngày đó.
         </p>

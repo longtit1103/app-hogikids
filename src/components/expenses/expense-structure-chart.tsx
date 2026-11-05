@@ -31,7 +31,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   interest: "#7a5c99", // tím trầm — chưa có token globals.css, chọn khác 7 màu hiện có
   other: "#6c6a64", // --muted (text)
 };
-const FALLBACK_CATEGORY_COLOR = "#a9583e"; // --primary-active — danh mục tùy chỉnh ngoài 8 id hệ thống
+const FALLBACK_CATEGORY_COLOR = "#a9583e"; // coral đậm (primary-active CŨ) — danh mục tùy chỉnh ngoài 8 id hệ thống
 
 function colorForCategory(categoryId: string): string {
   return CATEGORY_COLORS[categoryId] ?? FALLBACK_CATEGORY_COLOR;

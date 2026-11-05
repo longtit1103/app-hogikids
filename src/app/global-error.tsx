@@ -48,7 +48,7 @@ export default function GlobalError({
             padding: "0 16px",
             border: "none",
             borderRadius: 8,
-            background: "#cc785c",
+            background: "#b0553a", // = --primary (chữ trắng ≥ 4,5:1); inline vì global-error không nạp globals.css
             color: "#ffffff",
             fontSize: 14,
             fontWeight: 500,

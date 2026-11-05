@@ -28,13 +28,15 @@ const doc = (p: string) => readFileSync(path.join(repoRoot, p), "utf8");
  * Từng lần `docker exec … psql -c <sql>` mà `drop_schema_dich` gửi đi (mỗi phần tử = một lần gọi
  * = một transaction ngầm). `docker` giả in tham số cuối + `\0` sau MỖI lần gọi để đếm được số lần —
  * nối đuôi bằng `\n` là mù với đột biến "tách cổng ra một lần psql riêng" (review 25/09).
+ * Lệnh DROP chạy qua vỏ dấu chốt hoàn tất (`chay_co_dau_chot`): stdout của `docker exec` bị restore.sh đọc
+ * làm dấu chốt ⇒ stub ghi tham số ra fd 3 (nối về stdout của test) và trả dấu chốt mã 0 trên stdout.
  */
 function cacLanGoiPsql(schema: string, dumpTuTao: "" | "1"): string[] {
   return execFileSync(
     "bash",
     [
       "-c",
-      'source "$1"; docker() { printf "%s\\0" "${@: -1}"; }; drop_schema_dich postgres "$2" "$3"',
+      'source "$1"; docker() { printf "%s\\0" "${@: -1}" >&3; echo "${DAU_CHOT_TIEN_TO}0"; }; drop_schema_dich postgres "$2" "$3" 3>&1',
       "bash",
       RESTORE_SH,
       schema,
@@ -106,12 +108,14 @@ describe("restore.sh — cổng khoá việc nặng trước khi DROP schema", (
     expect(sql).toMatch(/SET LOCAL lock_timeout = '\d+s';/);
   });
 
+  // Lỗi SQL của `psql -c` (kể cả ON_ERROR_STOP) thoát mã 1 — mã 3 chỉ dành cho script `-f`/stdin. Chỉ mã 1
+  // mới được coi là "rollback, schema CÒN NGUYÊN" (mã khác ⇒ không rõ, xem ca it.each cuối file).
   it("psql từ chối vì lock timeout ⇒ thông điệp lỗi gợi ý rõ, không lẫn với khoá việc nặng của app", () => {
     const r = spawnSync(
       "bash",
       [
         "-c",
-        'source "$1"; docker() { echo "ERROR:  canceling statement due to lock timeout" >&2; return 3; }; set -e; drop_schema_dich postgres app ""; echo DA_DI_TIEP',
+        'source "$1"; docker() { echo "ERROR:  canceling statement due to lock timeout" >&2; echo "${DAU_CHOT_TIEN_TO}1"; return 1; }; set -e; drop_schema_dich postgres app ""; echo DA_DI_TIEP',
         "bash",
         RESTORE_SH,
       ],
@@ -172,7 +176,7 @@ describe("restore.sh — cổng khoá việc nặng trước khi DROP schema", (
       "bash",
       [
         "-c",
-        'source "$1"; docker() { echo "ERROR:  KHOA_VIEC_NANG_DANG_GIU" >&2; return 3; }; set -e; drop_schema_dich postgres app ""; echo DA_DI_TIEP',
+        'source "$1"; docker() { echo "ERROR:  KHOA_VIEC_NANG_DANG_GIU" >&2; echo "${DAU_CHOT_TIEN_TO}1"; return 1; }; set -e; drop_schema_dich postgres app ""; echo DA_DI_TIEP',
         "bash",
         RESTORE_SH,
       ],
@@ -182,5 +186,21 @@ describe("restore.sh — cổng khoá việc nặng trước khi DROP schema", (
     expect(r.stdout).not.toContain("DA_DI_TIEP");
     expect(r.stderr).toContain("schema CÒN NGUYÊN");
     expect(r.stderr).toContain("tối đa 5 phút");
+  });
+
+  it.each([
+    ["docker exec thoát 0 mà KHÔNG có dấu chốt (docker CLI bị Ctrl-C, psql trong container chưa xong)", "return 0", 4],
+    ["lệnh trong container chết vì tín hiệu (dấu chốt mã 137)", 'echo "${DAU_CHOT_TIEN_TO}137"; return 137', 137],
+    ["psql MẤT KẾT NỐI giữa câu (dấu chốt mã 2) — COMMIT có thể đã tới server", 'echo "${DAU_CHOT_TIEN_TO}2"; return 2', 2],
+    ["mã lạ không phải kết cục của psql -c (dấu chốt mã 3, đổi thành 1 vì 3 là mã riêng)", 'echo "${DAU_CHOT_TIEN_TO}3"; return 3', 1],
+  ])("%s ⇒ hàm trả lỗi nhưng KHÔNG nói 'schema CÒN NGUYÊN' — không biết DROP đã commit chưa", (_ten, than, ma) => {
+    const r = spawnSync(
+      "bash",
+      ["-c", `source "$1"; docker() { ${than}; }; set -e; drop_schema_dich postgres app ""; echo DA_DI_TIEP`, "bash", RESTORE_SH],
+      { encoding: "utf8" },
+    );
+    expect(r.status).toBe(ma);
+    expect(r.stdout).not.toContain("DA_DI_TIEP");
+    expect(r.stderr).not.toContain("schema CÒN NGUYÊN");
   });
 });

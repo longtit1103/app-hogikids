@@ -297,6 +297,154 @@ describe("tiktok-business-nightly — dấu lượt hoá đơn theo BC", () => {
     expect(lyDoAppGhi(dau()[1])).toEqual(["nguồn không báo total_page — không kiểm được đủ trang"]);
   });
 
+  // Nguồn co danh sách GIỮA lượt (hoá đơn rời cửa sổ, bản sao nguồn chưa đồng bộ): trang sau báo ít trang / ít hoá
+  // đơn hơn trang trước ⇒ vòng phân trang dừng theo số MỚI, mảng xô lùi ⇒ trang / hoá đơn chưa GET bị bỏ — không POST,
+  // không SyncLog. Dấu kết thúc phải khai số LỚN NHẤT nguồn đã báo để app thấy lượt chưa đủ.
+  it("total_page GIẢM giữa lượt (trang 1 báo 3, trang 2 báo 2) ⇒ dừng sau trang 2 nhưng khai 3 trang ⇒ app coi CHƯA ĐỦ", async () => {
+    const { keoHoaDon, get, dau } = dung({ traTrang: (p) => (p === 1 ? trang(50, 3, 1, 120) : trang(50, 2, p, 100)) });
+    await keoHoaDon(BC);
+
+    expect(get().map((g) => g.page)).toEqual([1, 2]);
+    const ketThuc = dau()[1];
+    expect(ketThuc).toMatchObject({ tongTrangNguon: 3, tongHoaDonNguon: 120, soTrangDaGet: 2, soTrangLand: 2, soHoaDon: 100 });
+    expect(lyDoAppGhi(ketThuc)).toEqual(["mới GET 2/3 trang nguồn báo", "mới land 100/120 hoá đơn nguồn báo"]);
+  });
+
+  it("total_number GIẢM giữa lượt, số trang không đổi (mảng xô lùi một hoá đơn) ⇒ khai số lớn nhất ⇒ app coi CHƯA ĐỦ", async () => {
+    const { keoHoaDon, dau } = dung({ traTrang: (p) => (p === 1 ? trang(50, 2, 1, 60) : trang(9, 2, p, 59)) });
+    await keoHoaDon(BC);
+
+    const ketThuc = dau()[1];
+    expect(ketThuc).toMatchObject({ tongTrangNguon: 2, tongHoaDonNguon: 60, soTrangDaGet: 2, soHoaDon: 59 });
+    expect(lyDoAppGhi(ketThuc)).toEqual(["mới land 59/60 hoá đơn nguồn báo"]);
+  });
+
+  it("3 trang nguồn báo ổn định (hình dạng đo thật 50 + 50 + 6 = 106) ⇒ khai đúng số nguồn, app coi ĐỦ", async () => {
+    const { keoHoaDon, dau } = dung({ traTrang: (p) => trang(p === 3 ? 6 : 50, 3, p, 106) });
+    expect(await keoHoaDon(BC)).toHaveLength(106);
+
+    const ketThuc = dau()[1];
+    expect(ketThuc).toMatchObject({ tongTrangNguon: 3, tongHoaDonNguon: 106, soTrangDaGet: 3, soTrangLand: 3, soHoaDon: 106 });
+    expect(lyDoAppGhi(ketThuc)).toEqual([]);
+  });
+
+  it("số nguồn báo TĂNG giữa lượt (hoá đơn mới về khi đang phân trang) ⇒ khai số trang cuối, app coi ĐỦ — không chặn oan", async () => {
+    const { keoHoaDon, dau } = dung({ traTrang: (p) => (p === 1 ? trang(50, 2, 1, 99) : trang(50, 2, p, 100)) });
+    await keoHoaDon(BC);
+
+    const ketThuc = dau()[1];
+    expect(ketThuc).toMatchObject({ tongTrangNguon: 2, tongHoaDonNguon: 100, soHoaDon: 100 });
+    expect(lyDoAppGhi(ketThuc)).toEqual([]);
+  });
+
+  // Danh sách xếp create_time giảm dần (đo thật 02/11/2026). Hoá đơn về trễ chen vào trang ĐÃ GET ⇒ mảng xô tới một
+  // chỗ ⇒ trang sau lặp lại hoá đơn cuối trang trước. Cộng độ dài trang ra đúng total_number mới (mất 1 + trùng 1 bù
+  // nhau) dù thiếu chính hoá đơn chen vào ⇒ đếm theo transaction_id khác nhau mới thấy thiếu.
+  it("hoá đơn trễ chen vào trang đã GET (mảng xô tới, trang sau lặp hoá đơn cuối) ⇒ đếm theo id ⇒ app coi CHƯA ĐỦ", async () => {
+    const id = (k: number) => `H${k}`;
+    const trangId = (ids: string[], tong: number, page: number, tongHd: number) =>
+      JSON.stringify({
+        code: 0,
+        message: "OK",
+        data: {
+          transaction_list: ids.map((transaction_id) => ({ transaction_id })),
+          page_info: { page, total_page: tong, total_number: tongHd },
+        },
+      });
+    // Lúc GET trang 1: 100 hoá đơn H0..H99 (2 trang). Sau đó 1 hoá đơn trễ chen vào trong trang 1 ⇒ 101 hoá đơn, 3 trang;
+    // trang 2 mới = H49..H98 (H49 lặp), trang 3 = H99. Hoá đơn chen vào không bao giờ được GET.
+    const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => id(a + i));
+    const { keoHoaDon, dau } = dung({
+      traTrang: (p) =>
+        p === 1 ? trangId(range(0, 49), 2, 1, 100) : p === 2 ? trangId(range(49, 98), 3, 2, 101) : trangId([id(99)], 3, 3, 101),
+    });
+    await keoHoaDon(BC);
+
+    const ketThuc = dau()[1];
+    expect(ketThuc).toMatchObject({ tongTrangNguon: 3, tongHoaDonNguon: 101, soTrangDaGet: 3, soTrangLand: 3, soHoaDon: 100 });
+    expect(lyDoAppGhi(ketThuc)).toEqual(["mới land 100/101 hoá đơn nguồn báo"]);
+  });
+
+  it("trang lặp lại nguyên trang trước (cùng id) ⇒ không đếm hai lần, hoá đơn thiếu id vẫn đếm từng cái", async () => {
+    const trangId = (ids: (string | null)[], page: number) =>
+      JSON.stringify({
+        code: 0,
+        message: "OK",
+        data: {
+          transaction_list: ids.map((transaction_id) => (transaction_id === null ? {} : { transaction_id })),
+          page_info: { page, total_page: 2, total_number: 4 },
+        },
+      });
+    const { keoHoaDon, dau } = dung({ traTrang: (p) => trangId(p === 1 ? ["A", "B"] : ["A", null], p) });
+    await keoHoaDon(BC);
+
+    const ketThuc = dau()[1];
+    expect(ketThuc).toMatchObject({ soTrangLand: 2, soHoaDon: 3 });
+    expect(lyDoAppGhi(ketThuc)).toEqual(["mới land 3/4 hoá đơn nguồn báo"]);
+  });
+
+  it("trang cuối không báo page_info dù trang trước có ⇒ total_page null (app chặn), total_number giữ số đã báo", async () => {
+    // Trang 2 vắng page_info ⇒ vòng dừng (`|| 1`); total_page null nghĩa là app CHẶN — không được thay bằng số trang 1.
+    // total_number null nghĩa là app BỎ phép đối ⇒ giữ số trang 1 đã báo để phép đối hoá đơn vẫn chạy.
+    const { keoHoaDon, dau } = dung({ traTrang: (p) => (p === 1 ? trang(50, 2, 1, 51) : trang(1, null, p)) });
+    await keoHoaDon(BC);
+
+    const ketThuc = dau()[1];
+    expect(ketThuc).toMatchObject({ tongTrangNguon: null, tongHoaDonNguon: 51, soTrangDaGet: 2, soHoaDon: 51 });
+    expect(lyDoAppGhi(ketThuc)).toEqual(["nguồn không báo total_page — không kiểm được đủ trang"]);
+  });
+
+  it("trang cuối có page_info nhưng vắng total_number mà thiếu hoá đơn ⇒ vẫn đối với số trang trước báo ⇒ app coi CHƯA ĐỦ", async () => {
+    const { keoHoaDon, dau } = dung({ traTrang: (p) => (p === 1 ? trang(50, 2, 1, 60) : trang(9, 2, p)) });
+    await keoHoaDon(BC);
+
+    const ketThuc = dau()[1];
+    expect(ketThuc).toMatchObject({ tongTrangNguon: 2, tongHoaDonNguon: 60, soHoaDon: 59 });
+    expect(lyDoAppGhi(ketThuc)).toEqual(["mới land 59/60 hoá đơn nguồn báo"]);
+  });
+
+  it("3 trang, số lớn nhất nằm ở trang GIỮA (2→3→3 trang, 100→110→105 hoá đơn) ⇒ khai 110 ⇒ app coi CHƯA ĐỦ", async () => {
+    const tongHd = [100, 110, 105];
+    const tongTr = [2, 3, 3];
+    const { keoHoaDon, dau } = dung({
+      traTrang: (p) => trang(p === 3 ? 5 : 50, tongTr[p - 1], p, tongHd[p - 1]),
+    });
+    await keoHoaDon(BC);
+
+    const ketThuc = dau()[1];
+    expect(ketThuc).toMatchObject({ tongTrangNguon: 3, tongHoaDonNguon: 110, soTrangDaGet: 3, soHoaDon: 105 });
+    expect(lyDoAppGhi(ketThuc)).toEqual(["mới land 105/110 hoá đơn nguồn báo"]);
+  });
+
+  it("số nguồn báo dạng CHUỖI co giữa lượt (\"3\" rồi \"2\") ⇒ vẫn khai số lớn nhất ⇒ app coi CHƯA ĐỦ", async () => {
+    const trangChuoi = (n: number, tp: string, page: number, tn: string) =>
+      JSON.stringify({
+        code: 0,
+        message: "OK",
+        data: {
+          transaction_list: Array.from({ length: n }, (_, i) => ({ transaction_id: `S${page}-${i}` })),
+          page_info: { page, total_page: tp, total_number: tn },
+        },
+      });
+    const { keoHoaDon, get, dau } = dung({
+      traTrang: (p) => (p === 1 ? trangChuoi(50, "3", 1, "120") : trangChuoi(50, "2", p, "100")),
+    });
+    await keoHoaDon(BC);
+
+    expect(get().map((g) => g.page)).toEqual([1, 2]);
+    expect(dau()[1]).toMatchObject({ tongTrangNguon: 3, tongHoaDonNguon: 120 });
+    expect(lyDoAppGhi(dau()[1])).toEqual(["mới GET 2/3 trang nguồn báo", "mới land 100/120 hoá đơn nguồn báo"]);
+  });
+
+  it("nguồn báo số rác vượt trần (20000 trang) ⇒ dừng ngay, KHÔNG land, dấu kết thúc loi qua được khuôn route", async () => {
+    const { keoHoaDon, suKien, dau } = dung({ traTrang: (p) => trang(50, 20_000, p, 1_000_000) });
+    await expect(keoHoaDon(BC)).rejects.toThrow("vượt trần");
+
+    expect(suKien.map((e) => e.loai)).toEqual(["dau", "get", "dau"]);
+    expect(dau()[1]).toMatchObject({ ketQua: "loi", soTrangDaGet: 0, hoanTat: false, loi: [expect.stringContaining("vượt trần")] });
+    expect(lyDoAppGhi(dau()[1]).length).toBeGreaterThan(0);
+  });
+
   it.each<[string, unknown]>([
     ["vắng", undefined],
     ["chuỗi rỗng", '""'],

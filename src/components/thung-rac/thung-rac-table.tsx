@@ -24,7 +24,7 @@ function TrangThaiCell({ dong }: { dong: ThungRacRow }) {
     return <span className="text-muted-foreground">{t.nhan}</span>;
   }
   if (t.kind === "khong_khoi_phuc_duoc") {
-    return <span className="text-amber-700 dark:text-amber-500">{t.lyDo}</span>;
+    return <span className="text-warning">{t.lyDo}</span>;
   }
   return <span className="text-muted-foreground">Chưa khôi phục</span>;
 }

@@ -220,6 +220,44 @@ test.describe("Cài đặt", () => {
   });
 
   /**
+   * Khối "Sao lưu": tarball toàn server CHƯA TỪNG có bản nào trong khi dump app đã chạy đều quá 36 giờ (vd DR quên
+   * crontab tarball) ⇒ phải báo quá hạn kèm câu riêng, không được im ở "chưa có". Cất nguyên các dòng BACKUP sẵn có
+   * của DB e2e rồi trả lại (Playwright chạy 1 worker nên không đá spec khác).
+   */
+  test("Section Dữ liệu — tarball chưa từng có bản nào mà dump app đã chạy quá 36 giờ ⇒ báo quá hạn", async ({ page }) => {
+    const prisma = testPrisma();
+    const cu = await prisma.syncLog.findMany({ where: { kind: "BACKUP" } });
+    const gioTruoc = (h: number) => new Date(Date.now() - h * 3_600_000);
+    const dumpApp = (h: number) => ({
+      kind: "BACKUP" as const,
+      status: "OK" as const,
+      startedAt: gioTruoc(h),
+      finishedAt: gioTruoc(h),
+      stats: { artifact: "APP_DUMP_REMOTE", drivePath: `hogikids-backups/e2e-${h}.dump.age` },
+    });
+    try {
+      await prisma.syncLog.deleteMany({ where: { kind: "BACKUP" } });
+      await prisma.syncLog.createMany({ data: [dumpApp(50), dumpApp(26), dumpApp(2)] });
+
+      await page.goto("/cai-dat");
+      await expect(page.getByText("Dump dữ liệu app (Google Drive)", { exact: false }).first()).toBeVisible();
+      await expect(
+        page.getByText(
+          "Tarball toàn server (Google Drive): chưa ghi nhận bản nào hoàn tất dù bản còn lại đã chạy quá 36 giờ",
+          { exact: false },
+        ),
+      ).toBeVisible();
+    } finally {
+      await prisma.syncLog.deleteMany({ where: { kind: "BACKUP" } });
+      if (cu.length) {
+        await prisma.syncLog.createMany({
+          data: cu.map((d) => ({ ...d, stats: d.stats ?? undefined })),
+        });
+      }
+    }
+  });
+
+  /**
    * Khối "Đơn chưa vào Sổ": đơn kẹt giữa "land kho thô" và "ghi Sổ" (tiến trình chết giữa chừng, hoặc
    * payload không map được) phải hiện lên đây để chủ shop vào xử lý — nếu không, đơn mất doanh thu âm
    * thầm dưới log xanh. Trạng thái sạch thì khối ẩn hẳn (đỡ nhiễu). Land một đơn có inserted_at KHÔNG

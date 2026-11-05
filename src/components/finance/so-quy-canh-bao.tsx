@@ -47,7 +47,7 @@ export function SoQuyCanhBao({
   if (!coDong) return null;
 
   return (
-    <div className="mt-3 flex flex-col gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+    <div className="mt-3 flex flex-col gap-1.5 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
       {c.tiktokPaidThieuNgay > 0 && (
         <p>⚠️ {c.tiktokPaidThieuNgay} lệnh TikTok đã trả nhưng thiếu ngày — chưa vào quỹ</p>
       )}

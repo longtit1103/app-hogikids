@@ -73,7 +73,7 @@ function ShopeeCashInBlock({ cash }: { cash: ShopeeCashIn }) {
         </div>
       </div>
       {cash.unclassifiedCount > 0 && (
-        <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+        <p className="mt-2 rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">
           ⚠️ {cash.unclassifiedCount} giao dịch loại chưa phân loại ({formatVnd(cash.unclassifiedAmount)}) — CHƯA
           tính vào net về ví. Nếu Shopee thêm loại giao dịch mới, cần bổ sung cách phân loại.
         </p>

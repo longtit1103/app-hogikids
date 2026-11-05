@@ -11,7 +11,7 @@ export function CanhBaoTheDongConNo({ the }: { the: readonly TheDongConNo[] }) {
   if (the.length === 0) return null;
   return (
     <div
-      className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700"
+      className="mt-3 rounded-xl bg-warning/10 px-3 py-2 text-xs text-warning"
       role="status"
       data-testid="the-dong-con-no"
     >

@@ -405,7 +405,7 @@ export function CashMovementFormModal({
 
         <div className="flex flex-col gap-4">
           {laDieuChinh && (
-            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+            <p className="rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">
               Điều chỉnh MỘT LẦN lúc bật theo dõi nợ ({row && formatNgayVn(row.date, "dd/MM/yyyy")}) — chỉ sửa được số tiền
               và lý do. Quỹ mọi ngày từ đó đổi theo.
             </p>
@@ -434,7 +434,7 @@ export function CashMovementFormModal({
               </p>
             )}
             {hoiTruocD0 && d0 !== null && (
-              <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+              <p className="rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">
                 Ngày này sớm hơn ngày mở sổ ({formatNgayVn(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày
                 mới; dòng số dư mở sổ có thể phải sửa lại.
               </p>
@@ -466,7 +466,7 @@ export function CashMovementFormModal({
               </SelectContent>
             </Select>
             {kind && <p className="text-xs text-muted-foreground">{CASH_MOVEMENT_KIND_META[kind].hint}</p>}
-            {kind && NHAC_THEM_NO[kind] && <p className="text-xs text-amber-700">{NHAC_THEM_NO[kind]}</p>}
+            {kind && NHAC_THEM_NO[kind] && <p className="text-xs text-warning">{NHAC_THEM_NO[kind]}</p>}
           </Field>
           </>
           )}

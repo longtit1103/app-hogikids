@@ -296,13 +296,13 @@ export function SoTietKiemFormModal({
           </O>
 
           {canXacNhan && ngayTruocD0 && d0 !== null && (
-            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+            <p className="rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">
               Ngày này sớm hơn ngày mở sổ ({formatNgayVn(d0, "dd/MM/yyyy")}). Quỹ sẽ tính lại từ ngày mới;
               dòng số dư mở sổ có thể phải sửa lại.
             </p>
           )}
           {canXacNhan && doiNenTang && (
-            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+            <p className="rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">
               Đổi số tiền hoặc ngày gửi làm số dư quỹ các tháng đã qua đổi theo (quỹ tính lại từ dòng
               tiền, không snapshot). Bấm Lưu lần nữa để xác nhận.
             </p>

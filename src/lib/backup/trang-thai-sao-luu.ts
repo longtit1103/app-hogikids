@@ -75,6 +75,14 @@ export type LogsTheoArtifact = {
   appDump: LogSaoLuuGanNhat | null;
   fullServer: LogSaoLuuGanNhat | null;
   manual: LogSaoLuuGanNhat | null;
+  /**
+   * Lúc XONG của log CŨ NHẤT mà `chonLogTheoArtifact` thấy được cho artifact đó — mốc "artifact này đã
+   * chạy từ bao giờ". Chỉ có khi artifact có ít nhất một log mang `finishedAt`; thiếu = không biết.
+   * Dùng để phân biệt "artifact kia mới cài, chưa tới giờ chạy" với "artifact kia đã chạy lâu mà bản
+   * này vẫn chưa từng xuất hiện" (xem `tinhTrangSaoLuu`).
+   */
+  appDumpCoLogTu?: Date;
+  fullServerCoLogTu?: Date;
 };
 
 const MAU_DUMP_APP_CU = /hogikids-\d{8}-\d{4}\.dump\.age$/;
@@ -124,13 +132,19 @@ export function phanLoaiArtifact(log: LogSaoLuuGanNhat): ArtifactSaoLuu | null {
  */
 export function chonLogTheoArtifact(logsMoiNhatTruoc: readonly LogSaoLuuGanNhat[]): LogsTheoArtifact {
   const kq: LogsTheoArtifact = { appDump: null, fullServer: null, manual: null };
+  // Duyệt HẾT danh sách (không dừng sớm khi đủ ba ô): cần cả log CŨ NHẤT của từng artifact bắt buộc.
+  // Danh sách do `docTrangThaiSaoLuu` đọc tối đa vài trăm dòng nên chi phí không đáng kể.
   for (const log of logsMoiNhatTruoc) {
     const loai = phanLoaiArtifact(log);
+    // ERROR không rõ nguồn chỉ dùng để kêu lỗi (fail-closed) — KHÔNG tính là bằng chứng artifact đã chạy.
     const khongRoLoi = loai === null && log.status === "ERROR";
     if (!kq.appDump && (loai === "APP_DUMP_REMOTE" || khongRoLoi)) kq.appDump = log;
     if (!kq.fullServer && (loai === "FULL_SERVER_REMOTE" || khongRoLoi)) kq.fullServer = log;
     if (!kq.manual && loai === "MANUAL_DOWNLOAD") kq.manual = log;
-    if (kq.appDump && kq.fullServer && kq.manual) break;
+    if (log.finishedAt) {
+      if (loai === "APP_DUMP_REMOTE") kq.appDumpCoLogTu = log.finishedAt;
+      if (loai === "FULL_SERVER_REMOTE") kq.fullServerCoLogTu = log.finishedAt;
+    }
   }
   return kq;
 }
@@ -183,16 +197,39 @@ export function tinhTrangMotArtifact(
 const DO_XAU: Record<MucSaoLuu, number> = { ok: 0, "chua-co": 1, "qua-han": 2, loi: 3 };
 
 /**
+ * `"chua-co"` của MỘT artifact mà artifact kia đang `"ok"` VÀ đã chạy được hơn `GIO_QUA_HAN_SAO_LUU` giờ
+ * (log cũ nhất của nó cách `bayGio` quá ngưỡng) ⇒ coi là `"qua-han"`: hệ đã chạy đủ lâu để bản này phải
+ * xuất hiện ít nhất một lần, mà vẫn chưa thấy ⇒ cron/script của bản này chết câm (vd sau dựng lại máy
+ * quên chép crontab). `finishedAt`/`gioTruoc` giữ null — chưa từng có bản nào để chỉ mốc.
+ *
+ * Chưa tới ngưỡng thì GIỮ `"chua-co"` (shop mới cài, hoặc lượt đầu của bản kia chưa tới giờ chạy).
+ * Artifact kia `"loi"`/`"qua-han"` thì tổng đã kêu rồi, không cần luật này.
+ */
+function nangChuaCoThanhQuaHan(
+  trangThai: TrangThaiMotArtifact,
+  banKia: TrangThaiMotArtifact,
+  banKiaCoLogTu: Date | undefined,
+  bayGio: Date,
+): TrangThaiMotArtifact {
+  if (trangThai.muc !== "chua-co" || banKia.muc !== "ok" || !banKiaCoLogTu) return trangThai;
+  const gioDaChay = (bayGio.getTime() - banKiaCoLogTu.getTime()) / 3_600_000;
+  return gioDaChay > GIO_QUA_HAN_SAO_LUU ? { ...trangThai, muc: "qua-han" } : trangThai;
+}
+
+/**
  * Trạng thái tổng từ log mới nhất của TỪNG artifact. Mức tổng = XẤU NHẤT của hai artifact bắt buộc
  * (dump app, tarball toàn server); bản tải tay chỉ hiện riêng, không kéo mức tổng lên hay xuống.
  *
  * `"chua-co"` của MỘT artifact khi artifact kia ổn vẫn cho tổng `"chua-co"` (banner im, giống shop mới
- * cài) — đừng đọc thành "đã ổn": hai dòng chi tiết nói rõ artifact nào thiếu. Một artifact đã TỪNG có
- * log mà cũ quá 36h thì là `"qua-han"` và kêu banner.
+ * cài) — đừng đọc thành "đã ổn": hai dòng chi tiết nói rõ artifact nào thiếu. NGOẠI LỆ: artifact kia
+ * đã chạy OK quá 36h mà bản này vẫn chưa từng có ⇒ `"qua-han"` (`nangChuaCoThanhQuaHan`). Một artifact
+ * đã TỪNG có log mà cũ quá 36h cũng là `"qua-han"` và kêu banner.
  */
 export function tinhTrangSaoLuu(logs: LogsTheoArtifact, bayGio: Date = new Date()): TrangThaiSaoLuu {
-  const appDump = tinhTrangMotArtifact(logs.appDump, bayGio);
-  const fullServer = tinhTrangMotArtifact(logs.fullServer, bayGio);
+  const appDumpTho = tinhTrangMotArtifact(logs.appDump, bayGio);
+  const fullServerTho = tinhTrangMotArtifact(logs.fullServer, bayGio);
+  const appDump = nangChuaCoThanhQuaHan(appDumpTho, fullServerTho, logs.fullServerCoLogTu, bayGio);
+  const fullServer = nangChuaCoThanhQuaHan(fullServerTho, appDumpTho, logs.appDumpCoLogTu, bayGio);
   const thuCong = tinhTrangMotArtifact(logs.manual, bayGio);
   const xauNhat = DO_XAU[appDump.muc] > DO_XAU[fullServer.muc] ? appDump : fullServer;
   return { ...xauNhat, appDump, fullServer, thuCong };

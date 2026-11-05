@@ -62,7 +62,7 @@ function SyncWarnings({ stats }: { stats: unknown }) {
   if (warnings.length === 0) return null;
   return (
     <details className="mt-1">
-      <summary className="cursor-pointer text-xs text-amber-700">{warnings.length} cảnh báo</summary>
+      <summary className="cursor-pointer text-xs text-warning">{warnings.length} cảnh báo</summary>
       <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
         {warnings.map((w, i) => (
           <li key={i} className="whitespace-pre-wrap break-words">

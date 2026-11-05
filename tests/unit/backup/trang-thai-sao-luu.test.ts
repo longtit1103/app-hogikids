@@ -229,6 +229,78 @@ describe("tinhTrangSaoLuu — hai artifact bắt buộc, mức XẤU NHẤT", ()
   });
 });
 
+describe("tinhTrangSaoLuu — artifact chưa từng có trong khi artifact kia đã chạy lâu", () => {
+  const hon36h = GIO_QUA_HAN_SAO_LUU + 1;
+
+  it("tarball chưa từng có, dump app OK và đã chạy hơn 36 giờ → tarball qua-han, tổng qua-han, banner kêu", () => {
+    const kq = tinhTrangSaoLuu(
+      { appDump: APP_OK(1), fullServer: null, manual: null, appDumpCoLogTu: gioTruoc(hon36h) },
+      BAY_GIO,
+    );
+    expect(kq.fullServer.muc).toBe("qua-han");
+    expect(kq.fullServer.finishedAt).toBeNull();
+    expect(kq.fullServer.gioTruoc).toBeNull();
+    expect(kq.appDump.muc).toBe("ok");
+    expect(kq.muc).toBe("qua-han");
+    expect(saoLuuCanBaoDong(kq.muc)).toBe(true);
+  });
+
+  it("đối xứng: dump app chưa từng có, tarball OK và đã chạy hơn 36 giờ → dump app qua-han", () => {
+    const kq = tinhTrangSaoLuu(
+      { appDump: null, fullServer: FULL_OK(2), manual: null, fullServerCoLogTu: gioTruoc(hon36h) },
+      BAY_GIO,
+    );
+    expect(kq.appDump.muc).toBe("qua-han");
+    expect(kq.fullServer.muc).toBe("ok");
+    expect(kq.muc).toBe("qua-han");
+  });
+
+  it("artifact kia mới chạy chưa tới 36 giờ (máy mới cài, dựng lại) → vẫn chua-co, banner im", () => {
+    const kq = tinhTrangSaoLuu(
+      { appDump: APP_OK(1), fullServer: null, manual: null, appDumpCoLogTu: gioTruoc(GIO_QUA_HAN_SAO_LUU - 1) },
+      BAY_GIO,
+    );
+    expect(kq.fullServer.muc).toBe("chua-co");
+    expect(kq.muc).toBe("chua-co");
+    expect(saoLuuCanBaoDong(kq.muc)).toBe(false);
+  });
+
+  it("không biết artifact kia chạy từ bao giờ (thiếu mốc) → giữ chua-co, không đoán", () => {
+    const kq = tinhTrangSaoLuu({ appDump: APP_OK(1), fullServer: null, manual: null }, BAY_GIO);
+    expect(kq.fullServer.muc).toBe("chua-co");
+    expect(kq.muc).toBe("chua-co");
+  });
+
+  it("artifact kia đang LỖI → tổng vẫn loi, artifact thiếu giữ chua-co (luật chỉ xét khi kia ok)", () => {
+    const kq = tinhTrangSaoLuu(
+      { appDump: logLoi(1, "backup-app-dump.sh: disk full", { artifact: "APP_DUMP_REMOTE" }), fullServer: null, manual: null, appDumpCoLogTu: gioTruoc(hon36h) },
+      BAY_GIO,
+    );
+    expect(kq.fullServer.muc).toBe("chua-co");
+    expect(kq.appDump.muc).toBe("loi");
+    expect(kq.muc).toBe("loi");
+  });
+
+  it("cả hai chưa từng có → vẫn chua-co (không có artifact nào chứng tỏ hệ đã chạy)", () => {
+    const kq = tinhTrangSaoLuu({ appDump: null, fullServer: null, manual: MANUAL_OK(50) }, BAY_GIO);
+    expect(kq.muc).toBe("chua-co");
+  });
+});
+
+describe("chonLogTheoArtifact — mốc artifact đã có log từ bao giờ", () => {
+  it("lấy log CŨ NHẤT của từng artifact bắt buộc (danh sách mới nhất trước)", () => {
+    const chon = chonLogTheoArtifact([APP_OK(1), FULL_OK(3), APP_OK(21), APP_OK(45), FULL_OK(27)]);
+    expect(chon.appDumpCoLogTu).toEqual(gioTruoc(45));
+    expect(chon.fullServerCoLogTu).toEqual(gioTruoc(27));
+  });
+
+  it("artifact không có log nào thì không có mốc; bản tải tay và OK/ERROR không rõ nguồn không tính", () => {
+    const chon = chonLogTheoArtifact([APP_OK(1), MANUAL_OK(60), logLoi(80, "disk full"), logOk(90, null)]);
+    expect(chon.appDumpCoLogTu).toEqual(gioTruoc(1));
+    expect(chon.fullServerCoLogTu).toBeUndefined();
+  });
+});
+
 describe("phanLoaiArtifact — log mới và log cũ", () => {
   it("đọc artifact ghi thẳng trong stats (kể cả ERROR không có file/drivePath)", () => {
     expect(phanLoaiArtifact(FULL_LOI(1))).toBe("FULL_SERVER_REMOTE");

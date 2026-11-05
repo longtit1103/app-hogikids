@@ -19,7 +19,11 @@ import { gzipSync } from "node:zlib";
  */
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../../..");
-export const RESTORE_SH = path.join(repoRoot, "deploy/restore.sh");
+/**
+ * Script dưới test. `RESTORE_SH_DUOI_TEST` CHỈ để chứng minh test đỏ trên một bản khác của script (vd bản
+ * `main` chép ra thư mục tạm, cạnh nó phải có `thu-hoi-phien-sau-phuc-hoi.sql`) — không đặt khi chạy thường.
+ */
+export const RESTORE_SH = process.env.RESTORE_SH_DUOI_TEST ?? path.join(repoRoot, "deploy/restore.sh");
 export const DOCKER_GIA = path.join(here, "docker-gia.sh");
 
 export type KichBanDockerGia = {
@@ -41,6 +45,23 @@ export type KichBanDockerGia = {
   cotSessionEpoch?: "0" | "1";
   /** Sau REVOKE quyền hiệu lực vẫn còn (grant từ grantor khác / role cha). */
   conQuyenSauRevoke?: boolean;
+  /**
+   * Nhãn của lệnh bọc dấu chốt mà docker exec thoát 0 nhưng KHÔNG có dấu chốt hoàn tất — docker CLI bị
+   * SIGINT thoát 0 trong khi lệnh trong container chưa xong (đo trên host 04/11, docker 29.4.1).
+   */
+  thieuDauChotO?: string;
+  /** Nhãn lệnh mà stdout docker exec có thêm dòng nhiễu trước dấu chốt thật (phải KHÔNG được tin). */
+  nhieuStdoutO?: string;
+  /** Nhãn của lệnh bọc dấu chốt mà dấu chốt mang mã `rc` ≠ 0 trong khi docker exec thoát 0. */
+  dauChotRcO?: { nhan: string; rc: number };
+  /** `ALTER ROLE … LOGIN` thoát 0 nhưng rolcanlogin vẫn là f (đọc lại `DOC_LOGIN_SAU_MO` ra f). */
+  loginKhongHieuLuc?: boolean;
+  /** `ALTER ROLE … NOLOGIN` thoát 0 nhưng rolcanlogin vẫn là t (đọc lại `DOC_LOGIN_SAU_KHOA` ra t). */
+  nologinKhongHieuLuc?: boolean;
+  /** Lượt đọc lại rolcanlogin ngay sau NOLOGIN thoát 0 nhưng in đúng chuỗi này (vd "" hay rác). */
+  raDocLoginSauKhoa?: string;
+  /** Lượt đọc lại rolcanlogin sau câu mở LOGIN thoát 0 nhưng in đúng chuỗi này. */
+  raDocLoginSauMo?: string;
 };
 
 export type TuyChonChay = {
@@ -62,6 +83,12 @@ export type TuyChonChay = {
   sqlGzip?: string;
   /** Ghi đè `CONTAINER_DB_DICH` (stack diễn tập song song). */
   containerDb?: string;
+  /**
+   * Tín hiệu bị IGNORE ở tiến trình cha lúc khởi động restore.sh (cha chạy `trap '' <tín hiệu>` rồi gọi
+   * script) — giả lập `script … &` / `cmd &` trong một bash không tương tác (lệnh nền thừa hưởng SIGINT bị
+   * ignore). Bash không trap được tín hiệu đã bị ignore lúc vào.
+   */
+  tinHieuBiIgnore?: Array<"INT" | "TERM">;
 };
 
 export type KetQuaChay = {
@@ -142,6 +169,15 @@ export async function chayRestoreVoiDockerGia(o: TuyChonChay): Promise<KetQuaCha
     GIA_CON_QUYEN_SAU_REVOKE: kb.conQuyenSauRevoke ? "1" : "0",
     GIA_NGU_O: kb.nguO ?? "",
     GIA_NGU_GIAY: "2",
+    GIA_THIEU_DAU_CHOT_O: kb.thieuDauChotO ?? "",
+    GIA_NHIEU_STDOUT_O: kb.nhieuStdoutO ?? "",
+    GIA_DAU_CHOT_RC_O: kb.dauChotRcO?.nhan ?? "",
+    GIA_DAU_CHOT_RC: String(kb.dauChotRcO?.rc ?? 1),
+    GIA_LOGIN_KHONG_HIEU_LUC: kb.loginKhongHieuLuc ? "1" : "0",
+    GIA_NOLOGIN_KHONG_HIEU_LUC: kb.nologinKhongHieuLuc ? "1" : "0",
+    // Chỉ ĐẶT khi test yêu cầu — stub phân biệt "không đặt" với "đặt rỗng".
+    ...(kb.raDocLoginSauKhoa !== undefined ? { GIA_RA_DOC_LOGIN_SAU_KHOA: kb.raDocLoginSauKhoa } : {}),
+    ...(kb.raDocLoginSauMo !== undefined ? { GIA_RA_DOC_LOGIN_SAU_MO: kb.raDocLoginSauMo } : {}),
     RESTORE_TEP_DANG_DO: tepDangDo,
     RESTORE_HAN_CHO_HET_PHIEN_LAN: String(o.hanChoLan ?? 3),
     RESTORE_NGU_GIUA_LAN_KIEM: "0",
@@ -154,7 +190,13 @@ export async function chayRestoreVoiDockerGia(o: TuyChonChay): Promise<KetQuaCha
     stdout: string;
     stderr: string;
   }>((resolve, reject) => {
-    const c = spawn("bash", [RESTORE_SH, dump, o.db, o.schema ?? "app"], { env, stdio: ["pipe", "pipe", "pipe"] });
+    // Cha ignore tín hiệu rồi gọi script bằng tiến trình con (không `exec`): đúng hình dạng lệnh nền trong
+    // một bash không tương tác. Tên tín hiệu chỉ lấy từ union type, không nội suy chuỗi tự do.
+    const ignore = (o.tinHieuBiIgnore ?? []).map((t) => `trap '' ${t};`).join(" ");
+    const lenh = ignore
+      ? ["-c", `${ignore} bash "$@"`, "bash", RESTORE_SH, dump, o.db, o.schema ?? "app"]
+      : [RESTORE_SH, dump, o.db, o.schema ?? "app"];
+    const c = spawn("bash", lenh, { env, stdio: ["pipe", "pipe", "pipe"] });
     let out = "";
     let err = "";
     c.stdout.setEncoding("utf8").on("data", (s: string) => (out += s));

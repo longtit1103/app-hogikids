@@ -38,6 +38,9 @@
 #   lưu. Đích = `postgres` (DB chung Supabase): app phải dừng sẵn + `ALTER ROLE hogikids NOLOGIN`.
 #   Mọi lối thoát (lỗi, mã 3, Ctrl-C) đều mở lại; mở hỏng ⇒ in lệnh mở tay + giữ tệp đánh dấu
 #   `~/docker/backups/.restore-dang-do` để lượt sau dừng ngay ở preflight.
+#   Mã thoát `docker exec` KHÔNG đủ để biết lệnh trong container đã xong (thoát 0 khi bị Ctrl-C): mọi lệnh
+#   của vùng phá huỷ chạy kèm DẤU CHỐT hoàn tất từ trong container; thiếu dấu chốt ⇒ giữ khoá. Từ chối chạy
+#   khi INT/TERM bị ignore từ tiến trình cha (chạy nền `&` trong script) — xem khối "DẤU CHỐT HOÀN TẤT".
 #
 # CHỈ nhận bản `pg_dump -Fc` STANDALONE 1-DB (custom .dump) hoặc plain `.sql.gz`.
 # TỪ CHỐI `.tar.gz` backup-toàn-server (chặn TRƯỚC mọi thao tác DB — C1).
@@ -527,7 +530,50 @@ drop_schema_dich() {
   else
     sql="$sql DROP SCHEMA IF EXISTS \"$schema\" CASCADE; CREATE SCHEMA \"$schema\";"
   fi
-  docker exec -i "$CONTAINER" psql -U supabase_admin -d "$db" -v ON_ERROR_STOP=1 -c "$sql" || {
+  # Kết cục → hành vi. CHỈ ca biết CHẮC transaction đã rollback mới được nói "schema CÒN NGUYÊN" và để
+  # trap ERR mở lại đăng nhập (`DROP_CHAC_ROLLBACK=1`); mọi ca khác FAIL-CLOSED (giữ khoá + tệp đánh dấu):
+  #   dấu chốt mã 0                      ⇒ xong, ra khỏi hàm.
+  #   dấu chốt mã 1                      ⇒ lỗi SQL thật (cổng khoá việc nặng RAISE, lock timeout, deadlock…):
+  #                                        `psql -c` gửi CẢ chuỗi làm một transaction ngầm, ERROR ⇒ server
+  #                                        rollback trọn ⇒ schema còn nguyên ⇒ mở lại như lỗi trước DROP.
+  #                                        Tài liệu psql chỉ định nghĩa 0 · 1 = lỗi nghiêm trọng của CHÍNH psql
+  #                                        (vd hết bộ nhớ, không tìm thấy file) · 2 = kết nối hỏng · 3 = lỗi
+  #                                        script `-f`/stdin khi ON_ERROR_STOP. Lỗi câu lệnh của `-c` ra 1 là
+  #                                        hành vi ĐO ĐƯỢC (04/11, PG tạm), tài liệu không nêu.
+  #                                        ⚠️ GIỚI HẠN đã chấp nhận: mã 1 vì thế gộp CẢ lỗi câu lệnh `-c` LẪN
+  #                                        lỗi nghiêm trọng phía client. Mã 1 KHÔNG chứng minh server đã rollback
+  #                                        trong ca lỗi phía CLIENT xảy ra SAU khi server đã COMMIT (vd client
+  #                                        hết bộ nhớ lúc nhận kết quả) ⇒ ca đó script mở lại trên schema có
+  #                                        thể đã MẤT. Xác suất rất thấp (chuỗi DROP không trả hàng nào).
+  #                                        OOM killer giết psql ⇒ 137 ⇒ nhánh > 128 (giữ khoá), không rơi vào
+  #                                        đây. Đo 04/11 trên PG TẠM (client/server bản dev, KHÔNG phải ảnh
+  #                                        `supabase/postgres:15.8.1.085`): cổng từ chối / `lock_timeout` /
+  #                                        cancel = 1, `pg_terminate_backend` = 2 — PHẢI đo lại trên host
+  #                                        (runbook DR, diễn tập A5).
+  #   dấu chốt mã 2                      ⇒ psql MẤT KẾT NỐI / kết nối hỏng: COMMIT có thể đã tới server mà
+  #                                        client không nhận được ReadyForQuery ⇒ KHÔNG RÕ ⇒ giữ khoá.
+  #   dấu chốt mã khác (3, 126, 127…)    ⇒ không phải kết cục đã biết của `psql -c` ⇒ KHÔNG RÕ ⇒ giữ khoá.
+  #   dấu chốt mã > 128 (chết vì tín hiệu) ⇒ như bị ngắt ⇒ trap ERR giữ khoá (`ngat`).
+  #   thiếu dấu chốt                     ⇒ `chay_co_dau_chot` đã giữ khoá (`ngat`).
+  # Đọc MÃ GỐC trong container (`MA_DAU_CHOT_GOC`), không đọc `rc`: `rc` đã đổi 3/4 ⇒ 1 (mã riêng), dùng
+  # `rc` là nhận nhầm mã 3 thành "lỗi SQL, rollback".
+  local rc=0
+  DROP_CHAC_ROLLBACK=""
+  chay_co_dau_chot -i psql -U supabase_admin -d "$db" -X -v ON_ERROR_STOP=1 -c "$sql" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "$KET_CUC_DAU_CHOT" == thieu || "$rc" -gt 128 ]]; then
+    return "$rc"
+  fi
+  if [[ "$KET_CUC_DAU_CHOT" != loi || "$MA_DAU_CHOT_GOC" != 1 ]]; then
+    echo "!!! Lệnh DROP schema '$schema' của '$db' KHÔNG kết thúc bằng lỗi SQL thường (psql mã '${MA_DAU_CHOT_GOC:-?}';" >&2
+    echo "    mã 2 = MẤT KẾT NỐI tới server) — không rõ DROP đã commit hay chưa: schema có thể CÒN hoặc đã MẤT." >&2
+    giu_khoa_neu_dang_pha_huy "$rc" loi
+    return "$rc"
+  fi
+  DROP_CHAC_ROLLBACK=1
+  {
     echo "Lỗi: KHÔNG dọn được schema '$schema' của '$db' — schema CÒN NGUYÊN (cổng khoá + DROP chạy trong MỘT transaction)." >&2
     echo "    Dòng ERROR có KHOA_VIEC_NANG_DANG_GIU ⇒ một việc nặng (dựng lại từ kho thô / ghi giá vốn /" >&2
     echo "    xoá dữ liệu / sao lưu trong app) ĐANG ghi vào schema này. Chờ nó xong rồi chạy lại — việc đã" >&2
@@ -541,8 +587,8 @@ drop_schema_dich() {
     echo "    chưa kịp đọc tới) — một phiên KHÁC đang giữ lock Postgres trên bảng Setting (transaction dài, phiên" >&2
     echo "    treo…) quá ${LOCK_TIMEOUT_CONG_KHOA_GIAY}s. Dừng app (docker compose stop app), đóng phiên psql/prisma" >&2
     echo "    đang mở tới DB này rồi chạy lại." >&2
-    return 1
   }
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -597,7 +643,9 @@ reassign_owner_scoped() {
   # Danh sách key → literal SQL `'a', 'b', …` cho mệnh đề IN của định nghĩa view.
   for k in $KEY_N8N_DUOC_DOC; do key_in="${key_in:+$key_in, }'$k'"; done
   echo ">> Trả quyền sở hữu schema '$schema' về role '$OWNER_ROLE' + cấp lại quyền đọc cho '$N8N_RO_ROLE'..." >&2
-  docker exec "$CONTAINER" psql -U supabase_admin -d "$db" -v ON_ERROR_STOP=1 -c "
+  # Cả hai khối chạy qua dấu chốt hoàn tất (xem "DẤU CHỐT HOÀN TẤT"): ALTER … OWNER bị ngắt mà docker exec
+  # thoát 0 là role app thiếu quyền một phần trong khi script tưởng đã xong.
+  chay_co_dau_chot psql -U supabase_admin -d "$db" -X -v ON_ERROR_STOP=1 -c "
 ALTER SCHEMA \"$schema\" OWNER TO $OWNER_ROLE;
 DO \$\$
 DECLARE r record;
@@ -647,7 +695,7 @@ END
   # `cannot change name of view column`, còn nếu `SettingN8n` lại là BẢNG thì `… is not a view`.
   # Để chung một lệnh nghĩa là một lỗi hình dạng view sẽ ROLLBACK luôn cả phần trả quyền sở hữu ⇒
   # app chết sau DR và `prisma migrate deploy` bị từ chối hàng loạt, trong khi dữ liệu đã nạp xong.
-  docker exec "$CONTAINER" psql -U supabase_admin -d "$db" -v ON_ERROR_STOP=1 -c "
+  chay_co_dau_chot psql -U supabase_admin -d "$db" -X -v ON_ERROR_STOP=1 -c "
 DO \$\$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$N8N_RO_ROLE') THEN
@@ -734,7 +782,9 @@ thu_hoi_phien_sau_phuc_hoi() {
       return 1
       ;;
   esac
-  docker exec -i "$CONTAINER" psql -U supabase_admin -d "$db" -X -v ON_ERROR_STOP=1 < "$THU_HOI_PHIEN_SQL" || {
+  # Dấu chốt hoàn tất (xem "DẤU CHỐT HOÀN TẤT"): docker exec thoát 0 khi bị ngắt ⇒ không có dấu chốt là
+  # chưa chắc đã đổi epoch — không được in "✓ Đã thu hồi" trong khi cookie đời dump còn sống.
+  chay_co_dau_chot -i psql -U supabase_admin -d "$db" -X -v ON_ERROR_STOP=1 < "$THU_HOI_PHIEN_SQL" || {
     echo "✗ LỖI: thu hồi phiên THẤT BẠI — cookie cấp trong đời bản dump có thể SỐNG LẠI. Dữ liệu ĐÃ nạp xong." >&2
     echo "    GIỮ APP DỪNG, đọc lỗi psql phía trên, sửa rồi chạy tay:" >&2
     echo "      docker exec -i $CONTAINER psql -U supabase_admin -d $db -X -v ON_ERROR_STOP=1 < deploy/thu-hoi-phien-sau-phuc-hoi.sql" >&2
@@ -788,11 +838,15 @@ thu_hoi_phien_sau_phuc_hoi() {
 #    VẪN chạy; mở lại lúc đó là mở cửa cho app/CLI ghi xen (dữ liệu lai);
 #  - lỗi THƯỜNG (mã 1…128) SAU khi DROP đã commit: nạp dở (`--exit-on-error`/`ON_ERROR_STOP` không có
 #    `--single-transaction` ⇒ phần đã nạp ở lại), hậu kỳ trả quyền dở (role app thiếu quyền một phần);
-#  - `exit` tường minh trong vùng (trap EXIT cũng xét vùng, không chỉ trap ERR).
-# NGOẠI LỆ duy nhất: lệnh DROP tự LỖI THƯỜNG ⇒ mở lại như cũ — cổng khoá việc nặng + DROP + CREATE chạy
-# trong MỘT `psql -c` (một transaction ngầm, xem `drop_schema_dich`) ⇒ lỗi = rollback, schema còn nguyên.
-# Bị ngắt GIỮA lệnh DROP thì vẫn giữ khoá (không biết transaction đã commit chưa). Lỗi/ngắt TRƯỚC DROP ⇒
-# mở lại như mọi lối thoát khác.
+#  - `exit` tường minh trong vùng (trap EXIT cũng xét vùng, không chỉ trap ERR);
+#  - lệnh trong container KHÔNG phát dấu chốt hoàn tất (`chay_co_dau_chot`) — kể cả khi `docker exec` thoát
+#    0: docker 29.4.1 bị SIGINT là thoát 0 ngay trong khi pg_restore/psql còn chạy (đo 04/11) ⇒ như bị ngắt.
+#    Không dựa riêng vào trap INT: bash không trap được tín hiệu bị ignore lúc vào script — `main` từ chối
+#    chạy trong ngữ cảnh đó (`kiem_bat_duoc_tin_hieu_ngat`), dấu chốt là lớp thứ hai độc lập.
+# NGOẠI LỆ duy nhất: lệnh DROP tự LỖI SQL THƯỜNG (dấu chốt psql mã 1) ⇒ mở lại như cũ — cổng khoá việc
+# nặng + DROP + CREATE chạy trong MỘT `psql -c` (một transaction ngầm, xem `drop_schema_dich`) ⇒ lỗi =
+# rollback, schema còn nguyên. Bị ngắt GIỮA lệnh DROP, MẤT KẾT NỐI (psql mã 2) hay mã lạ thì vẫn giữ khoá
+# (không biết transaction đã commit chưa). Lỗi/ngắt TRƯỚC DROP ⇒ mở lại như mọi lối thoát khác.
 # ===========================================================================
 
 # DB chung của Supabase self-host — đích này dùng chế độ NOLOGIN (xem trên).
@@ -813,7 +867,121 @@ APP_CONTAINER=""     # đặt trong main theo hậu tố của $CONTAINER
 TEP_TAM_CAN_DON=""   # mỗi dòng một đường dẫn file tạm — don_dep_khi_thoat dọn hết
 BUOC_PHA_HUY=""      # "" = ngoài vùng phá huỷ · drop · nap · tra_quyen — xem "VÙNG PHÁ HUỶ"
 
+# ===========================================================================
+# DẤU CHỐT HOÀN TẤT TỪ TRONG CONTAINER — cho mọi lệnh dài/nguy hiểm của vùng phá huỷ (DROP, nạp custom,
+# nạp plain, hai khối trả quyền) và bước thu hồi phiên.
+#
+# Vì sao (đo trên host 04/11/2026, docker 29.4.1): docker CLI bị SIGINT thì `docker exec -i` THOÁT MÃ 0
+# ngay, trong khi `pg_restore`/`psql` trong container vẫn chạy tiếp. Mã thoát của `docker exec` vì vậy
+# KHÔNG nói được lệnh đã chạy xong hay chưa — trap ERR không bao giờ thấy lượt nạp bị ngắt. Trước bản vá,
+# thứ duy nhất giữ khoá khi bị ngắt là trap INT của bash; lượt chạy mà bash không trap được (SIGINT bị
+# ignore lúc vào script, xem `kiem_bat_duoc_tin_hieu_ngat`) đi tiếp: trả quyền, MỞ LẠI đăng nhập, xoá tệp
+# đánh dấu, in "✓ Phục hồi xong", thoát 0 trên schema DỞ.
+#
+# Cách làm: chạy lệnh qua `sh -c` TRONG container; lệnh xong (vì bất kỳ lý do gì) thì chính shell trong
+# container in đúng MỘT dòng `<DAU_CHOT_TIEN_TO><mã>` ra stdout. stdout của lệnh được chuyển sang stderr
+# (`1>&2`) nên stdout của `docker exec` CHỈ mang dấu chốt — command tag của psql plain (SET, COPY n…)
+# vẫn hiện cho người vận hành, qua stderr. Lệnh đọc stdin (archive của pg_restore, SQL của psql) vẫn nhận
+# stdin như cũ: `sh` không đụng stdin, `"$@"` thừa hưởng nó.
+# Đọc kết quả, KHÔNG tin mã thoát của docker exec:
+#   • có dấu chốt mã 0 ⇒ xong thật;
+#   • có dấu chốt mã ≠ 0 ⇒ lệnh lỗi trong container ⇒ trả đúng mã đó (trap ERR xử lý như lỗi thường; mã
+#     > 128 = lệnh trong container chết vì tín hiệu ⇒ như bị ngắt);
+#   • KHÔNG có dấu chốt (docker exec thoát 0 hay ≠ 0 đều vậy) ⇒ không biết lệnh trong container đã xong
+#     chưa ⇒ coi như BỊ NGẮT: trong vùng phá huỷ thì GIỮ khoá + tệp đánh dấu (`bi_ngat_giua_nap=`), in lệnh
+#     kiểm + mở tay; trả mã ≠ 0 để script dừng (không bao giờ tới dòng "✓").
+# ===========================================================================
+DAU_CHOT_TIEN_TO=__HOGIKIDS_RESTORE_RC=
+# Chạy bằng `sh` của container (image supabase/postgres có /bin/sh) — KHÔNG phụ thuộc bash trong container.
+# Nháy ĐƠN: `$@`/`$?` phải được shell TRONG container khai triển, không phải bash trên host.
+SH_DAU_CHOT='"$@" 1>&2; rc=$?; echo "'"$DAU_CHOT_TIEN_TO"'$rc"; exit "$rc"'
+# Mã thoát khi thiếu dấu chốt mà docker exec lại thoát 0 (chính ca lỗi đo 04/11). ≠ 0 để mọi khối
+# `restore.sh && docker compose up -d` dừng; ≠ 3 (`MA_THOAT_CHUA_XONG`) để runbook không nhận nhầm là ca
+# "dữ liệu đã nạp, còn thiếu migrate".
+MA_THIEU_DAU_CHOT=4
+# Kết cục lượt gọi gần nhất của `chay_co_dau_chot`: "" · ok · loi (có dấu chốt mã ≠ 0) · thieu.
+KET_CUC_DAU_CHOT=""
+# Mã GỐC trong dấu chốt của lượt gọi gần nhất (TRƯỚC khi đổi 3/4 ⇒ 1); "" khi thiếu dấu chốt.
+MA_DAU_CHOT_GOC=""
+# "1" CHỈ khi lệnh DROP vừa lỗi mà biết CHẮC transaction đã rollback (xem `drop_schema_dich`) — trap ERR
+# chỉ mở lại đăng nhập ở bước DROP khi cờ này bật; mọi kết cục khác ở bước DROP giữ khoá.
+DROP_CHAC_ROLLBACK=""
+
+# Mã 3 (`MA_THOAT_CHUA_XONG`) và 4 (`MA_THIEU_DAU_CHOT`) mang NGHĨA RIÊNG của script — runbook §4.2 đọc
+# `[ $? -eq 3 ]` là "dữ liệu đã nạp xong, chỉ còn thiếu migrate" rồi chạy tiếp `migrate deploy`. Mã do lệnh
+# trong container / docker CLI trả về (vd psql `ON_ERROR_STOP` lỗi giữa file plain = 3) KHÔNG được mượn hai
+# số đó ⇒ đổi thành 1 (lỗi thường). Mã khác (kể cả > 128 = chết vì tín hiệu) giữ nguyên.
+ma_khong_trung_ma_rieng() {
+  case "$1" in
+    "$MA_THOAT_CHUA_XONG"|"$MA_THIEU_DAU_CHOT") echo 1 ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# Chạy MỘT lệnh trong container kèm dấu chốt hoàn tất. arg1 tuỳ chọn `-i` (lệnh đọc stdin của script —
+# stdin chuyển nguyên vào lệnh), còn lại = lệnh + tham số trong container. Trả 0 CHỈ khi có dấu chốt mã 0.
+# Gọi TRẦN (không `$(…)`): trạng thái khoá phải được giữ ở shell chính, không ở bản sao trong subshell.
+chay_co_dau_chot() {
+  local co_i="" dau="" rc_docker=0 ma re="^${DAU_CHOT_TIEN_TO}([0-9]+)\$"
+  if [[ "${1:-}" == -i ]]; then co_i=-i; shift; fi
+  KET_CUC_DAU_CHOT=""
+  MA_DAU_CHOT_GOC=""
+  if [[ -n "$co_i" ]]; then
+    dau=$(docker exec -i "$CONTAINER" sh -c "$SH_DAU_CHOT" sh "$@") || rc_docker=$?
+  else
+    dau=$(docker exec "$CONTAINER" sh -c "$SH_DAU_CHOT" sh "$@") || rc_docker=$?
+  fi
+  # So NGUYÊN chuỗi: stdout của docker exec chỉ được là đúng một dòng dấu chốt. Lẫn thứ khác = không tin.
+  if [[ "$dau" =~ $re ]]; then
+    ma=${BASH_REMATCH[1]}
+    MA_DAU_CHOT_GOC=$ma
+    if [[ "$ma" -eq 0 ]]; then
+      KET_CUC_DAU_CHOT=ok
+      return 0
+    fi
+    KET_CUC_DAU_CHOT=loi
+    echo "!!! Lệnh '$1' trong container '$CONTAINER' KẾT THÚC với mã $ma (dấu chốt từ trong container)." >&2
+    ma=$(ma_khong_trung_ma_rieng "$ma")
+    return "$ma"
+  fi
+  KET_CUC_DAU_CHOT=thieu
+  ma=$(ma_khong_trung_ma_rieng "$rc_docker")
+  if [[ "$ma" -eq 0 ]]; then ma=$MA_THIEU_DAU_CHOT; fi
+  echo "!!! KHÔNG thấy dấu chốt hoàn tất của lệnh '$1' từ TRONG container '$CONTAINER' (docker exec thoát $rc_docker)." >&2
+  echo "    Lệnh trong container CÓ THỂ VẪN ĐANG CHẠY hoặc đã chết giữa chừng — coi như BỊ NGẮT." >&2
+  giu_khoa_neu_dang_pha_huy "$ma" ngat
+  return "$ma"
+}
+
+# Preflight SỚM NHẤT (gọi ngay sau khi cài trap, TRƯỚC mọi thao tác DB): trap INT/TERM của script PHẢI
+# thật sự được cài. Signal bị IGNORE lúc vào shell không trap được — bash im lặng bỏ qua lệnh `trap`
+# (POSIX), không báo lỗi. Ca thật (diễn tập 04/11): `script … &` / `cmd &` trong một bash KHÔNG tương tác
+# ⇒ lệnh nền thừa hưởng SIGINT = SIG_IGN (đo `SigIgn=0x6`); docker CLI (Go) vẫn tự bật lại handler nên
+# bị Ctrl-C và thoát 0, còn restore.sh thì không hề biết mình bị ngắt.
+#
+# Cách đo — đọc lại ĐÚNG trap vừa cài bằng `trap -p`, không đoán từ /proc: đo 04/11/2026 trên bash 3.2.57
+# (macOS, máy chạy test) và bash 5.2 (bản Linux): signal bị ignore lúc vào ⇒ `trap -p INT` sau khi cài
+# trap trả RỖNG (3.2) hoặc `trap -- '' SIGINT` (5.2) — cả hai KHÔNG chứa lệnh trap của mình; bình thường
+# thì chứa. Đọc `/proc/$$/status` (SigIgn) chỉ có trên Linux và chỉ là cách gián tiếp nói cùng một điều.
+kiem_bat_duoc_tin_hieu_ngat() {
+  local t_int t_term thieu=""
+  t_int=$(trap -p INT)
+  t_term=$(trap -p TERM)
+  [[ "$t_int" == *"bi_ngat 130"* ]] || thieu="INT"
+  [[ "$t_term" == *"bi_ngat 143"* ]] || thieu="${thieu:+$thieu, }TERM"
+  [[ -z "$thieu" ]] && return 0
+  echo "Lỗi: tín hiệu $thieu đang bị IGNORE từ tiến trình cha — restore.sh KHÔNG bắt được Ctrl-C/kill. DB KHÔNG bị đụng." >&2
+  echo "    Bị ngắt giữa lúc nạp mà không bắt được thì script sẽ tưởng đã xong: mở lại đăng nhập trên schema DỞ." >&2
+  echo "    Chạy ở terminal thật (ssh / tmux / screen), gõ tay: bash deploy/restore.sh <dump> [db] [schema]." >&2
+  echo "    Đừng chạy nền bằng '&' trong một script không tương tác (lệnh nền thừa hưởng SIGINT bị ignore);" >&2
+  echo "    tự động hoá thì bật 'set -m' trước '&' (Linux: SigIgn trong /proc/<pid>/status không được bật bit 0x2 = INT, 0x4000 = TERM)." >&2
+  return 1
+}
+
 # Một câu SQL qua psql, in kết quả dạng trơn (`-tA`). arg1 = db, arg2 = SQL.
+# `-X` ở MỌI lệnh psql của script (kể cả lệnh qua dấu chốt và lệnh in cho người vận hành dán tay): không
+# đọc `~/.psqlrc` của user trong container — vd `\set AUTOCOMMIT off` ở đó làm psql THOÁT 0 mà KHÔNG
+# commit (DROP/nạp/trả quyền/khoá "xong" mà không có hiệu lực). Test cấu trúc ép mọi dòng gọi psql có `-X`.
 psql_mot_cau() {
   docker exec "$CONTAINER" psql -U supabase_admin -d "$1" -X -tA -v ON_ERROR_STOP=1 -c "$2"
 }
@@ -939,6 +1107,21 @@ khoa_dang_nhap_role_app() {
     LOAI_TRU_CHE_DO=nologin
     echo ">> Khoá đăng nhập role '$OWNER_ROLE' (NOLOGIN) — đích là DB chung Supabase, KHÔNG đụng quyền PUBLIC..." >&2
     psql_mot_cau "$db" "ALTER ROLE $OWNER_ROLE NOLOGIN;" > /dev/null
+    # Khoá phải ĐÃ CÓ HIỆU LỰC trước khi cắt phiên / DROP — không tin mã thoát của câu ALTER (đối xứng nhánh
+    # REVOKE đọc lại quyền hiệu lực, và lượt mở đọc lại `t`). Đọc ra ≠ f ⇒ khoá CHƯA có (app/CLI nối lại
+    # được ngay sau khi bị cắt, ghi xen vào schema đang thay); đọc LỖI ⇒ không biết. Cả hai: dừng TRƯỚC
+    # DROP (return 1 ⇒ trap ERR ngoài vùng phá huỷ ⇒ `mo_lai_dang_nhap` chạy ALTER … LOGIN + đọc lại `t`
+    # mới xoá tệp đánh dấu; mở không xác nhận được thì giữ tệp + in lệnh mở tay).
+    if ! login=$(psql_mot_cau "$db" "SELECT rolcanlogin FROM pg_catalog.pg_roles WHERE rolname = '$OWNER_ROLE'"); then
+      echo "Lỗi: KHÔNG đọc lại được rolcanlogin của '$OWNER_ROLE' sau ALTER ROLE … NOLOGIN — không biết khoá đã có" >&2
+      echo "    hiệu lực chưa. DỪNG TRƯỚC khi cắt phiên / dọn schema — schema CÒN NGUYÊN. Đang mở lại (đọc lại t)." >&2
+      return 1
+    fi
+    if [[ "$login" != f ]]; then
+      echo "Lỗi: sau ALTER ROLE … NOLOGIN, rolcanlogin của '$OWNER_ROLE' vẫn là '$login' (kỳ vọng f) — khoá CHƯA có" >&2
+      echo "    hiệu lực. DỪNG TRƯỚC khi cắt phiên / dọn schema — schema CÒN NGUYÊN. Đang mở lại (đọc lại t)." >&2
+      return 1
+    fi
   else
     acl=$(psql_mot_cau "$db" "SELECT COALESCE(datacl::text, 'NULL') FROM pg_catalog.pg_database WHERE datname = '$db'")
     # Chỉ nhận đúng hai hình dạng: NULL hoặc mảng aclitem `{…}` một dòng, không nháy đơn (nội suy vào
@@ -972,12 +1155,19 @@ khoa_dang_nhap_role_app() {
 mo_lai_dang_nhap() {
   [[ "${BASH_SUBSHELL:-0}" -eq 0 ]] || return 0
   [[ -n "$LOAI_TRU_CHE_DO" ]] || return 0
-  local che_do=$LOAI_TRU_CHE_DO acl_sau="" ok=0
+  local che_do=$LOAI_TRU_CHE_DO acl_sau="" login_sau="" ok=0
   LOAI_TRU_CHE_DO=""
   echo ">> Mở lại đăng nhập role '$OWNER_ROLE' (chế độ $che_do, DB '$LOAI_TRU_DB')..." >&2
   if psql_mot_cau "$LOAI_TRU_DB" "$(sql_mo_lai_dang_nhap "$che_do")" > /dev/null; then
+    # Đọc lại trạng thái THẬT — không tin mã thoát của câu mở (cùng lý do với nhánh REVOKE đọc lại datacl):
+    # chỉ `rolcanlogin = t` mới được xoá tệp đánh dấu và báo "✓". Đọc lỗi / ra giá trị khác ⇒ giữ tệp.
     if [[ "$che_do" == nologin ]]; then
-      ok=1
+      if login_sau=$(psql_mot_cau "$LOAI_TRU_DB" "SELECT rolcanlogin FROM pg_catalog.pg_roles WHERE rolname = '$OWNER_ROLE'") \
+        && [[ "$login_sau" == t ]]; then
+        ok=1
+      else
+        echo "✗ rolcanlogin của '$OWNER_ROLE' sau khi mở là '$login_sau' (kỳ vọng t)." >&2
+      fi
     elif acl_sau=$(psql_mot_cau "$LOAI_TRU_DB" "SELECT COALESCE(datacl::text, 'NULL') FROM pg_catalog.pg_database WHERE datname = '$LOAI_TRU_DB'") \
       && [[ "$acl_sau" == "$LOAI_TRU_ACL" ]]; then
       ok=1
@@ -1004,21 +1194,32 @@ giu_khoa_neu_dang_pha_huy() {
   [[ -n "$BUOC_PHA_HUY" && -n "$LOAI_TRU_CHE_DO" ]] || return 0
   local che_do=$LOAI_TRU_CHE_DO ma=$1 kieu=$2 buoc=$BUOC_PHA_HUY
   LOAI_TRU_CHE_DO=""   # don_dep_khi_thoat sẽ KHÔNG mở lại
+  # Ở chính bước DROP (vd thiếu dấu chốt vì docker thoát 126/127 hay bị ngắt giữa câu) thì KHÔNG biết DROP
+  # đã commit chưa — đừng khẳng định "SAU khi đã DROP"; schema có thể còn nguyên hoặc đã mất.
+  local moc="SAU khi đã DROP"
+  local moc_tep="SAU khi đã DROP"
+  if [[ "$buoc" == drop ]]; then
+    moc="(không rõ DROP đã commit hay chưa — schema có thể CÒN hoặc MẤT) với"
+    moc_tep="ở bước DROP (không rõ DROP đã commit hay chưa)"
+  fi
   {
     if [[ "$kieu" == ngat ]]; then
       echo "bi_ngat_giua_nap=$(date '+%Y-%m-%d %H:%M:%S %z') ma=$ma buoc_do=$buoc"
-      echo "# Bị ngắt SAU khi đã DROP — kiểm hết tiến trình nạp/trả quyền trong container trước khi mở tay."
+      echo "# Bị ngắt $moc_tep — kiểm hết tiến trình nạp/trả quyền trong container trước khi mở tay."
     else
       echo "loi_sau_drop=$(date '+%Y-%m-%d %H:%M:%S %z') ma=$ma kieu=$kieu buoc_do=$buoc"
-      echo "# Lỗi SAU khi đã DROP — schema '${SCHEMA:-?}' đang DỞ (bước '$buoc' chưa xong)."
+      echo "# Lỗi $moc_tep — schema '${SCHEMA:-?}' đang DỞ (bước '$buoc' chưa xong)."
     fi
   } >> "$TEP_DANG_DO" 2>/dev/null || true
   {
     if [[ "$kieu" == ngat ]]; then
-      echo "!!! Bị ngắt (mã $ma) ở bước '$buoc' SAU khi đã DROP schema '${SCHEMA:-?}' của '$LOAI_TRU_DB' — 'docker exec'"
+      echo "!!! Bị ngắt (mã $ma) ở bước '$buoc' $moc schema '${SCHEMA:-?}' của '$LOAI_TRU_DB' — 'docker exec'"
       echo "    không chuyển tín hiệu vào container nên pg_restore/psql/ALTER … OWNER CÓ THỂ VẪN ĐANG CHẠY."
+    elif [[ "$buoc" == drop ]]; then
+      echo "!!! Lỗi (mã $ma) ở bước '$buoc' $moc schema '${SCHEMA:-?}' của '$LOAI_TRU_DB' — schema có thể"
+      echo "    vẫn còn, đã MẤT, hoặc đã DROP mà chưa CREATE lại. Đọc dòng lỗi phía trên."
     else
-      echo "!!! Lỗi (mã $ma) ở bước '$buoc' SAU khi đã DROP schema '${SCHEMA:-?}' của '$LOAI_TRU_DB' — schema đang DỞ"
+      echo "!!! Lỗi (mã $ma) ở bước '$buoc' $moc schema '${SCHEMA:-?}' của '$LOAI_TRU_DB' — schema đang DỞ"
       echo "    (nạp thiếu bảng/dữ liệu, hoặc role app chưa được trả đủ quyền). Đọc dòng lỗi phía trên."
     fi
     echo "    KHÔNG mở lại đăng nhập role '$OWNER_ROLE', GIỮ tệp đánh dấu '$TEP_DANG_DO'. Schema đang DỞ — đừng bật app."
@@ -1027,6 +1228,10 @@ giu_khoa_neu_dang_pha_huy() {
     echo "         docker exec $CONTAINER psql -U supabase_admin -d $LOAI_TRU_DB -X -c \"SELECT pid, state, query_start, left(query, 60) FROM pg_stat_activity WHERE usename = 'supabase_admin' AND datname = '$LOAI_TRU_DB' AND pid <> pg_backend_pid();\""
     echo "       và xem schema đang dở tới đâu (số bảng; đối chiếu với bản dump):"
     echo "         docker exec $CONTAINER psql -U supabase_admin -d $LOAI_TRU_DB -X -c \"SELECT count(*) AS so_bang FROM pg_tables WHERE schemaname = '${SCHEMA:-?}';\""
+    if [[ "$buoc" == drop ]]; then
+      echo "       và schema còn hay đã mất (1 = còn, 0 = mất — không rõ DROP đã commit):"
+      echo "         docker exec $CONTAINER psql -U supabase_admin -d $LOAI_TRU_DB -X -tA -c \"SELECT count(*) FROM pg_namespace WHERE nspname = '${SCHEMA:-?}';\""
+    fi
     echo "    2) Chờ chúng xong (hoặc pg_cancel_backend), sửa nguyên nhân lỗi (đầy đĩa, dump hỏng…), rồi mở tay:"
     in_lenh_mo_tay "$che_do"
     echo "    3) Chạy lại restore.sh từ đầu để có schema trọn vẹn (lượt mới DROP + nạp lại sạch). Đừng bật app trước đó."
@@ -1039,15 +1244,17 @@ bi_ngat() {
 }
 
 # Trap ERR. Trong VÙNG PHÁ HUỶ ⇒ giữ khoá (lệnh chết vì TÍN HIỆU — mã > 128, Ctrl-C tới cả nhóm tiến
-# trình, docker CLI chết trước khi bash kịp chạy trap INT — tính là bị ngắt). Ngoại lệ: chính lệnh DROP
-# lỗi THƯỜNG ⇒ transaction đã rollback, schema còn nguyên ⇒ mở lại như mọi lỗi trước DROP.
+# trình, docker CLI chết trước khi bash kịp chạy trap INT — tính là bị ngắt). Ngoại lệ DUY NHẤT: chính
+# lệnh DROP lỗi SQL thường mà `drop_schema_dich` đã xác nhận transaction rollback (`DROP_CHAC_ROLLBACK=1`,
+# psql mã 1) ⇒ schema còn nguyên ⇒ mở lại như mọi lỗi trước DROP. Lỗi ở bước DROP mà cờ chưa bật (mất kết
+# nối — psql mã 2, mã lạ, lỗi lạ trong hàm) ⇒ giữ khoá.
 khi_loi() {
   if [[ -n "$BUOC_PHA_HUY" ]]; then
     if [[ "$1" -gt 128 ]]; then
       giu_khoa_neu_dang_pha_huy "$1" ngat
       return 0
     fi
-    if [[ "$BUOC_PHA_HUY" != drop ]]; then
+    if [[ "$BUOC_PHA_HUY" != drop || "$DROP_CHAC_ROLLBACK" != 1 ]]; then
       giu_khoa_neu_dang_pha_huy "$1" loi
       return 0
     fi
@@ -1078,6 +1285,8 @@ main() {
   trap 'don_dep_khi_thoat' EXIT
   trap 'bi_ngat 130' INT
   trap 'bi_ngat 143' TERM
+  # Trap INT/TERM ở trên chỉ có tác dụng nếu bash thật sự cài được — tín hiệu bị ignore lúc vào thì không.
+  kiem_bat_duoc_tin_hieu_ngat || exit 1
 
   # --- 0) Tham số --------------------------------------------------------
   if [[ $# -lt 1 || $# -gt 3 ]]; then
@@ -1241,7 +1450,8 @@ main() {
     drop_schema_dich "$DB" "$SCHEMA" ""
     BUOC_PHA_HUY=nap
     echo ">> Phục hồi custom dump vào '$DB' (schema '$SCHEMA')..." >&2
-    docker exec -i "$CONTAINER" pg_restore --clean --if-exists --exit-on-error \
+    # Dấu chốt hoàn tất từ TRONG container — docker exec thoát 0 khi bị ngắt (xem "DẤU CHỐT HOÀN TẤT").
+    chay_co_dau_chot -i pg_restore --clean --if-exists --exit-on-error \
       --no-owner --no-privileges -n "$SCHEMA" -U supabase_admin -d "$DB" < "$F"
   else
     # --- 4) gzip (.sql.gz) — CHỐT AN TOÀN C1 ----------------------------
@@ -1302,7 +1512,9 @@ main() {
     drop_schema_dich "$DB" "$SCHEMA" "$dump_tu_tao"
     BUOC_PHA_HUY=nap
     echo ">> Nạp SQL vào '$DB' (schema '$SCHEMA')..." >&2
-    docker exec -i "$CONTAINER" psql -U supabase_admin -d "$DB" -v ON_ERROR_STOP=1 < "$sql_tmp"
+    # Dấu chốt hoàn tất từ TRONG container — docker exec thoát 0 khi bị ngắt (xem "DẤU CHỐT HOÀN TẤT").
+    # Command tag của psql (SET, COPY n…) đi qua stderr: stdout của docker exec chỉ mang dấu chốt.
+    chay_co_dau_chot -i psql -U supabase_admin -d "$DB" -X -v ON_ERROR_STOP=1 < "$sql_tmp"
 
     rm -f "$sql_tmp"
   fi

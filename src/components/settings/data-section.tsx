@@ -41,6 +41,15 @@ function DongTrangThaiArtifact({ nhan, trangThai }: { nhan: string; trangThai: T
     );
   }
 
+  if (trangThai.muc === "qua-han" && trangThai.finishedAt === null) {
+    return (
+      <p className="text-sm text-warning">
+        {nhan}: chưa ghi nhận bản nào hoàn tất dù bản còn lại đã chạy quá 36 giờ — kiểm cron backup
+        đêm trên host.
+      </p>
+    );
+  }
+
   if (trangThai.muc === "qua-han") {
     const soGio = trangThai.gioTruoc !== null ? Math.floor(trangThai.gioTruoc) : null;
     return (

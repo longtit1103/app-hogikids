@@ -17,7 +17,7 @@ export function OViTiktokConLai({ vi }: { vi: ViTiktokConLaiHienThi | null }) {
       {vi.viHienTai < 0 ? (
         // Không thể xảy ra theo cấu trúc công thức (B0 cận dưới luôn kéo chuỗi về ≥ 0) — nếu vẫn tới
         // đây thì dữ liệu đọc ra đã hỏng; in số âm là khiến chủ shop tin một con số sai.
-        <p className="mt-1 text-xs text-amber-700">
+        <p className="mt-1 text-xs text-warning">
           ⚠️ dữ liệu ví không khớp — kiểm lại đồng bộ TikTok
         </p>
       ) : (
@@ -37,7 +37,7 @@ export function OViTiktokConLai({ vi }: { vi: ViTiktokConLaiHienThi | null }) {
       {vi.chuaChot.soDong > 0 && (
         // Statement ≠ SETTLED đã bị loại khỏi số trên (chưa làm ví đổi đồng nào). Statement kẹt trạng thái
         // cũ ngoài cửa sổ kéo lại thì bị loại mãi — dòng này là dấu vết DUY NHẤT; KHÔNG đổi con số.
-        <p className="mt-1 text-xs text-amber-700">
+        <p className="mt-1 text-xs text-warning">
           ⚠️ {vi.chuaChot.soDong} statement TikTok chưa chốt (tổng {formatVnd(vi.chuaChot.tong)}) —
           chưa tính vào số trên. Để lâu vẫn thế thì kiểm lại đồng bộ TikTok.
         </p>

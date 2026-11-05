@@ -147,7 +147,7 @@ export function ChannelCardGrid({
               )}
             </div>
 
-            <p className={cn("mt-4 text-sm", dark ? "text-on-dark" : "text-primary")}>Xem chi tiết →</p>
+            <p className={cn("mt-4 text-sm", dark ? "text-on-dark" : "text-primary-active")}>Xem chi tiết →</p>
           </Link>
         );
       })}

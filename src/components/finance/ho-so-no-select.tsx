@@ -40,7 +40,7 @@ export function HoSoNoSelect({
     <div className="flex flex-col gap-1">
       <label className="text-xs text-muted-foreground">{label}</label>
       {options.length === 0 && !coMucKhong ? (
-        <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">{emptyMessage}</p>
+        <p className="rounded-lg bg-warning/10 px-2 py-1.5 text-xs text-warning">{emptyMessage}</p>
       ) : (
         <Select
           value={coMucKhong && value === "" ? KHONG_CHON : value}
