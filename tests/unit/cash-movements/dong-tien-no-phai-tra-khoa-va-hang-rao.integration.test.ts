@@ -25,6 +25,14 @@ import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  chayNen,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giuTransactionDenKhiTha,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const vn = (ngay: string, gio = "00:00:00") => new Date(`${ngay}T${gio}+07:00`);
 const tr = (n: number) => Math.round(n * 1_000_000);
@@ -49,29 +57,19 @@ async function taoVi(nenTang: string): Promise<string> {
 
 /**
  * Một transaction khác GIỮ khoá dòng hồ sơ ~800 ms rồi mới commit thay đổi trạng thái (đóng thẻ / huỷ
- * phiếu). Trả `tha` (cho commit) + `xong` (chờ commit xong).
+ * phiếu). Trả `tha` (cho commit) + `xong` (chờ commit xong). Helper chung: test lỗi sớm / hết giờ thì hook dọn
+ * ROLLBACK nó và chờ lượt ghi đang đứng chờ khoá chạy xong.
  */
-async function giuKhoa(lam: (tx: Prisma.TransactionClient) => Promise<void>) {
-  let tha!: () => void;
-  const cho = new Promise<void>((res) => (tha = res));
-  let daGiu!: () => void;
-  const giuXong = new Promise<void>((res) => (daGiu = res));
-  const xong = prisma.$transaction(
-    async (tx: Prisma.TransactionClient) => {
-      await lam(tx);
-      daGiu();
-      await cho;
-    },
-    { timeout: 20_000 },
-  );
-  await giuXong;
-  return { tha, xong };
-}
+const giuKhoa = (lam: (tx: Prisma.TransactionClient) => Promise<void>) =>
+  giuTransactionDenKhiTha("giữ khoá hồ sơ nợ", lam);
 
 /** Chạy `goi` trong lúc khoá đang bị giữ, nhả sau 800 ms. Trả kết quả + thời gian chờ. */
 async function chayKhiBiGiu<T>(giu: { tha: () => void; xong: Promise<unknown> }, goi: () => Promise<T>) {
   const t0 = performance.now();
-  const p = goi().then((r) => ({ r, ms: performance.now() - t0 }));
+  const p = chayNen("lượt ghi chờ khoá hồ sơ", async () => {
+    const r = await goi();
+    return { r, ms: performance.now() - t0 };
+  });
   await new Promise((res) => setTimeout(res, 800));
   // Trước khi khoá nhả: lượt ghi chưa được để lại dấu vết OK nào (nó phải đang chờ khoá).
   const nhatKyTruocKhiNha = await prisma.auditLog.count({ where: { hanhDong: { startsWith: "DONG_TIEN_" }, ketQua: "OK" } });
@@ -98,7 +96,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await prisma.auditLog.deleteMany();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
@@ -108,11 +109,15 @@ beforeEach(async () => {
   vi.setSystemTime(vn("2026-11-26", "10:00:00"));
 });
 
-afterEach(async () => {
-  vi.restoreAllMocks();
-  vi.useRealTimers();
-  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+      await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();

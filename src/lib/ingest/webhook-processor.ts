@@ -258,9 +258,9 @@ type SoSanhBanApi = {
 /**
  * GUARD THỨ TỰ (bịt lỗi Silver thụt lùi — chứng minh thực nghiệm 2026-07-27).
  *
- * `landRaw` đóng dấu `fetchedAt = now()` — mốc LAND, không phải mốc NỘI DUNG. Đây là lớp guard ĐẦU
+ * `landRaw` đóng dấu `fetchedAt = clock_timestamp()` + `landSeq` (số land đơn điệu) — mốc LAND, không phải mốc NỘI DUNG. Đây là lớp guard ĐẦU
  * TIÊN (trước khi land) của MỘT thứ tự phiên bản chung cho đơn Pancake (`thu-tu-phien-ban-don.ts`:
- * `updated_at` trước, `fetchedAt` sau — đường dựng Silver và sổ kết cục cùng xếp theo nó; lớp sau là
+ * `updated_at` trước, rồi `fetchedAt`, `landSeq` — đường dựng Silver và sổ kết cục cùng xếp theo nó; lớp sau là
  * guard `updated_at` ở `upsertOneOrder`). Trước khi có thứ tự đó, transform chọn bản `fetchedAt` mới
  * nhất ⇒ nguồn land SAU luôn thắng, BẤT KỂ nội dung nó chụp lúc nào. Đường API cũ miễn nhiễm (API
  * luôn trả trạng thái hiện tại), nhưng webhook là nguồn ĐẦU TIÊN có thể mang nội dung CŨ tới muộn:

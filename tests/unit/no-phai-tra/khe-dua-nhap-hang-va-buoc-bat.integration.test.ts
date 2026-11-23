@@ -84,13 +84,21 @@ import { batLaiDinhKy, createExpense, deleteExpense, updateExpense } from "@/lib
 import { ensureRecurringExpensesChiTiet } from "@/lib/expenses/ensure-recurring-expenses";
 import { docDeXuatPhieuNhap } from "@/lib/nhap-hang/doc-phieu-nhap-bronze";
 import { vanTayDeXuatPhieuNhap } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
-import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { SHOP_KHO } from "../../helpers/shop-ids-fixture";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  chayNen,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giaLapBuocBatGiuKhoa,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const vn = (ngay: string, gio = "00:00:00") => new Date(`${ngay}T${gio}+07:00`);
 const M = "2026-09-01";
@@ -112,43 +120,14 @@ async function duyetTatCa(): Promise<{ vanTay: string; chon: { uuid: string; soT
 }
 
 /**
- * Giả lập bước bật: giữ EXCLUSIVE + ghi Setting M (chưa commit) 0,8s rồi commit. `hanhDong` chạy giữa chừng;
- * trả kết quả + thời gian nó phải chờ.
- */
-/**
  * Vân tay quỹ bất kỳ cho lượt bật chỉ cốt thấy LỖI ĐIỀU KIỆN: điều kiện tiên quyết kiểm TRƯỚC vân tay, nên số ở
  * đây không bao giờ được so tới.
  */
 const VAN_TAY_BAT_KY = { quyApp: 0, duNoThauChi: 0, tongPhieuY: 0 };
 
-async function trongLucBuocBatGiuKhoa<T>(
-  hanhDong: () => Promise<T>,
-  moc: string = M,
-  /** Chạy sau khi `hanhDong` đã bắt đầu, TRƯỚC khi bước bật commit (đổi dữ liệu xen giữa). */
-  giua?: () => Promise<void>
-): Promise<{ r: T; ms: number }> {
-  let tha!: () => void;
-  const cho = new Promise<void>((res) => (tha = res));
-  let daGiu!: () => void;
-  const giuXong = new Promise<void>((res) => (daGiu = res));
-  const buocBat = prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
-      await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: moc } });
-      daGiu();
-      await cho;
-    },
-    { timeout: 20_000 }
-  );
-  await giuXong;
-  const t0 = performance.now();
-  const p = hanhDong().then((r) => ({ r, ms: performance.now() - t0 }));
-  if (giua) await giua();
-  await new Promise((res) => setTimeout(res, 800));
-  tha();
-  await buocBat;
-  return p;
-}
+/** Giả lập bước bật (helper chung — hook dọn chờ/huỷ transaction còn treo); mặc định M của file. */
+const trongLucBuocBatGiuKhoa = <T>(hanhDong: () => Promise<T>, moc: string = M, giua?: () => Promise<void>) =>
+  giaLapBuocBatGiuKhoa(moc, hanhDong, giua);
 
 const docM = async () => (await prisma.setting.findUnique({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } }))?.value ?? null;
 
@@ -156,7 +135,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
   await seedBronzePhieuNhap();
@@ -172,11 +154,15 @@ beforeEach(async () => {
   vi.setSystemTime(vn("2026-09-20", "10:00:00"));
 });
 
-afterEach(async () => {
-  vi.useRealTimers();
-  treNhatKy.hanhDong = null;
-  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.useRealTimers();
+      treNhatKy.hanhDong = null;
+      await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -223,10 +209,12 @@ describe("đường ghi Nhập hàng chạy trước ⇒ bước bật chờ r�
     treNhatKy.ms = 800;
     treNhatKy.daVao = daVao;
 
-    const ghi = ghiChiPhiNhapHang(duyet);
+    const ghi = chayNen("ghiChiPhiNhapHang", () => ghiChiPhiNhapHang(duyet));
     await vaoNhatKy; // dòng Nhập hàng đã chèn trong transaction, chưa commit
     const t0 = performance.now();
-    const bat = await xacNhanBatNoPhaiTra({ yeuCauId: randomUUID(), mocM: M, the: [], viAds: [], dieuChinh: [], vanTayQuy: VAN_TAY_BAT_KY });
+    const bat = await chayNen("xacNhanBatNoPhaiTra", () =>
+      xacNhanBatNoPhaiTra({ yeuCauId: randomUUID(), mocM: M, the: [], viAds: [], dieuChinh: [], vanTayQuy: VAN_TAY_BAT_KY })
+    );
     const ms = performance.now() - t0;
 
     expect(await ghi).toMatchObject({ ok: true, data: { daGhi: duyet.chon.length } });
@@ -266,10 +254,12 @@ describe("bật lại mẫu định kỳ Nhập hàng ↔ bước bật", () => 
     treNhatKy.ms = 800;
     treNhatKy.daVao = daVao;
 
-    const batLai = batLaiDinhKy(mau.id, { thangBatDau: "2026-09" });
+    const batLai = chayNen("batLaiDinhKy", () => batLaiDinhKy(mau.id, { thangBatDau: "2026-09" }));
     await vaoNhatKy; // mẫu đã bật trong transaction, chưa commit
     const t0 = performance.now();
-    const bat = await xacNhanBatNoPhaiTra({ yeuCauId: randomUUID(), mocM: M, the: [], viAds: [], dieuChinh: [], vanTayQuy: VAN_TAY_BAT_KY });
+    const bat = await chayNen("xacNhanBatNoPhaiTra", () =>
+      xacNhanBatNoPhaiTra({ yeuCauId: randomUUID(), mocM: M, the: [], viAds: [], dieuChinh: [], vanTayQuy: VAN_TAY_BAT_KY })
+    );
     const ms = performance.now() - t0;
 
     expect(await batLai).toMatchObject({ ok: true });

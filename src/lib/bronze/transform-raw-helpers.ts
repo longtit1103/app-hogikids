@@ -205,8 +205,10 @@ export function mocPhienBanSql(table: string): string {
 
 /**
  * Khoá `ORDER BY` của thứ tự phiên bản (bản ĐỨNG ĐẦU trước) — ghép sau khoá nhóm cho `DISTINCT ON`. `"id" DESC` chốt
- * cuối: mốc là TIMESTAMP(3), hai phiên bản trùng mili-giây thì `DISTINCT ON` chọn tuỳ ý (số tiền theo may rủi).
- * KHÔNG dùng cho đơn Pancake (`THU_TU_PHIEN_BAN_DON_SQL`).
+ * cuối: mốc là TIMESTAMP(3), hai phiên bản trùng mili-giây thì `DISTINCT ON` không còn chọn tuỳ ý giữa các lượt
+ * đọc — nhưng `id` là uuid NGẪU NHIÊN nên nó chỉ làm thứ tự XÁC ĐỊNH, không làm nó ĐÚNG thứ tự land (bản land trước
+ * thắng khoảng một nửa số ca trùng mốc). KHÔNG dùng cho đơn Pancake (`THU_TU_PHIEN_BAN_DON_SQL` phân xử bằng
+ * `landSeq` trước `id`).
  */
 export function thuTuPhienBanSql(table: string): string {
   return `${mocPhienBanSql(table)} DESC, "id" DESC`;
@@ -233,6 +235,12 @@ export type RawRow = {
    * `fetchedAt` ở bảng có cột lần thấy (A→B→A); đơn Pancake vẫn dùng `fetchedAt` làm mốc land (`Order.rawFetchedAt`).
    */
   mocPhienBan: Date;
+  /**
+   * CHỈ đơn Pancake (`RawPancakeOrder.landSeq`, bảng khác không có cột ⇒ vắng): số thứ tự land đơn điệu, đi cặp
+   * `fetchedAt` làm mốc nguồn CAS ghi Silver (`Order.rawFetchedAt`/`rawLandSeq`). BIGINT ⇒ chỉ dùng trong ingest,
+   * KHÔNG đưa qua JSON/RSC.
+   */
+  landSeq?: bigint;
 };
 
 export type LatestFilter = {
@@ -251,7 +259,7 @@ export type LatestFilter = {
  *
  * NGOẠI LỆ — đơn Pancake (`RawPancakeOrder`), MỌI đường (quét cả bảng lẫn theo từng đơn `externalIds`):
  * xếp bằng MỘT thứ tự phiên bản duy nhất `THU_TU_PHIEN_BAN_DON_SQL` (`updated_at` Pancake trước,
- * `fetchedAt` sau — `thu-tu-phien-ban-don.ts`), CÙNG thứ tự mà sổ kết cục (`ket-cuc-silver.ts`) dùng
+ * rồi mốc land `fetchedAt`, `landSeq` — `thu-tu-phien-ban-don.ts`), CÙNG thứ tự mà sổ kết cục (`ket-cuc-silver.ts`) dùng
  * để nói bản nào là bản đứng đầu, bản nào là bản cũ. Lý do: `fetchedAt` là mốc LAND, không phải mốc
  * NỘI DUNG — trang API chụp trước một sự kiện webhook mà POST sau vẫn land muộn hơn. Khi Silver chưa
  * có đơn (DR, hoặc transform của bản mới từng hỏng) thì guard `updated_at` ở `upsertOneOrder` không
@@ -262,9 +270,10 @@ export type LatestFilter = {
  * Bảng khác: thứ tự phiên bản chung `thuTuPhienBanSql` (mốc = lần thấy cuối nếu bảng có cột đó, không thì
  * `fetchedAt` — xem `BANG_LAN_THAY`).
  *
- * Tiebreaker `"id" DESC`: `fetchedAt` là TIMESTAMP(3) — 2 phiên bản cùng entity land trong CÙNG
- * mili-giây thì `DISTINCT ON` chọn bản tuỳ ý, tức số TIỀN của đơn phụ thuộc may rủi. Thêm `id`
- * vào ORDER BY để "bản thắng" luôn xác định.
+ * Trùng mốc: `fetchedAt` là TIMESTAMP(3) — 2 phiên bản cùng entity land trong CÙNG mili-giây là có thật.
+ * Đơn Pancake phân xử bằng `landSeq` (số land đơn điệu cấp dưới khoá land) ⇒ bản land SAU thắng. Bảng khác
+ * còn `"id" DESC`: bản thắng XÁC ĐỊNH giữa các lượt đọc nhưng `id` là uuid ngẫu nhiên nên KHÔNG bảo đảm là
+ * bản land sau (kiểm kê các bảng đó là việc riêng).
  *
  * ⚠️ BẤT BIẾN int64 — đọc `payload` qua Prisma (`Json`) CHÍNH LÀ `JSON.parse`:
  * số > Number.MAX_SAFE_INTEGER sẽ bị làm tròn (461168615117802872 → …900).
@@ -295,12 +304,13 @@ export async function latestPayloads(
   const laDonPancake = table === "RawPancakeOrder";
   const noiMoc = laDonPancake ? NOI_MOC_PHIEN_BAN_DON_SQL : "";
   const thuTu = laDonPancake ? THU_TU_PHIEN_BAN_DON_SQL : thuTuPhienBanSql(table);
-  // `fetchedAt` đi kèm payload: nhánh `orders` dùng nó làm SỐ PHIÊN BẢN cho phép ghi Silver, để hai
-  // lượt transform song song không ghi ngược thứ tự (xem `Order.rawFetchedAt`). `mocPhienBan` là số
-  // phiên bản của nhánh Silver TikTok (`nguonFetchedAt`).
+  // `fetchedAt` (+ `landSeq` của đơn Pancake) đi kèm payload: nhánh `orders` dùng cặp này làm SỐ PHIÊN BẢN cho phép
+  // ghi Silver, để hai lượt transform song song không ghi ngược thứ tự (xem `Order.rawFetchedAt`/`rawLandSeq`).
+  // `mocPhienBan` là số phiên bản của nhánh Silver TikTok (`nguonFetchedAt`). Bảng khác không có cột `landSeq`.
+  const cotLandSeq = laDonPancake ? `, "landSeq"` : "";
   return prisma.$queryRawUnsafe<RawRow[]>(
     `
-    SELECT DISTINCT ON ("shopId", "externalId") "id", "shopId", "externalId", payload, "fetchedAt",
+    SELECT DISTINCT ON ("shopId", "externalId") "id", "shopId", "externalId", payload, "fetchedAt"${cotLandSeq},
       ${mocPhienBanSql(table)} AS "mocPhienBan"
     FROM "${table}" ${noiMoc}
     ${where}

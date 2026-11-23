@@ -9,8 +9,9 @@ import { SHOP_KHO } from "./shop-ids-fixture";
  * tối giản (đúng các trường `rutPhieuTuPayload` đọc), seed Bronze có `fetchedAt` điều khiển được, đặt /
  * gỡ mốc bật M, và tạo hồ sơ `PhieuNhapNo` trực tiếp.
  *
- * Bảng `RawPancakePurchase` và khoá `Setting.noPhaiTraTuNgay` KHÔNG nằm trong `truncateBusinessTables`
- * ⇒ suite gọi `donFixtureNoPhaiTra()` ở beforeEach + afterAll.
+ * Bảng `RawPancakePurchase` KHÔNG nằm trong `truncateBusinessTables` ⇒ suite gọi `donFixtureNoPhaiTra()`
+ * ở beforeEach + afterAll. Khoá `Setting.noPhaiTraTuNgay` (M) thì `truncateBusinessTables` đã xoá; gọi
+ * lại `datMocM(null)` ở đây vẫn vô hại (cho suite không gọi truncate, hoặc cần gỡ M giữa chừng).
  */
 
 export const vn = (iso: string) => new Date(`${iso}+07:00`);
@@ -61,7 +62,7 @@ export async function datMocM(ngay: string | null): Promise<void> {
   if (ngay !== null) await prisma.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: ngay } });
 }
 
-/** Dọn phần fixture nằm ngoài `truncateBusinessTables`. */
+/** Dọn phần fixture nằm ngoài `truncateBusinessTables` (`RawPancakePurchase`) + gỡ mốc M (truncate cũng đã gỡ). */
 export async function donFixtureNoPhaiTra(): Promise<void> {
   await prisma.rawPancakePurchase.deleteMany();
   await datMocM(null);

@@ -151,6 +151,13 @@ model Order {
   /// song không ghi ngược thứ tự (bước dựng Silver cố ý nằm NGOÀI khoá land để webhook khỏi xếp
   /// hàng). `null` = bản ghi có trước khi thêm cột này ⇒ lượt ghi nào cũng được đè (tự lành dần).
   rawFetchedAt         DateTime?
+  /// MỐC NGUỒN phần hai: `RawPancakeOrder.landSeq` của CHÍNH dòng kho thô đã dựng nên bản này — đi CẶP với
+  /// `rawFetchedAt`. Chỉ dùng khi hai bản bằng nhau theo `updated_at` (guard `soThuTuCapNhatDon` trả `BANG` /
+  /// `KHONG_SO_DUOC`): lượt ghi được đè khi `rawFetchedAt` NULL hoặc cũ hơn, hoặc BẰNG mà `rawLandSeq` NULL hoặc
+  /// ≤ số của nó. Hai bản land cùng mili-giây thì số land quyết, không phải `id` (uuid ngẫu nhiên — cùng thứ tự
+  /// với `THU_TU_PHIEN_BAN_DON_SQL`). `null` = đơn có trước cột này mà không khớp đúng một dòng kho thô (luật cũ:
+  /// chỉ so `rawFetchedAt`), hoặc đường ghi không mốc nguồn. BIGINT — chỉ sống trong ingest, không đưa ra JSON/màn hình.
+  rawLandSeq           BigInt?
   /// Đơn được BÙ từ bản sao trong shop kho vì Pancake không còn đơn gốc ở shop bán
   /// (`scripts/bu-don-shopee-tu-don-kho.ts`). Vào P&L y hệt đơn thường — cờ này CHỈ để các đường
   /// bảo vệ tiền nhận ra: lượt dựng lại KHÔNG tái tạo được chúng (luật mirror loại), và phép đếm
@@ -696,13 +703,21 @@ model RawPancakeOrder {
   payload     Json
   fetchedAt   DateTime @default(now())
   syncLogId   String?
+  /// SỐ THỨ TỰ LAND đơn điệu (sequence `RawPancakeOrder_landSeq_seq`), cấp lúc INSERT. Mọi lượt land đơn chạy dưới
+  /// khoá `giuKhoaLandDon` và câu INSERT xếp `ORDER BY thu_tu` ⇒ bản land SAU luôn có số LỚN hơn, kể cả khi
+  /// `fetchedAt` (TIMESTAMP(3)) trùng mili-giây. Là khoá phân xử thứ ba của thứ tự phiên bản đơn
+  /// (`mốc updated_at, fetchedAt, landSeq, id` — `THU_TU_PHIEN_BAN_DON_SQL`). Không dùng `id` để phân xử vì `id` là
+  /// uuid ngẫu nhiên: trùng mốc thì bản land trước thắng khoảng một nửa số ca. Có KHE (rollback, `ON CONFLICT DO
+  /// NOTHING` vẫn tiêu số) — chỉ thứ tự tương đối có nghĩa. Dòng có trước cột này được đánh số theo `(fetchedAt, id)`
+  /// (giữ nguyên bản đang thắng). BIGINT — không đưa ra JSON/màn hình.
+  landSeq     BigInt   @default(autoincrement())
 
   /// KẾT CỤC dựng Silver của CHÍNH dòng này (payload không bao giờ bị sửa):
   ///   `APPLIED`         — đã ghi vào Silver.
   ///   `EXCLUDED_MIRROR` — transform CỐ Ý không ghi (đơn mirror kho, bất biến doanh thu #2).
   ///                       KHÔNG có nghĩa "không tồn tại đơn Silver nào": script bù đơn Shopee
   ///                       dựng đơn thật TỪ chính các dòng mirror này (46/522 dòng, 7,89tr).
-  ///   `SUPERSEDED`      — đã có phiên bản mới hơn thắng (thua CAS `rawFetchedAt`, hoặc không
+  ///   `SUPERSEDED`      — đã có phiên bản mới hơn thắng (thua CAS `rawFetchedAt`/`rawLandSeq`, hoặc không
   ///                       phải bản mới nhất của khoá (shopId, externalId)).
   ///   `FAILED_SHAPE`    — payload hiện KHÔNG map được (shape sai, ngày giờ không hợp lệ…). Payload
   ///                       bất biến ⇒ lỗi TẤT ĐỊNH ⇒ dừng retry tự động, nhưng vẫn hiện "cần xem".

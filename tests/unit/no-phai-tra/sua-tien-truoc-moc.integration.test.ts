@@ -41,7 +41,7 @@ import { updateExpense } from "@/lib/actions/expenses";
 import { ensureRecurringExpensesChiTiet } from "@/lib/expenses/ensure-recurring-expenses";
 import { suaSoTienTruocMoc } from "@/lib/actions/sua-tien-truoc-moc";
 import { LOI_DANG_PHUC_HOI, thuGiuKhoaPhucHoi } from "@/lib/backup/khoa-bao-tri";
-import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docSoLieuTruocM } from "@/lib/no-phai-tra/doc-chenh-lech-tai-m";
 import { docNguCanhLoc } from "@/lib/no-phai-tra/doc-ngu-canh-loc";
 import { docDieuChinhDaGhi } from "@/lib/no-phai-tra/doc-trang-no-phai-tra";
@@ -55,6 +55,16 @@ import { docTongNguon, ngayMoSo } from "@/lib/so-quy/so-quy-queries";
 import { donKhoaPhucHoi } from "../../helpers/khoa-bao-tri-reset";
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  chayNen,
+  choTatCa,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giaLapBuocBatGiuKhoa,
+  giuTransactionDenKhiTha,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const vn = (ngay: string, gio = "00:00:00") => new Date(`${ngay}T${gio}+07:00`);
 const tr = (n: number) => Math.round(n * 1_000_000);
@@ -65,7 +75,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
   vi.mocked(docNguoiDungPhien).mockResolvedValue(nguoiDungGia());
@@ -79,12 +92,16 @@ beforeEach(async () => {
   });
 });
 
-afterEach(async () => {
-  vi.useRealTimers();
-  rao.bat = false;
-  donKhoaPhucHoi();
-  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.useRealTimers();
+      rao.bat = false;
+      donKhoaPhucHoi();
+      await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -166,7 +183,8 @@ describe("sửa số tiền dòng chi trong quỹ (D0 ≤ ngày < M) ⇒ bù đi
   it("Δ > 0: 8tr → 9tr ⇒ thêm CUTOVER_ADJ_IN 1tr ngày M; bất biến giữ tuyệt đối, quỹ hôm nay không đổi, Lãi/Lỗ tháng 9 giảm 1tr", async () => {
     const chi = await taoChi({ date: vn("2026-09-15"), amount: tr(8), description: "Tiền nhà tháng 9" });
     await batOk([{ chieu: "OUT", soTien: tr(2), moTa: "Chênh chưa giải thích" }]);
-    const dongBat = await prisma.cashMovement.findFirstOrThrow({ where: { kind: { in: [...KIND_CUTOVER] } } });
+    // Dòng của bước bật nhận diện bằng `yeuCauId` (mã yêu cầu bật); dòng bù do lối sửa ghi sau có `yeuCauId` null.
+    const dongBat = await prisma.cashMovement.findFirstOrThrow({ where: { kind: { in: [...KIND_CUTOVER] }, yeuCauId: { not: null } } });
 
     const [k, q, quyM1, pnl9] = [await batBien(), await quyHomNay(), await quyTruocM(), await loiLoThang("2026-09-01", "2026-09-30")];
     expect(k).toBe(tr(100) - tr(8) - tr(2));
@@ -180,22 +198,29 @@ describe("sửa số tiền dòng chi trong quỹ (D0 ≤ ngày < M) ⇒ bù đi
     expect(await loiLoThang("2026-09-01", "2026-09-30")).toBe(pnl9 - tr(1));
     expect((await prisma.expense.findUniqueOrThrow({ where: { id: chi.id } })).amount).toBe(tr(9));
 
-    const cutover = await prisma.cashMovement.findMany({ where: { kind: { in: [...KIND_CUTOVER] } }, orderBy: { createdAt: "asc" } });
+    // Chọn dòng theo `id` / `yeuCauId`, KHÔNG theo thứ tự `createdAt`: hai dòng ghi trong cùng một mili-giây (đồng hồ
+    // giả đứng yên) có `createdAt` trùng nên thứ tự trả về không cố định.
+    const cutover = await prisma.cashMovement.findMany({ where: { kind: { in: [...KIND_CUTOVER] } } });
     expect(cutover).toHaveLength(2);
     // Dòng của bước bật NGUYÊN VẸN.
-    expect(cutover[0]).toEqual(dongBat);
-    expect(cutover[1]).toMatchObject({ kind: "CUTOVER_ADJ_IN", amount: tr(1), date: vn(M), yeuCauId: null, loanId: null });
-    expect(cutover[1]!.description).toBe(
+    expect(cutover.find((d) => d.id === dongBat.id)).toEqual(dongBat);
+    const dongBu = cutover.filter((d) => d.id !== dongBat.id);
+    expect(dongBu).toHaveLength(1);
+    expect(dongBu[0]).toMatchObject({ kind: "CUTOVER_ADJ_IN", amount: tr(1), date: vn(M), yeuCauId: null, loanId: null });
+    expect(dongBu[0]!.description).toBe(
       'Bù sửa chi phí 15/09/2026 "Tiền nhà tháng 9": 8.000.000 ₫ → 9.000.000 ₫ — Hoá đơn tiền nhà ghi thiếu'
     );
-    // Trang Nợ phải trả tách dòng của bước bật khỏi dòng bù (theo `yeuCauId`).
-    expect((await docDieuChinhDaGhi()).map((d) => [d.id, d.cuaBuocBat])).toEqual([
-      [dongBat.id, true],
-      [cutover[1]!.id, false],
-    ]);
+    // Trang Nợ phải trả tách dòng của bước bật khỏi dòng bù (theo `yeuCauId`). Hai dòng cùng `date` + `createdAt` nên
+    // thứ tự mảng không bảo đảm ⇒ so theo `id`: đúng 2 dòng, đúng cờ `cuaBuocBat` cho từng `id`.
+    const daGhi = await docDieuChinhDaGhi();
+    expect(daGhi).toHaveLength(2);
+    expect(Object.fromEntries(daGhi.map((d) => [d.id, d.cuaBuocBat]))).toEqual({
+      [dongBat.id]: true,
+      [dongBu[0]!.id]: false,
+    });
 
     const nhatKy = await prisma.auditLog.findMany({
-      where: { OR: [{ doiTuongId: chi.id }, { doiTuongId: cutover[1]!.id }], ketQua: "OK" },
+      where: { OR: [{ doiTuongId: chi.id }, { doiTuongId: dongBu[0]!.id }], ketQua: "OK" },
       orderBy: { hanhDong: "asc" },
     });
     expect(nhatKy.map((n) => n.hanhDong)).toEqual(["CHI_PHI_SUA_TIEN_TRUOC_MOC", "DONG_TIEN_TAO"]);
@@ -380,26 +405,7 @@ describe("đồng thời", () => {
   it("bước bật đang giữ EXCLUSIVE ⇒ lối sửa CHỜ nó commit rồi đọc M mới ⇒ sửa + bù theo M đó", async () => {
     const chi = await taoChi({ date: vn("2026-09-15"), amount: tr(8) });
     const k = await batBien();
-    let tha!: () => void;
-    const cho = new Promise<void>((res) => (tha = res));
-    let daGiu!: () => void;
-    const giuXong = new Promise<void>((res) => (daGiu = res));
-    const buocBat = prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
-        await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: M } });
-        daGiu();
-        await cho;
-      },
-      { timeout: 20_000 }
-    );
-    await giuXong;
-    const t0 = performance.now();
-    const p = sua(chi.id, tr(8), tr(9)).then((r) => ({ r, ms: performance.now() - t0 }));
-    await new Promise((res) => setTimeout(res, 800));
-    tha();
-    await buocBat;
-    const { r, ms } = await p;
+    const { r, ms } = await giaLapBuocBatGiuKhoa(M, () => sua(chi.id, tr(8), tr(9)));
 
     expect(ms).toBeGreaterThanOrEqual(700);
     expect(r).toEqual({ ok: true, data: { coBu: true, chieu: "IN", soTienBu: tr(1) } });
@@ -411,7 +417,10 @@ describe("đồng thời", () => {
     await batOk();
     const k = await batBien();
     rao.bat = true;
-    const [a, b] = await Promise.all([sua(chi.id, tr(8), tr(9)), sua(chi.id, tr(8), tr(10))]);
+    const [a, b] = await choTatCa([
+      chayNen("sửa 8tr → 9tr", () => sua(chi.id, tr(8), tr(9))),
+      chayNen("sửa 8tr → 10tr", () => sua(chi.id, tr(8), tr(10))),
+    ]);
     rao.bat = false;
 
     const thang = [a, b].filter((r) => r.ok);
@@ -432,15 +441,17 @@ describe("đồng thời", () => {
     // Giữ khoá dòng chi để CẢ HAI lượt đều đọc dòng (1tr) rồi đứng xếp hàng ở câu ghi: lối sửa số tiền tới trước,
     // lượt sửa mô tả tới sau. Thả khoá ⇒ lối sửa ghi 1,5tr + bù rồi commit; lượt sửa mô tả mới tới câu ghi của nó.
     const giu = await giuKhoaDongChi(chi.id);
-    const pTien = sua(chi.id, tr(1), tr(1.5));
+    const pTien = chayNen("sửa số tiền 1tr → 1,5tr", () => sua(chi.id, tr(1), tr(1.5)));
     await choSoLuotDungChoGhiChi(1);
-    const pMoTa = updateExpense(chi.id, {
-      date: vn("2026-09-15"),
-      categoryId: "fixed",
-      amount: tr(1),
-      channelId: null,
-      description: "Tiền điện tháng 9 (đã đối chiếu)",
-    });
+    const pMoTa = chayNen("sửa mô tả thường", () =>
+      updateExpense(chi.id, {
+        date: vn("2026-09-15"),
+        categoryId: "fixed",
+        amount: tr(1),
+        channelId: null,
+        description: "Tiền điện tháng 9 (đã đối chiếu)",
+      })
+    );
     await choSoLuotDungChoGhiChi(2);
     giu.tha();
     await giu.xong;
@@ -457,23 +468,14 @@ describe("đồng thời", () => {
   });
 });
 
-/** Transaction riêng giữ `FOR UPDATE` trên một dòng chi cho tới khi gọi `tha()`. */
-async function giuKhoaDongChi(id: string): Promise<{ tha: () => void; xong: Promise<unknown> }> {
-  let daGiu!: () => void;
-  const giuXong = new Promise<void>((res) => (daGiu = res));
-  let tha!: () => void;
-  const cho = new Promise<void>((res) => (tha = res));
-  const xong = prisma.$transaction(
-    async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "Expense" WHERE id = ${id} FOR UPDATE`;
-      daGiu();
-      await cho;
-    },
-    { timeout: 20_000 }
-  );
-  await giuXong;
-  return { tha, xong };
-}
+/**
+ * Transaction riêng giữ `FOR UPDATE` trên một dòng chi cho tới khi gọi `tha()` (helper chung — test lỗi sớm / hết giờ
+ * thì hook dọn ROLLBACK nó và chờ các lượt đang đứng chờ khoá chạy xong).
+ */
+const giuKhoaDongChi = (id: string) =>
+  giuTransactionDenKhiTha("giữ FOR UPDATE dòng chi", async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Expense" WHERE id = ${id} FOR UPDATE`;
+  });
 
 /**
  * Chờ tới khi đúng `n` kết nối khác đang ĐỨNG CHỜ khoá ở câu `UPDATE` bảng `Expense` (`pg_stat_activity`) —

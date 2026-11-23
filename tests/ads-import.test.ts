@@ -6,11 +6,18 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { importAdsExpenses, previewAdsImport } from "@/lib/actions/ads-import";
 import { parseAdsFile } from "@/lib/import/ads-csv";
 import { ghiNhatKy } from "@/lib/nhat-ky/ghi-nhat-ky";
-import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { nguoiDungGia } from "./helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
+import {
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giaLapBuocBatGiuKhoa,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "./helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 /**
  * Integration test import CSV ads (`hogikids_test`) — chạy trên DB thật, chỉ
@@ -481,14 +488,21 @@ describe("importAdsExpenses — đã bật nợ phải trả: bỏ dòng trướ
       },
     });
 
+  dangKyTheHeCa();
+
   beforeEach(async () => {
+    moTheoDoiThaoTacNen();
     await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
     await prisma.auditLog.deleteMany();
   });
 
-  afterEach(async () => {
-    await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-  });
+  afterEach(
+    () =>
+      donSauKhiThaoTacNenXong(async () => {
+        await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+      }),
+    TIMEOUT_HOOK_DON_MS
+  );
 
   it("file trộn ngày < M và ≥ M ⇒ chỉ dòng ≥ M vào sổ, đếm đúng; Σ chi phí ngày < M không đổi", async () => {
     await batGia();
@@ -567,26 +581,7 @@ describe("importAdsExpenses — đã bật nợ phải trả: bỏ dòng trướ
   });
 
   it("bước bật đang giữ khoá EXCLUSIVE (M chưa commit) ⇒ import CHỜ rồi lọc theo M mới", async () => {
-    let tha!: () => void;
-    const cho = new Promise<void>((res) => (tha = res));
-    let daGiu!: () => void;
-    const giuXong = new Promise<void>((res) => (daGiu = res));
-    const buocBat = prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
-        await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: M } });
-        daGiu();
-        await cho;
-      },
-      { timeout: 20_000 }
-    );
-    await giuXong;
-    const t0 = performance.now();
-    const p = importAdsExpenses(formTron()).then((r) => ({ r, ms: performance.now() - t0 }));
-    await new Promise((res) => setTimeout(res, 800));
-    tha();
-    await buocBat;
-    const { r, ms } = await p;
+    const { r, ms } = await giaLapBuocBatGiuKhoa(M, () => importAdsExpenses(formTron()));
 
     expect(ms).toBeGreaterThanOrEqual(700);
     expect(r).toMatchObject({ ok: true, data: { imported: 3, skippedTruocM: 3, mocM: M } });

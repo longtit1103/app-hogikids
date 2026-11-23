@@ -111,6 +111,52 @@ describe("bu-don-shopee-tu-don-kho — bù đơn mới từ bản sao kho", () =
     expect(don.channelId).toBe("shopee");
     expect(don.code).toBe("30");
   });
+
+  it(
+    "--ghi: đơn bù mang ĐÚNG cặp mốc nguồn (rawFetchedAt, rawLandSeq) của dòng mirror thắng — trùng mili-giây thì số land quyết",
+    { timeout: 60_000 },
+    async () => {
+      // Hai bản land của CÙNG đơn mirror, cùng `fetchedAt` tới mili-giây, cùng `updated_at` ⇒ thứ tự phiên bản quyết
+      // bằng `landSeq` (bản land SAU thắng). Script phải dựng đơn từ bản thắng VÀ truyền đúng cặp mốc của chính dòng
+      // đó — truyền số của dòng khác / bỏ số / lấy `fetchedAt` khác là lượt ghi Silver kế tiếp so sai cặp (CAS).
+      const luc = new Date("2026-03-20T05:00:00.123Z");
+      const payload = (tong: number) => ({
+        id: "AF1942992175O31",
+        system_id: 12346,
+        status: 3,
+        inserted_at: "2026-03-20T03:00:00.000000",
+        updated_at: "2026-03-20T04:00:00.000000",
+        order_sources_name: "Affiliate",
+        marketplace_id: "-3",
+        total_price: tong,
+        total_discount: 0,
+        fee_marketplace: 0,
+        cod: tong,
+        items: [
+          { quantity: 1, variation_id: "v-m", discount_each_product: 0, variation_info: { display_id: "SKU-M", name: "SP M", retail_price: tong } },
+        ],
+      });
+      // `id` cố ý NGƯỢC thứ tự land (bản land trước mang id lớn hơn) — code còn sắp theo `id DESC` thay vì `landSeq` thì
+      // chọn nhầm bản trước và test đỏ.
+      const truoc = await prisma.rawPancakeOrder.create({
+        data: { id: "raw-zz-31", shopId: "714995134", externalId: "AF1942992175O31", payloadHash: "h-mirror-31a", payload: payload(250_000), fetchedAt: luc },
+      });
+      const sau = await prisma.rawPancakeOrder.create({
+        data: { id: "raw-aa-31", shopId: "714995134", externalId: "AF1942992175O31", payloadHash: "h-mirror-31b", payload: payload(260_000), fetchedAt: luc },
+      });
+      expect(sau.landSeq).toBeGreaterThan(truoc.landSeq);
+      expect(sau.id < truoc.id).toBe(true);
+
+      chayScript(["--ghi"]);
+
+      const don = await prisma.order.findUniqueOrThrow({ where: { pancakeId: "AF1942992175O31" } });
+      expect(don.backfilledFromMirror).toBe(true);
+      expect(don.itemsTotal).toBe(260_000); // nội dung của bản land SAU
+      expect(don.rawFetchedAt?.toISOString()).toBe(sau.fetchedAt.toISOString());
+      expect(don.rawLandSeq).toBe(sau.landSeq);
+      expect(don.rawLandSeq).not.toBe(truoc.landSeq);
+    },
+  );
 });
 
 describe("bu-don-shopee-tu-don-kho — bước tự sửa cờ đơn bù", () => {

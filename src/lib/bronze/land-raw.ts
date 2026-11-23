@@ -369,13 +369,22 @@ export async function landRaw(
   // cách rẻ nhất để bảo đảm khoá/hash của mọi stream đang chạy không đổi một bit.
   const chieuElemMeta = ngay === undefined ? `elem` : `elem || jsonb_build_object('_ngay', $3::text) AS elem`;
   const thamSoMeta: unknown[] = ngay === undefined ? [responseText, path] : [responseText, path, ngay];
-  const tuElemInsert =
-    ngay === undefined
+  // Đơn Pancake: số land `landSeq` (DEFAULT nextval) phải tăng theo THỨ TỰ PHẦN TỬ trong trang — Postgres chỉ bảo
+  // đảm thứ tự cấp số khi câu SELECT có `ORDER BY` tường minh (không có thì "thường đúng" nhưng không được hứa). Bung
+  // mảng kèm `WITH ORDINALITY` để có `thu_tu` rồi xếp theo nó. Stream này không khai `chapNhanNgay` (`ngay` đã bị từ
+  // chối ở trên) nên chỉ cần nhánh không `ngay`. Bảng khác giữ NGUYÊN VĂN câu cũ.
+  const laDonPancake = table === "RawPancakeOrder";
+  const tuElemInsert = laDonPancake
+    ? `jsonb_array_elements(($1::jsonb) #> $4::text[]) WITH ORDINALITY AS x(elem, thu_tu)`
+    : ngay === undefined
       ? `jsonb_array_elements(($1::jsonb) #> $4::text[]) AS elem`
       : `(
       SELECT elem || jsonb_build_object('_ngay', $5::text) AS elem
       FROM jsonb_array_elements(($1::jsonb) #> $4::text[]) AS elem
     ) AS e`;
+  // Chèn NGAY sau `IS NOT NULL`, TRƯỚC chú thích `--` cùng dòng: đặt sau chú thích là `ORDER BY` bị comment mất trong
+  // im lặng (câu vẫn chạy, chỉ mất bảo đảm thứ tự). Bảng khác: chuỗi rỗng ⇒ câu SQL y nguyên văn cũ.
+  const xepTheoThuTuTrang = laDonPancake ? ` ORDER BY x.thu_tu` : "";
   const thamSoInsert: unknown[] =
     ngay === undefined
       ? [responseText, shopId, syncLogId ?? null, path]
@@ -468,7 +477,7 @@ export async function landRaw(
     -- thứ tự land mà khoá vừa thiết lập.
     SELECT gen_random_uuid()::text, $2, ${khoa}, md5(elem::text), elem, clock_timestamp(), $3${giaTriMocChup}
     FROM ${tuElemInsert}
-    WHERE ${khoa} IS NOT NULL   -- không có khoá thì không dedupe được (cần externalId)
+    WHERE ${khoa} IS NOT NULL${xepTheoThuTuTrang}   -- không có khoá thì không dedupe được (cần externalId)
     ON CONFLICT ("shopId", "externalId", "payloadHash") DO NOTHING
     RETURNING "externalId"${traDuoiDau}
     `,

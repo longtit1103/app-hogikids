@@ -1,6 +1,7 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import { ensureRecurringExpenses } from "@/lib/expenses/ensure-recurring-expenses";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 import { docCanhBaoSapCan, docDuBaoQuy, KEY_QUY_TOI_THIEU } from "@/lib/so-quy/du-bao-quy-queries";
 import { tinhSoQuyThang } from "@/lib/so-quy/so-quy-queries";
@@ -44,12 +45,23 @@ vi.mock("react", async (goc) => ({
 const vn = (iso: string) => new Date(`${iso}+07:00`);
 const HOM_NAY = vn("2026-09-24T09:00:00");
 
+/**
+ * Banner (`docCanhBaoSapCan`) NUỐT mọi lỗi đọc rồi trả `null` + `console.error` — đúng cho app, nhưng ở test thì
+ * lỗi DB chập chờn chỉ hiện thành "expected null to deeply equal …", mất nguyên nhân. Bắt lại để test đỏ ĐÚNG lỗi gốc.
+ */
+let loiBiNuot: MockInstance<typeof console.error>;
+
 beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
 beforeEach(async () => {
   await truncateBusinessTables();
+  // Mốc M (`Setting.noPhaiTraTuNgay`) KHÔNG nằm trong `truncateBusinessTables`. File chạy trước để lọt M > 20/09
+  // (vd transaction bước bật commit sau lượt dọn cuối của nó) ⇒ dự báo bỏ lần "Điện" 20/09 đến hạn trước M ⇒
+  // banner chạm ngưỡng 20/10 thay vì 25/09 — đỏ khi chạy cả bộ, xanh khi chạy riêng. Test này cần trạng thái CHƯA bật.
+  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+  loiBiNuot = vi.spyOn(console, "error");
   nho.bang.clear();
   nho.bangD0.clear();
   nho.bangNguCanh.clear();
@@ -72,6 +84,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.useRealTimers();
+  loiBiNuot?.mockRestore(); // `?.`: beforeEach hỏng trước khi gán spy thì không ném thêm TypeError che lỗi gốc
 });
 
 afterAll(async () => {
@@ -91,6 +104,7 @@ describe("phần dự báo nhớ theo request", () => {
     expect(nho.soLanTinh).toBe(1); // tab dùng lại, không tính lần hai
     expect(docNguong.mock.calls.filter(([a]) => a.where.key === KEY_QUY_TOI_THIEU)).toHaveLength(1);
     docNguong.mockRestore();
+    expect(loiBiNuot).not.toHaveBeenCalled(); // sau mockRestore: đỏ ở đây không để spy findUnique rò sang ca sau
     if (tab.trangThai !== "CO_SO") throw new Error("mong CO_SO");
     expect(banner).toEqual({ ngay: "2026-09-25", soDu: 99_400_000, nguong: 99_500_000, nguongDaDat: true });
     expect(tab.cham?.ngay).toBe(banner?.ngay);
@@ -98,8 +112,12 @@ describe("phần dự báo nhớ theo request", () => {
   });
 
   it("🔴 bản nhớ CŨ hơn trang (layout đọc trước, trang sinh dòng định kỳ sau) ⇒ tab tự đọc lại, không nổ", async () => {
-    expect(await docCanhBaoSapCan()).toEqual({ ngay: "2026-09-25", soDu: 99_400_000, nguong: 99_500_000, nguongDaDat: true });
-    expect(await ensureRecurringExpenses(HOM_NAY)).toBe(1);
+    const banner = await docCanhBaoSapCan();
+    expect(loiBiNuot).not.toHaveBeenCalled();
+    expect(banner).toEqual({ ngay: "2026-09-25", soDu: 99_400_000, nguong: 99_500_000, nguongDaDat: true });
+    // Bộ sinh cũng nuốt lỗi (khoá bước bật bận quá 10s / transaction P2028 ⇒ trả 0, không ném) — ghi rõ để lần đỏ
+    // sau khỏi nhầm với lỗi đếm.
+    expect(await ensureRecurringExpenses(HOM_NAY), "bộ sinh trả 0: khoá bước bật bận hoặc P2028 (bị nuốt)").toBe(1);
 
     const tab = await docDuBaoQuy();
     if (tab.trangThai !== "CO_SO") throw new Error("mong CO_SO");
@@ -135,6 +153,7 @@ describe("phần dự báo nhớ theo request", () => {
     // `ngayMoSo` là lượt DUY NHẤT gọi `aggregate` với `_min` trên bảng ghi tay.
     const luotDocD0 = docDb.mock.calls.filter(([a]) => a !== undefined && "_min" in a);
     docDb.mockRestore();
+    expect(loiBiNuot).not.toHaveBeenCalled();
     expect(luotDocD0).toHaveLength(1);
     expect(the.d0).toEqual(vn("2026-09-01T00:00:00"));
     expect(viTiktok).toEqual({

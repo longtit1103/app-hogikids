@@ -76,8 +76,8 @@ async function main(): Promise<void> {
   // Bản kho thô ĐỨNG ĐẦU của mỗi đơn mirror Shopee — theo MỘT thứ tự phiên bản chung của đơn Pancake
   // (`thu-tu-phien-ban-don.ts`). Script chỉ dựng đơn Silver CHƯA có, nên guard `updated_at` ở upsert
   // không có bản nào để so: xếp theo `fetchedAt` ở đây là trang cũ land muộn thắng nội dung mới.
-  const rows = await prisma.$queryRaw<{ externalId: string; payload: unknown; fetchedAt: Date }[]>`
-    SELECT DISTINCT ON ("externalId") "externalId", payload, "fetchedAt"
+  const rows = await prisma.$queryRaw<{ externalId: string; payload: unknown; fetchedAt: Date; landSeq: bigint }[]>`
+    SELECT DISTINCT ON ("externalId") "externalId", payload, "fetchedAt", "landSeq"
     FROM "RawPancakeOrder" ${noiMocPhienBanDon}
     WHERE "shopId" = ${SHOP_KHO} AND "externalId" LIKE ${`AF${SHOP_SHOPEE}O%`}
     ORDER BY "externalId", ${thuTuPhienBanDon}
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
       // `chanKhiCoDonKhacCungKenhMa`: snapshot `daCo` chụp đầu lượt là chưa đủ — sync/webhook chạy
       // song song có thể chen đơn gốc vào; check + khoá (kênh, mã) nằm TRONG transaction ghi.
       const truoc = { chan: stats.boQuaCoChuDich, loi: stats.skipped, stale: stats.ordersSkippedStale };
-      await upsertOneOrder(mo, rawCoDau, stats, warnings, row.fetchedAt, {
+      await upsertOneOrder(mo, rawCoDau, stats, warnings, { fetchedAt: row.fetchedAt, landSeq: row.landSeq }, {
         backfilledFromMirror: true,
         chanKhiCoDonKhacCungKenhMa: true,
       });

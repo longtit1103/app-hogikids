@@ -24,6 +24,14 @@ import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  chayNen,
+  choTatCa,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const vn = (ngay: string, gio = "00:00:00") => new Date(`${ngay}T${gio}+07:00`);
 const tr = (n: number) => Math.round(n * 1_000_000);
@@ -32,7 +40,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
   vi.mocked(docNguoiDungPhien).mockResolvedValue(nguoiDungGia());
@@ -40,10 +51,14 @@ beforeEach(async () => {
   vi.setSystemTime(vn("2026-11-03", "10:00:00"));
 });
 
-afterEach(async () => {
-  vi.useRealTimers();
-  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.useRealTimers();
+      await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -157,7 +172,10 @@ describe("xacNhanBatNoPhaiTra", () => {
 
   it("hai tab bấm đồng thời (hai mã) ⇒ đúng một lượt bật, lượt kia DA_BAT_ROI", async () => {
     const { A, B } = await seed();
-    const [r1, r2] = await Promise.all([xacNhan(yeuCau(A, B)), xacNhan(yeuCau(A, B))]);
+    const [r1, r2] = await choTatCa([
+      chayNen("xacNhan tab 1", () => xacNhan(yeuCau(A, B))),
+      chayNen("xacNhan tab 2", () => xacNhan(yeuCau(A, B))),
+    ]);
     const ok = [r1, r2].filter((r) => r.ok);
     const tuChoi = [r1, r2].filter((r) => !r.ok);
     expect(ok).toHaveLength(1);

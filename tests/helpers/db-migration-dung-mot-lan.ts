@@ -184,6 +184,26 @@ export function apMigrations(url: string, thuMucMigrations: string): void {
 }
 
 /**
+ * `prisma migrate resolve --rolled-back <ten>` — đánh dấu lượt áp migration THẤT BẠI là đã cuộn lại, để `migrate deploy`
+ * chịu chạy lại (Prisma từ chối deploy khi còn migration thất bại chưa giải quyết — P3009). Đúng bước vận hành sau khi
+ * một migration tự dừng (vd chặn dữ liệu mơ hồ, hết `lock_timeout`).
+ */
+export function danhDauMigrationDaCuonLai(url: string, thuMucMigrations: string, ten: string): void {
+  kiemUrlMigration(url);
+  const configTam = vietConfigTam(thuMucMigrations);
+  try {
+    execFileSync("npx", ["prisma", "migrate", "resolve", "--rolled-back", ten, "--config", configTam], {
+      env: { ...process.env, DATABASE_URL: url },
+      stdio: "pipe",
+      encoding: "utf8",
+    });
+  } catch (e) {
+    const loi = e as { status?: number | null; stdout?: string; stderr?: string };
+    throw new Error(`prisma migrate resolve thất bại (exit ${loi.status ?? "?"}):\n${loi.stdout ?? ""}\n${loi.stderr ?? ""}`);
+  }
+}
+
+/**
  * So schema THẬT của DB migration (sau khi `apMigrations`) với `prisma/schema.prisma` của repo bằng
  * `prisma migrate diff --from-config-datasource --to-schema --exit-code`. Trả `null` khi KHÔNG lệch;
  * lệch ⇒ trả bản SQL Prisma muốn chạy thêm (để test in ra cho người sửa). CHECK viết tay không nằm

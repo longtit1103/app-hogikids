@@ -14,6 +14,8 @@ import { seedReference, truncateBusinessTables } from "../helpers/test-db";
  */
 
 const MOC = new Date("2026-09-21T20:00:00Z");
+// Không có dòng kho thô thật: số land cố định ⇒ thứ tự chỉ còn theo `fetchedAt` như luật cũ.
+const MOC_NGUON = { fetchedAt: MOC, landSeq: BigInt(1) };
 const DON = {
   id: 777,
   system_id: 777,
@@ -54,12 +56,12 @@ describe("dựng lại đơn bán trực tiếp đã nằm ở kênh website", (
     const parsed = pancakeOrderSchema.parse(DON);
     // Bản Silver CŨ: dựng bằng mapping trước khi có kênh mới ⇒ website, paidAtShop 0.
     const cu = { ...mapPancakeOrder(parsed, CTX), channelId: "website", paidAtShop: 0 };
-    await upsertOneOrder(cu, DON, stats(), [], MOC);
+    await upsertOneOrder(cu, DON, stats(), [], MOC_NGUON);
     const truoc = await prisma.order.findUniqueOrThrow({ where: { pancakeId: "777" } });
     expect(truoc.channelId).toBe("website");
 
     const w: string[] = [];
-    await upsertOneOrder(mapPancakeOrder(parsed, CTX), DON, stats(), w, MOC);
+    await upsertOneOrder(mapPancakeOrder(parsed, CTX), DON, stats(), w, MOC_NGUON);
     const sau = await prisma.order.findUniqueOrThrow({ where: { pancakeId: "777" } });
     expect(sau.channelId).toBe("direct");
     expect(sau.paidAtShop).toBe(520000);
@@ -72,11 +74,11 @@ describe("dựng lại đơn bán trực tiếp đã nằm ở kênh website", (
 describe("cổng trùng pancakeId giữa hai shop", () => {
   it("đơn bán trực tiếp shop khác cùng id KHÔNG được đè đơn đang có — bỏ qua + cảnh báo", async () => {
     const donTiktok = { ...DON, shop_id: 100975192 };
-    await upsertOneOrder(mapPancakeOrder(pancakeOrderSchema.parse(donTiktok), CTX), donTiktok, stats(), [], MOC);
+    await upsertOneOrder(mapPancakeOrder(pancakeOrderSchema.parse(donTiktok), CTX), donTiktok, stats(), [], MOC_NGUON);
 
     const donKho = { ...DON, shop_id: 714995134, total_price: 100000, total_discount: 0, transfer_money: 100000, items: [] };
     const w: string[] = [];
-    const kq = await upsertOneOrder(mapPancakeOrder(pancakeOrderSchema.parse(donKho), CTX), donKho, stats(), w, MOC);
+    const kq = await upsertOneOrder(mapPancakeOrder(pancakeOrderSchema.parse(donKho), CTX), donKho, stats(), w, MOC_NGUON);
 
     expect(kq).toBe("CHAN");
     expect(w.some((x) => x.includes("ĐANG thuộc đơn của shop 100975192"))).toBe(true);
@@ -86,7 +88,7 @@ describe("cổng trùng pancakeId giữa hai shop", () => {
 
   it("cùng shop ghi lại (dựng lại / webhook) vẫn đi qua bình thường", async () => {
     const don = { ...DON, shop_id: 100975192 };
-    await upsertOneOrder(mapPancakeOrder(pancakeOrderSchema.parse(don), CTX), don, stats(), [], MOC);
-    expect(await upsertOneOrder(mapPancakeOrder(pancakeOrderSchema.parse(don), CTX), don, stats(), [], MOC)).toBe("APPLIED");
+    await upsertOneOrder(mapPancakeOrder(pancakeOrderSchema.parse(don), CTX), don, stats(), [], MOC_NGUON);
+    expect(await upsertOneOrder(mapPancakeOrder(pancakeOrderSchema.parse(don), CTX), don, stats(), [], MOC_NGUON)).toBe("APPLIED");
   });
 });

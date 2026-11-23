@@ -18,7 +18,7 @@ import { createCashMovement, deleteCashMovement } from "@/lib/actions/cash-movem
 import { deleteExpense } from "@/lib/actions/expenses";
 import { xoaPhieu } from "@/lib/actions/phieu-nhap-no";
 import { taoThe, xoaThe } from "@/lib/actions/the-tin-dung";
-import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { docDuNoCacThe } from "@/lib/no-phai-tra/du-no-the";
 import { docPhieuTheoId } from "@/lib/no-phai-tra/phieu-nhap-no-queries";
 import { prisma } from "@/lib/prisma";
@@ -30,6 +30,13 @@ import { listThungRac } from "@/lib/thung-rac/thung-rac-queries";
 
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giaLapBuocBatGiuKhoa,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const vn = (ngay: string, gio = "00:00:00") => new Date(`${ngay}T${gio}+07:00`);
 const tr = (n: number) => Math.round(n * 1_000_000);
@@ -54,7 +61,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await datM(null);
   vi.mocked(docNguoiDungPhien).mockResolvedValue(CHU);
@@ -62,10 +72,14 @@ beforeEach(async () => {
   vi.setSystemTime(vn("2026-11-26", "10:00:00"));
 });
 
-afterEach(async () => {
-  vi.useRealTimers();
-  await datM(null);
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.useRealTimers();
+      await datM(null);
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -330,26 +344,7 @@ describe("khôi phục thẻ SAU khi bật — neo phải 0 trừ neo của bư�
 
   it("thẻ không neo khôi phục giữa lúc bước bật đang chạy ⇒ CHỜ bước bật commit rồi bị từ chối 'không có neo'", async () => {
     const mucId = await theVaoThungRac([]);
-    let tha!: () => void;
-    const cho = new Promise<void>((res) => (tha = res));
-    let daGiu!: () => void;
-    const giuXong = new Promise<void>((res) => (daGiu = res));
-    const buocBat = prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
-        await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: "2026-11-01" } });
-        daGiu();
-        await cho;
-      },
-      { timeout: 20_000 }
-    );
-    await giuXong;
-    const t0 = performance.now();
-    const p = khoiPhucBanGhiDaXoa(mucId, CHU).then((r) => ({ r, ms: performance.now() - t0 }));
-    await new Promise((res) => setTimeout(res, 800));
-    tha();
-    await buocBat;
-    const { r, ms } = await p;
+    const { r, ms } = await giaLapBuocBatGiuKhoa("2026-11-01", () => khoiPhucBanGhiDaXoa(mucId, CHU));
     expect(ms).toBeGreaterThanOrEqual(700);
     expect(r).toMatchObject({ ok: false, lyDo: expect.stringMatching(/không có neo dư nợ/) });
     expect(await prisma.theTinDung.count()).toBe(0);
@@ -508,26 +503,7 @@ describe("dòng tiền / thu nhập TRƯỚC M và thấu chi trước M — kh�
     });
     await deleteCashMovement(dong.id);
     const mucId = (await mucThungRac("CashMovement")).id;
-    let tha!: () => void;
-    const cho = new Promise<void>((res) => (tha = res));
-    let daGiu!: () => void;
-    const giuXong = new Promise<void>((res) => (daGiu = res));
-    const buocBat = prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
-        await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: "2026-11-01" } });
-        daGiu();
-        await cho;
-      },
-      { timeout: 20_000 }
-    );
-    await giuXong;
-    const t0 = performance.now();
-    const p = khoiPhucBanGhiDaXoa(mucId, CHU).then((r) => ({ r, ms: performance.now() - t0 }));
-    await new Promise((res) => setTimeout(res, 800));
-    tha();
-    await buocBat;
-    const { r, ms } = await p;
+    const { r, ms } = await giaLapBuocBatGiuKhoa("2026-11-01", () => khoiPhucBanGhiDaXoa(mucId, CHU));
     expect(ms).toBeGreaterThanOrEqual(700);
     expect(r).toMatchObject({ ok: false, lyDo: expect.stringMatching(CAU_TRUOC_M) });
     expect(await prisma.cashMovement.count()).toBe(0);

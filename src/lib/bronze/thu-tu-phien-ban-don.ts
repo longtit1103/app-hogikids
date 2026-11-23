@@ -11,14 +11,19 @@ import { Prisma } from "@/generated/prisma/client";
  * `FAILED_RETRY_LIMIT` = báo "đơn kẹt" giả; hoặc ngược lại sổ kết cục nói "xong" theo bản A mà Silver
  * đang dựng nội dung cũ của B.
  *
- * Thứ tự: `mốc updated_at DESC NULLS LAST, fetchedAt DESC, id DESC`.
+ * Thứ tự: `mốc updated_at DESC NULLS LAST, fetchedAt DESC, landSeq DESC, id DESC`.
  *  - `updated_at` là mốc NỘI DUNG Pancake; `fetchedAt` chỉ là mốc LAND — trang API chụp TRƯỚC một sự kiện
  *    webhook mà POST tới SAU vẫn land muộn hơn, nên xếp theo `fetchedAt` thuần là nội dung cũ thắng.
  *  - Bằng mốc `updated_at` (Pancake có sửa phí lúc đối soát mà giữ nguyên mốc — đo 27/07) ⇒ bản land muộn
  *    thắng, đúng như guard `soThuTuCapNhatDon` trả `BANG` rồi rơi về luật mốc land.
  *  - Thiếu / sai khuôn `updated_at` ⇒ xếp SAU mọi dòng có mốc; giữa chúng vẫn luật `fetchedAt`.
- *  - `id DESC` cuối cùng: `fetchedAt` là TIMESTAMP(3), hai phiên bản land cùng mili-giây thì `DISTINCT ON`
- *    chọn tuỳ ý — tức số TIỀN của đơn phụ thuộc may rủi. Có `id` thì thứ tự là TOÀN PHẦN, xác định.
+ *  - `landSeq DESC`: `fetchedAt` là TIMESTAMP(3), hai phiên bản land cùng mili-giây là CÓ THẬT (hai lượt land
+ *    tuần tự dưới khoá `giuKhoaLandDon` cách nhau vài ms là thường). `landSeq` cấp từ sequence ngay lúc INSERT,
+ *    dưới khoá, theo thứ tự phần tử trong trang ⇒ bản land SAU luôn số lớn hơn. Trước khi có cột này `id` (uuid
+ *    ngẫu nhiên) phân xử ⇒ khoảng một nửa số ca bản land TRƯỚC thắng. Cùng cặp `(fetchedAt, landSeq)` là mốc
+ *    nguồn của CAS ghi Silver (`Order.rawFetchedAt`/`rawLandSeq`) — hai nơi không bao giờ bất đồng.
+ *  - `id DESC` cuối cùng: chỉ là chốt TOÀN PHẦN tĩnh (`landSeq` NOT NULL, duy nhất theo sequence nên thực tế
+ *    không còn ca nào tới lượt `id`).
  *
  * CÁCH DÙNG — HAI mảnh đi CẶP, không tách:
  *   `FROM "RawPancakeOrder" ${noiMocPhienBanDon} WHERE … ORDER BY "shopId", "externalId", ${thuTuPhienBanDon}`
@@ -81,7 +86,7 @@ export const NOI_MOC_PHIEN_BAN_DON_SQL = `CROSS JOIN LATERAL (
  * Ghép sau khoá nhóm: `ORDER BY "shopId", "externalId", ${THU_TU_PHIEN_BAN_DON_SQL}` cho `DISTINCT ON`,
  * hoặc đứng một mình trong `row_number() OVER (ORDER BY …)`. BẮT BUỘC đi cùng `NOI_MOC_PHIEN_BAN_DON_SQL`.
  */
-export const THU_TU_PHIEN_BAN_DON_SQL = `${BI_DANH}.moc DESC NULLS LAST, "fetchedAt" DESC, "id" DESC`;
+export const THU_TU_PHIEN_BAN_DON_SQL = `${BI_DANH}.moc DESC NULLS LAST, "fetchedAt" DESC, "landSeq" DESC, "id" DESC`;
 
 /** Hai mảnh trên ở dạng `Prisma.Sql` để nhúng vào `$queryRaw`/`$executeRaw` dạng tagged template. */
 export const noiMocPhienBanDon: Prisma.Sql = Prisma.raw(NOI_MOC_PHIEN_BAN_DON_SQL);

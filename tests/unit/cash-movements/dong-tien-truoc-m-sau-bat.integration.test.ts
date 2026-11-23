@@ -41,13 +41,20 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { createCashMovement, deleteCashMovement, updateCashMovement } from "@/lib/actions/cash-movements";
 import { cauDongTienTruocM } from "@/lib/no-phai-tra/chan-dong-tien-truoc-m";
-import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { THONG_BAO_KHOA_DONG_TIEN_BAN } from "@/lib/so-quy/khoa-dong-tien-co-han";
 
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giaLapBuocBatGiuKhoa,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const vn = (ngay: string, gio = "00:00:00") => new Date(`${ngay}T${gio}+07:00`);
 const tr = (n: number) => Math.round(n * 1_000_000);
@@ -81,42 +88,18 @@ const anhDongTien = () =>
     orderBy: { id: "asc" },
   });
 
-/**
- * Giả lập bước bật: giữ EXCLUSIVE + ghi Setting M (chưa commit) 0,8s rồi commit. `hanhDong` chạy giữa chừng; `giua`
- * chạy sau khi nó đã bắt đầu, TRƯỚC khi bước bật commit. Trả kết quả + thời gian `hanhDong` phải chờ.
- */
-async function trongLucBuocBatGiuKhoa<T>(
-  hanhDong: () => Promise<T>,
-  giua?: () => Promise<void>
-): Promise<{ r: T; ms: number }> {
-  let tha!: () => void;
-  const cho = new Promise<void>((res) => (tha = res));
-  let daGiu!: () => void;
-  const giuXong = new Promise<void>((res) => (daGiu = res));
-  const buocBat = prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
-      await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: M } });
-      daGiu();
-      await cho;
-    },
-    { timeout: 20_000 }
-  );
-  await giuXong;
-  const t0 = performance.now();
-  const p = hanhDong().then((r) => ({ r, ms: performance.now() - t0 }));
-  if (giua) await giua();
-  await new Promise((res) => setTimeout(res, 800));
-  tha();
-  await buocBat;
-  return p;
-}
+/** Giả lập bước bật với M của file (helper chung — hook dọn chờ/huỷ transaction còn treo). */
+const trongLucBuocBatGiuKhoa = <T>(hanhDong: () => Promise<T>, giua?: () => Promise<void>) =>
+  giaLapBuocBatGiuKhoa(M, hanhDong, giua);
 
 beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await datM(null);
   vi.mocked(docNguoiDungPhien).mockResolvedValue(nguoiDungGia());
@@ -126,12 +109,16 @@ beforeEach(async () => {
   vi.setSystemTime(vn("2026-10-13", "10:00:00"));
 });
 
-afterEach(async () => {
-  vi.useRealTimers();
-  cheKhoa.bao = null;
-  cheKhoa.hanNganMs = null;
-  await datM(null);
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.useRealTimers();
+      cheKhoa.bao = null;
+      cheKhoa.hanNganMs = null;
+      await datM(null);
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();

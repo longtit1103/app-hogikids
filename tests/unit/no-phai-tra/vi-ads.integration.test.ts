@@ -11,12 +11,19 @@ vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { suaViAds, taoViAds, xoaViAds } from "@/lib/actions/vi-ads";
-import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giaLapBuocBatGiuKhoa,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const vn = (ngay: string, gio = "00:00:00") => new Date(`${ngay}T${gio}+07:00`);
 const tr = (n: number) => Math.round(n * 1_000_000);
@@ -25,7 +32,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
   vi.mocked(docNguoiDungPhien).mockResolvedValue(nguoiDungGia());
@@ -33,10 +43,14 @@ beforeEach(async () => {
   vi.setSystemTime(vn("2026-11-05", "10:00:00"));
 });
 
-afterEach(async () => {
-  vi.useRealTimers();
-  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.useRealTimers();
+      await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -166,29 +180,9 @@ describe("khoá SHARED với bước bật (đua taoViAds ↔ bước bật)", (
    * commit) và nhận số dư 5tr như hồ sơ chuẩn bị, mà bước bật lại không thấy ví đó.
    */
   it("taoViAds số dư 5tr CHỜ bước bật rồi bị từ chối NEO_KHAC_0", async () => {
-    let tha!: () => void;
-    const cho = new Promise<void>((res) => (tha = res));
-    let daGiu!: () => void;
-    const giuXong = new Promise<void>((res) => (daGiu = res));
-    const buocBat = prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
-        await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: "2026-11-01" } });
-        daGiu();
-        await cho;
-      },
-      { timeout: 20_000 }
+    const { r, ms } = await giaLapBuocBatGiuKhoa("2026-11-01", () =>
+      taoViAds({ nenTang: "SHOPEE_ADS", nguonNap: "BANK", soDuNeo: tr(5) })
     );
-    await giuXong;
-    const t0 = performance.now();
-    const p = taoViAds({ nenTang: "SHOPEE_ADS", nguonNap: "BANK", soDuNeo: tr(5) }).then((r) => ({
-      r,
-      ms: performance.now() - t0,
-    }));
-    await new Promise((res) => setTimeout(res, 800));
-    tha();
-    await buocBat;
-    const { r, ms } = await p;
     expect(ms).toBeGreaterThanOrEqual(700);
     expect(r).toMatchObject({ ok: false, code: "NEO_KHAC_0" });
     expect(await prisma.viAdsTraTruoc.count()).toBe(0);

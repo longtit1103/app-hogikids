@@ -650,10 +650,17 @@ ALTER SCHEMA \"$schema\" OWNER TO $OWNER_ROLE;
 DO \$\$
 DECLARE r record;
 BEGIN
+  -- ORDER BY: bang/view TRUOC, sequence SAU. Postgres cam ALTER SEQUENCE OWNER voi sequence da
+  -- OWNED BY mot cot bang (cannot change owner of sequence ... linked to table) tru khi owner da trung;
+  -- ALTER TABLE OWNER thi tu keo theo moi sequence no so huu (ca OWNED BY lan identity). Xu ly bang
+  -- truoc ⇒ toi luot sequence do thi owner da trung ⇒ cau ALTER SEQUENCE la no-op; sequence dung le
+  -- (khong OWNED BY) van duoc doi binh thuong. Khong ORDER BY thi thu tu quet pg_class tuy vi tri dong
+  -- trong heap — do 06/11 tren PG15: tao sequence truoc bang roi OWNED BY ⇒ sequence ra truoc ⇒ loi.
   FOR r IN
     SELECT c.relkind, c.relname
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = '$schema' AND c.relkind IN ('r','p','S','v','m')
+    ORDER BY (c.relkind = 'S'), c.relname
   LOOP
     IF r.relkind = 'S' THEN
       EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO $OWNER_ROLE', '$schema', r.relname);
@@ -690,7 +697,8 @@ END
   # KHỐI 2 — cấp lại đường đọc của n8n, chạy bằng MỘT lệnh psql RIÊNG.
   #
   # VÌ SAO TÁCH (đo 22/09/2026): `psql -c "a; b"` gửi cả chuỗi như MỘT query ⇒ MỘT transaction ngầm.
-  # Khối 1 ở trên chỉ trả quyền sở hữu (không thể lỗi trong thực tế); khối 2 nay chứa DDL THẬT
+  # Khối 1 ở trên chỉ trả quyền sở hữu (lỗi đã biết — sequence OWNED BY bị xử lý trước bảng — đã chặn
+  # bằng ORDER BY); khối 2 nay chứa DDL THẬT
   # (`CREATE OR REPLACE VIEW`) có thể lỗi thật — view cũ khác số/tên cột thì Postgres ném
   # `cannot change name of view column`, còn nếu `SettingN8n` lại là BẢNG thì `… is not a view`.
   # Để chung một lệnh nghĩa là một lỗi hình dạng view sẽ ROLLBACK luôn cả phần trả quyền sở hữu ⇒

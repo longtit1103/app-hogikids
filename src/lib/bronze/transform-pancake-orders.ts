@@ -16,13 +16,14 @@ import {
   pancakeOrderSchema,
   pancakeProductSchema,
 } from "@/lib/ingest/pancake-schemas";
-import { upsertOneOrder, upsertOneProduct } from "@/lib/ingest/pancake-upsert";
+import { type MocNguonDon, upsertOneOrder, upsertOneProduct } from "@/lib/ingest/pancake-upsert";
 import { layCauHinhShop } from "@/lib/ket-noi/cau-hinh-shop";
 import { prisma } from "@/lib/prisma";
 
 import {
   chamMoc,
   latestPayloads,
+  type RawRow,
   type TransformOptions,
   type TransformStats,
 } from "./transform-raw-helpers";
@@ -31,6 +32,17 @@ import {
  * Nhánh Pancake của transform — ĐƯỜNG TIỀN (doanh thu/P&L, bất biến #1/#2). Gọi từ
  * `transform-from-raw.ts`; luật loại đơn khỏi Silver nằm DUY NHẤT ở file này.
  */
+
+/**
+ * Cặp mốc land (`fetchedAt`, `landSeq`) của dòng `RawPancakeOrder` = mốc nguồn CAS ghi Silver. Thiếu một trong hai là
+ * lỗi lập trình (bộ đọc bỏ cột) — NÉM, không rơi về "ghi vô điều kiện" (bỏ mốc là mất guard thứ tự).
+ */
+function mocNguonCuaDong(row: RawRow): MocNguonDon {
+  if (row.fetchedAt === undefined || row.landSeq === undefined) {
+    throw new Error(`Dòng kho thô đơn ${row.externalId} thiếu fetchedAt/landSeq — bộ đọc phải SELECT cả hai cột`);
+  }
+  return { fetchedAt: row.fetchedAt, landSeq: row.landSeq };
+}
 
 /** id đơn MIRROR shop kho theo discovery: `AF<shopId>O<n>` (vd `AF1942992175O123`). */
 const KHO_MIRROR_ID = /^AF\d+O/;
@@ -198,7 +210,8 @@ export async function transformOrders(
       continue;
     }
     // `rawRowId` để kết cục APPLIED/SUPERSEDED được đóng dấu NGAY TRONG transaction ghi Silver.
-    const kqGhi = await upsertOneOrder(mo, row.payload, stats, warnings, row.fetchedAt, {
+    // Mốc nguồn = cặp mốc land của CHÍNH dòng này (`latestPayloads` luôn SELECT hai cột với đơn Pancake).
+    const kqGhi = await upsertOneOrder(mo, row.payload, stats, warnings, mocNguonCuaDong(row), {
       rawRowId: row.id,
       luotTayDuocGhiDe,
     });

@@ -200,17 +200,25 @@ function shopCuaPayload(raw: unknown): string | null {
   return typeof v === "number" || (typeof v === "string" && v.trim() !== "") ? String(v).trim() : null;
 }
 
+/**
+ * MỐC NGUỒN của một bản đơn = cặp mốc land của CHÍNH dòng `RawPancakeOrder` sinh ra nó: `fetchedAt` (TIMESTAMP(3))
+ * và `landSeq` (số land đơn điệu — phân xử khi `fetchedAt` trùng mili-giây). Cùng hai khoá land của thứ tự phiên bản
+ * `THU_TU_PHIEN_BAN_DON_SQL`, nên CAS ghi Silver và bộ chọn bản không bao giờ bất đồng "bản nào land sau".
+ * `landSeq` là BIGINT: chỉ đi trong ingest, không đưa qua JSON/RSC.
+ */
+export type MocNguonDon = { fetchedAt: Date; landSeq: bigint };
+
 export async function upsertOneOrder(
   mo: MappedOrder,
   raw: unknown,
   stats: UpsertStats,
   warnings: string[],
   /**
-   * `fetchedAt` của dòng kho thô sinh ra bản này = SỐ PHIÊN BẢN phụ (xếp sau `updated_at` của
+   * Mốc land của dòng kho thô sinh ra bản này = SỐ PHIÊN BẢN phụ (xếp sau `updated_at` của
    * payload — xem `ghiMotLuot`). Bỏ trống ⇒ ghi vô điều kiện, KHÔNG so cả `updated_at` (giữ
    * nguyên hành vi cũ cho các đường gọi chưa có mốc, vd test mapping).
    */
-  mocNguon?: Date,
+  mocNguon?: MocNguonDon,
   opts?: {
     /**
      * Đơn BÙ từ bản sao kho (`scripts/bu-don-shopee-tu-don-kho.ts`): gắn cờ NGAY TRONG transaction
@@ -371,13 +379,14 @@ export async function upsertOneOrder(
       paidAtShop: mo.paidAtShop,
       syncedAt: now(),
       raw: (raw ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-      rawFetchedAt: mocNguon ?? null,
+      rawFetchedAt: mocNguon?.fetchedAt ?? null,
+      rawLandSeq: mocNguon?.landSeq ?? null,
       ...(opts?.backfilledFromMirror ? { backfilledFromMirror: true } : {}),
     };
     /**
      * Một lượt ghi. Trả `false` = KHÔNG ghi vì Silver đang giữ bản mới hơn (kết cục ĐÚNG).
      *
-     * THỨ TỰ PHIÊN BẢN = cặp (`updated_at` Pancake, `rawFetchedAt` mốc land), so theo kiểu từ điển:
+     * THỨ TỰ PHIÊN BẢN = bộ (`updated_at` Pancake, `rawFetchedAt`, `rawLandSeq` mốc land), so kiểu từ điển:
      * `updated_at` (mốc NỘI DUNG) quyết trước; chỉ khi BẰNG nhau hoặc không so được mới rơi về
      * mốc land như cũ. Mốc land một mình không đủ: trang API chụp TRƯỚC một sự kiện webhook mà POST
      * SAU vẫn land muộn hơn và từng kéo Silver lùi (RETURNED → COMPLETED) tới lượt API kế tiếp.
@@ -431,13 +440,15 @@ export async function upsertOneOrder(
             return "chan";
           }
         }
-        // `lte` (nhận mốc BẰNG NHAU) là BẮT BUỘC, không phải lỏng tay: đường dựng lại từ kho thô
-        // đọc lại đúng `fetchedAt` cũ của dòng Bronze rồi truyền vào đây làm mốc nguồn, nên nếu đòi
-        // "phải mới hơn thật" thì mọi lượt dựng lại bị từ chối sạch (đúng lượt cứu dữ liệu).
-        // Đánh đổi đã chấp nhận: hai bản KHÁC nhau của cùng một đơn mà trùng mốc tới mili-giây thì
-        // bản tới sau thắng. Không xảy ra trong thực tế — hai lượt land của cùng một đơn bị khoá tư
-        // vấn tuần tự hoá (giữa chúng luôn có ≥1 COMMIT có fsync + nhiều round-trip DB), còn hai bản
-        // trong CÙNG một trang API thì đến từ MỘT lần chụp nên không có khái niệm cũ/mới.
+        // MỐC LAND là CẶP (`fetchedAt`, `landSeq`) của dòng Bronze. Nhận cặp BẰNG NHAU là BẮT BUỘC,
+        // không phải lỏng tay: đường dựng lại từ kho thô đọc lại đúng cặp cũ của dòng Bronze rồi
+        // truyền vào đây, nên nếu đòi "phải mới hơn thật" thì mọi lượt dựng lại bị từ chối sạch (đúng
+        // lượt cứu dữ liệu), và hai lượt song song cùng dòng không còn luỹ đẳng (`dongDauKetCuc`).
+        // `fetchedAt` một mình KHÔNG đủ: TIMESTAMP(3), hai lượt land cùng đơn tuần tự dưới khoá land
+        // cách nhau vài ms TRÙNG mili-giây là có thật — khi đó bản nào transform sau thì thắng, kể cả
+        // bản land TRƯỚC. `landSeq` cấp dưới khoá land theo đúng thứ tự land nên phân xử được.
+        //   `rawFetchedAt` NULL hoặc cũ hơn ⇒ ghi; BẰNG ⇒ ghi khi `rawLandSeq` NULL (đơn có trước cột,
+        //   luật cũ — lượt ghi này điền số) hoặc ≤ số của bản này.
         //
         // GUARD THỨ TỰ THEO `updated_at` — chỉ áp ở đường có mốc nguồn (dựng từ kho thô); đường
         // không mốc (test mapping) giữ "ghi vô điều kiện" như hợp đồng tham số `mocNguon`.
@@ -445,9 +456,9 @@ export async function upsertOneOrder(
         //             soát tính là đã hạch toán — không bật backlog oan). Bronze vẫn giữ dòng này.
         //   MOI_HON ⇒ ghi, BỎ điều kiện mốc land: bản land sớm hơn mà nội dung mới hơn phải thắng
         //             (ca dựng Silver so le: trang API cũ dựng xong TRƯỚC webhook mới).
-        //   BANG / KHONG_SO_DUOC ⇒ luật mốc land cũ (`lte`). Cùng `updated_at` KHÔNG đủ quyết vì
+        //   BANG / KHONG_SO_DUOC ⇒ luật mốc land (cặp ở trên). Cùng `updated_at` KHÔNG đủ quyết vì
         //             Pancake có sửa phí lúc đối soát mà giữ nguyên mốc; dựng lại đúng dòng cũ thì
-        //             mốc bằng nhau ⇒ vẫn ghi (idempotent).
+        //             cặp mốc bằng nhau ⇒ vẫn ghi (idempotent).
         const thuTu = mocNguon && dang ? soThuTuCapNhatDon(updatedAtMoi, dang.updatedAt) : "KHONG_SO_DUOC";
         if (thuTu === "CU_HON") {
           if (opts?.rawRowId) await dauKetCuc(opts)(tx, opts.rawRowId, KET_CUC.SUPERSEDED);
@@ -460,7 +471,16 @@ export async function upsertOneOrder(
         }
         const dieuKienMoiHon: Prisma.OrderWhereInput =
           mocNguon && thuTu !== "MOI_HON"
-            ? { OR: [{ rawFetchedAt: null }, { rawFetchedAt: { lte: mocNguon } }] }
+            ? {
+                OR: [
+                  { rawFetchedAt: null },
+                  { rawFetchedAt: { lt: mocNguon.fetchedAt } },
+                  {
+                    rawFetchedAt: mocNguon.fetchedAt,
+                    OR: [{ rawLandSeq: null }, { rawLandSeq: { lte: mocNguon.landSeq } }],
+                  },
+                ],
+              }
             : {};
         const sua = await tx.order.updateMany({
           where: { pancakeId: mo.pancakeId, ...dieuKienMoiHon },

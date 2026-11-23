@@ -27,10 +27,17 @@ import { ghiKyTraNo, suaKhoanVay, taoKhoanVay, tatToanKhoanVay, xoaKhoanVay } fr
 import { suaSoTietKiem, taoSoTietKiem, xoaSoTietKiem } from "@/lib/actions/so-tiet-kiem";
 import { moLaiSoTietKiem, tatToanSoTietKiem } from "@/lib/actions/tat-toan-so-tiet-kiem";
 import { tatToanThauChi } from "@/lib/actions/tat-toan-thau-chi";
-import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giaLapBuocBatGiuKhoa,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const M = "2026-10-01";
 const vn = (ngay: string) => new Date(`${ngay}T00:00:00+07:00`);
@@ -139,48 +146,31 @@ const so = (startDate: string) => ({
   note: "",
 });
 
-/**
- * Giả lập bước bật: giữ EXCLUSIVE + ghi Setting M (chưa commit) 0,8s rồi commit. `hanhDong` chạy giữa chừng;
- * trả kết quả + thời gian nó phải chờ.
- */
-async function trongLucBuocBatGiuKhoa<T>(hanhDong: () => Promise<T>): Promise<{ r: T; ms: number }> {
-  let tha!: () => void;
-  const cho = new Promise<void>((res) => (tha = res));
-  let daGiu!: () => void;
-  const giuXong = new Promise<void>((res) => (daGiu = res));
-  const buocBat = prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${KHOA_BAT_NO_PHAI_TRA}::text))`;
-      await tx.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: M } });
-      daGiu();
-      await cho;
-    },
-    { timeout: 20_000 }
-  );
-  await giuXong;
-  const t0 = performance.now();
-  const p = hanhDong().then((r) => ({ r, ms: performance.now() - t0 }));
-  await new Promise((res) => setTimeout(res, 800));
-  tha();
-  await buocBat;
-  return p;
-}
+/** Giả lập bước bật với M của file (helper chung — hook dọn chờ/huỷ transaction còn treo). */
+const trongLucBuocBatGiuKhoa = <T>(hanhDong: () => Promise<T>) => giaLapBuocBatGiuKhoa(M, hanhDong);
 
 beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 9, 20, 10, 0, 0));
 });
 
-afterEach(async () => {
-  vi.useRealTimers();
-  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.useRealTimers();
+      await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();

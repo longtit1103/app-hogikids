@@ -73,6 +73,9 @@ function statsRong(): UpsertStats {
   };
 }
 
+/** Mốc nguồn không gắn dòng kho thô thật: số land cố định ⇒ thứ tự chỉ theo `fetchedAt` (luật cũ). */
+const mocLand = (fetchedAt: Date) => ({ fetchedAt, landSeq: BigInt(1) });
+
 async function ghi(
   id: string,
   fee: number,
@@ -82,7 +85,7 @@ async function ghi(
 ): Promise<{ stats: UpsertStats }> {
   const raw = DON(id, fee, status, updatedAt);
   const stats = statsRong();
-  await upsertOneOrder(mapPancakeOrder(raw as never, { channels: {} }), raw, stats, [], moc);
+  await upsertOneOrder(mapPancakeOrder(raw as never, { channels: {} }), raw, stats, [], moc && mocLand(moc));
   return { stats };
 }
 
@@ -165,7 +168,7 @@ describe("thứ tự ghi Silver theo mốc nguồn", () => {
     const chay = async (fee: number, status: number, moc: Date) => {
       const raw = DON("D-8", fee, status);
       const stats = statsRong();
-      await upsertOneOrder(mapPancakeOrder(raw as never, { channels: {} }), raw, stats, canhBao, moc);
+      await upsertOneOrder(mapPancakeOrder(raw as never, { channels: {} }), raw, stats, canhBao, mocLand(moc));
       return stats;
     };
     const [s1, s2] = await Promise.all([chay(16_000, 3, MOC_CU), chay(5_839, 4, MOC_MOI)]);
@@ -286,7 +289,7 @@ describe("thứ tự ghi Silver theo updated_at của Pancake", () => {
     const raw = DON("U-8", 16_000, 3, "01/07/2026 05:00");
     const stats = statsRong();
     const canhBao: string[] = [];
-    await upsertOneOrder(mapPancakeOrder(raw as never, { channels: {} }), raw, stats, canhBao, MOC_MOI);
+    await upsertOneOrder(mapPancakeOrder(raw as never, { channels: {} }), raw, stats, canhBao, mocLand(MOC_MOI));
 
     expect((await docDon("U-8"))?.platformFeeEst).toBe(16_000); // mốc land mới hơn ⇒ ghi như cũ
     expect(canhBao.some((c) => c.includes("U-8") && c.includes("không so được updated_at"))).toBe(true);

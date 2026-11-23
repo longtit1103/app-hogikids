@@ -19,7 +19,7 @@ import { noiMocPhienBanDon, thuTuPhienBanDon } from "./thu-tu-phien-ban-don";
  * metadata bên cạnh được ghi.
  *
  * "BẢN MỚI NHẤT" / "BẢN ĐỨNG ĐẦU" ở MỌI câu trong file này = dòng đứng đầu theo MỘT thứ tự phiên bản
- * duy nhất `thuTuPhienBanDon` (`updated_at` Pancake trước, `fetchedAt` sau — `thu-tu-phien-ban-don.ts`),
+ * duy nhất `thuTuPhienBanDon` (`updated_at` Pancake trước, rồi `fetchedAt`, `landSeq` — `thu-tu-phien-ban-don.ts`),
  * đúng thứ tự `latestPayloads` dùng để chọn payload dựng Silver. "Bản cũ" = mọi dòng khác của cùng
  * (`shopId`, `externalId`), KỂ CẢ dòng land SAU mà nội dung cũ hơn (trang API chụp trước sự kiện
  * webhook). Hai bên lệch thứ tự là đường dựng một bản mà sổ chờ dấu trên bản khác — báo kẹt giả.
@@ -122,7 +122,7 @@ export async function dongDauKetCuc(
   //
   // Vì sao nhận `= ketCuc` (lũy đẳng) chứ không chỉ `IS NULL`: hai lượt transform CHẠY SONG SONG trên
   // CÙNG một dòng Bronze mới nhất đều đi tới CÙNG một kết cục (kẻ thua khoá tư vấn vẫn khớp `updateMany`
-  // vì `rawFetchedAt` bằng nhau, rồi tới đây). Nếu chỉ CAS `IS NULL` thì kẻ thua ném OAN ⇒ nuốt thành
+  // vì cặp mốc land `rawFetchedAt`/`rawLandSeq` bằng nhau, rồi tới đây). Nếu chỉ CAS `IS NULL` thì kẻ thua ném OAN ⇒ nuốt thành
   // `skipped` ⇒ cổng đối soát "đã land vs đã hạch toán" lệch ⇒ bật cờ backlog GIẢ (dính, chỉ rebuild
   // mới hạ) dù Sổ đã đúng. Kịch bản thường ngày: webhook Pancake bắn 2 sự kiện cùng đơn cách 0,2–7s;
   // và self-heal `/api/ingest/raw` trùng nhịp lượt đối soát đêm. `ketCuc` KHÔNG bao giờ là `DISCARDED`

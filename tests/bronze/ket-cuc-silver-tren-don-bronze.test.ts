@@ -258,14 +258,14 @@ describe("kết cục dựng Silver trên từng dòng đơn Bronze", () => {
     } as Parameters<typeof upsertOneOrder>[2];
 
     // `rawRowId` trỏ vào dòng KHÔNG tồn tại ⇒ câu đóng dấu ném ⇒ cả transaction cuộn lại.
-    const ketCuc = await upsertOneOrder(mo, {}, stats, [], raw.fetchedAt, { rawRowId: "khong-co-that" });
+    const ketCuc = await upsertOneOrder(mo, {}, stats, [], { fetchedAt: raw.fetchedAt, landSeq: raw.landSeq }, { rawRowId: "khong-co-that" });
     expect(ketCuc).toBe("LOI");
     expect(await prisma.order.count()).toBe(0); // Silver KHÔNG được giữ lại phần ghi dở
     // Lỗi ghi kiểu này TỰ LÀNH được ⇒ dòng phải ở lại "chưa xong" để lượt sau còn thử tiếp.
     expect((await prisma.rawPancakeOrder.findUniqueOrThrow({ where: { id: raw.id } })).silverOutcome).toBeNull();
 
     // Lượt sau với id đúng: cả hai cùng thành công.
-    const ketCuc2 = await upsertOneOrder(mo, {}, stats, [], raw.fetchedAt, { rawRowId: raw.id });
+    const ketCuc2 = await upsertOneOrder(mo, {}, stats, [], { fetchedAt: raw.fetchedAt, landSeq: raw.landSeq }, { rawRowId: raw.id });
     expect(ketCuc2).toBe("APPLIED");
     expect(await prisma.order.count()).toBe(1);
     expect((await prisma.rawPancakeOrder.findUniqueOrThrow({ where: { id: raw.id } })).silverOutcome).toBe(

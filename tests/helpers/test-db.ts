@@ -1,3 +1,4 @@
+import { KEY_NO_PHAI_TRA_TU_NGAY } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -12,7 +13,9 @@ import { prisma } from "@/lib/prisma";
  *    tham chiếu, tồn tại suốt vòng đời suite; gọi 1 lần trong beforeAll).
  *  - truncateBusinessTables(): xoá các bảng nghiệp vụ theo thứ tự an toàn FK
  *    (gọi trong beforeEach để mỗi test khởi đầu sạch); GIỮ lại Channel +
- *    ExpenseCategory để không phải seed lại tham chiếu giữa các test.
+ *    ExpenseCategory để không phải seed lại tham chiếu giữa các test. Bảng `Setting` KHÔNG bị dọn,
+ *    NGOẠI LỆ DUY NHẤT là khoá mốc Nợ phải trả `noPhaiTraTuNgay` (M) — sót M sang file sau làm test
+ *    ở file đó chạy ở chế độ "đã bật" ngoài ý muốn; mọi khoá Setting khác vẫn giữ nguyên.
  *
  * Phase 5/6 tái dùng nguyên helper này — đừng đổi chữ ký export.
  */
@@ -128,4 +131,7 @@ export async function truncateBusinessTables(): Promise<void> {
   // Silver tín dụng TikTok tặng (P&L trừ khỏi Quảng cáo TikTok) — không FK. Sót là tín dụng của suite trước trừ
   // vào chi phí ads của suite sau (lãi ròng lệch đúng số đó).
   await prisma.tiktokAdsTinDung.deleteMany();
+  // Mốc bật Nợ phải trả (M) — CHỈ khoá này trong `Setting` bị xoá; các khoá khác (shop id, cờ backlog…)
+  // vẫn giữ. Không FK, nên đặt cuối. Sót M là file sau tự động chạy ở chế độ "đã bật" (xem dự báo quỹ).
+  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
 }
