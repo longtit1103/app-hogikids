@@ -28,7 +28,7 @@ export const MIGRATION_DA_AP_PROD: Readonly<Record<string, string>> = {
   "20260811110000_dau_ket_cuc_silver_cho_don_bronze": "014eb177a4e1f7802805f07e27fe46dbaf5a18b356fc61d4d90cbbc22f3ca836",
   "20260811140000_dem_luot_thu_lai_cho_don_bronze": "0035011b9e24b002474e94b51611176413a9706bd173495110e735fa53464ea7",
   "20260821210000_seed_shop_id_pancake_theo_dieu_kien": "218f116a8c11adc24222818eb9756dfecabba3ef787dd34a2b956bd37062a2aa",
-  "20260821224500_view_setting_n8n_va_bang_backup_workflow": "80ca7c6a43838908e1d29fbe6f283057c36bf21fdb64a76c432de14f70317c46",
+  "20260821224500_view_setting_n8n_va_bang_backup_workflow": "bab71fb7a79557deaff9b04e655a782e59006fb5a91556c06c1aec8a2904c9fc",
   "20260822011500_setting_n8n_view_security_barrier": "e59503d075c6fb1e97795ae9ea4a10224ec5e8263add90ca8f056a87cf7d26df",
   "20260825120000_bronze_tiktok_analytics_va_gmvmax_item": "84c7e4e232f9e5b9496c9c4c3a3fe908b49e3c374c7c3bd2e9fc780c50e453f6",
   "20260828110000_bronze_tiktok_affiliate_order": "7e86d4019b24b1059eb80be86d6cd3f7699d8a89dc09abbd29567f8daf0d0d77",
