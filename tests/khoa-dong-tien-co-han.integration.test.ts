@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createCashMovement, updateCashMovement } from "@/lib/actions/cash-movements";
 import { prisma } from "@/lib/prisma";
@@ -13,6 +13,15 @@ import { taoPrismaClient } from "@/lib/tao-prisma-client";
 import { khoaCacSoTietKiem, khoaSoTietKiem } from "@/lib/tiet-kiem/vi-tu-so-tiet-kiem";
 
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
+import {
+  chayNen,
+  choTatCa,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giuTransactionDenKhiTha,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "./helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 /**
  * Chờ khoá dòng tiền CÓ HẠN (`src/lib/so-quy/khoa-dong-tien-co-han.ts`): lượt khác giữ dòng `Loan` /
@@ -66,7 +75,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   const loan = await prisma.loan.create({
     data: {
@@ -80,34 +92,26 @@ beforeEach(async () => {
   loanId = loan.id;
 });
 
+// Dọn dữ liệu nằm ở `beforeEach` kế (truncate) / `afterAll`: hook này chỉ chờ mọi thao tác nền đã đăng ký xong TRƯỚC khi
+// chúng chạy — transaction giữ khoá còn sống sẽ bị ROLLBACK, không giữ `Loan`/`SoTietKiem` qua lượt truncate.
+afterEach(() => donSauKhiThaoTacNenXong(async () => undefined), TIMEOUT_HOOK_DON_MS);
+
 afterAll(async () => {
   await truncateBusinessTables();
   await prisma.$disconnect();
 });
 
 /**
- * Transaction A giành khoá dòng `bang`/`id` (`FOR UPDATE`) rồi GIỮ cho tới khi `nha()` được gọi hoặc hết
- * `giuToiDaMs` (chốt chặn: test đỏ giữa chừng cũng không để khoá treo). `daGiu` resolve khi khoá đã nằm
- * trong tay A.
+ * Transaction A giành khoá dòng `bang`/`id` (`FOR UPDATE`) rồi GIỮ cho tới khi `nha()` được gọi. Giữ bằng helper chung:
+ * test đỏ giữa chừng / hết giờ thì hook dọn ROLLBACK transaction nên khoá không treo qua lượt dọn. Trả sau khi khoá
+ * đã nằm trong tay A.
  */
-function giuKhoaDong(bang: "Loan" | "SoTietKiem", id: string, giuToiDaMs: number) {
-  let nha!: () => void;
-  const choNha = new Promise<void>((r) => {
-    nha = r;
-    setTimeout(r, giuToiDaMs);
+async function giuKhoaDong(bang: "Loan" | "SoTietKiem", id: string) {
+  const giu = await giuTransactionDenKhiTha(`giữ khoá ${bang}`, async (tx) => {
+    if (bang === "Loan") await tx.$queryRaw`SELECT id FROM "Loan" WHERE id = ${id} FOR UPDATE`;
+    else await tx.$queryRaw`SELECT id FROM "SoTietKiem" WHERE id = ${id} FOR UPDATE`;
   });
-  let baoDaGiu!: () => void;
-  const daGiu = new Promise<void>((r) => (baoDaGiu = r));
-  const xong = prisma.$transaction(
-    async (tx) => {
-      if (bang === "Loan") await tx.$queryRaw`SELECT id FROM "Loan" WHERE id = ${id} FOR UPDATE`;
-      else await tx.$queryRaw`SELECT id FROM "SoTietKiem" WHERE id = ${id} FOR UPDATE`;
-      baoDaGiu();
-      await choNha;
-    },
-    { timeout: giuToiDaMs + 10_000, maxWait: 5_000 }
-  );
-  return { daGiu, nha, xong };
+  return { nha: giu.tha, xong: giu.xong };
 }
 
 async function soPhienKetTrongTransaction(): Promise<number> {
@@ -119,8 +123,7 @@ async function soPhienKetTrongTransaction(): Promise<number> {
 
 describe("khoá dòng tiền có hạn chờ", () => {
   it("lượt khác giữ dòng Loan quá hạn ⇒ LoiKhoaDongTienBan đúng câu, transaction lùi, không ghi dòng nào", async () => {
-    const giu = giuKhoaDong("Loan", loanId, 8_000);
-    await giu.daGiu;
+    const giu = await giuKhoaDong("Loan", loanId);
 
     const batDau = Date.now();
     const ketQua = prisma.$transaction(
@@ -156,8 +159,7 @@ describe("khoá dòng tiền có hạn chờ", () => {
         annualRateBp: 500,
       },
     });
-    const giu = giuKhoaDong("SoTietKiem", so.id, 8_000);
-    await giu.daGiu;
+    const giu = await giuKhoaDong("SoTietKiem", so.id);
 
     const batDau = Date.now();
     await expect(
@@ -187,8 +189,7 @@ describe("khoá dòng tiền có hạn chờ", () => {
   });
 
   it("12 lượt chờ cùng lúc (pool 10) đều rút ra có hạn — pool không cạn, câu sau chạy ngay", async () => {
-    const giu = giuKhoaDong("Loan", loanId, 15_000);
-    await giu.daGiu;
+    const giu = await giuKhoaDong("Loan", loanId);
 
     const batDau = Date.now();
     const ket = await Promise.allSettled(
@@ -215,17 +216,18 @@ describe("khoá dòng tiền có hạn chờ", () => {
     "đường action thật (hạn 10s): createCashMovement trả đúng câu tiếng Việt, không ghi dòng trả gốc nào",
     async () => {
       expect(HAN_CHO_KHOA_DONG_TIEN_MS).toBe(10_000);
-      const giu = giuKhoaDong("Loan", loanId, HAN_CHO_KHOA_DONG_TIEN_MS + 8_000);
-      await giu.daGiu;
+      const giu = await giuKhoaDong("Loan", loanId);
 
       const batDau = Date.now();
-      const res = await createCashMovement({
-        date: "2026-07-01",
-        kind: "LOAN_IN",
-        amount: 50_000_000,
-        description: "Giải ngân",
-        loanId,
-      });
+      const res = await chayNen("createCashMovement chờ khoá khoản vay", () =>
+        createCashMovement({
+          date: "2026-07-01",
+          kind: "LOAN_IN",
+          amount: 50_000_000,
+          description: "Giải ngân",
+          loanId,
+        })
+      );
       const daCho = Date.now() - batDau;
       expect(res).toEqual({ ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN });
       expect(daCho).toBeGreaterThanOrEqual(HAN_CHO_KHOA_DONG_TIEN_MS - 100);
@@ -244,9 +246,10 @@ describe("khoá dòng tiền có hạn chờ", () => {
 
     it("khoá [A, B]: A nhả ở 60% hạn, B bị giữ lâu ⇒ báo bận quanh HẠN, không phải 60% + trọn hạn nữa", async () => {
       const [a, b] = await haiKhoanTheoThuTuKhoa();
-      const giuA = giuKhoaDong("Loan", a, 15_000);
-      const giuB = giuKhoaDong("Loan", b, 15_000);
-      await Promise.all([giuA.daGiu, giuB.daGiu]);
+      const [giuA, giuB] = await choTatCa([
+        giuKhoaDong("Loan", a),
+        giuKhoaDong("Loan", b),
+      ]);
 
       const batDau = Date.now();
       nhaSau(giuA, HAN_MS * 0.6);
@@ -261,7 +264,7 @@ describe("khoá dòng tiền có hạn chờ", () => {
       expect(daCho).toBeLessThan(HAN_MS + 600);
 
       giuB.nha();
-      await Promise.all([giuA.xong, giuB.xong]);
+      await choTatCa([giuA.xong, giuB.xong]);
       expect(await soPhienKetTrongTransaction()).toBe(0);
     }, 30_000);
 
@@ -276,9 +279,10 @@ describe("khoá dòng tiền có hạn chờ", () => {
           annualRateBp: 500,
         },
       });
-      const giuVay = giuKhoaDong("Loan", loanId, 15_000);
-      const giuSo = giuKhoaDong("SoTietKiem", so.id, 15_000);
-      await Promise.all([giuVay.daGiu, giuSo.daGiu]);
+      const [giuVay, giuSo] = await choTatCa([
+        giuKhoaDong("Loan", loanId),
+        giuKhoaDong("SoTietKiem", so.id),
+      ]);
 
       const batDau = Date.now();
       nhaSau(giuVay, HAN_MS * 0.6);
@@ -295,13 +299,12 @@ describe("khoá dòng tiền có hạn chờ", () => {
       expect(daCho).toBeLessThan(HAN_MS + 600);
 
       giuSo.nha();
-      await Promise.all([giuVay.xong, giuSo.xong]);
+      await choTatCa([giuVay.xong, giuSo.xong]);
     }, 30_000);
 
     it("ngân sách đã cạn trước câu khoá kế ⇒ báo bận NGAY, không gửi câu nào xuống DB", async () => {
       const [a, b] = await haiKhoanTheoThuTuKhoa();
-      const giuB = giuKhoaDong("Loan", b, 15_000);
-      await giuB.daGiu;
+      const giuB = await giuKhoaDong("Loan", b);
 
       const ketQua = prisma.$transaction(
         async (tx) => {
@@ -333,27 +336,30 @@ describe("khoá dòng tiền có hạn chờ", () => {
       const dong = await prisma.cashMovement.create({
         data: { date: new Date("2026-07-10T00:00:00+07:00"), kind: "LOAN_REPAY", amount: 1_000_000, description: "Trả gốc", loanId: a },
       });
-      const giuA = giuKhoaDong("Loan", a, 20_000);
-      const giuB = giuKhoaDong("Loan", b, 20_000);
-      await Promise.all([giuA.daGiu, giuB.daGiu]);
+      const [giuA, giuB] = await choTatCa([
+        giuKhoaDong("Loan", a),
+        giuKhoaDong("Loan", b),
+      ]);
 
       const batDau = Date.now();
       nhaSau(giuA, 6_000);
       nhaSau(giuB, 13_000);
-      const res = await updateCashMovement(dong.id, {
-        date: "2026-07-10",
-        kind: "LOAN_REPAY",
-        amount: 1_000_000,
-        description: "Trả gốc",
-        loanId: b,
-      });
+      const res = await chayNen("updateCashMovement chờ khoá hai khoản vay", () =>
+        updateCashMovement(dong.id, {
+          date: "2026-07-10",
+          kind: "LOAN_REPAY",
+          amount: 1_000_000,
+          description: "Trả gốc",
+          loanId: b,
+        })
+      );
       const daCho = Date.now() - batDau;
       expect(res).toEqual({ ok: false, error: THONG_BAO_KHOA_DONG_TIEN_BAN });
       expect(daCho).toBeGreaterThanOrEqual(HAN_CHO_KHOA_DONG_TIEN_MS - 100);
       // Hạn từng câu: giành B ở 13s rồi mới chạy tiếp (> 10s) — và khi đó timeout 10s cũ ra P2028.
       expect(daCho).toBeLessThan(HAN_CHO_KHOA_DONG_TIEN_MS + 1_500);
 
-      await Promise.all([giuA.xong, giuB.xong]);
+      await choTatCa([giuA.xong, giuB.xong]);
       expect((await prisma.cashMovement.findUniqueOrThrow({ where: { id: dong.id } })).loanId).toBe(a);
       expect(await soPhienKetTrongTransaction()).toBe(0);
     },
@@ -364,19 +370,20 @@ describe("khoá dòng tiền có hạn chờ", () => {
     "OPT_TX_DONG_TIEN chừa chỗ cho câu chạy TRƯỚC khoá: giành khoá sát hạn (10,3s) vẫn commit, không P2028",
     async () => {
       expect(OPT_TX_DONG_TIEN.timeout).toBe(HAN_CHO_KHOA_DONG_TIEN_MS + 10_000);
-      const giu = giuKhoaDong("Loan", loanId, 30_000);
-      await giu.daGiu;
+      const giu = await giuKhoaDong("Loan", loanId);
 
       const batDau = Date.now();
       nhaSau(giu, HAN_CHO_KHOA_DONG_TIEN_MS + 300);
-      await prisma.$transaction(async (tx) => {
-        // Câu đứng trước khoá (đọc dòng, CAS…) — mốc hạn khoá tính từ lần khoá đầu nên lùi theo 0,5s.
-        await tx.$executeRaw`SELECT pg_sleep(0.5)`;
-        await khoaKhoanVay(tx, loanId);
-        await tx.cashMovement.create({
-          data: { date: new Date("2026-07-10T00:00:00+07:00"), kind: "CAPITAL_IN", amount: 1_000, description: "sau khoá" },
-        });
-      }, OPT_TX_DONG_TIEN);
+      await chayNen("tx chờ khoá sát hạn rồi commit", () =>
+        prisma.$transaction(async (tx) => {
+          // Câu đứng trước khoá (đọc dòng, CAS…) — mốc hạn khoá tính từ lần khoá đầu nên lùi theo 0,5s.
+          await tx.$executeRaw`SELECT pg_sleep(0.5)`;
+          await khoaKhoanVay(tx, loanId);
+          await tx.cashMovement.create({
+            data: { date: new Date("2026-07-10T00:00:00+07:00"), kind: "CAPITAL_IN", amount: 1_000, description: "sau khoá" },
+          });
+        }, OPT_TX_DONG_TIEN)
+      );
       expect(Date.now() - batDau).toBeGreaterThanOrEqual(HAN_CHO_KHOA_DONG_TIEN_MS + 250);
 
       await giu.xong;

@@ -1,5 +1,5 @@
 import type { Prisma } from "@/generated/prisma/client";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deleteCashMovement } from "@/lib/actions/cash-movements";
 import { deleteExpense } from "@/lib/actions/expenses";
@@ -17,6 +17,14 @@ import type { AnhBanGhi } from "@/lib/thung-rac/chup-anh-ban-ghi";
 import { CAU_SO_DU_AM } from "@/lib/thung-rac/ly-do-khong-khoi-phuc";
 import { listThungRac } from "@/lib/thung-rac/thung-rac-queries";
 import { seedReference, truncateBusinessTables } from "./helpers/test-db";
+import {
+  chayNen,
+  choTatCa,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "./helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 /**
  * Integration THÙNG RÁC trên `hogikids_test`.
@@ -47,9 +55,16 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
 });
+
+// Dọn dữ liệu nằm ở `beforeEach` kế (truncate): hook này chỉ chờ mọi thao tác nền đã đăng ký xong TRƯỚC khi nó chạy —
+// lượt khôi phục chạy song song không được ghi bản ghi lại sau lượt dọn.
+afterEach(() => donSauKhiThaoTacNenXong(async () => undefined), TIMEOUT_HOOK_DON_MS);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -651,7 +666,10 @@ describe("khôi phục KHÔNG được vượt cổng tiền", () => {
     await deleteExpense(chiPhi.id, "only");
     const dong = await prisma.banGhiDaXoa.findFirstOrThrow();
 
-    const [a, b] = await Promise.all([khoiPhucBanGhi(dong.id), khoiPhucBanGhi(dong.id)]);
+    const [a, b] = await choTatCa([
+      chayNen("khôi phục lượt 1", () => khoiPhucBanGhi(dong.id)),
+      chayNen("khôi phục lượt 2", () => khoiPhucBanGhi(dong.id)),
+    ]);
 
     // Đúng MỘT lượt thắng; lượt thua phải nhận câu của con dấu, không phải lỗi trùng khoá chính
     // đội lốt "Lỗi khi khôi phục bản ghi".

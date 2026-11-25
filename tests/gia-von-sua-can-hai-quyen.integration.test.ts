@@ -77,10 +77,17 @@ describe("cùng một tài khoản san-pham:sua KHÔNG xem giá vốn", () => {
     expect(await updateProductThreshold(productId, 6)).toEqual({ ok: true, data: { updated: 1 } });
 
     expect((await bienThe()).lowStockThreshold).toBe(6);
-    expect(await nhatKy("NGUONG_TON_SUA")).toEqual([
-      expect.objectContaining({ ketQua: "OK", actorId: SUA_KHONG_GIA_VON.id, doiTuongLoai: "Variant", doiTuongId: variantId }),
-      expect.objectContaining({ ketQua: "OK", doiTuongLoai: "Product", doiTuongId: productId, ghiChu: { soDong: 1 } }),
-    ]);
+    // Hai dòng so theo NỘI DUNG, không theo vị trí: `thoiDiem` là `timestamp(3)` do Prisma điền bằng đồng hồ Node, hai
+    // lần ghi cách nhau chỉ vài mili-giây, không gì đảm bảo hai giá trị khác nhau; khi trùng, thứ tự đọc do plan quyết định. Nghiệp vụ không
+    // đòi biến thể trước sản phẩm; đúng 2 dòng + từng dòng đúng nội dung vẫn bắt được thiếu/thừa/sai đối tượng.
+    const nguong = await nhatKy("NGUONG_TON_SUA");
+    expect(nguong).toHaveLength(2);
+    expect(nguong).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ketQua: "OK", actorId: SUA_KHONG_GIA_VON.id, doiTuongLoai: "Variant", doiTuongId: variantId }),
+        expect.objectContaining({ ketQua: "OK", doiTuongLoai: "Product", doiTuongId: productId, ghiChu: { soDong: 1 } }),
+      ]),
+    );
   });
 
   it.each([
@@ -127,10 +134,15 @@ describe("đủ cả hai quyền ⇒ sửa + nhật ký đúng mã", () => {
     expect(imp.ok && imp.data.updatedVariants).toBe(1);
 
     expect((await bienThe()).costPrice).toBe(63_000);
-    expect(await nhatKy("GIA_VON_SUA")).toEqual([
-      expect.objectContaining({ actorId: DU_HAI_QUYEN.id, doiTuongLoai: "Variant", doiTuongId: variantId }),
-      expect.objectContaining({ doiTuongLoai: "Product", doiTuongId: productId, ghiChu: { soDong: 1 } }),
-    ]);
+    // So theo nội dung (lý do như ca ngưỡng tồn ở trên): đúng 2 dòng, một của biến thể, một của sản phẩm.
+    const giaVon = await nhatKy("GIA_VON_SUA");
+    expect(giaVon).toHaveLength(2);
+    expect(giaVon).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ actorId: DU_HAI_QUYEN.id, doiTuongLoai: "Variant", doiTuongId: variantId }),
+        expect.objectContaining({ doiTuongLoai: "Product", doiTuongId: productId, ghiChu: { soDong: 1 } }),
+      ]),
+    );
     expect(await nhatKy("GIA_VON_IMPORT")).toEqual([expect.objectContaining({ ketQua: "OK", ghiChu: { soDong: 1 } })]);
   });
 

@@ -149,9 +149,11 @@ describe("sổ tiết kiệm — từ chối nghiệp vụ ⇒ dòng LOI", () =>
 
     expect((await tatToanSoTietKiem({ id, ...TAT_TOAN })).ok).toBe(false);
 
-    expect(await nhatKy("TIET_KIEM_TAT_TOAN")).toMatchObject([
-      { ketQua: "OK" },
-      { ketQua: "LOI", ghiChu: { lyDo: "LoiHopDong" } },
-    ]);
+    // Đồng hồ `Date` bị ghim ở `beforeEach` ⇒ hai dòng luôn CÙNG `thoiDiem` ⇒ SQL không bảo đảm thứ tự
+    // `nhatKy` (đổi plan là đảo chỗ). Chỉ khẳng định tập dòng theo nội dung, không theo vị trí.
+    const dong = await nhatKy("TIET_KIEM_TAT_TOAN");
+    expect(dong).toHaveLength(2);
+    expect(dong.filter((d) => d.ketQua === "OK")).toHaveLength(1);
+    expect(dong.filter((d) => d.ketQua === "LOI")).toMatchObject([{ ghiChu: { lyDo: "LoiHopDong" } }]);
   });
 });

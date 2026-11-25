@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { demDaHachToan } from "@/lib/bronze/doi-soat-hach-toan";
 import { landRaw } from "@/lib/bronze/land-raw";
@@ -9,6 +9,15 @@ import { prisma } from "@/lib/prisma";
 
 import { SHOP_TIKTOK } from "../helpers/shop-ids-fixture";
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
+import {
+  chayNen,
+  choTatCa,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giuTransactionDenKhiTha,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 /**
  * LUẬT THỨ TỰ GHI SILVER — bản ghi CŨ không được đè bản MỚI.
@@ -99,9 +108,16 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
 });
+
+// Dọn dữ liệu nằm ở `beforeEach` kế (truncate): hook này chỉ chờ mọi thao tác nền đã đăng ký xong TRƯỚC khi nó chạy —
+// lượt ghi Silver đứng chờ khoá / transaction chèn đơn không được commit sau lượt dọn.
+afterEach(() => donSauKhiThaoTacNenXong(async () => undefined), TIMEOUT_HOOK_DON_MS);
 
 describe("thứ tự ghi Silver theo mốc nguồn", () => {
   it("bản CŨ tới sau KHÔNG đè bản mới — phí sàn thật giữ nguyên", async () => {
@@ -153,7 +169,10 @@ describe("thứ tự ghi Silver theo mốc nguồn", () => {
   });
 
   it("hai lượt ghi CHẠY SONG SONG: bản mới luôn thắng, bất kể ai xong trước", async () => {
-    await Promise.all([ghi("D-6", 16_000, 3, MOC_CU), ghi("D-6", 5_839, 4, MOC_MOI)]);
+    await choTatCa([
+      chayNen("ghi bản cũ D-6", () => ghi("D-6", 16_000, 3, MOC_CU)),
+      chayNen("ghi bản mới D-6", () => ghi("D-6", 5_839, 4, MOC_MOI)),
+    ]);
 
     const don = await docDon("D-6");
     expect(don?.platformFeeEst).toBe(5_839);
@@ -171,7 +190,10 @@ describe("thứ tự ghi Silver theo mốc nguồn", () => {
       await upsertOneOrder(mapPancakeOrder(raw as never, { channels: {} }), raw, stats, canhBao, mocLand(moc));
       return stats;
     };
-    const [s1, s2] = await Promise.all([chay(16_000, 3, MOC_CU), chay(5_839, 4, MOC_MOI)]);
+    const [s1, s2] = await choTatCa([
+      chayNen("tạo D-8 bản cũ", () => chay(16_000, 3, MOC_CU)),
+      chayNen("tạo D-8 bản mới", () => chay(5_839, 4, MOC_MOI)),
+    ]);
 
     expect(canhBao.filter((c) => c.includes("Bỏ qua đơn"))).toEqual([]);
     // Đúng một lượt ghi được, lượt kia hoặc cũng ghi (nếu chạy nối tiếp) hoặc bị từ chối vì cũ hơn —
@@ -409,39 +431,31 @@ describe("upsertOneOrder — chanKhiCoDonKhacCungKenhMa", () => {
  */
 describe("upsertOneOrder — khoá (kênh, mã) chặn đua ghi đồng thời", () => {
   it("transaction khác giữ khoá + chèn đơn gốc rồi mới nhả → đơn bù bị chặn, không đếm đôi", { timeout: 60_000 }, async () => {
-    let moKhoa!: () => void;
-    const choMoKhoa = new Promise<void>((r) => (moKhoa = r));
-    let daGiu!: () => void;
-    const khoaSanSang = new Promise<void>((r) => (daGiu = r));
     // Vai "ingest chen ngang": giữ khoá của (tiktok, MA-RACE) rồi chèn đơn gốc TRONG transaction
-    // đang mở — chỉ thấy được từ ngoài sau khi commit (lúc nhả khoá).
-    const phienChenNgang = prisma.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"don:tiktok|MA-RACE"}, 0))`;
-        await tx.order.create({
-          data: {
-            pancakeId: "GOC-RACE",
-            code: "MA-RACE",
-            channelId: "tiktok",
-            status: "COMPLETED",
-            orderedAt: new Date("2026-07-01T10:00:00+07:00"),
-            syncedAt: new Date(),
-            itemsTotal: 200_000,
-          },
-        });
-        daGiu();
-        await choMoKhoa;
-      },
-      { timeout: 60_000, maxWait: 10_000 }
-    );
-    await khoaSanSang;
+    // đang mở — chỉ thấy được từ ngoài sau khi commit (lúc nhả khoá). Giữ bằng helper chung: test đỏ giữa
+    // chừng / hết giờ thì hook dọn ROLLBACK nó và chờ lượt bù xong.
+    const phienChenNgang = await giuTransactionDenKhiTha("ingest chen ngang giữ khoá (kênh, mã)", async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"don:tiktok|MA-RACE"}, 0))`;
+      await tx.order.create({
+        data: {
+          pancakeId: "GOC-RACE",
+          code: "MA-RACE",
+          channelId: "tiktok",
+          status: "COMPLETED",
+          orderedAt: new Date("2026-07-01T10:00:00+07:00"),
+          syncedAt: new Date(),
+          itemsTotal: 200_000,
+        },
+      });
+    });
 
-    const luotBu = ghiVoiChan("AF-RACE", "MA-RACE"); // phải đứng chờ ở khoá, KHÔNG được kiểm sớm
+    // Phải đứng chờ ở khoá, KHÔNG được kiểm sớm.
+    const luotBu = chayNen("lượt bù chờ khoá (kênh, mã)", () => ghiVoiChan("AF-RACE", "MA-RACE"));
     // Nhường thời gian cho lượt bù chạy tới khoá — nếu khoá bị gỡ khỏi upsert, lượt bù sẽ kiểm
     // ngay trong khe này (đơn gốc chưa commit, vô hình ở READ COMMITTED) rồi ghi ⇒ test đỏ.
     await new Promise((r) => setTimeout(r, 300));
-    moKhoa();
-    await phienChenNgang;
+    phienChenNgang.tha();
+    await phienChenNgang.xong;
 
     const { stats } = await luotBu;
     expect(stats.boQuaCoChuDich).toBe(1);

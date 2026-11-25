@@ -24,6 +24,14 @@ import type { Prisma } from "@/generated/prisma/client";
 
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  chayNen,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giuTransactionDenKhiTha,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const vn = (ngay: string, gio = "00:00:00") => new Date(`${ngay}T${gio}+07:00`);
 const tr = (n: number) => Math.round(n * 1_000_000);
@@ -50,25 +58,16 @@ async function trongLucGiuKhoaThe<T>(
   lamGi: (tx: Prisma.TransactionClient) => Promise<unknown>,
   hanhDong: () => Promise<T>
 ): Promise<{ r: T; ms: number }> {
-  let tha!: () => void;
-  const cho = new Promise<void>((res) => (tha = res));
-  let daGiu!: () => void;
-  const giuXong = new Promise<void>((res) => (daGiu = res));
-  const giu = prisma.$transaction(
-    async (tx) => {
-      await khoaThe(tx, cardId);
-      await lamGi(tx);
-      daGiu();
-      await cho;
-    },
-    { timeout: 20_000 }
-  );
-  await giuXong;
+  // Giữ khoá bằng helper chung: test lỗi sớm / hết giờ thì hook dọn ROLLBACK transaction và chờ `hanhDong` xong.
+  const giu = await giuTransactionDenKhiTha("giữ khoá dòng thẻ", async (tx) => {
+    await khoaThe(tx, cardId);
+    await lamGi(tx);
+  });
   const t0 = performance.now();
-  const p = hanhDong().then((r) => ({ r, ms: performance.now() - t0 }));
+  const p = chayNen("hành động chờ khoá dòng thẻ", () => hanhDong().then((r) => ({ r, ms: performance.now() - t0 })));
   await new Promise((res) => setTimeout(res, 800));
-  tha();
-  await giu;
+  giu.tha();
+  await giu.xong;
   return p;
 }
 
@@ -79,7 +78,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
   await prisma.setting.create({ data: { key: KEY_NO_PHAI_TRA_TU_NGAY, value: "2026-11-01" } });
@@ -88,10 +90,14 @@ beforeEach(async () => {
   vi.setSystemTime(vn("2026-11-26", "10:00:00"));
 });
 
-afterEach(async () => {
-  vi.useRealTimers();
-  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.useRealTimers();
+      await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();

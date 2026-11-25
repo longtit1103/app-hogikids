@@ -15,7 +15,6 @@ vi.mock("@/lib/quyen/nguoi-dung-phien", async (goc) => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import type { Prisma } from "@/generated/prisma/client";
 import {
   createCashMovement,
   deleteCashMovement,
@@ -31,6 +30,14 @@ import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  chayNen,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giuTransactionDenKhiTha,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 const vn = (ngay: string, gio = "00:00:00") => new Date(`${ngay}T${gio}+07:00`);
 const tr = (n: number) => Math.round(n * 1_000_000);
@@ -73,7 +80,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
   vi.mocked(docNguoiDungPhien).mockResolvedValue(nguoiDungGia());
@@ -81,10 +91,14 @@ beforeEach(async () => {
   vi.setSystemTime(vn("2026-11-26", "10:00:00"));
 });
 
-afterEach(async () => {
-  vi.useRealTimers();
-  await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
-});
+afterEach(
+  () =>
+    donSauKhiThaoTacNenXong(async () => {
+      vi.useRealTimers();
+      await prisma.setting.deleteMany({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } });
+    }),
+  TIMEOUT_HOOK_DON_MS
+);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -219,25 +233,17 @@ describe("sửa / xoá dòng nợ phải trả", () => {
     await createCashMovement(traThe(a));
     const dong = await prisma.cashMovement.findFirstOrThrow();
 
-    let tha!: () => void;
-    const cho = new Promise<void>((res) => (tha = res));
-    let daGiu!: () => void;
-    const giuXong = new Promise<void>((res) => (daGiu = res));
-    const giu = prisma.$transaction(
-      async (tx: Prisma.TransactionClient) => {
-        await khoaThe(tx, a);
-        await tx.theTinDung.update({ where: { id: a }, data: { closedAt: vn("2026-11-26") } });
-        daGiu();
-        await cho;
-      },
-      { timeout: 20_000 },
-    );
-    await giuXong;
+    const giu = await giuTransactionDenKhiTha("giữ khoá thẻ A (đóng thẻ)", async (tx) => {
+      await khoaThe(tx, a);
+      await tx.theTinDung.update({ where: { id: a }, data: { closedAt: vn("2026-11-26") } });
+    });
     const t0 = performance.now();
-    const p = updateCashMovement(dong.id, traThe(b)).then((r) => ({ r, ms: performance.now() - t0 }));
+    const p = chayNen("sửa CARD_PAY chuyển A→B chờ khoá", () =>
+      updateCashMovement(dong.id, traThe(b)).then((r) => ({ r, ms: performance.now() - t0 })),
+    );
     await new Promise((res) => setTimeout(res, 800));
-    tha();
-    await giu;
+    giu.tha();
+    await giu.xong;
     const { r, ms } = await p;
     expect(ms).toBeGreaterThan(600);
     expect(r).toMatchObject({ ok: false, code: "THE_DA_DONG" });

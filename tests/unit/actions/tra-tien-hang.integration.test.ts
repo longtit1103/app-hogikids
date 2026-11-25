@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { addDays, format } from "date-fns";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Prisma } from "@/generated/prisma/client";
 import { docPhieuConNo, khoaCacPhieu, vanTayPhieuConNo } from "@/lib/no-phai-tra/phieu-nhap-no-queries";
@@ -11,6 +11,13 @@ import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { datMocM, donFixtureNoPhaiTra, taoPhieuNo, vn } from "../../helpers/phieu-nhap-no-fixture";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  chayNen,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 /**
  * `traTienHangGop` trên DB thật (`hogikids_test`) — spec §5.3 sáu bước, phase-03 Bước 3 ca (a)–(h).
@@ -40,7 +47,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   vi.mocked(docNguoiDungPhien).mockImplementation(async () => nguoiDungGia());
   await truncateBusinessTables();
   await donFixtureNoPhaiTra();
@@ -48,6 +58,10 @@ beforeEach(async () => {
   p1 = await taoPhieuNo({ uuid: "u-1", maPhieu: "#1", ngayPhieu: vn("2026-09-10T00:00:00"), tongTien: 20 * TR });
   p2 = await taoPhieuNo({ uuid: "u-2", maPhieu: "#2", ngayPhieu: vn("2026-09-20T00:00:00"), tongTien: 100 * TR, daTraTruoc: 10 * TR });
 });
+
+// Dọn dữ liệu nằm ở `beforeEach` kế (truncate) / `afterAll`: hook này chỉ chờ mọi thao tác nền đã đăng ký xong TRƯỚC khi
+// chúng chạy, để transaction giữ khoá không commit dòng lạ sau lượt dọn.
+afterEach(() => donSauKhiThaoTacNenXong(async () => undefined), TIMEOUT_HOOK_DON_MS);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -226,20 +240,28 @@ describe("traTienHangGop", () => {
     const yc = await yeuCau50();
     let daGiu!: () => void;
     const giuXong = new Promise<void>((r) => (daGiu = r));
-    const giu = prisma.$transaction(
-      async (tx) => {
-        await khoaCacPhieu(tx, [p1]);
-        daGiu();
-        await new Promise((r) => setTimeout(r, 800));
-        await tx.cashMovement.create({
-          data: { date: vn("2026-10-05T00:00:00"), kind: "SUPPLIER_PAY", amount: 5 * TR, phieuNhapId: p1, description: "tab khác" },
-        });
-      },
-      { timeout: 20_000 },
+    const giu = chayNen("tx khác giữ khoá phiếu rồi ghi", () =>
+      prisma.$transaction(
+        async (tx) => {
+          await khoaCacPhieu(tx, [p1]);
+          daGiu();
+          await new Promise((r) => setTimeout(r, 800));
+          await tx.cashMovement.create({
+            data: { date: vn("2026-10-05T00:00:00"), kind: "SUPPLIER_PAY", amount: 5 * TR, phieuNhapId: p1, description: "tab khác" },
+          });
+        },
+        { timeout: 20_000 },
+      ),
     );
-    await giuXong;
+    // Transaction kết thúc trước khi báo đã giữ khoá (vd ném) ⇒ báo ngay lý do gốc, đừng treo ở `giuXong`.
+    await Promise.race([
+      giuXong,
+      giu.then(() => {
+        throw new Error("tx giữ khoá phiếu kết thúc trước khi báo đã giữ");
+      }),
+    ]);
     const batDau = Date.now();
-    const res = await traTienHangGop(yc);
+    const res = await chayNen("trả gộp chờ khoá phiếu", () => traTienHangGop(yc));
     const choMs = Date.now() - batDau;
     await giu;
 

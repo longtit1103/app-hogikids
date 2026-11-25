@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { writeSync } from "node:fs";
 import { isMainThread } from "node:worker_threads";
 
-import { aroundEach, expect, onTestFinished } from "vitest";
+import { aroundEach, expect, onTestFinished, type TestContext } from "vitest";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { KEY_NO_PHAI_TRA_TU_NGAY, KHOA_BAT_NO_PHAI_TRA } from "@/lib/no-phai-tra/cong-bat-no-phai-tra";
@@ -15,6 +15,13 @@ import { prisma } from "@/lib/prisma";
  * Vì sao không đủ `try/finally` trong thân test: Vitest hết giờ một test thì KHÔNG chờ hàm test — `afterEach` chạy
  * ngay trong lúc thân test còn chạy nền. Một transaction "giả lập bước bật" đang giữ khoá + ghi mốc M chưa commit
  * sẽ commit SAU lượt dọn (M sống sang test/file sau), còn lượt ghi đang chờ khoá thì chèn dòng lạ vào test kế tiếp.
+ *
+ * KHÔNG hỗ trợ ca chạy đồng thời (`it.concurrent` / `describe.concurrent` / `sequence.concurrent`): sổ, cờ đóng/mở và ca
+ * đang chạy là MỘT bộ trạng thái chung của cả file, nhiều ca chạy chồng nhau sẽ giẫm lên nhau. `dangKyTheHeCa` từ chối
+ * thẳng ca khai báo đồng thời bằng lời báo rõ lý do. Đồng thời BÊN TRONG một ca (nhiều lượt cùng lúc) thì dùng `choTatCa`.
+ *
+ * Hẹn giờ của helper (trần chờ, nhịp 0,8s giữ khoá) dùng `setTimeout` THẬT chốt lúc nạp module: file test có
+ * `vi.useFakeTimers()` (giả cả `setTimeout`) không làm trần chờ không bao giờ nổ.
  *
  * PHẠM VI: chỉ các file test ĐÃ áp helper này (đăng ký đủ 3 hook dưới) được phủ. Test đồng thời ở file khác (còn
  * transaction giữ tới `tha()` / `Promise.all` tự viết) vẫn có lỗ cũ — helper không tự lan sang chúng.
@@ -49,7 +56,24 @@ import { prisma } from "@/lib/prisma";
  * rồi giết chính worker (JS của thao tác còn sống chết theo, kết nối DB đóng ⇒ Postgres ROLLBACK transaction đang mở).
  * Giới hạn còn lại: một câu lệnh SQL server ĐANG THỰC THI lúc worker chết (vd câu autocommit đang chờ khoá) vẫn có thể
  * chạy nốt phía Postgres — nhưng lượt đã huỷ nên không ca nào của lượt này chạy sau nó.
+ *
+ * GIỚI HẠN CHƯA CHẶN — callback / listener băng qua ca: thế hệ ca đi theo NƠI GỌI, không theo nơi đăng ký. Một hàm do ca
+ * CŨ đăng ký (listener `EventEmitter`, callback cất vào biến / đối tượng dùng chung giữa các ca) mà ca MỚI gọi thì chạy
+ * trong ngữ cảnh của ca mới: `chayNen` bên trong nó được tính là của ca mới và KHÔNG bị từ chối, ca mới xanh im lặng dù
+ * đang chạy mã của ca cũ. Helper không phát hiện và không chặn đường này.
+ * QUY ƯỚC: không truyền callback / listener có gọi thao tác qua sổ từ ca này sang ca khác. Nếu sau này thật sự cần, phải
+ * bổ sung cơ chế giữ ngữ cảnh của ca gốc (vd `AsyncResource.bind` lúc đăng ký) kèm ca test chứng minh, TRƯỚC khi áp cho
+ * file test nào. (Chờ bằng `await` một promise do ca khác hoàn tất thì KHÔNG thuộc giới hạn này: phần chạy tiếp sau
+ * `await` giữ ngữ cảnh của ca đang chờ — fixture `f-than-ca-cu-goi-thao-tac-luc-ca-moi` dựa đúng vào điều đó.)
  */
+
+/**
+ * Hẹn giờ THẬT, chốt lúc nạp module (helper được import ở đầu file test, trước mọi `vi.useFakeTimers()`). Trần chờ của hook
+ * dọn mà dùng `setTimeout` toàn cục thì file giả `setTimeout` làm nó không bao giờ nổ — thao tác nền còn sống không bị
+ * phát hiện, đúng lỗ helper này sinh ra để vá.
+ */
+const henGioThat = globalThis.setTimeout;
+const huyHenGioThat = globalThis.clearTimeout;
 
 /** Timeout transaction giữ khoá ở các ca đồng thời (số các file đã dùng từ trước). */
 export const TIMEOUT_TX_GIU_KHOA_MS = 20_000;
@@ -162,6 +186,25 @@ function ghiHetVaoStderr(noiDung: string): void {
   }
 }
 
+/** Trần ký tự của phần lỗi gốc in vào khung — khung chỉ cần đủ để biết ca đỏ vì gì, stack đầy đủ nằm ở lượt chạy lại. */
+const TRAN_KY_TU_LOI_GOC = 1_500;
+
+/**
+ * Lỗi Vitest đã ghi cho ca đang chạy (assertion hỏng, hết giờ…) — lượt bị huỷ thì reporter không kịp in nó, nên khung
+ * lý do huỷ phải mang theo, nếu không lỗi sinh ra thao tác treo (thường chính là lỗi này) mất theo cả lượt. Chỉ ĐỌC, không
+ * bao giờ ném: huỷ lượt phải đi tiếp dù không đọc được.
+ */
+function docLoiGocCuaCa(): string {
+  try {
+    const loi = caDangChay?.task.result?.errors;
+    if (!loi || loi.length === 0) return "(Vitest chưa ghi lỗi nào cho ca này)";
+    const chuoi = loi.map((l) => `${l.name ?? "Error"}: ${l.message ?? "(không có thông điệp)"}`).join("\n");
+    return chuoi.length > TRAN_KY_TU_LOI_GOC ? `${chuoi.slice(0, TRAN_KY_TU_LOI_GOC)}…(cắt)` : chuoi;
+  } catch (loi) {
+    return `(không đọc được: ${moTaLoi(loi)})`;
+  }
+}
+
 /**
  * Huỷ CẢ lượt Vitest: in lý do ra stderr (reporter sẽ không kịp in), giết tiến trình chính của lượt rồi giết chính
  * worker. Phần giết nằm trong `finally`: ghi stderr lỗi (EBADF, pipe đầy quá trần…) vẫn KHÔNG được bỏ qua việc huỷ.
@@ -176,6 +219,7 @@ function huyCaLuotVitest(baoCao: string): void {
         `█ HUỶ CẢ LƯỢT VITEST — thao tác DB nền của test VẪN CÒN CHẠY quá trần chờ ${tranChoXongMs}ms.\n` +
         `█ Không dọn dữ liệu, không chạy ca / afterAll / file kế tiếp trên cùng DB test (sẽ nhận dòng lạ do thao tác ghi sau dọn).\n` +
         `█ File: ${testPath ?? "?"} · ca: ${currentTestName ?? "?"}\n` +
+        `█ Lỗi gốc của ca: ${docLoiGocCuaCa().replaceAll("\n", "\n█ ")}\n` +
         `█ ${baoCao.replaceAll("\n", "\n█ ")}\n` +
         `${"█".repeat(100)}\n`
     );
@@ -227,18 +271,17 @@ let daDong = true;
 /** Hook dọn của test hiện tại đã chạy chưa — kiểm ở cuối test (`onTestFinished`) để bắt file quên `afterEach`. */
 let daQuaHookDon = true;
 
-/** Một lượt chạy ca do `aroundEach` cấp: thế hệ tăng dần + tên ca (để báo lỗi). */
-type TheHeCa = { theHe: number; tenCa: string };
+/** Một lượt chạy ca do `aroundEach` cấp: thế hệ tăng dần + tên ca đầy đủ (để báo lỗi) + chính task của Vitest (đọc lỗi gốc). */
+type TheHeCa = { theHe: number; tenCa: string; task: TestContext["task"] };
 /**
  * Thế hệ của ca mà đoạn mã đang chạy THUỘC VỀ — đi theo mọi `await` / timer / promise sinh ra từ thân ca, kể cả khi thân
- * ca đó đã bị Vitest bỏ (hết giờ) mà vẫn chạy tiếp. Vì vậy thân ca cũ còn sống thì vẫn mang thế hệ CŨ.
+ * ca đó đã bị Vitest bỏ (hết giờ) mà vẫn chạy tiếp. Vì vậy thân ca cũ còn sống thì vẫn mang thế hệ CŨ. Ngoại lệ:
+ * callback / listener do ca cũ đăng ký mà ca khác gọi thì mang thế hệ của NƠI GỌI (giới hạn chưa chặn, xem đầu file).
  */
 const alsTheHeCa = new AsyncLocalStorage<TheHeCa>();
 let demTheHe = 0;
 /** Ca mà `aroundEach` đang chạy (`runTest` chưa trả); null giữa hai ca. */
 let caDangChay: TheHeCa | null = null;
-/** Thế hệ của ca đã mở sổ gần nhất (`moTheoDoiThaoTacNen`). */
-let theHeMoSo: number | null = null;
 /**
  * Lời từ chối dành cho thân ca CŨ: lỗi ném vào thân ca đã bị Vitest bỏ thì không ai thấy, nên lưu lại để hook dọn kế
  * tiếp (của ca đang chạy) NÉM ra — ca đó đỏ ở `afterEach`.
@@ -252,7 +295,16 @@ const tuChoiThanCaCu: string[] = [];
  */
 export function dangKyTheHeCa(): void {
   aroundEach(async (runTest, context) => {
-    const ca: TheHeCa = { theHe: ++demTheHe, tenCa: context.task.name };
+    // Từ chối TRƯỚC khi đụng trạng thái chung: ca đồng thời nào cũng đỏ cùng MỘT lý do đúng, thay vì ca sau đè
+    // `caDangChay` rồi ca trước bị từ chối với lời báo "thân ca đã kết thúc" sai sự thật.
+    if (context.task.concurrent) {
+      throw new Error(
+        `Ca "${context.task.fullTestName}" khai báo chạy ĐỒNG THỜI (it.concurrent / describe.concurrent / ` +
+          `sequence.concurrent): helper thao tác nền chỉ có MỘT sổ và MỘT "ca đang chạy" cho cả file nên không phủ được ` +
+          `các ca chạy chồng nhau. Dùng it thường; muốn nhiều lượt cùng lúc thì chạy chúng BÊN TRONG một ca và chờ bằng choTatCa.`
+      );
+    }
+    const ca: TheHeCa = { theHe: ++demTheHe, tenCa: context.task.fullTestName, task: context.task };
     caDangChay = ca;
     try {
       await alsTheHeCa.run(ca, runTest);
@@ -277,7 +329,6 @@ export function moTheoDoiThaoTacNen(): void {
       "moTheoDoiThaoTacNen() chạy ngoài ngữ cảnh thế hệ ca — thiếu dangKyTheHeCa() cùng cấp, đặt TRƯỚC beforeEach này."
     );
   }
-  theHeMoSo = ca.theHe;
   daDong = false;
   daQuaHookDon = false;
   onTestFinished(async () => {
@@ -418,7 +469,7 @@ export async function giaLapBuocBatGiuKhoa<T>(
     return { r, ms: performance.now() - t0 };
   });
   if (giua) await giua();
-  await new Promise((res) => setTimeout(res, 800));
+  await new Promise((res) => henGioThat(res, 800));
   buocBat.tha();
   await buocBat.xong;
   return p;
@@ -469,10 +520,10 @@ export async function choThaoTacNenXong(): Promise<void> {
   const ketQua = await Promise.race([
     Promise.all(muc.map((m) => m.ketThuc)).then(() => "xong" as const),
     new Promise<"het-tran">((res) => {
-      hen = setTimeout(() => res("het-tran"), tranChoXongMs);
+      hen = henGioThat(() => res("het-tran"), tranChoXongMs);
     }),
   ]);
-  clearTimeout(hen);
+  huyHenGioThat(hen);
 
   const baoCao: string[] = [];
   const nguyenNhan: unknown[] = [];

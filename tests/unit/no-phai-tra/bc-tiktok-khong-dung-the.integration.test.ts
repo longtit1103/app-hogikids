@@ -164,10 +164,11 @@ describe("đánh dấu BC không dùng thẻ — chỉ chủ shop", () => {
     expect(await cong()).toContain(`CHƯA XÁC NHẬN (BC ${BC_B})`);
 
     expect(await boDanhDauBcTiktokKhongDung(BC_B)).toEqual({ ok: true, data: { daDoi: false } });
-    expect((await nhatKy()).map((n) => n.hanhDong)).toEqual([
-      "BC_TIKTOK_DANH_DAU_KHONG_DUNG",
-      "BC_TIKTOK_BO_DANH_DAU_KHONG_DUNG",
-    ]);
+    // Đúng một dòng cho mỗi lần ĐỔI trạng thái (lần bỏ thứ hai không thêm dòng). So theo tập mã, không theo vị trí:
+    // không gì đảm bảo hai dòng khác `thoiDiem` (mili-giây); khi trùng, thứ tự đọc do plan quyết định; trạng thái đã được kiểm ở trên.
+    const hanhDong = (await nhatKy()).map((n) => n.hanhDong);
+    expect(hanhDong).toHaveLength(2);
+    expect(hanhDong).toEqual(expect.arrayContaining(["BC_TIKTOK_DANH_DAU_KHONG_DUNG", "BC_TIKTOK_BO_DANH_DAU_KHONG_DUNG"]));
   });
 
   it("BC chỉ có hoá đơn trong kho thô (chưa có dòng bảng bền) đánh dấu được — dòng được tạo", async () => {

@@ -1,5 +1,5 @@
 import { format } from "date-fns";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Prisma } from "@/generated/prisma/client";
 import { refIdChoPhieu } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
@@ -10,6 +10,13 @@ import { docNguoiDungPhien } from "@/lib/quyen/nguoi-dung-phien";
 import { nguoiDungGia } from "../../helpers/nguoi-dung-gia";
 import { datMocM, donFixtureNoPhaiTra, seedBronze, vn } from "../../helpers/phieu-nhap-no-fixture";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  chayNen,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 /**
  * Action hồ sơ phiếu nợ trên DB thật (`hogikids_test`): ghi nhận (ba ca theo M — spec phase-03 Bước 2),
@@ -45,7 +52,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   vi.mocked(docNguoiDungPhien).mockImplementation(async () => nguoiDungGia());
   await truncateBusinessTables();
   await donFixtureNoPhaiTra();
@@ -61,6 +71,10 @@ beforeEach(async () => {
     },
   });
 });
+
+// Dọn dữ liệu nằm ở `beforeEach` kế (truncate) / `afterAll`: hook này chỉ chờ mọi thao tác nền đã đăng ký xong TRƯỚC khi
+// chúng chạy, để transaction giữ khoá không commit dòng lạ sau lượt dọn.
+afterEach(() => donSauKhiThaoTacNenXong(async () => undefined), TIMEOUT_HOOK_DON_MS);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -357,16 +371,24 @@ describe("nút hậu kiểm", () => {
   async function giuKhoaRoiSua(id: string, sua: (tx: Prisma.TransactionClient) => Promise<unknown>) {
     let daGiu!: () => void;
     const giuXong = new Promise<void>((r) => (daGiu = r));
-    const giu = prisma.$transaction(
-      async (tx) => {
-        await khoaCacPhieu(tx, [id]);
-        daGiu();
-        await new Promise((r) => setTimeout(r, 800));
-        await sua(tx);
-      },
-      { timeout: 20_000 },
+    const giu = chayNen("tx khác giữ khoá phiếu rồi sửa", () =>
+      prisma.$transaction(
+        async (tx) => {
+          await khoaCacPhieu(tx, [id]);
+          daGiu();
+          await new Promise((r) => setTimeout(r, 800));
+          await sua(tx);
+        },
+        { timeout: 20_000 },
+      ),
     );
-    await giuXong;
+    // Transaction kết thúc trước khi báo đã giữ khoá (vd ném) ⇒ báo ngay lý do gốc, đừng treo ở `giuXong`.
+    await Promise.race([
+      giuXong,
+      giu.then(() => {
+        throw new Error("tx giữ khoá phiếu kết thúc trước khi báo đã giữ");
+      }),
+    ]);
     // Bọc trong object: `return giu` trần từ hàm async sẽ khiến caller CHỜ cả tx xong mới chạy tiếp.
     return { giu };
   }
@@ -376,7 +398,7 @@ describe("nút hậu kiểm", () => {
     await seedBronze({ ...P1, tongTien: 95 * TR }, vn("2026-10-02T12:00:00"));
     const { giu } = await giuKhoaRoiSua(id, (tx) => tx.phieuNhapNo.update({ where: { id }, data: { tongTien: 95 * TR } }));
     const batDau = Date.now();
-    const res = await capNhatTongPhieu({ phieuNhapId: id, tongTienMoi: 95 * TR });
+    const res = await chayNen("capNhatTongPhieu chờ khoá phiếu", () => capNhatTongPhieu({ phieuNhapId: id, tongTienMoi: 95 * TR }));
     const choMs = Date.now() - batDau;
     await giu;
     expect(res).toMatchObject({ ok: true, data: { tongTien: 95 * TR } });
@@ -388,7 +410,7 @@ describe("nút hậu kiểm", () => {
     const id = await ghiNhan(P1.uuid);
     const { giu } = await giuKhoaRoiSua(id, (tx) => tx.phieuNhapNo.update({ where: { id }, data: { daHuy: true } }));
     const batDau = Date.now();
-    const res = await danhDauHuyPhieu({ phieuNhapId: id });
+    const res = await chayNen("danhDauHuyPhieu chờ khoá phiếu", () => danhDauHuyPhieu({ phieuNhapId: id }));
     const choMs = Date.now() - batDau;
     await giu;
     expect(res).toMatchObject({ ok: true, data: { conNo: 0 } });

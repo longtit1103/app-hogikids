@@ -25,6 +25,7 @@ import {
   dangKyTheHeCa,
   donSauKhiThaoTacNenXong,
   giaLapBuocBatGiuKhoa,
+  giuTransactionDenKhiTha,
   kiemThieuHookDon,
   moTheoDoiThaoTacNen,
   TIMEOUT_HOOK_DON_MS,
@@ -32,13 +33,25 @@ import {
 
 const docM = async () => (await prisma.setting.findUnique({ where: { key: KEY_NO_PHAI_TRA_TU_NGAY } }))?.value ?? null;
 
-/** Transaction đang mở của phiên KHÁC + khoá advisory của bước bật (cả lượt giữ lẫn lượt đứng chờ). */
-async function doPhienConMo(): Promise<{ tx: number; khoa: number }> {
+/**
+ * Pid các phiên KHÁC đang mở transaction ngay lúc gọi — chụp ĐẦU ca để phép đo "còn transaction" chỉ tính phiên do ca
+ * này sinh ra: DB test dùng chung (Prisma Studio, `psql` quên `COMMIT`…) có phiên ngoài mở sẵn thì đếm mọi phiên sẽ đỏ giả.
+ */
+async function pidPhienNgoaiDangMoTx(): Promise<number[]> {
+  const ds = await prisma.$queryRaw<{ pid: number }[]>`
+    SELECT pid::int AS pid FROM pg_stat_activity
+      WHERE datname = current_database() AND pid <> pg_backend_pid() AND backend_type = 'client backend'
+        AND xact_start IS NOT NULL`;
+  return ds.map((d) => d.pid);
+}
+
+/** Transaction đang mở của phiên KHÁC (trừ `boQuaPid`) + khoá advisory của bước bật (cả lượt giữ lẫn lượt đứng chờ). */
+async function doPhienConMo(boQuaPid: number[]): Promise<{ tx: number; khoa: number }> {
   const [d] = await prisma.$queryRaw<{ tx: number; khoa: number }[]>`
     SELECT
       (SELECT count(*)::int FROM pg_stat_activity
         WHERE datname = current_database() AND pid <> pg_backend_pid() AND backend_type = 'client backend'
-          AND xact_start IS NOT NULL) AS tx,
+          AND xact_start IS NOT NULL AND pid <> ALL(${boQuaPid}::int[])) AS tx,
       (SELECT count(*)::int FROM pg_locks
         WHERE locktype = 'advisory' AND objsubid = 1
           AND objid = (hashtext(${KHOA_BAT_NO_PHAI_TRA}::text)::bigint & 4294967295)::oid) AS khoa`;
@@ -73,35 +86,86 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+/**
+ * Ca "lỗi sớm": thân test ném trước `tha()` — hook dọn phải ROLLBACK bước bật ngay, chờ lượt đang chờ khoá xong, báo việc
+ * dở; lúc dọn 0 transaction của ca, khoá nhả, M không commit. `boQuaPid` = phiên ngoài đã mở sẵn lúc bắt đầu ca.
+ */
+async function chayCaLoiSomRoiKiemDon(boQuaPid: number[]): Promise<void> {
+  let daChayXong = false;
+  let mThayDuoc: string | null | undefined;
+  await expect(
+    giaLapBuocBatGiuKhoa(
+      "2026-10-01",
+      async () => {
+        mThayDuoc = await docMSauKhoaChung();
+        daChayXong = true;
+        return mThayDuoc;
+      },
+      async () => {
+        throw new Error("lỗi sớm cố ý");
+      }
+    )
+  ).rejects.toThrow("lỗi sớm cố ý");
+  // Ngay sau lỗi: bước bật vẫn giữ khoá EXCLUSIVE + M chưa commit, lượt ghi đứng chờ.
+  expect((await doPhienConMo(boQuaPid)).khoa).toBeGreaterThanOrEqual(1);
+  expect(daChayXong).toBe(false);
+
+  const t0 = performance.now();
+  await expect(choThaoTacNenXong()).rejects.toThrow(/"giả lập bước bật" còn giữ transaction lúc test kết thúc/);
+  // Huỷ ngay chứ không đợi hết timeout transaction 20s.
+  expect(performance.now() - t0).toBeLessThan(5_000);
+  expect(await doPhienConMo(boQuaPid)).toEqual({ tx: 0, khoa: 0 });
+  expect(daChayXong).toBe(true);
+  expect(mThayDuoc).toBeNull();
+  expect(await docM()).toBeNull();
+}
+
 describe("hook dọn chờ / huỷ thao tác nền", () => {
   it("thân test ném trước tha() ⇒ hook dọn ROLLBACK bước bật ngay, chờ lượt đang chờ khoá xong, báo việc dở; lúc dọn 0 transaction, khoá nhả, M không commit", async () => {
-    let daChayXong = false;
-    let mThayDuoc: string | null | undefined;
-    await expect(
-      giaLapBuocBatGiuKhoa(
-        "2026-10-01",
-        async () => {
-          mThayDuoc = await docMSauKhoaChung();
-          daChayXong = true;
-          return mThayDuoc;
-        },
-        async () => {
-          throw new Error("lỗi sớm cố ý");
-        }
-      )
-    ).rejects.toThrow("lỗi sớm cố ý");
-    // Ngay sau lỗi: bước bật vẫn giữ khoá EXCLUSIVE + M chưa commit, lượt ghi đứng chờ.
-    expect((await doPhienConMo()).khoa).toBeGreaterThanOrEqual(1);
-    expect(daChayXong).toBe(false);
+    await chayCaLoiSomRoiKiemDon(await pidPhienNgoaiDangMoTx());
+  });
 
-    const t0 = performance.now();
-    await expect(choThaoTacNenXong()).rejects.toThrow(/"giả lập bước bật" còn giữ transaction lúc test kết thúc/);
-    // Huỷ ngay chứ không đợi hết timeout transaction 20s.
-    expect(performance.now() - t0).toBeLessThan(5_000);
-    expect(await doPhienConMo()).toEqual({ tx: 0, khoa: 0 });
-    expect(daChayXong).toBe(true);
-    expect(mThayDuoc).toBeNull();
-    expect(await docM()).toBeNull();
+  it("phiên NGOÀI đã mở transaction sẵn từ đầu ca ⇒ phép đo '0 transaction' không đỏ giả (chỉ tính phiên do ca sinh ra)", async () => {
+    // Phiên ngoài = transaction mở bằng mã thường, KHÔNG qua sổ (như Prisma Studio / `psql` quên COMMIT trên DB chung).
+    let thaNgoai!: () => void;
+    const giuNgoai = new Promise<void>((res) => (thaNgoai = res));
+    let daMoNgoai!: () => void;
+    const moNgoai = new Promise<void>((res) => (daMoNgoai = res));
+    const phienNgoai = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT 1`;
+        daMoNgoai();
+        await giuNgoai;
+      },
+      { timeout: 20_000 }
+    );
+    try {
+      await moNgoai;
+      const boQuaPid = await pidPhienNgoaiDangMoTx();
+      // Điều kiện đầu: phiên ngoài có thật và đang bị đếm khi KHÔNG bỏ qua (đây chính là nguồn đỏ giả).
+      expect(boQuaPid.length).toBeGreaterThanOrEqual(1);
+      expect((await doPhienConMo([])).tx).toBeGreaterThanOrEqual(1);
+      await chayCaLoiSomRoiKiemDon(boQuaPid);
+    } finally {
+      thaNgoai();
+      await phienNgoai;
+    }
+  });
+
+  it("transaction bị CHÍNH hook huỷ (ROLLBACK) chỉ báo 'còn giữ transaction' — không thêm dòng 'ném' mang lý do huỷ do hook gây ra", async () => {
+    const giu = await giuTransactionDenKhiTha("giữ chờ hook huỷ", async () => {});
+    const loi = await choThaoTacNenXong().then(
+      () => null,
+      (e: unknown) => e
+    );
+    expect(loi).toBeInstanceOf(Error);
+    // Đúng MỘT dòng việc dở; lý do huỷ (`HuyBoiHookDon`) không phải thao tác ném ngoài dự kiến nên không có dòng "ném" / cause.
+    expect((loi as Error).message).toBe(
+      'Thao tác nền của test:\n- "giữ chờ hook huỷ" còn giữ transaction lúc test kết thúc (lỗi sớm / hết giờ / quên tha()) — đã ROLLBACK trước khi dọn'
+    );
+    expect((loi as Error).cause).toBeUndefined();
+    // Chính transaction thì thật sự kết thúc bằng lý do huỷ của hook (đối chứng: bộ lọc chỉ bỏ ĐÚNG loại lỗi này).
+    await expect(giu.xong).rejects.toThrow(/"giữ chờ hook huỷ" bị hook dọn huỷ \(ROLLBACK\)/);
   });
 
   it("sau hook dọn, thân test (đã hết giờ) không khởi chạy thêm thao tác được tới beforeEach kế tiếp", async () => {
@@ -198,6 +262,8 @@ describe("choTatCa thay Promise.all", () => {
 });
 
 const nghi = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** Hẹn giờ THẬT chốt lúc nạp file — còn dùng được sau khi một ca gọi `vi.useFakeTimers()`. */
+const henGioThatCuaTest = setTimeout;
 
 const GOC_REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CAU_HINH_LUOT_CON = path.join(GOC_REPO, "tests/fixtures/thao-tac-nen-qua-tran/vitest.config.ts");
@@ -319,6 +385,47 @@ describe("thao tác đã đăng ký còn sống quá trần", () => {
     }
   });
 
+  it("file giả hẹn giờ (vi.useFakeTimers) ⇒ trần chờ VẪN nổ đúng hạn: không dọn, gọi huỷ lượt, báo ThaoTacNenConSong (không đợi thao tác kết thúc)", async () => {
+    const huyLuotChay = vi.fn<(baoCao: string) => void>();
+    const khoiPhuc = doiCauHinhChoTestHopDong({ tranChoXongMs: 300, huyLuotChay });
+    let thaoTac: Promise<void> | undefined;
+    vi.useFakeTimers();
+    try {
+      // Thao tác sống ~1,2s theo đồng hồ THẬT (hẹn giờ chốt trước khi giả) — quá trần 300ms. Không chạm DB: chỉ cần một
+      // lượt đã đăng ký còn sống; hẹn giờ giả không được làm trần chờ của hook dọn câm.
+      let thaoTacXong = false;
+      thaoTac = chayNen(
+        "sống 1,2s theo đồng hồ thật",
+        () =>
+          new Promise<void>((res) =>
+            henGioThatCuaTest(() => {
+              thaoTacXong = true;
+              res();
+            }, 1_200)
+          )
+      );
+      const don = vi.fn(async () => {});
+      const loi = await donSauKhiThaoTacNenXong(don).then(
+        () => null,
+        (e: unknown) => e
+      );
+      expect({
+        lanDon: don.mock.calls.length,
+        thaoTacXongLucBao: thaoTacXong,
+        lanHuyLuot: huyLuotChay.mock.calls.length,
+        tenLoi: (loi as Error | null)?.name ?? null,
+      }).toEqual({ lanDon: 0, thaoTacXongLucBao: false, lanHuyLuot: 1, tenLoi: "ThaoTacNenConSong" });
+    } finally {
+      vi.useRealTimers();
+      try {
+        // Chờ thao tác còn sống kết thúc THẬT rồi mới gỡ dấu chặn (cùng quy ước ca quá trần ở trên).
+        if (thaoTac) await thaoTac;
+      } finally {
+        khoiPhuc();
+      }
+    }
+  });
+
   it("lượt thật: huỷ CẢ lượt Vitest — lượt dọn, ca kế, afterAll, file kế đều không chạy; JS của thao tác còn sống bị giết", async () => {
     // Chờ thêm quá mốc thao tác nền lẽ ra xong (1s sau khi bắt đầu): vắng dấu "thao-tac-nen-xong" là nó đã bị giết.
     const kq = await chayLuotConVaDocDau(["a-thao-tac-con-song", "z-file-ke-tiep"], [], 1_200);
@@ -347,6 +454,18 @@ describe("thao tác đã đăng ký còn sống quá trần", () => {
     // Dòng lý do + dòng khung đóng cuối cùng: thiếu là khung bị cắt (bỏ phần chưa ghi / bỏ cuộc ở EAGAIN đầu).
     expect(kq.dauRa).toMatch(/HUỶ CẢ LƯỢT VITEST/);
     expect(kq.dauRa).toMatch(/Quá 300ms vẫn còn chạy: "thao tác nền chậm" — CHƯA xác nhận kết thúc ⇒ KHÔNG dọn, chặn mọi ca \/ file kế tiếp trên cùng DB\n█{100}\n/);
+  }, 40_000);
+
+  it("lượt thật: ca đã đỏ (assertion hỏng) rồi thao tác sống quá trần ⇒ khung lý do huỷ lượt mang LỖI GỐC của ca (reporter không kịp in)", async () => {
+    const kq = await chayLuotConVaDocDau(["g-ca-do-truoc-roi", "z-file-ke-tiep"], [], 1_200);
+    expect({ dau: kq.dau, biGietBoiHelper: kq.biGietBoiHelper }, kq.dauRa).toEqual({
+      dau: ["ca-1-bat-dau"],
+      biGietBoiHelper: true,
+    });
+    expect(kq.dauRa).toMatch(
+      /█ Lỗi gốc của ca: AssertionError: expected 'lỗi gốc của ca: số thực tế' to be 'lỗi gốc của ca: số kỳ vọng'/
+    );
+    expect(kq.dauRa).toMatch(/Quá 300ms vẫn còn chạy: "thao tác nền chậm"/);
   }, 40_000);
 
   it("lượt thật: file quên hook dọn, thao tác sống quá hookTimeout ⇒ kiểm cuối test không bị cắt, vẫn huỷ cả lượt", async () => {
@@ -378,7 +497,8 @@ describe("lời gọi không thuộc ca nào", () => {
   it("chayNen từ ngữ cảnh không thuộc ca nào lúc sổ đang mở ⇒ TỪ CHỐI trước batDau, hook dọn của ca đang chạy báo đỏ", async () => {
     kichHoat();
     await expect(goiNgoaiCa).rejects.toThrow(
-      /KHÔNG thuộc ca nào .*chayNen\("ghi ngoài ca"\) lúc ca "chayNen từ ngữ cảnh không thuộc ca nào.*" đang chạy — ĐÃ TỪ CHỐI/
+      // Tên ca trong lời báo mang cả đường `describe` ("nhóm > ca"), không chỉ tên `it`.
+      /KHÔNG thuộc ca nào .*chayNen\("ghi ngoài ca"\) lúc ca "lời gọi không thuộc ca nào > chayNen từ ngữ cảnh không thuộc ca nào.*" đang chạy — ĐÃ TỪ CHỐI/
     );
     expect(batDauDaGoi).toBe(false);
     await expect(choThaoTacNenXong()).rejects.toThrow(/KHÔNG thuộc ca nào .*chayNen\("ghi ngoài ca"\)/);
@@ -414,6 +534,34 @@ describe("thân ca đã hết giờ còn chạy tiếp", () => {
       expect(ca[1]!.failureMessages.join("\n"), dauRa).toMatch(
         /Thân ca "ca 1: hết giờ, thân còn chạy tiếp" đã KẾT THÚC \(hết giờ \/ bị bỏ\) nhưng vẫn chạy tiếp và gọi chayNen\("ghi của ca cũ"\) lúc ca "ca 2: ca mới, thao tác của chính nó chạy bình thường" đang chạy — ĐÃ TỪ CHỐI, không khởi chạy/
       );
+    } finally {
+      rmSync(thuMuc, { recursive: true, force: true });
+      rmSync(thuMucKq, { recursive: true, force: true });
+    }
+  }, 40_000);
+});
+
+describe("ca khai báo chạy đồng thời", () => {
+  it("lượt thật: it.concurrent ⇒ MỌI ca đồng thời đỏ ở aroundEach với đúng lý do (ca đồng thời + đường describe), không ca nào bị báo nhầm 'thân ca đã kết thúc'", async () => {
+    const thuMuc = mkdtempSync(path.join(tmpdir(), "ca-dong-thoi-"));
+    const thuMucKq = mkdtempSync(path.join(tmpdir(), "ca-dong-thoi-kq-"));
+    try {
+      const fileKq = path.join(thuMucKq, "kq.json");
+      const kq = await chayLuotVitestCon(thuMuc, ["--reporter=json", `--outputFile=${fileKq}`, "h-ca-dong-thoi"]);
+      const json = JSON.parse(readFileSync(fileKq, "utf8")) as {
+        testResults: { assertionResults: { title: string; status: string; failureMessages: string[] }[] }[];
+      };
+      const ca = json.testResults.flatMap((f) => f.assertionResults);
+      const dauRa = `kết thúc: ${String(kq.tinHieu ?? kq.ma)}\n${JSON.stringify(ca, null, 2)}\n${kq.dauRa}`;
+      expect({ trangThai: ca.map((c) => `${c.title}: ${c.status}`), ma: kq.ma }, dauRa).toEqual({
+        trangThai: ["ca A: failed", "ca B: failed"],
+        ma: 1,
+      });
+      for (const [i, ten] of ["ca A", "ca B"].entries()) {
+        const loi = ca[i]!.failureMessages.join("\n");
+        expect(loi, dauRa).toContain(`Ca "nhóm ngoài > nhóm trong > ${ten}" khai báo chạy ĐỒNG THỜI`);
+        expect(loi, dauRa).not.toMatch(/KẾT THÚC/);
+      }
     } finally {
       rmSync(thuMuc, { recursive: true, force: true });
       rmSync(thuMucKq, { recursive: true, force: true });

@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { hasBronzeBacklog, markBronzeBacklog } from "@/lib/bronze/bronze-only";
 import { landRaw } from "@/lib/bronze/land-raw";
@@ -9,6 +9,14 @@ import { giuKhoaGhiChiTieuAds } from "@/lib/ingest/khoa-ghi-chi-tieu-ads";
 import { prisma } from "@/lib/prisma";
 
 import { seedReference, truncateBusinessTables } from "../helpers/test-db";
+import {
+  chayNen,
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giuTransactionDenKhiTha,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 /**
  * BẤT BIẾN TIỀN quan trọng nhất của dự án: rebuild dựng lại Silver TỪ BRONZE, và TUYỆT ĐỐI
@@ -73,23 +81,14 @@ async function choToiKhi(dieuKien: () => Promise<boolean>, moTa: string): Promis
  * Dùng cho CẢ HAI đường dựng lại (nút bấm + lệnh chạy tay) — chúng phải theo cùng một luật hạ cờ.
  */
 async function giuKhoaGhiAds(): Promise<{ nha: () => Promise<void> }> {
-  let moKhoa!: () => void;
-  const choMoKhoa = new Promise<void>((r) => (moKhoa = r));
-  let daGiu!: () => void;
-  const khoaSanSang = new Promise<void>((r) => (daGiu = r));
-  const phien = prisma.$transaction(
-    async (tx) => {
-      await giuKhoaGhiChiTieuAds(tx);
-      daGiu();
-      await choMoKhoa;
-    },
-    { timeout: 60_000, maxWait: 10_000 }
-  );
-  await khoaSanSang;
+  // Giữ bằng helper chung: test đỏ giữa chừng / hết giờ thì hook dọn ROLLBACK, lượt dựng lại đang đứng chờ chạy nốt.
+  const giu = await giuTransactionDenKhiTha("giữ khoá ghi chi tiêu ads", async (tx) => {
+    await giuKhoaGhiChiTieuAds(tx);
+  });
   return {
     nha: async () => {
-      moKhoa();
-      await phien;
+      giu.tha();
+      await giu.xong;
     },
   };
 }
@@ -112,7 +111,10 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await prisma.rawPancakeOrder.deleteMany();
   await prisma.rawPancakeProduct.deleteMany();
@@ -122,6 +124,10 @@ beforeEach(async () => {
   // trước sống sót và test sau pass/fail vì lý do sai.
   await prisma.setting.deleteMany({ where: { key: "bronzeBacklogPending" } });
 });
+
+// Dọn dữ liệu nằm ở `beforeEach` kế (truncate): hook này chỉ chờ mọi thao tác nền đã đăng ký xong TRƯỚC khi nó chạy —
+// lượt dựng lại đứng chờ khoá ads không được ghi Silver / tắt cờ backlog sau lượt dọn.
+afterEach(() => donSauKhiThaoTacNenXong(async () => undefined), TIMEOUT_HOOK_DON_MS);
 
 describe("rebuildFromRaw — BẤT BIẾN: không đụng dữ liệu APP-OWNED", () => {
   it("giá vốn sửa tay + ngưỡng tồn KHÔNG bị rebuild ghi đè", async () => {
@@ -339,7 +345,7 @@ describe("dungLaiGiaoDichTuKhoTho — cờ backlog", () => {
     const khoa = await giuKhoaGhiAds();
 
     const warnings: string[] = [];
-    const dangChay = dungLaiGiaoDichTuKhoTho(warnings);
+    const dangChay = chayNen("dungLaiGiaoDichTuKhoTho chạy nền", () => dungLaiGiaoDichTuKhoTho(warnings));
     await choToiKhi(
       async () => (await prisma.order.count()) > 0,
       "lượt dựng lại ghi xong đơn đầu tiên (đã qua mốc chụp cờ)"
@@ -446,7 +452,7 @@ describe("rebuildFromRaw — cờ backlog", () => {
     const khoa = await giuKhoaGhiAds();
 
     const warnings: string[] = [];
-    const dangChay = rebuildFromRaw(warnings);
+    const dangChay = chayNen("rebuildFromRaw chạy nền", () => rebuildFromRaw(warnings));
     await choToiKhi(
       async () => (await prisma.order.count()) > 0,
       "lượt dựng lại ghi xong đơn đầu tiên (đã qua mốc chụp cờ)"

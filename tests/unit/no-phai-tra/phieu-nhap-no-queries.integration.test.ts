@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { refIdChoPhieu } from "@/lib/nhap-hang/doi-chieu-phieu-nhap";
 import {
@@ -13,6 +13,13 @@ import { LoiKhoaDongTienBan } from "@/lib/so-quy/khoa-dong-tien-co-han";
 
 import { donFixtureNoPhaiTra, seedBronze, taoPhieuNo, vn } from "../../helpers/phieu-nhap-no-fixture";
 import { seedReference, truncateBusinessTables } from "../../helpers/test-db";
+import {
+  dangKyTheHeCa,
+  donSauKhiThaoTacNenXong,
+  giuTransactionDenKhiTha,
+  moTheoDoiThaoTacNen,
+  TIMEOUT_HOOK_DON_MS,
+} from "../../helpers/thao-tac-nen-cho-xong-truoc-khi-don";
 
 /**
  * Đọc / vân tay / khoá / hậu kiểm hồ sơ phiếu nợ trên DB thật (`hogikids_test`). Số theo spec §6
@@ -26,10 +33,17 @@ beforeAll(async () => {
   await seedReference();
 }, 60_000);
 
+dangKyTheHeCa();
+
 beforeEach(async () => {
+  moTheoDoiThaoTacNen();
   await truncateBusinessTables();
   await donFixtureNoPhaiTra();
 });
+
+// Dọn dữ liệu nằm ở `beforeEach` kế (truncate) / `afterAll`: hook này chỉ chờ mọi thao tác nền đã đăng ký xong TRƯỚC khi
+// chúng chạy, để transaction giữ khoá không commit / còn giữ khoá sau lượt dọn.
+afterEach(() => donSauKhiThaoTacNenXong(async () => undefined), TIMEOUT_HOOK_DON_MS);
 
 afterAll(async () => {
   await truncateBusinessTables();
@@ -107,20 +121,10 @@ describe("khoaCacPhieu", () => {
 
   it("phiếu đang bị lượt khác giữ ⇒ lượt sau hết hạn chờ ⇒ LoiKhoaDongTienBan", async () => {
     const p1 = await taoPhieuNo({ uuid: "u-1", tongTien: 20 * TR });
-    let nha!: () => void;
-    const choNha = new Promise<void>((r) => (nha = r));
-    let daGiu!: () => void;
-    const giuXong = new Promise<void>((r) => (daGiu = r));
-
-    const giu = prisma.$transaction(
-      async (tx) => {
-        await khoaCacPhieu(tx, [p1]);
-        daGiu();
-        await choNha;
-      },
-      { timeout: 20_000 },
-    );
-    await giuXong;
+    // Giữ khoá bằng helper chung: test lỗi sớm / hết giờ thì hook dọn ROLLBACK transaction giữ khoá.
+    const giu = await giuTransactionDenKhiTha("giữ khoá phiếu", async (tx) => {
+      await khoaCacPhieu(tx, [p1]);
+    });
     try {
       await expect(
         prisma.$transaction(async (tx) => {
@@ -128,8 +132,8 @@ describe("khoaCacPhieu", () => {
         }),
       ).rejects.toBeInstanceOf(LoiKhoaDongTienBan);
     } finally {
-      nha();
-      await giu;
+      giu.tha();
+      await giu.xong;
     }
   });
 });
