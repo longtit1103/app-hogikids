@@ -5,6 +5,7 @@ import { hasBronzeBacklog, isBronzeOnly, markBronzeBacklog } from "@/lib/bronze/
 import { coTheDoiSoat, demDaHachToan, loiBoDongPhaiBaoDo } from "@/lib/bronze/doi-soat-hach-toan";
 import { locDonChuaDongDau } from "@/lib/bronze/ket-cuc-silver";
 import { giuKhoaLandDon } from "@/lib/bronze/khoa-land-don";
+import { soiTrungMocCuaLuot } from "@/lib/bronze/dem-trung-moc-phien-ban-bang-tien";
 import { docChupLuc, kiemCuaSoChupLuc, landRaw, LoiThieuKhoaStreamTien } from "@/lib/bronze/land-raw";
 import { BRONZE_STREAMS, isBronzeStream } from "@/lib/bronze/streams";
 import { transformFromRaw, type TransformStats } from "@/lib/bronze/transform-from-raw";
@@ -247,6 +248,21 @@ async function xuLyPost(req: Request): Promise<Response> {
       );
     }
 
+    // Stream TIỀN TikTok (bốn bảng soi thứ tự phiên bản): hai bản cùng mốc ở bản đầu, hoặc cùng khoá lặp trong trang, là
+    // ca bộ đọc/CAS không phân xử được (bản nào "mới nhất" do uuid ngẫu nhiên quyết). Dữ liệu đã land nên KHÔNG bật backlog
+    // (dựng lại không cứu) — báo ĐỎ: SyncLog ERROR, HTTP 200 (n8n không dừng các trang sau). Chỉ ĐỌC Bronze, không đổi Silver.
+    // Lỗi của chính phép soi chỉ thành cảnh báo (không chặn dựng Silver).
+    const soi = await soiTrungMocCuaLuot(prisma, {
+      stream,
+      table: BRONZE_STREAMS[stream].table,
+      shopId,
+      landedIds,
+      syncLogId,
+    });
+    if (soi.khongSoiDuoc !== null) warnings.push(soi.khongSoiDuoc);
+    const loiTrungMoc = soi.canhBao;
+    if (loiTrungMoc !== null) warnings.push(loiTrungMoc);
+
     // Chế độ chỉ-land: dừng ngay sau Bronze. Ghi warning để SyncLog nói rõ vì sao Silver không đổi —
     // im lặng bỏ transform sẽ khiến người đọc log tưởng dữ liệu đã lên bảng nghiệp vụ.
     if (isBronzeOnly()) {
@@ -259,7 +275,9 @@ async function xuLyPost(req: Request): Promise<Response> {
         skippedNoId,
         seen: seenIds.length,
         mode: "bronze-only" as const,
-        ...(loiKetDuoiDau !== null ? { loiSauKhiGhi: loiKetDuoiDau } : {}),
+        ...(loiKetDuoiDau !== null || loiTrungMoc !== null
+          ? { loiSauKhiGhi: [loiKetDuoiDau, loiTrungMoc].filter((l): l is string => l !== null).join(" | ") }
+          : {}),
       };
     }
 
@@ -356,8 +374,8 @@ async function xuLyPost(req: Request): Promise<Response> {
           "số tiền cũ trong Silver được giữ nguyên, bản mới bị bỏ. Sửa mapping rồi dựng lại từ kho thô."
         : null);
     if (loiBoDong !== null) await markBronzeBacklog();
-    // Hai lỗi sau-khi-ghi độc lập nhau ⇒ giữ cả hai trong `error` của SyncLog (lỗi bỏ dòng tiền đi trước).
-    const loiSauKhiGhi = [loiBoDong, loiKetDuoiDau].filter((l): l is string => l !== null).join(" | ");
+    // Các lỗi sau-khi-ghi độc lập nhau ⇒ giữ đủ trong `error` của SyncLog (lỗi bỏ dòng tiền đi trước).
+    const loiSauKhiGhi = [loiBoDong, loiKetDuoiDau, loiTrungMoc].filter((l): l is string => l !== null).join(" | ");
     return {
       stream,
       shopId,

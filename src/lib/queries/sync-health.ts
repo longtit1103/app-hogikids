@@ -1,5 +1,6 @@
 import type { SyncKind } from "@/generated/prisma/client";
 
+import { demTongTrungMocBangTien, type TrungMocTheoBang } from "@/lib/bronze/dem-trung-moc-phien-ban-bang-tien";
 import { prisma } from "@/lib/prisma";
 
 /** Mọi kind đồng bộ có thể sinh SyncLog. Thứ tự này cũng là thứ tự render cảnh báo. */
@@ -74,4 +75,37 @@ export async function getRecentDataErrorKinds(): Promise<SyncKind[]> {
   });
   const found = new Set(rows.map((r) => r.kind));
   return DATA_SYNC_KINDS.filter((k) => found.has(k));
+}
+
+/**
+ * Cache ngắn cho banner "trùng mốc phiên bản kho thô tiền". Đo 25/11 trên bản sao cỡ prod (13k dòng / 12,4k khoá ở
+ * `RawTiktokShopTransaction`): ~50 ms + ~90 ms chỉ cho MỘT bảng — vượt xa ngân sách 20 ms của một nguồn cảnh báo ở layout
+ * (đọc ở MỌI request). Tín hiệu này bền (Bronze không dọn, trùng mốc đứng yên tới khi khoá có bản mới) nên trễ tối đa
+ * `TTL_TRUNG_MOC_MS` là vô hại; app chạy MỘT tiến trình nên cache trong bộ nhớ là đủ. Lỗi KHÔNG được nhớ (lượt sau thử lại),
+ * nhiều request đồng thời dùng chung MỘT lượt đo.
+ */
+export const TTL_TRUNG_MOC_MS = 10 * 60_000;
+let cacheTrungMoc: { luc: number; ketQua: TrungMocTheoBang[] } | null = null;
+let dangDoTrungMoc: Promise<TrungMocTheoBang[]> | null = null;
+
+/** Xoá cache — chỉ cho test. */
+export function xoaCacheTrungMocBronzeTien(): void {
+  cacheTrungMoc = null;
+  dangDoTrungMoc = null;
+}
+
+/** Bảng tiền TikTok còn khoá trùng mốc / lặp trong trang (toàn bảng). Rỗng = sạch. Cache `TTL_TRUNG_MOC_MS`. */
+export async function getTrungMocBronzeTien(now: number = Date.now()): Promise<TrungMocTheoBang[]> {
+  if (cacheTrungMoc !== null && now - cacheTrungMoc.luc < TTL_TRUNG_MOC_MS) return cacheTrungMoc.ketQua;
+  if (dangDoTrungMoc === null) {
+    dangDoTrungMoc = demTongTrungMocBangTien(prisma)
+      .then((ketQua) => {
+        cacheTrungMoc = { luc: now, ketQua };
+        return ketQua;
+      })
+      .finally(() => {
+        dangDoTrungMoc = null;
+      });
+  }
+  return dangDoTrungMoc;
 }

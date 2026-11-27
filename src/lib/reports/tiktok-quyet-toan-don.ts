@@ -91,9 +91,9 @@ export async function layQuyetToanDon(pancakeId: string): Promise<QuyetToanDon |
       SELECT DISTINCT ON ("shopId", "externalId") payload
       FROM "RawTiktokShopTransaction"
       WHERE payload->>'order_id' = ${pancakeId}
-      -- id chốt cuối: fetchedAt là TIMESTAMP(3), một lô land dùng chung
-      -- clock_timestamp() nên trùng mili-giây đi được; thiếu chốt thì bản thắng tuỳ
-      -- ý. Khối đối soát ở /tai-chinh dùng CÙNG khuôn và nối sang đây bằng một
+      -- id chốt cuối: fetchedAt là TIMESTAMP(3), mỗi dòng của lô land một giá trị
+      -- µs riêng nhưng cột làm tròn về ms nên vẫn trùng ms được; thiếu chốt thì
+      -- bản thắng tuỳ ý. Khối đối soát ở /tai-chinh dùng CÙNG khuôn và nối sang đây bằng một
       -- hyperlink — lệch chốt là hai màn nói hai số cho cùng một đơn.
       ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
     ),

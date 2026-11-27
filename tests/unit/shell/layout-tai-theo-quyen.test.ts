@@ -22,6 +22,7 @@ const nguon = vi.hoisted(() => ({
   countMissingCostVariants: vi.fn(),
   hasLowStockVariants: vi.fn(),
   getRecentDataErrorKinds: vi.fn(),
+  getTrungMocBronzeTien: vi.fn(),
   hasBronzeBacklog: vi.fn(),
   docTrangThaiSaoLuu: vi.fn(),
   settingFindMany: vi.fn(),
@@ -34,7 +35,10 @@ vi.mock("@/lib/queries/variants", () => ({
   countMissingCostVariants: nguon.countMissingCostVariants,
   hasLowStockVariants: nguon.hasLowStockVariants,
 }));
-vi.mock("@/lib/queries/sync-health", () => ({ getRecentDataErrorKinds: nguon.getRecentDataErrorKinds }));
+vi.mock("@/lib/queries/sync-health", () => ({
+  getRecentDataErrorKinds: nguon.getRecentDataErrorKinds,
+  getTrungMocBronzeTien: nguon.getTrungMocBronzeTien,
+}));
 vi.mock("@/lib/bronze/bronze-only", () => ({ hasBronzeBacklog: nguon.hasBronzeBacklog }));
 vi.mock("@/lib/backup/doc-trang-thai-sao-luu", () => ({ docTrangThaiSaoLuu: nguon.docTrangThaiSaoLuu }));
 vi.mock("@/lib/prisma", () => ({ prisma: { setting: { findMany: nguon.settingFindMany } } }));
@@ -61,6 +65,7 @@ beforeEach(() => {
   nguon.countMissingCostVariants.mockResolvedValue(3);
   nguon.hasLowStockVariants.mockResolvedValue(true);
   nguon.getRecentDataErrorKinds.mockResolvedValue([]);
+  nguon.getTrungMocBronzeTien.mockResolvedValue([]);
   nguon.hasBronzeBacklog.mockResolvedValue(false);
   nguon.docTrangThaiSaoLuu.mockResolvedValue({ muc: "ok" });
   nguon.settingFindMany.mockResolvedValue([]);
@@ -79,6 +84,7 @@ describe("layout (app) tải theo quyền", () => {
     expect(nguon.hasLowStockVariants).toHaveBeenCalledTimes(1);
     expect(nguon.countMissingCostVariants).not.toHaveBeenCalled();
     expect(nguon.getRecentDataErrorKinds).not.toHaveBeenCalled();
+    expect(nguon.getTrungMocBronzeTien).not.toHaveBeenCalled();
     expect(nguon.hasBronzeBacklog).not.toHaveBeenCalled();
     expect(nguon.docTrangThaiSaoLuu).not.toHaveBeenCalled();
     expect(nguon.settingFindMany).not.toHaveBeenCalled();
@@ -102,12 +108,24 @@ describe("layout (app) tải theo quyền", () => {
     expect(nguon.countMissingCostVariants).toHaveBeenCalledTimes(1);
     expect(nguon.hasLowStockVariants).toHaveBeenCalledTimes(1);
     expect(nguon.getRecentDataErrorKinds).toHaveBeenCalledTimes(1);
+    expect(nguon.getTrungMocBronzeTien).toHaveBeenCalledTimes(1);
     expect(nguon.hasBronzeBacklog).toHaveBeenCalledTimes(1);
     expect(nguon.docTrangThaiSaoLuu).toHaveBeenCalledTimes(1);
     expect(nguon.settingFindMany).toHaveBeenCalledTimes(2);
     expect(nguon.demKhoanVayCoKyChoDuyet).toHaveBeenCalledTimes(1);
     expect(nguon.docCanhBaoSapCan).toHaveBeenCalledTimes(1);
     expect(propsShell(el).hrefDuocPhep).toContain("/quan-tri");
+  });
+
+  it("banner trùng mốc kho thô tiền: sạch ⇒ null; có ca ⇒ câu cảnh báo; nguồn lỗi ⇒ null (không kéo sập trang)", async () => {
+    nguoiHienTai = nguoiDungGia({ role: "OWNER" });
+    expect(propsShell(await AppLayout({ children: null })).trungMocBronzeTien).toBeNull();
+
+    nguon.getTrungMocBronzeTien.mockResolvedValue([{ bang: "RawTiktokBusinessCost", trungMocDau: 1, lapTrongLuot: 0 }]);
+    expect(String(propsShell(await AppLayout({ children: null })).trungMocBronzeTien)).toContain("RawTiktokBusinessCost");
+
+    nguon.getTrungMocBronzeTien.mockRejectedValue(new Error("db hỏng"));
+    expect(propsShell(await AppLayout({ children: null })).trungMocBronzeTien).toBeNull();
   });
 
   it("giá vốn cần CẢ san-pham:xem và gia-von-loi-nhuan:xem", async () => {

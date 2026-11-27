@@ -219,6 +219,8 @@ export async function rebuildFromRaw(
     paymentsSkippedStale: pay.paymentsSkippedStale,
     hoaDonAdsSkippedStale: hd.hoaDonAdsSkippedStale,
     tinDungAdsSkippedStale: td.tinDungAdsSkippedStale,
+    // Hoá đơn OTHERS trừ số dư đã xác minh — bỏ CÓ CHỦ ĐÍCH, ngoài `skipped` nên không giữ cờ backlog.
+    boQuaTruSoDuDaXacMinh: hd.boQuaTruSoDuDaXacMinh,
   };
 }
 
@@ -385,6 +387,8 @@ export async function dungLaiGiaoDichTuKhoTho(
     paymentsSkippedStale: pay.paymentsSkippedStale,
     hoaDonAdsSkippedStale: hd.hoaDonAdsSkippedStale,
     tinDungAdsSkippedStale: td.tinDungAdsSkippedStale,
+    // Hoá đơn OTHERS trừ số dư đã xác minh — bỏ CÓ CHỦ ĐÍCH, ngoài `skipped` nên không giữ cờ backlog.
+    boQuaTruSoDuDaXacMinh: hd.boQuaTruSoDuDaXacMinh,
   };
 }
 

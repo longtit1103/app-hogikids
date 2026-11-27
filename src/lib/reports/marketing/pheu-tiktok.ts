@@ -17,8 +17,8 @@ import { mocDuLieuSanSang, xepNgayTheoMoc } from "./moc-du-lieu-san-sang";
  *
  * Bốn luật chung của mọi reader Marketing, chép ở đây để đọc file này là đủ hiểu:
  *  1. BẢN MỚI NHẤT: DISTINCT ON (shopId, externalId) ORDER BY fetchedAt DESC, id DESC. `id` là
- *     chốt cuối vì fetchedAt là TIMESTAMP(3) và cả một lô land dùng chung clock_timestamp() —
- *     trùng mili-giây là chuyện thường, thiếu chốt thì bản thắng là tuỳ ý.
+ *     chốt cuối vì fetchedAt là TIMESTAMP(3): mỗi dòng của một lô land có một giá trị µs riêng
+ *     nhưng cột làm tròn về mili-giây nên vẫn trùng ms được, thiếu chốt thì bản thắng là tuỳ ý.
  *  2. SO NGÀY BẰNG CHUỖI (format yyyy-MM-dd, giờ VN tính sẵn ở TS), KHÔNG ép kiểu sang date trong
  *     SQL: phép ép đó dịch theo GUC TimeZone của session (prod đang UTC — đo 18/08).
  *  3. HAI BỘ ĐẾM NGÀY (A13 mục 1): soNgayChuaSanSang (> mốc — sàn chưa chốt, KHÔNG null hoá) vs

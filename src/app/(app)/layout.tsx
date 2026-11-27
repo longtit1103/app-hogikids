@@ -5,6 +5,7 @@ import { docDauLuiBan } from "@/lib/backup/dau-lui-ban";
 import { docTrangThaiSaoLuu } from "@/lib/backup/doc-trang-thai-sao-luu";
 import { saoLuuCanBaoDong } from "@/lib/backup/trang-thai-sao-luu";
 import { hasBronzeBacklog } from "@/lib/bronze/bronze-only";
+import { canhBaoTrungMocBanner } from "@/lib/bronze/dem-trung-moc-phien-ban-bang-tien";
 import { chuanHoaLuaChonDaLuu } from "@/lib/date-range-cookie";
 import { docLuaChonDaLuu } from "@/lib/date-range-cookie-server";
 import {
@@ -21,7 +22,7 @@ import {
   type TrangThaiPhieuNhap,
 } from "@/lib/nhap-hang/trang-thai-phieu-nhap";
 import { countMissingCostVariants, hasLowStockVariants } from "@/lib/queries/variants";
-import { getRecentDataErrorKinds } from "@/lib/queries/sync-health";
+import { getRecentDataErrorKinds, getTrungMocBronzeTien } from "@/lib/queries/sync-health";
 import { prisma } from "@/lib/prisma";
 import { coQuyen, laChuShop } from "@/lib/quyen/nguoi-dung-phien";
 import { yeuCauQuyenTrang } from "@/lib/quyen/cong-trang";
@@ -62,6 +63,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     lowStockWarning,
     dataErrorKinds,
     bronzeBacklog,
+    trungMocBronze,
     trangThaiSaoLuu,
     mocGiaVon,
     soKhoanVayCoKyCho,
@@ -78,6 +80,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       ? getRecentDataErrorKinds().catch(boQuaLoiCanhBao<Awaited<ReturnType<typeof getRecentDataErrorKinds>>>("loiDongBo", []))
       : Promise.resolve([]),
     coCaiDat ? hasBronzeBacklog().catch(boQuaLoiCanhBao("bronzeBacklog", false)) : Promise.resolve(false),
+    // Kho thô tiền TikTok còn khoá trùng thứ tự phiên bản: phép đếm quét cả bốn bảng nên đi qua cache ngắn trong bộ nhớ
+    // (`getTrungMocBronzeTien`, lý do ở đó) — KHÔNG gọi thẳng `demTongTrungMocBangTien` ở layout.
+    coCaiDat
+      ? getTrungMocBronzeTien().catch(boQuaLoiCanhBao<Awaited<ReturnType<typeof getTrungMocBronzeTien>>>("trungMocBronzeTien", []))
+      : Promise.resolve([]),
     // Sao lưu có nhánh banner riêng: bỏ BACKUP khỏi cảnh báo số liệu mà không đặt gì thay thế
     // thì một lượt backup hỏng chỉ còn dấu vết ở /cai-dat — chủ shop không vào đó mỗi ngày, mà
     // đây đúng là tín hiệu phải biết TRƯỚC khi cần tới bản phục hồi.
@@ -150,6 +157,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         lowStockWarning={lowStockWarning}
         dataSyncHasError={dataErrorKinds.length > 0}
         syncHasBacklog={bronzeBacklog}
+        trungMocBronzeTien={canhBaoTrungMocBanner(trungMocBronze)}
         saoLuuCoVanDe={trangThaiSaoLuu ? saoLuuCanBaoDong(trangThaiSaoLuu.muc) : false}
         lechGiaVon={lechGiaVon}
         soKhoanVayCoKyCho={soKhoanVayCoKyCho}

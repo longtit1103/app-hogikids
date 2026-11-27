@@ -28,6 +28,7 @@ export function ShellChrome({
   lowStockWarning,
   dataSyncHasError,
   syncHasBacklog,
+  trungMocBronzeTien = null,
   saoLuuCoVanDe,
   lechGiaVon,
   soKhoanVayCoKyCho,
@@ -46,6 +47,11 @@ export function ShellChrome({
   /** CHỈ kind ảnh hưởng số liệu (`DATA_SYNC_KINDS`) — KHÔNG gồm BACKUP, xem banner bên dưới. */
   dataSyncHasError: boolean;
   syncHasBacklog: boolean;
+  /**
+   * Câu cảnh báo khi kho thô TIỀN TikTok còn khoá trùng thứ tự phiên bản (`canhBaoTrungMocBanner`), null = sạch / không
+   * có quyền xem. Bền tới khi khoá có phiên bản mới hơn — KHÔNG phụ thuộc cửa sổ 48 giờ của SyncLog.
+   */
+  trungMocBronzeTien?: string | null;
   /** Lượt sao lưu gần nhất LỖI, hoặc quá `GIO_QUA_HAN_SAO_LUU` giờ chưa có bản mới. */
   saoLuuCoVanDe: boolean;
   /** Lệch giá vốn app ↔ Pancake, số do lượt đêm chốt (`trang-thai-lech-gia-von.ts`). */
@@ -121,9 +127,12 @@ export function ShellChrome({
             mỗi ngày, trong khi đây đúng là thứ phải biết TRƯỚC lúc cần bản phục hồi. Chi tiết
             ở `NON_DATA_SYNC_KINDS` (`lib/queries/sync-health.ts`).
 
-            Thứ tự ưu tiên khi trùng nhau: backlog → lỗi đồng bộ → sao lưu. Số liệu sai dẫn
+            Thứ tự ưu tiên khi trùng nhau: backlog → lỗi đồng bộ → sao lưu → trùng mốc kho thô tiền. Số liệu sai dẫn
             tới quyết định kinh doanh sai ngay hôm nay; sao lưu hỏng chỉ thành thiệt hại khi
-            cần phục hồi. Chỉ hiện MỘT câu để banner không thành khối chữ bị lướt qua.
+            cần phục hồi. Trùng mốc đứng CUỐI vì là tín hiệu BỀN không có lối gỡ trong app (Bronze
+            append-only, chỉ tắt khi khoá có phiên bản mới): để nó che lỗi đồng bộ/sao lưu thì một ca
+            tồn tại lâu biến câu đỏ thành thứ chủ shop quen mắt, lỗi mới xảy ra sau đó bị lướt qua.
+            Chỉ hiện MỘT câu để banner không thành khối chữ bị lướt qua.
           */}
           {/*
             MỘT vùng sticky chung cho banner ĐỎ "hệ đang hỏng" (và lùi bản), không để từng banner tự
@@ -138,7 +147,7 @@ export function ShellChrome({
           <div className="sticky top-2 z-20 flex flex-col gap-2 empty:hidden [&:not(:empty)]:mb-6">
             {/* Đứng ĐẦU: trạng thái sau lùi bản là lỗi vận hành trên máy chủ, không tự hết. */}
             {dangLuiBanTu && <BannerLuiBan tu={dangLuiBanTu} />}
-            {(syncHasBacklog || dataSyncHasError || saoLuuCoVanDe) && (
+            {(syncHasBacklog || trungMocBronzeTien !== null || dataSyncHasError || saoLuuCoVanDe) && (
               <Link
                 href="/cai-dat"
                 className="flex flex-col gap-0.5 rounded-lg border border-error bg-error p-3 text-sm text-white shadow-sm transition hover:brightness-95"
@@ -154,11 +163,13 @@ export function ShellChrome({
                     chi tiêu quảng cáo hoặc &quot;Tiền đã về&quot;). Mở Cài đặt
                     để kiểm tra.
                   </span>
-                ) : (
+                ) : saoLuuCoVanDe ? (
                   <span className="font-semibold">
                     Sao lưu đang có vấn đề — số liệu vẫn đủ, nhưng có thể không
                     còn điểm phục hồi mới. Mở Cài đặt để xem chi tiết.
                   </span>
+                ) : (
+                  <span className="font-semibold">{trungMocBronzeTien}</span>
                 )}
                 <span className="text-white/85">
                   Nhấn để mở trang Cài đặt &amp; Đồng bộ →

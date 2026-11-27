@@ -1,4 +1,8 @@
 import { mapHoaDonTiktok, type TruongHoaDonTho } from "@/lib/ingest/tiktok-ads-hoa-don-mapping";
+import {
+  DAU_BAM_OTHERS_TRU_SO_DU_DA_XAC_MINH,
+  laOthersTruSoDuDaXacMinh,
+} from "@/lib/ingest/tiktok-hoa-don-others-tru-so-du-da-xac-minh";
 import { upsertOneHoaDonTiktok } from "@/lib/ingest/tiktok-ads-hoa-don-upsert";
 import { prisma } from "@/lib/prisma";
 
@@ -69,6 +73,19 @@ async function docHoaDonMoiNhat(filter: { shopId?: string; externalIds?: string[
   );
 }
 
+/**
+ * Trong các `transactionId` đã cho, mã nào Silver `TiktokAdsHoaDon` ĐANG có dòng. MỘT truy vấn cho cả lượt (chỉ gọi với
+ * các mã khớp tập đã xác minh — vài dòng), không truy vấn từng dòng.
+ */
+async function maDaCoTrongSilver(transactionIds: string[]): Promise<Set<string>> {
+  if (transactionIds.length === 0) return new Set();
+  const rows = await prisma.tiktokAdsHoaDon.findMany({
+    where: { transactionId: { in: transactionIds } },
+    select: { transactionId: true },
+  });
+  return new Set(rows.map((r) => r.transactionId));
+}
+
 /** Hoá đơn quảng cáo TikTok → Silver `TiktokAdsHoaDon` (mọi loại giao dịch, idempotent theo `transactionId`). */
 export async function transformTiktokAdsHoaDon(
   stats: TransformStats,
@@ -76,11 +93,36 @@ export async function transformTiktokAdsHoaDon(
   opts: TransformOptions,
 ): Promise<void> {
   const { externalIds, shopId, checkpoint } = opts;
+  const rows = await docHoaDonMoiNhat({ shopId, externalIds });
+  // Tập truyền TƯỜNG MINH (không dựa tham số mặc định) để test thay được bằng tập giả qua `vi.mock` module tập.
+  const khopTap = (row: HoaDonThoRow) =>
+    laOthersTruSoDuDaXacMinh(row.externalId, row.shopId, row.truong, DAU_BAM_OTHERS_TRU_SO_DU_DA_XAC_MINH);
+  // Mã khớp tập mà Silver ĐÃ có dòng: TikTok từng trả bản POSITIVE/NEGATIVE của chính giao dịch này (đã vào Silver và
+  // có thể đang tính vào nợ thẻ) rồi lại trả bản OTHERS. Bỏ im lặng ở đây là tắt báo động trong khi dòng cũ vẫn tính
+  // tiền ⇒ coi như dòng không dựng được (skipped ⇒ ERROR + backlog), GIỮ NGUYÊN dòng Silver để người đối soát.
+  // Không đường dựng lại nào xoá Silver hoá đơn trước khi dựng (`rebuildFromRaw`, `dungLaiGiaoDichTuKhoTho` chỉ upsert)
+  // ⇒ phép kiểm này chạy y hệt ở route ingest lẫn mọi lượt dựng lại. Bảng chỉ bị xoá sạch bởi "Xoá dữ liệu giao dịch"
+  // (`deleteAllData`) — sau đó không còn dòng cũ để kiểm, bỏ có chủ đích là đúng.
+  const silverDaCo = await maDaCoTrongSilver(rows.filter(khopTap).map((r) => r.externalId));
   let i = 0;
-  for (const row of await docHoaDonMoiNhat({ shopId, externalIds })) {
+  for (const row of rows) {
     await chamMoc(checkpoint, i++);
     const m = mapHoaDonTiktok(row.externalId, row.shopId, row.truong);
     if (!m.ok) {
+      // Ngoại lệ DUY NHẤT của "mapping từ chối ⇒ skipped": hoá đơn OTHERS đã xác minh từng giao dịch là trừ số dư nạp
+      // trước (không trừ thẻ) ⇒ bỏ CÓ CHỦ ĐÍCH, đếm riêng — không ERROR, không backlog.
+      if (khopTap(row)) {
+        if (!silverDaCo.has(row.externalId)) {
+          stats.boQuaTruSoDuDaXacMinh++;
+          continue;
+        }
+        stats.skipped++;
+        warnings.push(
+          `Bỏ qua hoá đơn TikTok ${row.externalId}: thuộc tập trừ số dư đã xác minh nhưng bảng hoá đơn đang có dòng ` +
+            `cùng mã — nợ thẻ có thể đang tính khoản này; kiểm tay (dòng hoá đơn cũ được giữ nguyên)`,
+        );
+        continue;
+      }
       // Kẹt ở Bronze (dedupe theo hash chặn dựng lại) ⇒ `skipped` — lượt dựng lại giữ cờ backlog tới khi sửa mapping.
       stats.skipped++;
       warnings.push(`Bỏ qua hoá đơn TikTok ${row.externalId}: ${m.loi}`);

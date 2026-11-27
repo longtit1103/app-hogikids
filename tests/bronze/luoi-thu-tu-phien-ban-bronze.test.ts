@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { BANG_TIEN_SOI_THU_TU } from "@/lib/bronze/dem-trung-moc-phien-ban-bang-tien";
+import { BRONZE_STREAMS } from "@/lib/bronze/streams";
 import { BANG_LAN_THAY, mocPhienBanSql, thuTuPhienBanSql } from "@/lib/bronze/transform-raw-helpers";
 
 /**
@@ -97,6 +99,42 @@ function viPhamOrm(noiDung: string, bang: ReadonlySet<string>): string[] {
   return ket;
 }
 
+/**
+ * Phần đứng ngay sau `"fetchedAt" DESC` phải là chốt `"id" DESC`: chấp nhận `NULLS FIRST|LAST` sau `fetchedAt`, bí danh bảng
+ * (`r."id"`) và khoảng trắng/xuống dòng tuỳ ý — những dạng viết tay hợp lệ này không được báo oan.
+ */
+const CHOT_ID_DESC = /^(?:\s+NULLS\s+(?:FIRST|LAST))?\s*,\s*(?:\w+\.)?"id"\s+DESC/i;
+
+/**
+ * Bộ đọc viết tay của bảng TIỀN (mốc = `fetchedAt`, không có cột lần thấy) mà xếp `"fetchedAt" DESC` thì PHẢI chốt tiếp
+ * bằng `, "id" DESC` — thiếu chốt thì hai bản cùng mili-giây chọn TUỲ Ý giữa các lượt đọc (không cả tất định). Cách dò
+ * cùng quy tắc 1 ở trên: bảng của câu là mệnh đề FROM/JOIN "Raw…" gần nhất phía trước.
+ */
+function viPhamThieuChotId(noiDung: string, bang: ReadonlySet<string>): string[] {
+  const cacBang = [...noiDung.matchAll(BANG_TINH)].map((m) => ({ viTri: m.index ?? 0, bang: m[1] }));
+  const ket: string[] = [];
+  for (const m of noiDung.matchAll(DESC_TRAN)) {
+    const viTri = m.index ?? 0;
+    const truoc = cacBang.filter((f) => f.viTri < viTri);
+    const gan = truoc[truoc.length - 1];
+    if (!gan || !bang.has(gan.bang)) continue;
+    const sau = noiDung.slice(viTri + m[0].length);
+    if (!CHOT_ID_DESC.test(sau)) {
+      ket.push(`${gan.bang} @ dòng ${noiDung.slice(0, viTri).split("\n").length}: "fetchedAt" DESC không chốt "id" DESC`);
+    }
+  }
+  return ket;
+}
+
+/**
+ * Stream tiền (`laStreamTien`) được MIỄN soi trùng mốc — mỗi mục có lý do. Stream tiền MỚI thêm vào registry mà không nằm
+ * trong `BANG_TIEN_SOI_THU_TU` cũng không nằm ở đây ⇒ lưới đỏ (fail-closed): phải quyết định soi hay miễn, kèm lý do.
+ */
+const STREAM_TIEN_MIEN_SOI: Record<string, string> = {
+  "shopee/wallet": "số tiền + loại + giờ nằm TRONG khoá ⇒ hai nội dung khác nhau là hai khoá khác nhau, không có 'bản đầu' tranh nhau",
+  "tiktok/statements": "chỉ hiển thị (cash-flow, ví TikTok tối thiểu), không tự vào Sổ quỹ / nợ thẻ / P&L",
+};
+
 describe("lưới thứ tự phiên bản kho thô", () => {
   it("không bộ đọc nào xếp bảng có cột lần thấy theo fetchedAt trần", () => {
     const viPham: string[] = [];
@@ -157,5 +195,48 @@ describe("lưới thứ tự phiên bản kho thô", () => {
       expect(khoi, b).toMatch(/\n\s+lanThayCuoi\s+DateTime\?/);
       expect(khoi, b).toMatch(/\n\s+mocChup\s+DateTime\?/);
     }
+  });
+  it("mọi stream tiền đều được soi trùng mốc (BANG_TIEN_SOI_THU_TU) hoặc miễn có lý do", () => {
+    const soi = new Set<string>(BANG_TIEN_SOI_THU_TU);
+    const chuaPhanLoai: string[] = [];
+    for (const [ten, def] of Object.entries(BRONZE_STREAMS)) {
+      if (!def.laStreamTien) continue;
+      if (soi.has(def.table) || ten in STREAM_TIEN_MIEN_SOI) continue;
+      chuaPhanLoai.push(`${ten} (${def.table})`);
+    }
+    expect(chuaPhanLoai, "thêm bảng vào BANG_TIEN_SOI_THU_TU hoặc STREAM_TIEN_MIEN_SOI kèm lý do").toEqual([]);
+    // Mỗi bảng được soi phải thật sự là bảng của một stream tiền (không soi bảng ma).
+    const bangStreamTien = new Set(Object.values(BRONZE_STREAMS).filter((d) => d.laStreamTien).map((d) => d.table));
+    for (const b of BANG_TIEN_SOI_THU_TU) expect(bangStreamTien.has(b), b).toBe(true);
+    // Miễn trừ cũng không được mồ côi.
+    for (const ten of Object.keys(STREAM_TIEN_MIEN_SOI)) {
+      expect(BRONZE_STREAMS[ten as keyof typeof BRONZE_STREAMS]?.laStreamTien, ten).toBe(true);
+    }
+  });
+
+  it("bộ đọc viết tay của bảng tiền chốt `\"id\" DESC` sau `\"fetchedAt\" DESC`", () => {
+    const bang = new Set<string>(BANG_TIEN_SOI_THU_TU);
+    const viPham: string[] = [];
+    for (const thuMuc of THU_MUC_QUET) {
+      for (const file of lietKeFileTs(join(GOC, thuMuc))) {
+        for (const v of viPhamThieuChotId(readFileSync(file, "utf8"), bang)) viPham.push(`${relative(GOC, file)}: ${v}`);
+      }
+    }
+    expect(viPham).toEqual([]);
+    // Tự kiểm.
+    const sai = `SELECT DISTINCT ON ("shopId","externalId") payload FROM "RawTiktokShopTransaction" ORDER BY "shopId","externalId","fetchedAt" DESC`;
+    expect(viPhamThieuChotId(sai, bang)).toHaveLength(1);
+    expect(viPhamThieuChotId(`${sai}, "id" DESC`, bang)).toEqual([]);
+    expect(viPhamThieuChotId(`FROM "RawPancakeOrder" ORDER BY "fetchedAt" DESC`, bang)).toEqual([]);
+    // Dạng viết tay hợp lệ khác: bí danh bảng, NULLS LAST, xuống dòng — KHÔNG báo oan.
+    const tien = `FROM "RawTiktokShopPayment" r ORDER BY`;
+    expect(viPhamThieuChotId(`${tien} r."fetchedAt" DESC, r."id" DESC`, bang)).toEqual([]);
+    expect(viPhamThieuChotId(`${tien} "fetchedAt" DESC NULLS LAST, "id" DESC`, bang)).toEqual([]);
+    expect(viPhamThieuChotId(`${tien} r."fetchedAt" DESC NULLS LAST,\n   r."id" DESC NULLS LAST`, bang)).toEqual([]);
+    // Vẫn bắt thiếu chốt dù có bí danh / NULLS LAST, và chốt `ASC` hoặc cột khác không tính là chốt `id`.
+    expect(viPhamThieuChotId(`${tien} r."fetchedAt" DESC`, bang)).toHaveLength(1);
+    expect(viPhamThieuChotId(`${tien} r."fetchedAt" DESC NULLS LAST`, bang)).toHaveLength(1);
+    expect(viPhamThieuChotId(`${tien} r."fetchedAt" DESC, r."id" ASC`, bang)).toHaveLength(1);
+    expect(viPhamThieuChotId(`${tien} r."fetchedAt" DESC, r."externalId" DESC`, bang)).toHaveLength(1);
   });
 });

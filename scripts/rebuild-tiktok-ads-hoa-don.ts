@@ -44,7 +44,12 @@ async function dungVaIn(checkpoint: () => Promise<void>): Promise<void> {
   const warnings: string[] = [];
   const stats = await transformFromRaw("tiktokbusiness/invoice", warnings, { checkpoint });
 
-  console.log(`Upserted → hoá đơn: ${stats.hoaDonAdsUpserted} · skipped: ${stats.skipped}`);
+  // `boQuaTruSoDuDaXacMinh`: hoá đơn OTHERS thuộc tập trừ số dư đã xác minh — bỏ CÓ CHỦ ĐÍCH (không Silver, không
+  // `skipped`). In ra để Bronze nhiều hơn Silver đúng số dòng này có lời giải thích.
+  console.log(
+    `Upserted → hoá đơn: ${stats.hoaDonAdsUpserted} · skipped: ${stats.skipped} · ` +
+      `bỏ có chủ đích (OTHERS trừ số dư đã xác minh): ${stats.boQuaTruSoDuDaXacMinh}`,
+  );
   if (warnings.length) {
     console.log(`\n${warnings.length} cảnh báo (20 dòng đầu):`);
     warnings.slice(0, 20).forEach((w) => console.warn("⚠", w));

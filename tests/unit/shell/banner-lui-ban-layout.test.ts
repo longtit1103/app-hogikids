@@ -30,7 +30,10 @@ vi.mock("@/lib/queries/variants", () => ({
   countMissingCostVariants: async () => 0,
   hasLowStockVariants: async () => false,
 }));
-vi.mock("@/lib/queries/sync-health", () => ({ getRecentDataErrorKinds: async () => [] }));
+vi.mock("@/lib/queries/sync-health", () => ({
+  getRecentDataErrorKinds: async () => [],
+  getTrungMocBronzeTien: async () => [],
+}));
 vi.mock("@/lib/bronze/bronze-only", () => ({ hasBronzeBacklog: async () => false }));
 vi.mock("@/lib/backup/doc-trang-thai-sao-luu", () => ({ docTrangThaiSaoLuu: async () => ({ muc: "ok" }) }));
 vi.mock("@/lib/prisma", () => ({

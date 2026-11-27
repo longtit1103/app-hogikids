@@ -22,6 +22,10 @@ import { NOI_MOC_PHIEN_BAN_DON_SQL, THU_TU_PHIEN_BAN_DON_SQL } from "./thu-tu-ph
  * HƠN (chốt `nguonFetchedAt`) — kết cục ĐÚNG, tách khỏi `skipped`. Ở đây (không ở `UpsertStats`) cùng lý do hai bộ đếm
  * `*Upserted` của chúng: không cổng đối soát nào soi hai stream này. Ba bộ đếm stale của sao kê / khoản ads trừ ví /
  * lệnh rút nằm trong `UpsertStats` vì `demDaHachToan` đọc chúng.
+ *
+ * `boQuaTruSoDuDaXacMinh`: hoá đơn TikTok `amount_type = OTHERS` thuộc tập dấu băm đã xác minh là trừ số dư nạp trước
+ * (`tiktok-hoa-don-others-tru-so-du-da-xac-minh.ts`) — bỏ CÓ CHỦ ĐÍCH, không vào Silver. Kết cục ĐÚNG nên tách khỏi
+ * `skipped` (không SyncLog ERROR, không bật / không giữ cờ backlog), cùng lý do `skippedTruocM`.
  */
 export type TransformStats = UpsertStats & {
   skippedTruocM: number;
@@ -29,6 +33,7 @@ export type TransformStats = UpsertStats & {
   tinDungAdsUpserted: number;
   hoaDonAdsSkippedStale: number;
   tinDungAdsSkippedStale: number;
+  boQuaTruSoDuDaXacMinh: number;
 };
 
 export const empty = (): TransformStats => ({
@@ -54,6 +59,7 @@ export const empty = (): TransformStats => ({
   paymentsSkippedStale: 0,
   hoaDonAdsSkippedStale: 0,
   tinDungAdsSkippedStale: 0,
+  boQuaTruSoDuDaXacMinh: 0,
 });
 
 export type TransformOptions = {

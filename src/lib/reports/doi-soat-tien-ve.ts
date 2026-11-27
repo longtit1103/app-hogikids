@@ -229,9 +229,9 @@ export async function doiSoatTienVe(range: DateRange): Promise<DoiSoatTienVe> {
         -- cáo là order_id IS NOT NULL ở trên: đo 2026-08-18, mọi loại không phải
         -- ORDER đều không có order_id.
         AND (payload->>'type' = 'ORDER' OR payload->>'type' IS NULL)
-      -- id chốt cuối: fetchedAt là TIMESTAMP(3) và cả một lô land dùng chung
-      -- clock_timestamp() nên trùng mili-giây là chuyện đi được; thiếu chốt thì
-      -- bản thắng là TUỲ Ý. Cùng quy ước transform-raw-helpers.ts.
+      -- id chốt cuối: fetchedAt là TIMESTAMP(3), mỗi dòng của một lô land có một
+      -- giá trị µs riêng nhưng cột làm tròn về mili-giây nên vẫn trùng ms được;
+      -- thiếu chốt thì bản thắng là TUỲ Ý. Cùng quy ước transform-raw-helpers.ts.
       ORDER BY "shopId", "externalId", "fetchedAt" DESC, "id" DESC
     ),
     txn AS (

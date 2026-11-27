@@ -396,6 +396,11 @@ export type KetQuaDungLai = {
   hoaDonAdsUpserted: number;
   /** Số dòng tín dụng TikTok tặng theo ngày (`TiktokAdsTinDung` — P&L trừ khỏi Quảng cáo TikTok) dựng lại từ kho thô. */
   tinDungAdsUpserted: number;
+  /**
+   * Số hoá đơn TikTok OTHERS thuộc tập trừ số dư đã xác minh — bỏ CÓ CHỦ ĐÍCH (không Silver, không tính dòng kẹt). Chỉ trả
+   * về để quan sát; giao diện chưa hiện.
+   */
+  boQuaTruSoDuDaXacMinh: number;
   /** Tổng số cảnh báo của lượt dựng lại (danh sách đầy đủ nằm trong nhật ký đồng bộ). */
   soCanhBao: number;
   /** Vài cảnh báo đầu để hiện toast — danh sách đầy đủ có thể rất dài. */
@@ -500,6 +505,7 @@ export async function dungLaiTuKhoTho(): Promise<ActionResult<KetQuaDungLai>> {
           adsExpensesUpserted: body.stats.adsExpensesUpserted,
           hoaDonAdsUpserted: body.stats.hoaDonAdsUpserted,
           tinDungAdsUpserted: body.stats.tinDungAdsUpserted,
+          boQuaTruSoDuDaXacMinh: body.stats.boQuaTruSoDuDaXacMinh,
           soCanhBao: canhBao.length,
           canhBao: canhBao.slice(0, SO_CANH_BAO_HIEN),
         },

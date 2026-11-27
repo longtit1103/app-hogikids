@@ -30,6 +30,7 @@
  *   Tuỳ chọn khoảng: `--tu=2026-01-14 --den=2026-10-23` (ngày VN, gồm cả hai đầu).
  */
 import { giuKhoaViecNang, taoCheckpoint, traKhoaViecNang } from "@/lib/backup/khoa-viec-nang";
+import { coTrungMoc, demTrungMoc } from "@/lib/bronze/dem-trung-moc-phien-ban-bang-tien";
 import { landRaw } from "@/lib/bronze/land-raw";
 import { latestPayloads } from "@/lib/bronze/transform-raw-helpers";
 import { transformFromRaw } from "@/lib/bronze/transform-from-raw";
@@ -298,6 +299,17 @@ async function main(): Promise<void> {
     if (warnings.length) {
       console.log(`\n${warnings.length} cảnh báo (20 dòng đầu):`);
       warnings.slice(0, 20).forEach((w) => console.warn("⚠", w));
+    }
+
+    // Bản đứng đầu của khoá nào do uuid ngẫu nhiên quyết (hai bản cùng mili-giây) thì Silver có thể giữ sai bản: in số khoá
+    // và thoát ≠ 0 — chạy chồng với n8n 01:15 là đường duy nhất sinh ca này từ script.
+    const trungMoc = await demTrungMoc(prisma, "RawTiktokBusinessCost");
+    if (coTrungMoc(trungMoc)) {
+      console.error(
+        `\n✖ RawTiktokBusinessCost còn ${trungMoc.trungMocDau} khoá trùng mốc ở bản đầu, ${trungMoc.lapTrongLuot} khoá lặp trong một trang — ` +
+          "báo dev kiểm từng khoá (xem plans/261125-1430-thu-tu-phien-ban-bronze-con-lai).",
+      );
+      process.exitCode = 1;
     }
 
     await inBangThang();
