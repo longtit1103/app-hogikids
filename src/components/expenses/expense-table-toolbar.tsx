@@ -28,8 +28,7 @@ type ExpenseTableToolbarProps = {
  * Toolbar lọc riêng của `ExpenseTable` (search + Danh mục/Kênh/Nguồn + Xóa
  * lọc), tách khỏi `expense-table.tsx` cho gọn (>200 dòng — quy ước
  * modularize). Đọc/ghi trực tiếp query string `?q=&danh_muc=&kenh=&nguon=` —
- * là 1 trong 2 sibling client component cùng đọc chung URL (như
- * `order-filters.tsx`/`order-table.tsx`), không cần props qua lại với
+ * là 1 trong 2 sibling client component cùng đọc chung URL, không cần props qua lại với
  * `ExpenseTable`. Đổi filter luôn xóa `trang` (reset về trang 1); KHÔNG đụng
  * `sap_xep` (thuộc bảng, không phải toolbar).
  */

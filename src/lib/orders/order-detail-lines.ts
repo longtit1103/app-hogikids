@@ -137,11 +137,13 @@ export function buildOrderProfitLines(i: OrderDetailLineInput): PnlLineItem[] {
     ...conPhiSan,
     {
       id: "netRevenue",
-      label: "Thực nhận từ sàn",
+      // Nhãn nói đúng phép tính (số app tính từ đơn), không nói "thực nhận" để khỏi bị đọc là tiền đã về;
+      // `id` giữ "netRevenue", dòng cùng số ở bảng Lãi/Lỗ vẫn tên "Thực nhận từ sàn".
+      label: "Tiền sau voucher và phí sàn",
       value: thucNhan,
       isDeduction: false,
       kind: "subtotal",
-      hint: "Doanh thu trừ phí sàn — tiền hàng còn lại sau khi sàn cắt phần của họ, chưa trừ giá vốn.",
+      hint: "Doanh thu trừ phí sàn — tiền hàng còn lại sau khi sàn cắt phần của họ, chưa trừ giá vốn. Số app tính từ đơn, chưa phải tiền đã về tài khoản.",
     },
     {
       id: "cogs",
@@ -169,7 +171,7 @@ export function buildOrderProfitLines(i: OrderDetailLineInput): PnlLineItem[] {
       value: thucNhan - i.cogs,
       isDeduction: false,
       kind: "total",
-      hint: "Thực nhận từ sàn trừ giá vốn. Chưa gồm chi phí chung của shop (quảng cáo, vận chuyển, đóng gói…).",
+      hint: "Tiền sau voucher và phí sàn trừ giá vốn. Chưa gồm chi phí chung của shop (quảng cáo, vận chuyển, đóng gói…).",
     },
   ];
 }
@@ -237,7 +239,7 @@ export function buildSettlementLines(q: QuyetToanDon, thucNhanApp: number | null
             isDeduction: false,
             kind: "subtotal" as const,
             warn: thucNhanApp !== 0 && Math.abs(chenh / thucNhanApp) > 0.05,
-            hint: "Sàn quyết toán trừ đi 'Thực nhận từ sàn' của app. Lệch khác 0 là đáng xem — khối Đối soát ở tab Dòng tiền nêu mọi mức. Đơn CHƯA hoàn tất thì phí sàn app còn là số tạm tính nên lệch lớn là bình thường, sửa bằng cách cập nhật trạng thái đơn bên Pancake.",
+            hint: "Sàn quyết toán trừ đi 'Tiền sau voucher và phí sàn' của app. Lệch khác 0 là đáng xem — khối Đối soát ở tab Dòng tiền nêu mọi mức. Đơn CHƯA hoàn tất thì phí sàn app còn là số tạm tính nên lệch lớn là bình thường, sửa bằng cách cập nhật trạng thái đơn bên Pancake.",
           },
         ]),
   ];

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { OrderStatusBadge } from "@/components/orders/order-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { formatVnd } from "@/lib/format";
+import { hrefMoDonHang } from "@/lib/orders/doc-tham-so-don-hang";
 import { PROVISIONAL_FEE_TITLE } from "@/lib/orders/provisional-fee";
 import type { DoiSoatTienVe } from "@/lib/reports/doi-soat-tien-ve";
 import { CUA_SO_CHO_QUYET_TOAN_NGAY } from "@/lib/reports/doi-soat-tien-ve";
@@ -182,7 +183,7 @@ export function DoiSoatSection({
                 {danhSachLech.map((d) => (
                   <tr key={d.id} className="border-b border-hairline/60 last:border-0">
                     <td className="py-1.5 pr-2">
-                      <Link href={`/don-hang?don=${d.id}`} className="text-ink underline-offset-2 hover:underline">
+                      <Link href={hrefMoDonHang(d.id)} className="text-ink underline-offset-2 hover:underline">
                         #{d.code}
                       </Link>
                       {/* Mã ngắn KHÔNG định danh được đơn (TikTok có 2 cặp mã trùng) —
@@ -270,7 +271,7 @@ export function DoiSoatSection({
                 {hoanConTien.map((d) => (
                   <tr key={d.id} className="border-b border-hairline/60 last:border-0">
                     <td className="py-1.5 pr-2">
-                      <Link href={`/don-hang?don=${d.id}`} className="text-ink underline-offset-2 hover:underline">
+                      <Link href={hrefMoDonHang(d.id)} className="text-ink underline-offset-2 hover:underline">
                         #{d.code}
                       </Link>
                       <span className="ml-1 text-xs text-muted-foreground" title={d.pancakeId}>

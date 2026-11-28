@@ -88,8 +88,8 @@
   /* Radius scale — buttons/inputs 8px, cards 12px, badges pill (claude-DESIGN.md rounded.*) */
   --radius: 0.625rem;
 
-  /* Trang chủ (spec trang-chu-redesign-261031 §6) — token RIÊNG tiền tố --tq-*, CHỈ trang `/` dùng;
-   * không thay token chung ở trên. */
+  /* Trang chủ (spec trang-chu-redesign-261031 §6) — token RIÊNG tiền tố --tq-*, trang `/` và `/don-hang`
+   * dùng (spec don-hang-redesign-261127 §9); không thay token chung ở trên. */
   --tq-nen: #f1f1f1;
   --tq-the: #ffffff;
   --tq-chu-dam: #1a1a1a;

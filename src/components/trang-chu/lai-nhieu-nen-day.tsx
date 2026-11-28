@@ -7,7 +7,7 @@ import type { DongLaiSanPham } from "@/lib/trang-chu/xep-hang-lai-san-pham";
 const DICH_BAO_CAO_SAN_PHAM = "/bao-cao?tab=san-pham";
 const DICH_THIEU_GIA_VON = "/san-pham?loc=da_ban_thieu_gia_von";
 const LUOI_COT =
-  "grid grid-cols-[minmax(0,1fr)_5.5rem_3.5rem_3.5rem] items-center gap-2";
+  "grid grid-cols-[minmax(0,1fr)_4.75rem_3rem_2.25rem] items-center gap-2";
 
 /**
  * Khối "Lãi nhiều – nên đẩy" (spec trang chủ §4.6): top sản phẩm CHA theo tổng lãi gộp kỳ, đã xếp và đã loại

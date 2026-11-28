@@ -101,14 +101,14 @@ export async function SyncSection({ syncLogs }: { syncLogs: SyncLog[] }) {
           <code className="font-mono">.env</code> trên minipc.
         </p>
 
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-ink">Webhook &quot;Đồng bộ ngay&quot;:</span>
           {syncNow ? (
             <Badge className="bg-success/15 text-success">
               {syncNow.nguon === "env" ? "Đã cấu hình (env override)" : "Đã cấu hình (Kết nối n8n)"}
             </Badge>
           ) : (
-            <Badge className="bg-warning/15 text-warning">Chưa cấu hình — điền n8n URL ở khối Kết nối n8n</Badge>
+            <Badge className="h-auto max-w-full whitespace-normal bg-warning/15 text-warning">Chưa cấu hình — điền n8n URL ở khối Kết nối n8n</Badge>
           )}
         </div>
       </div>

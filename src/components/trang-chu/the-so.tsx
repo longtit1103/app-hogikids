@@ -69,7 +69,7 @@ export function TheSo(props: {
       <span className="text-[12px] font-medium text-tq-chu-phu">{nhan}</span>
       <span
         className={cn(
-          "truncate text-lg font-semibold tabular-nums sm:text-2xl",
+          "truncate text-lg font-semibold tabular-nums sm:text-xl xl:text-2xl",
           giaTriAm ? "text-tq-xau-chu" : giaTriLoiNhuan ? "text-tq-loi-nhuan-chu" : "text-tq-chu-dam",
         )}
       >

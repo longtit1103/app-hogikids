@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 
+import { cn } from "@/lib/utils";
 import { OrdersTopbarDateFilter } from "@/components/orders/orders-topbar-date-filter";
 import { DateRangePicker } from "./date-range-picker";
 import { getPageTitle } from "./nav-config";
@@ -11,6 +12,9 @@ import { SyncNowButton } from "./sync-now-button";
 export function Topbar({ choPhepDongBo = false }: { choPhepDongBo?: boolean }) {
   const pathname = usePathname();
   const title = getPageTitle(pathname);
+  // `/don-hang` tự có h1 trong nội dung từ md (cùng kiểu trang chủ) ⇒ tiêu đề thanh trên chỉ còn ở điện
+  // thoại, tránh "Đơn hàng" lặp hai lần. Các trang khác giữ nguyên.
+  const anTieuDeTuMd = pathname === "/don-hang";
 
   return (
     // Dưới xl: 2 hàng — tiêu đề + đồng bộ ở hàng 1, bộ chọn kỳ tụt xuống hàng 2 cuộn ngang toàn
@@ -21,7 +25,7 @@ export function Topbar({ choPhepDongBo = false }: { choPhepDongBo?: boolean }) {
     // TRÀN NGANG cả trang ở 768–1279px (bắt được bởi smoke xoay ngang iPhone 844px).
     <header className="flex flex-wrap items-center gap-3 border-b border-hairline bg-canvas px-4 py-3 md:px-6 xl:h-16 xl:flex-nowrap xl:py-0">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <h1 className="truncate font-serif text-2xl tracking-tight text-ink">{title}</h1>
+        <h1 className={cn("truncate font-serif text-2xl tracking-tight text-ink", anTieuDeTuMd && "md:hidden")}>{title}</h1>
       </div>
 
       {/* Cùng ô: chỉ 1 trong 2 hiện theo route (picker toàn cục tự ẩn ngoài

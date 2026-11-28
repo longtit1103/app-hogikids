@@ -155,6 +155,7 @@ export const BANG_QUYEN_MONG_DOI: Readonly<Record<string, CongMongDoiCoKieu>> = 
   "src/app/api/restore/route.ts#POST": "CHU_SHOP",
   "src/app/api/restore/cat-phien/route.ts#POST": "CHU_SHOP",
   "src/app/api/export/bao-cao/route.ts#GET": ["bao-cao:xem", "tai-chinh-loi-lo:xem"],
+  "src/app/api/export/don-hang/route.ts#GET": "don-hang:xem",
   "src/app/api/export/gia-von/route.ts#GET": "san-pham:xem",
   "src/app/api/export/so-quy/route.ts#GET": "tai-chinh-so-quy:xem",
   "src/app/api/export/ton-kho/route.ts#GET": "ton-kho:xem",

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { OrderStatusBadge } from "@/components/orders/order-status-badge";
 import { formatVnd } from "@/lib/format";
+import { hrefMoDonHang } from "@/lib/orders/doc-tham-so-don-hang";
 import { CUA_SO_CHO_QUYET_TOAN_NGAY, type DonSanChuaGhiDoanhThu } from "@/lib/reports/doi-soat-tien-ve";
 import { cn } from "@/lib/utils";
 
@@ -57,7 +58,7 @@ export function DoiSoatSanChuaGhiDoanhThu({
                 data-testid="doi-soat-san-chua-ghi-doanh-thu-dong"
               >
                 <td className="py-1.5 pr-2">
-                  <Link href={`/don-hang?don=${d.id}`} className="text-ink underline-offset-2 hover:underline">
+                  <Link href={hrefMoDonHang(d.id)} className="text-ink underline-offset-2 hover:underline">
                     #{d.code}
                   </Link>
                   {/* Mã ngắn KHÔNG định danh được đơn (TikTok có 2 cặp mã trùng) —

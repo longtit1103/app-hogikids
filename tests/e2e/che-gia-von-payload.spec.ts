@@ -20,6 +20,14 @@ const EMAIL_XEM = "xem@hogikids.test";
 const MAT_KHAU = "Xem-Password-123!";
 const CHUOI_DINH_DANG = "7.331.117";
 /**
+ * Số SUY RA từ giá vốn dò trên đơn dò `DO-GIA-VON-01` (2 × 7.331.117, tiền hàng 240.000, không phí):
+ * giá vốn đơn 14.662.234 và lãi đơn −14.422.234. Trang Đơn hàng tính lãi từng đơn ⇒ hai số này cũng
+ * là giá vốn lọt ra ngoài, ở cả dạng thô lẫn dạng tiền.
+ */
+/** Mã sàn của đơn dò (= `pancakeId`, đơn Shopee) — hiện ở dòng phụ của ô Đơn. */
+const MA_SAN_DON_DO = "E2E-DO-GIA-VON-DON";
+const CHUOI_SUY_RA = ["14422234", "14.422.234", "14662234", "14.662.234"];
+/**
  * DB e2e sống qua nhiều lượt và nhiều spec ghi sản phẩm/đơn, nên dòng dò không chắc nằm ở trang đầu của
  * danh sách. Mỗi trang kiểm CẢ bản thường lẫn bản lọc theo mã (`?q=`) — bản lọc bắt buộc render ra dòng
  * dò (`phaiCo`), nếu không phép "không chứa giá vốn" xanh vì dòng chưa từng được vẽ.
@@ -31,8 +39,31 @@ const URL_KIEM: { url: string; phaiCo?: string }[] = [
   { url: "/ton-kho" },
   { url: `/ton-kho?q=${SKU_DO_GIA_VON}`, phaiCo: SKU_DO_GIA_VON },
   { url: "/don-hang" },
-  { url: "/don-hang?q=DO-GIA-VON-01", phaiCo: "DO-GIA-VON-01" },
+  // `phaiCo` là MÃ SÀN của đơn dò (chỉ có trong dòng đơn) — mã đơn thì ô tìm/chip "Tìm:" cũng chứa, phép
+  // "phải render dòng dò" sẽ xanh cả khi danh sách rỗng.
+  { url: "/don-hang?q=DO-GIA-VON-01", phaiCo: MA_SAN_DON_DO },
+  // Gõ tay tham số cần giá vốn: chip `thieu_gv` + sắp theo lãi phải bị BỎ (đơn dò vẫn hiện) — giữ lại
+  // thì tập đơn / thứ tự tự nó lộ giá vốn.
+  { url: "/don-hang?q=DO-GIA-VON-01&loc=thieu_gv&sx=lai_thap", phaiCo: MA_SAN_DON_DO },
+  { url: "/don-hang?ky=tat_ca&q=DO-GIA-VON-01", phaiCo: MA_SAN_DON_DO },
 ];
+
+/** Không chứa giá vốn dò ở dạng nào (thô, định dạng tiền, số suy ra trên đơn dò). */
+function khongLoGiaVon(noiDung: string, nhan: string): void {
+  expect(noiDung, `${nhan} lộ giá vốn dạng thô`).not.toContain(CHUOI_DO_GIA_VON);
+  expect(noiDung, `${nhan} lộ giá vốn dạng định dạng tiền`).not.toContain(CHUOI_DINH_DANG);
+  for (const chuoi of CHUOI_SUY_RA) expect(noiDung, `${nhan} lộ số suy ra từ giá vốn (${chuoi})`).not.toContain(chuoi);
+}
+
+/** Id đơn dò — mở drawer `?don=` cần id thật. */
+async function idDonDo(): Promise<string> {
+  const prisma = testPrisma();
+  try {
+    return (await prisma.order.findFirstOrThrow({ where: { code: "DO-GIA-VON-01" }, select: { id: true } })).id;
+  } finally {
+    await prisma.$disconnect();
+  }
+}
 
 test.beforeAll(async () => {
   const prisma = testPrisma();
@@ -98,9 +129,24 @@ test.describe("người không có quyền giá vốn", () => {
         const noiDung = await res.text();
         expect(noiDung.length, `${ten} ${url} không được rỗng`).toBeGreaterThan(500);
         if (phaiCo) expect(noiDung, `${ten} ${url} phải render dòng dò`).toContain(phaiCo);
-        expect(noiDung, `${ten} ${url} lộ giá vốn dạng thô`).not.toContain(CHUOI_DO_GIA_VON);
-        expect(noiDung, `${ten} ${url} lộ giá vốn dạng định dạng tiền`).not.toContain(CHUOI_DINH_DANG);
+        khongLoGiaVon(noiDung, `${ten} ${url}`);
       }
+    }
+  });
+
+  test("drawer đơn dò (`?don=`) không chứa giá vốn hay lãi suy ra", async ({ page }) => {
+    await dangNhapVoi(page, EMAIL_XEM, MAT_KHAU);
+    const url = `/don-hang?q=DO-GIA-VON-01&don=${await idDonDo()}`;
+    for (const [ten, headers, duongDan] of [
+      ["HTML", undefined, url],
+      ["RSC", { RSC: "1" }, `${url}&_rsc`],
+    ] as const) {
+      const res = await page.request.get(duongDan, { maxRedirects: 0, headers });
+      expect(res.status(), `${ten} ${url} phải 200`).toBe(200);
+      const noiDung = await res.text();
+      // Drawer thật sự được dựng (SKU dò chỉ có trong bảng sản phẩm của drawer, không ở danh sách).
+      expect(noiDung, `${ten} ${url} phải dựng drawer`).toContain(SKU_DO_GIA_VON);
+      khongLoGiaVon(noiDung, `${ten} ${url}`);
     }
   });
 });
@@ -119,5 +165,21 @@ test.describe("đối chứng chủ shop — phép dò có bắt được giá v
         `${url} của chủ shop phải có giá vốn dò`,
       ).toBe(true);
     }
+  });
+
+  test("/don-hang của chủ shop CÓ lãi đơn dò; chip thiếu giá vốn CÓ hiệu lực", async ({ page }) => {
+    await dangNhap(page);
+    const res = await page.request.get("/don-hang?q=DO-GIA-VON-01", { maxRedirects: 0 });
+    expect(res.status()).toBe(200);
+    // Chứng minh phép dò bên trên bắt được lãi suy ra: chủ shop thấy đúng số đó (và đúng đơn dò).
+    const html = await res.text();
+    expect(html).toContain(MA_SAN_DON_DO);
+    expect(html).toContain("14.422.234");
+
+    // Giá vốn đơn dò ≠ 0 nên đơn không "thiếu giá vốn" ⇒ với chủ shop chip lọc mất đơn dò. Nhánh người
+    // không quyền vẫn thấy đơn dò ở cùng URL ⇒ chip bị bỏ thật, không phải lọc vô tác dụng.
+    const loc = await page.request.get("/don-hang?q=DO-GIA-VON-01&loc=thieu_gv", { maxRedirects: 0 });
+    expect(loc.status()).toBe(200);
+    expect(await loc.text()).not.toContain(MA_SAN_DON_DO);
   });
 });

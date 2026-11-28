@@ -21,6 +21,7 @@ const MIEN: Readonly<Record<string, string>> = {
   "src/app/api/restore/cat-phien/route.ts#POST":
     "Chỉ `pg_terminate_backend` một phiên CLI giữ khoá ghi chung — không ghi dữ liệu app; nhật ký best-effort, từ chối khi cờ phục hồi bật.",
   "src/app/api/export/bao-cao/route.ts#GET": "Chỉ đọc (xuất Excel).",
+  "src/app/api/export/don-hang/route.ts#GET": "Chỉ đọc (xuất Excel).",
   "src/app/api/export/gia-von/route.ts#GET": "Chỉ đọc (xuất Excel).",
   "src/app/api/export/so-quy/route.ts#GET": "Chỉ đọc (xuất Excel).",
   "src/app/api/export/ton-kho/route.ts#GET": "Chỉ đọc (xuất Excel).",

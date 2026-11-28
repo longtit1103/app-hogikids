@@ -36,6 +36,13 @@ describe("order-status-meta", () => {
     expect(slugToStatus("hoan_hang, lung_tung ,huy_bom")).toEqual(["RETURNED", "CANCELLED"]);
     expect(slugToStatus("")).toEqual([]);
   });
+  it("slugToStatus: tên thuộc tính kế thừa của Object (constructor, __proto__, toString…) KHÔNG phải slug", () => {
+    // URL gõ tay `?trang_thai=constructor` từng lọt hàm `Object` vào danh sách trạng thái ⇒ trang 500.
+    for (const la of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+      expect(slugToStatus(la)).toEqual([]);
+    }
+    expect(slugToStatus("hoan_hang,constructor,__proto__")).toEqual(["RETURNED"]);
+  });
 });
 
 // Finding M2/B6: order-profit.ts (lãi từng đơn ở drawer) LẶP công thức cấp-đơn với

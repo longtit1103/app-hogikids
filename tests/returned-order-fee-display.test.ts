@@ -33,6 +33,13 @@ describe("returnedOrderFeeDisplay", () => {
       returnedOrderFeeDisplay({ channelId: "facebook", status: "RETURNED", orderedAt: recent, returnedFee: 0, platformFeeEst: 100 }, now).show,
     ).toBe(false);
   });
+  it("kênh không phí thật nhưng returnedFee>0: VẪN hiện số thực (P&L đã trừ khoản này, ô Phí sàn phải khớp ô Lãi)", () => {
+    for (const channelId of ["facebook", "website", "direct"]) {
+      expect(
+        returnedOrderFeeDisplay({ channelId, status: "CANCELLED", orderedAt: recent, returnedFee: 4_000, platformFeeEst: 0 }, now),
+      ).toEqual({ show: true, fee: 4_000, provisional: false });
+    }
+  });
   it("đơn hợp lệ (COMPLETED): không hiện", () => {
     expect(
       returnedOrderFeeDisplay({ channelId: "shopee", status: "COMPLETED", orderedAt: recent, returnedFee: 5, platformFeeEst: 5 }, now).show,

@@ -1,7 +1,7 @@
 import { endOfDay, startOfDay } from "date-fns";
 import { describe, expect, it } from "vitest";
 
-import { isExactlyPnlValid, isFullCalendarMonth } from "@/components/orders/order-totals-strip";
+import { isExactlyPnlValid, isFullCalendarMonth } from "@/lib/orders/khop-bang-lai-lo";
 
 /**
  * Caption "khớp bảng Lỗ lãi" chỉ được đúng khi kỳ là TRỌN 1 tháng dương lịch —

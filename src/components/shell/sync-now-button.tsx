@@ -153,7 +153,9 @@ function NutDongBoNgay({ trongTopbar }: { trongTopbar: boolean }) {
       <span
         className={cn(
           "hidden items-center gap-2 text-sm text-muted-foreground sm:inline-flex",
-          trongTopbar && "md:hidden xl:inline-flex",
+          // Từ 1440 (không phải xl=1280): chữ Inter rộng hơn nên ở 1280 hàng tiêu đề + 7 nút kỳ + dòng này
+          // + nút đồng bộ vượt ~1000px cột nội dung ⇒ tiêu đề bị ép còn "D".
+          trongTopbar && "md:hidden min-[1440px]:inline-flex",
         )}
       >
         {when ? `Đồng bộ lúc ${formatNgayVn(new Date(when), "HH:mm dd/MM")}` : "Chưa đồng bộ"}

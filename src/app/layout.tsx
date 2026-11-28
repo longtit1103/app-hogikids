@@ -55,7 +55,11 @@ export default async function RootLayout({
   await connection();
 
   return (
-    <html lang="vi">
+    // Ba lớp biến font PHẢI nằm ở <html>, không phải <body>: globals.css đặt `html { font-sans }`, tức
+    // `font-family: var(--font-inter)` ngay tại <html>. Biến khai ở <body> thì tại <html> nó chưa tồn tại ⇒
+    // khai báo vô hiệu ⇒ cả trang rơi về font mặc định có chân của trình duyệt, chỉ phần tử tự gắn
+    // `font-sans` mới ra Inter.
+    <html lang="vi" className={`${ebGaramond.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
       <head>
         {/*
           Manifest PWA — ĐÚNG MỘT thẻ, tự render (không dùng metadata.manifest / app/manifest.ts):
@@ -64,9 +68,7 @@ export default async function RootLayout({
         */}
         <link rel="manifest" href="/manifest.webmanifest" crossOrigin="use-credentials" />
       </head>
-      <body
-        className={`${ebGaramond.variable} ${inter.variable} ${jetbrainsMono.variable} antialiased`}
-      >
+      <body className="antialiased">
         {children}
         {/* Hộp xác nhận dùng chung cho `xacNhan()` — thay hộp confirm gốc của trình duyệt (bị chặn trong PWA/iOS). */}
         <XacNhanHost />

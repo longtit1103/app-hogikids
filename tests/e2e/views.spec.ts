@@ -259,6 +259,26 @@ test.describe("Đơn hàng", () => {
             },
           ],
         },
+        // Một đơn hoàn + một đơn hủy TRONG THÁNG NÀY cho bài lọc `trang_thai=hoan_hang,huy_bom`: kỳ mặc
+        // định của /don-hang là Tháng này, còn `ingest.spec.ts` (chạy trước trong cùng lượt) xoá sạch đơn.
+        ...[
+          { id: "E2E-DRAWER-HOAN", status: 4 },
+          { id: "E2E-DRAWER-HUY", status: 6 },
+        ].map((d) => ({
+          ...d,
+          inserted_at: gioNaiveUtcTruoc(3),
+          order_sources_name: "Shopee",
+          marketplace_id: "-3",
+          total_price: 60000,
+          total_discount: 0,
+          fee_marketplace: 6000,
+          items: [
+            {
+              quantity: 1,
+              variation_info: { display_id: "E2E-DRAWER-SKU", name: "SP Drawer Test", retail_price: 60000 },
+            },
+          ],
+        })),
       ],
     });
   });
@@ -269,7 +289,7 @@ test.describe("Đơn hàng", () => {
 
   test("banner hiển thị thời điểm đồng bộ sau khi ingest", async ({ page }) => {
     await page.goto("/don-hang");
-    await expect(page.getByText(/Đồng bộ Pancake lúc/)).toBeVisible();
+    await expect(page.getByText(/đồng bộ Pancake lúc/i)).toBeVisible();
   });
 
   /**
@@ -277,9 +297,8 @@ test.describe("Đơn hàng", () => {
    * Neo dòng theo mã Pancake (998877) rồi khẳng định mã sàn ĐẦY ĐỦ xuất hiện cùng dòng —
    * hai chuỗi khác hẳn nhau nên phép kiểm không thể xanh nhờ trùng cột (bài học e2e mù 22/08).
    */
-  test('cột "Mã sàn" hiện mã đơn bên sàn, tìm được bằng mã sàn', async ({ page }) => {
+  test("mã sàn hiện dưới mã đơn, tìm được bằng mã sàn", async ({ page }) => {
     await page.goto("/don-hang?q=260800E2EMASAN1");
-    await expect(page.getByRole("columnheader", { name: "Mã sàn" })).toBeVisible();
     const row = page.locator("tbody tr").filter({ hasText: "998877" });
     await expect(row).toHaveCount(1);
     await expect(row).toContainText("260800E2EMASAN1");
@@ -287,11 +306,13 @@ test.describe("Đơn hàng", () => {
 
   test('"?trang_thai=hoan_hang,huy_bom" chỉ hiện 2 trạng thái', async ({ page }) => {
     await page.goto("/don-hang?trang_thai=hoan_hang,huy_bom");
-    const rows = page.locator("tbody tr");
-    const count = await rows.count();
+    // Viên thuốc trạng thái trong BẢNG (thẻ điện thoại cùng nằm trong DOM nhưng ẩn bằng CSS).
+    const vien = page.locator("tbody").getByTestId("trang-thai-don");
+    await expect(vien.first()).toBeVisible();
+    const count = await vien.count();
     expect(count).toBeGreaterThan(0);
     for (let i = 0; i < count; i++) {
-      await expect(rows.nth(i)).toContainText(/Hoàn hàng|Hủy\/Bom/);
+      await expect(vien.nth(i)).toHaveText(/^(Hoàn|Hủy)$/);
     }
   });
 
@@ -325,9 +346,11 @@ test.describe("Đơn hàng", () => {
     await page.getByRole("link", { name: "E2E-DRAWER-01" }).click();
 
     // itemsTotal = 200.000 − giảm giá dòng (2×20.000) = 160.000; − fee 15.000 − cogs (2×40.000) = 65.000
-    await expect(page.getByText("65.000 ₫")).toBeVisible();
+    // Khoanh trong hộp thoại: số lãi xuất hiện ở cả ô số đầu drawer lẫn cây "Tiền của đơn".
+    const hop = page.getByRole("dialog");
+    await expect(hop.getByText("65.000 ₫").first()).toBeVisible();
     // Lãi gộp dòng RÒNG = 200.000 − 40.000(giảm giá dòng) − 80.000(cogs) = 80.000 (khớp cơ sở itemsTotal)
-    await expect(page.getByTestId("line-profit")).toHaveText("80.000 ₫");
+    await expect(hop.getByTestId("line-profit")).toHaveText("80.000 ₫");
 
     // Đóng drawer, sửa giá vốn ở /san-pham, mở lại → lãi đổi (COGS hiện hành, không snapshot).
     // "SP Drawer Test" 1 biến thể → áp cấp sản phẩm không bung confirm.
@@ -345,7 +368,7 @@ test.describe("Đơn hàng", () => {
     await page.goto("/don-hang?q=E2E-DRAWER-01");
     await page.getByRole("link", { name: "E2E-DRAWER-01" }).click();
     // cogs mới = 2×60.000=120.000 → lãi = 160.000−0−15.000−120.000 = 25.000
-    await expect(page.getByText("25.000 ₫")).toBeVisible();
+    await expect(page.getByRole("dialog").getByText("25.000 ₫").first()).toBeVisible();
 
   });
 
@@ -365,10 +388,11 @@ test.describe("Đơn hàng", () => {
     await page.goto("/don-hang?q=E2E-DRAWER-01");
     await page.getByRole("link", { name: "E2E-DRAWER-01" }).click();
 
-    await expect(page.getByText("Lãi đơn", { exact: true })).toBeVisible();
+    const hop = page.getByRole("dialog");
+    await expect(hop.getByText("Lãi đơn", { exact: true }).first()).toBeVisible();
 
     // Nhóm "Doanh thu đơn" mặc định BUNG HẾT — dòng con "Giá niêm yết" đang hiện.
-    const listPrice = page.getByText("Giá niêm yết", { exact: true });
+    const listPrice = hop.getByText("Giá niêm yết", { exact: true });
     await expect(listPrice).toBeVisible();
 
     // Thu gọn nhóm (mũi tên đổi tên/hướng) → dòng con biến mất; bung lại → hiện lại.

@@ -20,8 +20,8 @@ export function TheoKenh({ du, hrefDuocPhep }: { du: DuTheoKenh; hrefDuocPhep: r
   const tongDoanhSo = du.rows.reduce((s, r) => s + Math.max(0, r.doanhSo), 0);
   // 3 cột (tên · thanh · số) khi che, 4 cột khi đủ; điện thoại bỏ cột doanh số + đơn.
   const cot = duQuyen
-    ? "grid-cols-[64px_1fr_72px] sm:grid-cols-[80px_1fr_118px_92px]"
-    : "grid-cols-[64px_1fr_72px] sm:grid-cols-[80px_1fr_118px]";
+    ? "grid-cols-[64px_1fr_72px] sm:grid-cols-[80px_1fr_118px_92px] xl:grid-cols-[96px_1fr_150px_92px]"
+    : "grid-cols-[64px_1fr_72px] sm:grid-cols-[80px_1fr_118px] xl:grid-cols-[96px_1fr_150px]";
 
   return (
     <TheKhoi

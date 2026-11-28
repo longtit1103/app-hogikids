@@ -127,7 +127,7 @@ export function ChannelOrdersTab({
               {rows.map((o) => (
                 <TableRow key={o.id}>
                   <TableCell>
-                    <Link href={`/don-hang?kenh=${channelId}&don=${o.id}`} className="font-mono text-sm text-primary hover:underline">
+                    <Link href={`/don-hang?kenh=${channelId}&ky=tat_ca&don=${o.id}`} className="font-mono text-sm text-primary hover:underline">
                       {o.code}
                     </Link>
                   </TableCell>
@@ -184,7 +184,7 @@ export function ChannelOrdersTab({
         </div>
       )}
 
-      <Link href={`/don-hang?kenh=${channelId}`} className="text-sm text-primary hover:underline">
+      <Link href={`/don-hang?kenh=${channelId}&ky=tat_ca`} className="text-sm text-primary hover:underline">
         Mở màn Đơn hàng →
       </Link>
     </div>

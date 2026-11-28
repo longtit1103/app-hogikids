@@ -1,6 +1,9 @@
 import type { OrderStatus, Prisma } from "@/generated/prisma/client";
 
+import { KENH_BAN_TRUC_TIEP } from "@/lib/channels/kenh-ban-truc-tiep";
 import { REAL_FEE_CHANNELS } from "@/lib/channels/real-fee-channels";
+import { docThongTinPhuDon } from "@/lib/orders/doc-thong-tin-phu-don";
+import type { ThongTinPhuDon } from "@/lib/orders/don-hang-kieu-du-lieu";
 import { sumPnlPlatformFee } from "@/lib/orders/order-list-totals";
 import { prisma } from "@/lib/prisma";
 import { tachChiTietPhiTuRaw, type PlatformFeeComponent } from "@/lib/reports/platform-fee-breakdown";
@@ -96,6 +99,11 @@ export type OrderDetailChe = {
   marketplaceFunded: number;
   /** Số SÀN quyết toán cho đơn này (đối chiếu, đọc Bronze TikTok) — null = chưa quyết toán/không phải TikTok. */
   quyetToan: QuyetToanDon | null;
+  /**
+   * Dòng thời gian trạng thái, chắt ở SERVER từ `raw.status_history` (`docThongTinPhuDon`) — chỉ mang
+   * trạng thái + thời điểm, không trường nào khác của `raw`. Rỗng ⇒ drawer ẩn khối.
+   */
+  thongTinPhu: ThongTinPhuDon;
 };
 
 /** Chi tiết đơn đầy đủ — dòng hàng kèm giá vốn hiện hành. */
@@ -115,7 +123,7 @@ export const ORDER_LIST_ORDER_BY: Prisma.OrderOrderByWithRelationInput[] = [{ or
  *  - đơn bù từ bản sao kho (`backfilledFromMirror`): pancakeId là id mirror "AF…";
  *  - kênh ngoài sàn (facebook/website): pancakeId là id nội bộ Pancake.
  */
-function maDonBenSan(o: { pancakeId: string; backfilledFromMirror: boolean; channelId: string }): string | null {
+export function maDonBenSan(o: { pancakeId: string; backfilledFromMirror: boolean; channelId: string }): string | null {
   if (o.backfilledFromMirror) return null;
   return REAL_FEE_CHANNELS.has(o.channelId) ? o.pancakeId : null;
 }
@@ -317,7 +325,9 @@ export async function getOrderDetail(id: string, quyen: QuyenGiaVon): Promise<Or
     channelId: order.channel.id,
     channelName: order.channel.name,
     channelColor: order.channel.color,
-    customerName: order.customerName,
+    // Tên khách CHỈ cho đơn bán tại shop (cùng luật cột `ten_khach` của danh sách): tên người nhận đơn sàn
+    // là PII màn Đơn hàng không cần, và drawer là component client — gửi xuống là lộ trong payload.
+    customerName: order.channel.id === KENH_BAN_TRUC_TIEP ? order.customerName : null,
     itemsTotal: order.itemsTotal,
     discount: order.discount,
     platformFeeEst: order.platformFeeEst,
@@ -327,6 +337,7 @@ export async function getOrderDetail(id: string, quyen: QuyenGiaVon): Promise<Or
     feeComponents: tachChiTietPhiTuRaw(order.raw),
     marketplaceFunded,
     quyetToan,
+    thongTinPhu: docThongTinPhuDon(order.raw, order.status),
   };
 
   if (!quyen.coQuyenGiaVon) return { coQuyenGiaVon: false, ...chung, items };

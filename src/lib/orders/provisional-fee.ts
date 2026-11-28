@@ -61,8 +61,9 @@ export const PROVISIONAL_SETTLEMENT_WINDOW_DAYS = 30;
  * - `returnedFee = 0` nhưng đơn ĐÃ QUÁ cửa sổ: coi như sàn chốt (thường 0đ) →
  *   hiện 0, BỎ nhãn tạm (không cảnh báo sai cho đơn đã đối soát lâu).
  * - cả hai = 0: không có phí → không hiện.
- * Chỉ kênh có phí THẬT (Shopee/TikTok) + status RETURNED/CANCELLED. `now` truyền
- * vào (không gọi Date trong hàm) để test tất định.
+ * Chỉ status RETURNED/CANCELLED. Nhãn "tạm tính" (returnedFee = 0) chỉ xét kênh có phí
+ * THẬT (Shopee/TikTok); `returnedFee > 0` thì hiện ở MỌI kênh. `now` truyền vào (không
+ * gọi Date trong hàm) để test tất định.
  */
 export function returnedOrderFeeDisplay(
   o: {
@@ -74,9 +75,12 @@ export function returnedOrderFeeDisplay(
   },
   now: Date,
 ): { show: boolean; fee: number; provisional: boolean } {
-  if (!usesRealPlatformFee(o.channelId)) return { show: false, fee: 0, provisional: false };
   if (o.status !== "RETURNED" && o.status !== "CANCELLED") return { show: false, fee: 0, provisional: false };
-  if (o.returnedFee <= 0 && o.platformFeeEst <= 0) return { show: false, fee: 0, provisional: false };
+  // Sàn đã giữ phí thật thì luôn hiện số đó, BẤT KỂ kênh: P&L (`returnedOrderFee`) và ô Lãi đơn đều trừ nó
+  // cho mọi kênh — ẩn ở ô Phí sàn là cùng một dòng nói hai điều trái nhau.
+  if (o.returnedFee > 0) return { show: true, fee: o.returnedFee, provisional: false };
+  if (!usesRealPlatformFee(o.channelId)) return { show: false, fee: 0, provisional: false };
+  if (o.platformFeeEst <= 0) return { show: false, fee: 0, provisional: false };
   const ageDays = (now.getTime() - o.orderedAt.getTime()) / 86_400_000;
   const provisional = o.returnedFee <= 0 && ageDays <= PROVISIONAL_SETTLEMENT_WINDOW_DAYS;
   return { show: true, fee: o.returnedFee, provisional };

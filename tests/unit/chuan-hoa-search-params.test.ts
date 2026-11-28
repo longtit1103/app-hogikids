@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chuanHoaSearchParams, chuoiDauTien } from "@/lib/chuan-hoa-search-params";
+import { chuanHoaSearchParams, chuoiDauTien, thamSoDauTienTuUrl } from "@/lib/chuan-hoa-search-params";
 
 describe("chuoiDauTien", () => {
   it("giữ nguyên chuỗi và undefined", () => {
@@ -36,5 +36,14 @@ describe("chuanHoaSearchParams", () => {
   it("khoá lạ ngoài kiểu khai báo cũng được ép (chuyển hướng giữ bộ lọc không nhận mảng)", () => {
     const sp = chuanHoaSearchParams<{ q?: string }>({ q: "áo", la: ["1", "2"] } as never) as Record<string, unknown>;
     expect(sp.la).toBe("1");
+  });
+});
+
+describe("thamSoDauTienTuUrl — phía client đọc cùng luật 'giá trị đầu' như server", () => {
+  it("tham số lặp lấy giá trị ĐẦU (Object.fromEntries lấy giá trị cuối ⇒ tab kỳ sáng lệch danh sách)", () => {
+    const p = new URLSearchParams("ngay_tu=2026-11-01&ngay_tu=2026-10-01&ngay_den=2026-11-30&q=");
+    expect(thamSoDauTienTuUrl(p)).toEqual({ ngay_tu: "2026-11-01", ngay_den: "2026-11-30", q: "" });
+    const server = chuanHoaSearchParams({ ngay_tu: ["2026-11-01", "2026-10-01"], ngay_den: "2026-11-30", q: "" });
+    expect(thamSoDauTienTuUrl(p)).toEqual(server);
   });
 });

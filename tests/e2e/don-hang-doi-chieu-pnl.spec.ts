@@ -5,15 +5,15 @@ import { ingestPancake, resetRawPancake } from "./ingest-raw";
 import { TEST_USER_EMAIL, TEST_USER_PASSWORD } from "./test-constants";
 
 /**
- * NGHIỆM THU tính năng "Đơn hàng — cột Phí sàn/Voucher + dải tổng đối chiếu P&L".
+ * NGHIỆM THU "Đơn hàng — thẻ số đối chiếu P&L".
  *
- * Kịch bản người dùng thật: ở `/tai-chinh?tab=loi-lo` bấm dòng "Doanh thu gộp"
- * (hoặc "Phí sàn"/"Voucher") → sang `/don-hang` đã lọc sẵn kỳ + trạng thái →
- * số ở DẢI TỔNG phải BẰNG ĐÚNG số ở dòng P&L vừa bấm. Đây là bằng chứng duy
+ * Kịch bản người dùng thật: ở `/tai-chinh?tab=loi-lo` bấm dòng "Doanh thu"
+ * (hoặc "Phí sàn") → sang `/don-hang` đã lọc sẵn kỳ + trạng thái →
+ * số trên THẺ phải BẰNG ĐÚNG số ở dòng P&L vừa bấm. Đây là bằng chứng duy
  * nhất chứng minh tính năng làm được việc user cần: đối chiếu được.
  *
  * Nguyên tắc của file này:
- *  - Cả hai vế đều ĐỌC TỪ DOM (P&L đọc ở màn Lãi/Lỗ, dải tổng đọc ở màn Đơn
+ *  - Cả hai vế đều ĐỌC TỪ DOM (P&L đọc ở màn Lãi/Lỗ, thẻ số đọc ở màn Đơn
  *    hàng) rồi so với nhau. TUYỆT ĐỐI KHÔNG hardcode số kỳ vọng cho phép so
  *    này — hardcode thì lệch định nghĩa "đơn hợp lệ" (thiếu/thừa 1 slug trạng
  *    thái) vẫn xanh, mất sạch mục đích test.
@@ -47,11 +47,13 @@ const VALID_ORDERS = Array.from({ length: 21 }, (_, i) => ({
 
 /**
  * Đơn BỊ LOẠI (RETURNED=4, CANCELLED=6) với số RẤT lệch: nếu lọt vào một trong
- * hai vế (P&L hoặc dải tổng) thì assertion vỡ to và rõ, không âm thầm.
+ * hai vế (P&L hoặc thẻ số) thì assertion vỡ to và rõ, không âm thầm. Có phí sàn
+ * sàn giữ (`returned_fee`) để dòng "Phí sàn đơn hoàn/hủy" của P&L khác 0 — đối
+ * chiếu đường bấm dòng đó không được là so 0 với 0.
  */
 const EXCLUDED_ORDERS = [
-  { seq: 100, code: 4, itemsTotal: 9_000_000, fee: 900_000, voucher: 800_000 },
-  { seq: 101, code: 6, itemsTotal: 7_000_000, fee: 700_000, voucher: 600_000 },
+  { seq: 100, code: 4, itemsTotal: 9_000_000, fee: 900_000, voucher: 800_000, returnedFee: 33_000 },
+  { seq: 101, code: 6, itemsTotal: 7_000_000, fee: 700_000, voucher: 600_000, returnedFee: 11_000 },
 ];
 
 const SUM_VALID = {
@@ -76,6 +78,11 @@ function parseVndText(text: string): number {
   const negative = moneyPart.includes("−");
   const digits = moneyPart.replace(/[^\d]/g, "");
   return digits === "" ? 0 : (negative ? -1 : 1) * Number(digits);
+}
+
+/** 44000 → "44.000 ₫" (cùng cách `formatVnd` viết số dương) — để so chữ trong câu chú thích. */
+function formatVndE2e(n: number): string {
+  return `${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ".")} ₫`;
 }
 
 /**
@@ -104,28 +111,35 @@ async function readPnlAmount(page: Page, label: string): Promise<number> {
 }
 
 /**
- * Số của 1 ô trong dải tổng `/don-hang` — lấy span kề ngay sau span nhãn.
- * Nhãn dùng ĐÚNG chuỗi hiển thị (có tiền tố "− "/"= ") nên không đụng header
- * bảng ("Phí sàn"/"Voucher" trơn).
+ * Số trên thẻ của `/don-hang`. Tiền hàng / Tiền sau voucher và phí sàn / Lãi đọc ô số lớn của thẻ; phí sàn và voucher đọc
+ * thuộc tính `title` của phần "phí sàn x% · voucher y%" ("Phí sàn −1.234 ₫") — chữ hiển thị chỉ là %.
+ * Phí sàn đơn hoàn/hủy đọc CHỮ HIỂN THỊ ("phí sàn đơn hoàn/hủy −44.000 ₫") — người dùng thấy trực tiếp; vắng
+ * (tổng = 0) ⇒ 0.
  */
-async function readStripAmount(page: Page, label: string): Promise<number> {
-  const value = page.getByText(label, { exact: true }).locator("xpath=following-sibling::span[1]");
-  return parseVndText((await value.textContent()) ?? "");
+type OThe = "tien-hang" | "thuc-nhan" | "lai" | "phi-san" | "voucher" | "phi-san-hoan-huy";
+async function readCard(page: Page, o: OThe): Promise<number> {
+  if (o === "phi-san-hoan-huy") {
+    const el = page.getByTestId("phi-san-hoan-huy-tong");
+    return (await el.count()) === 0 ? 0 : parseVndText(await el.innerText());
+  }
+  if (o === "phi-san" || o === "voucher") {
+    const el = page.getByTestId(o === "phi-san" ? "phi-san-tong" : "voucher-tong");
+    return parseVndText((await el.getAttribute("title")) ?? "");
+  }
+  return parseVndText(await page.getByTestId(`the-so-${o}`).getByTestId("gia-tri").innerText());
 }
 
 /**
- * Dòng P&L bấm được ↔ ô tương ứng trên dải tổng `/don-hang`. `stripLabels` là
- * DANH SÁCH vì hai màn nhóm số khác nhau: bảng P&L gộp "Doanh thu" = doanh thu
- * gộp đã trừ voucher, còn dải tổng vẫn tách làm hai ô (số ở ô voucher mang dấu
- * âm sẵn nên chỉ việc cộng). Đối chiếu vẫn là đối chiếu thật, không nới lỏng.
+ * Dòng P&L bấm được ↔ ô tương ứng trên thẻ `/don-hang`. `cardParts` là DANH SÁCH vì hai màn nhóm số
+ * khác nhau: bảng P&L gộp "Doanh thu" = tiền hàng đã trừ voucher, còn thẻ tách Tiền hàng với voucher
+ * (title voucher mang dấu âm sẵn nên chỉ việc cộng). Đối chiếu vẫn là đối chiếu thật, không nới lỏng.
  *
- * Không đối chiếu dòng "Giảm giá do người bán": nó gộp cả phần giảm giá trên
- * từng sản phẩm (đã nằm trong `itemsTotal`) nên dải tổng `/don-hang` chưa có ô
- * tương ứng — thêm ô đó là việc của màn Đơn hàng, không phải test này.
+ * Không đối chiếu dòng "Giảm giá do người bán": nó gộp cả phần giảm giá trên từng sản phẩm (đã nằm
+ * trong `itemsTotal`) nên trang Đơn hàng chưa có ô tương ứng.
  */
-const DRILL_LINES = [
-  { pnlLabel: "Doanh thu", linkName: "Doanh thu", stripLabels: ["Doanh thu gộp", "− Voucher"] },
-  { pnlLabel: "Phí sàn", linkName: "Phí sàn", stripLabels: ["− Phí sàn"] },
+const DRILL_LINES: { pnlLabel: string; linkName: string; cardParts: OThe[] }[] = [
+  { pnlLabel: "Doanh thu", linkName: "Doanh thu", cardParts: ["tien-hang", "voucher"] },
+  { pnlLabel: "Phí sàn", linkName: "Phí sàn", cardParts: ["phi-san"] },
 ];
 
 test.describe("Đơn hàng ↔ P&L — đối chiếu số", () => {
@@ -172,6 +186,7 @@ test.describe("Đơn hàng ↔ P&L — đối chiếu số", () => {
         total_price: o.itemsTotal,
         total_discount: o.voucher,
         fee_marketplace: o.fee,
+        ...("returnedFee" in o ? { advanced_platform_fee: { returned_fee: o.returnedFee } } : {}),
         customer: { name: `Khách Đối Chiếu ${o.seq}` },
         items: [
           {
@@ -207,11 +222,14 @@ test.describe("Đơn hàng ↔ P&L — đối chiếu số", () => {
       ["cho_xu_ly", "dang_giao", "hoan_thanh"].sort(),
     );
 
-    // Caption phải NÓI RA rằng bộ lọc này khớp tập "đơn hợp lệ" của P&L.
-    await expect(page.getByText(/số dưới đây khớp bảng Lỗ lãi cùng kỳ/)).toBeVisible();
+    // Chú thích dưới thẻ phải NÓI RA rằng bộ lọc này khớp tập "đơn hợp lệ" của P&L — không phải bản
+    // cảnh báo "Đang lọc".
+    const ghiChu = page.getByTestId("ghi-chu-the");
+    await expect(ghiChu).toContainText(/khớp bảng Lãi\/Lỗ/);
+    await expect(ghiChu).not.toContainText("Đang lọc");
   });
 
-  test("dải tổng /don-hang BẰNG ĐÚNG dòng P&L vừa bấm", async ({ page }) => {
+  test("thẻ số /don-hang BẰNG ĐÚNG dòng P&L vừa bấm", async ({ page }) => {
     for (const line of DRILL_LINES) {
       await page.goto("/tai-chinh?tab=loi-lo");
       const pnlAmount = await readPnlAmount(page, line.pnlLabel);
@@ -221,31 +239,44 @@ test.describe("Đơn hàng ↔ P&L — đối chiếu số", () => {
       await page.getByRole("link", { name: line.linkName, exact: true }).click();
       await expect(page).toHaveURL(/\/don-hang\?/);
 
-      let stripAmount = 0;
-      for (const label of line.stripLabels) stripAmount += await readStripAmount(page, label);
-      expect(
-        stripAmount,
-        `dải tổng ${line.stripLabels.join(" + ")} phải bằng dòng P&L "${line.pnlLabel}"`
-      ).toBe(pnlAmount);
+      let cardAmount = 0;
+      for (const o of line.cardParts) cardAmount += await readCard(page, o);
+      expect(cardAmount, `thẻ ${line.cardParts.join(" + ")} phải bằng dòng P&L "${line.pnlLabel}"`).toBe(pnlAmount);
     }
   });
 
-  test('ô "= Thực nhận từ sàn" bằng dòng subtotal cùng tên ở P&L', async ({ page }) => {
+  test('thẻ "Tiền sau voucher và phí sàn" bằng dòng subtotal "Thực nhận từ sàn" ở P&L', async ({ page }) => {
     await page.goto("/tai-chinh?tab=loi-lo");
     const pnlNetRevenue = await readPnlAmount(page, "Thực nhận từ sàn");
     expect(pnlNetRevenue).not.toBe(0);
 
     await page.getByRole("link", { name: "Doanh thu", exact: true }).click();
-    expect(await readStripAmount(page, "= Thực nhận từ sàn")).toBe(pnlNetRevenue);
+    await expect(page).toHaveURL(/\/don-hang\?/);
+    expect(await readCard(page, "thuc-nhan")).toBe(pnlNetRevenue);
   });
 
-  test("tổng theo BỘ LỌC chứ không theo trang: sang trang 2 số dải tổng không đổi", async ({ page }) => {
+  test('thẻ "Lãi đơn" bằng dòng "LN gộp" khi lọc đúng đơn hợp lệ', async ({ page }) => {
+    await page.goto("/tai-chinh?tab=loi-lo");
+    const pnlGrossProfit = await readPnlAmount(page, "LN gộp");
+    expect(pnlGrossProfit).not.toBe(0);
+
+    await page.getByRole("link", { name: "Doanh thu", exact: true }).click();
+    await expect(page).toHaveURL(/\/don-hang\?/);
+    // Drill "Doanh thu" luôn lọc đúng 3 trạng thái hợp lệ ⇒ không có phí sàn đơn hoàn/hủy trừ vào thẻ.
+    expect(new URL(page.url()).searchParams.get("trang_thai")?.split(",").sort()).toEqual(
+      ["cho_xu_ly", "dang_giao", "hoan_thanh"].sort(),
+    );
+    expect(await readCard(page, "lai")).toBe(pnlGrossProfit);
+  });
+
+  test("tổng theo BỘ LỌC chứ không theo trang: sang trang 2 số trên thẻ không đổi", async ({ page }) => {
     await page.goto("/tai-chinh?tab=loi-lo");
     await page.getByRole("link", { name: "Doanh thu", exact: true }).click();
+    await expect(page).toHaveURL(/\/don-hang\?/);
     const page1 = {
-      revenue: await readStripAmount(page, "Doanh thu gộp"),
-      fee: await readStripAmount(page, "− Phí sàn"),
-      voucher: await readStripAmount(page, "− Voucher"),
+      revenue: await readCard(page, "tien-hang"),
+      fee: await readCard(page, "phi-san"),
+      voucher: await readCard(page, "voucher"),
     };
 
     const url = new URL(page.url());
@@ -254,10 +285,57 @@ test.describe("Đơn hàng ↔ P&L — đối chiếu số", () => {
 
     // Fixture seed 21 đơn hợp lệ (> PAGE_SIZE 20) nên trang 2 LUÔN có dòng —
     // không có nhánh skip ở đây, skip là để lọt đúng rủi ro cần chặn.
-    await expect(page.getByText("Doanh thu gộp", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("bang-don-hang").getByTestId("dong-don-hang").first()).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("trang")).toBe("2");
 
-    expect(await readStripAmount(page, "Doanh thu gộp")).toBe(page1.revenue);
-    expect(await readStripAmount(page, "− Phí sàn")).toBe(page1.fee);
-    expect(await readStripAmount(page, "− Voucher")).toBe(page1.voucher);
+    expect(await readCard(page, "tien-hang")).toBe(page1.revenue);
+    expect(await readCard(page, "phi-san")).toBe(page1.fee);
+    expect(await readCard(page, "voucher")).toBe(page1.voucher);
+  });
+
+  test('bấm dòng "Phí sàn đơn hoàn/hủy" → số phí sàn đơn hoàn/hủy trên trang BẰNG ĐÚNG dòng đó', async ({ page }) => {
+    await page.goto("/tai-chinh?tab=loi-lo");
+    const pnlHoanHuy = await readPnlAmount(page, "Phí sàn đơn hoàn/hủy");
+    // Non-vacuity: hai đơn loại ở test 1 có phí sàn giữ 33.000 + 11.000.
+    expect(pnlHoanHuy).toBeLessThanOrEqual(-44_000);
+
+    await page.getByRole("link", { name: "Phí sàn đơn hoàn/hủy", exact: true }).click();
+    await expect(page).toHaveURL(/\/don-hang\?/);
+    expect(new URL(page.url()).searchParams.get("trang_thai")?.split(",").sort()).toEqual(["hoan_hang", "huy_bom"]);
+
+    // Số nhìn thấy (không nằm trong title) — người không rê chuột được (iPhone) vẫn đối chiếu được.
+    await expect(page.getByTestId("phi-san-hoan-huy-tong")).toBeVisible();
+    expect(await readCard(page, "phi-san-hoan-huy")).toBe(pnlHoanHuy);
+    // Chú thích trỏ ĐÚNG dòng vừa bấm, không phải bản cảnh báo "Đang lọc… không khớp".
+    const ghiChu = page.getByTestId("ghi-chu-the");
+    await expect(ghiChu).toContainText("khớp dòng “Phí sàn đơn hoàn/hủy” của bảng Lãi/Lỗ");
+    await expect(ghiChu).toContainText(formatVndE2e(-pnlHoanHuy));
+    await expect(ghiChu).not.toContainText("Đang lọc");
+  });
+
+  test("màn mặc định (Tháng này, mọi trạng thái): Lãi đơn = LN gộp − Phí sàn đơn hoàn/hủy, các thẻ tiền vẫn khớp", async ({ page }) => {
+    await page.goto("/tai-chinh?tab=loi-lo");
+    const pnl = {
+      doanhThu: await readPnlAmount(page, "Doanh thu"),
+      phiSan: await readPnlAmount(page, "Phí sàn"),
+      thucNhan: await readPnlAmount(page, "Thực nhận từ sàn"),
+      lnGop: await readPnlAmount(page, "LN gộp"),
+      hoanHuy: await readPnlAmount(page, "Phí sàn đơn hoàn/hủy"),
+    };
+    expect(pnl.lnGop).not.toBe(0);
+    expect(pnl.hoanHuy).toBeLessThan(0);
+
+    await page.goto("/don-hang");
+    expect((await readCard(page, "tien-hang")) + (await readCard(page, "voucher"))).toBe(pnl.doanhThu);
+    expect(await readCard(page, "phi-san")).toBe(pnl.phiSan);
+    expect(await readCard(page, "thuc-nhan")).toBe(pnl.thucNhan);
+    expect(await readCard(page, "phi-san-hoan-huy")).toBe(pnl.hoanHuy);
+    // Dòng P&L "Phí sàn đơn hoàn/hủy" là khoản trừ (đọc ra số âm) ⇒ cộng là trừ đi.
+    expect(await readCard(page, "lai")).toBe(pnl.lnGop + pnl.hoanHuy);
+
+    const ghiChu = page.getByTestId("ghi-chu-the");
+    await expect(ghiChu).toContainText(/khớp bảng Lãi\/Lỗ/);
+    await expect(ghiChu).toContainText(`Lãi đơn = “LN gộp” − “Phí sàn đơn hoàn/hủy” (${formatVndE2e(-pnl.hoanHuy)})`);
+    await expect(ghiChu).not.toContainText("Đang lọc");
   });
 });

@@ -141,6 +141,7 @@ export function DateRangePresetTabs({
             key={option.value}
             type="button"
             onClick={() => onSelectPreset(option.value)}
+            aria-pressed={activePreset === option.value}
             className={tabClassName(activePreset === option.value)}
           >
             {option.label}

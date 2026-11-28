@@ -56,12 +56,12 @@ describe("buildOrderProfitLines — Σ con = cha ở mọi nhóm", () => {
 });
 
 describe("buildOrderProfitLines — cộng dọc mạch chính", () => {
-  it("Doanh thu − Phí sàn = Thực nhận từ sàn", () => {
+  it("Doanh thu − Phí sàn = Tiền sau voucher và phí sàn", () => {
     const m = byId(buildOrderProfitLines(INPUT));
     expect(m.get("netOfDiscount")!.value - m.get("platformFee")!.value).toBe(m.get("netRevenue")!.value);
   });
 
-  it("Thực nhận từ sàn − Giá vốn = Lãi đơn", () => {
+  it("Tiền sau voucher và phí sàn − Giá vốn = Lãi đơn", () => {
     const m = byId(buildOrderProfitLines(INPUT));
     expect(m.get("netRevenue")!.value - m.get("cogs")!.value).toBe(m.get("profit")!.value);
   });

@@ -1,52 +1,43 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRef } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatNgayVn } from "@/lib/dinh-dang-ngay-gio-vn";
-import { formatVnd } from "@/lib/format";
-import { usesRealPlatformFee } from "@/lib/channels/real-fee-channels";
-import { buildOrderProfitLines, buildSettlementLines } from "@/lib/orders/order-detail-lines";
-import { calcOrderCogs } from "@/lib/orders/order-profit";
-import {
-  formatPlatformFeeRatio,
-  isProvisionalPlatformFee,
-  PROVISIONAL_FEE_TITLE,
-  returnedOrderFeeDisplay,
-} from "@/lib/orders/provisional-fee";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import type { OrderDetailTheoQuyen } from "@/lib/queries/orders";
-import { OrderProfitTree } from "./order-profit-tree";
-import { OrderReturnedPanel } from "./order-returned-panel";
-import { OrderStatusBadge } from "./order-status-badge";
+import type { DieuHuongDon } from "./drawer-dau-don";
+import { DrawerNoiDung } from "./drawer-noi-dung";
 
 /**
- * Drawer chi tiết đơn (đọc-only) + khối tính lãi đơn theo giá vốn HIỆN HÀNH. Mở qua `?don=<id>`.
+ * Drawer chi tiết đơn (đọc-only), mở qua `?don=<id>`: vỏ `Sheet` phải 640px (điện thoại phủ toàn màn)
+ * + nút đóng. Ruột ở `drawer-noi-dung.tsx`: đầu (mã, trạng thái, kênh, ‹ i/N ›), 3 ô số, dòng thời gian
+ * trạng thái, sản phẩm, "Tiền của đơn", "Sàn quyết toán".
  *
- * Hai khối số dưới bảng SKU:
- *  1. "Lãi đơn" (mọi đơn hợp lệ) hoặc khối hoàn/hủy (giữ nguyên như cũ) — app TỰ TÍNH,
- *     cây `buildOrderProfitLines` render y hệt cách bảng Lãi/Lỗ làm (`pnl-tab.tsx`).
- *  2. "Sàn quyết toán" (`buildSettlementLines`) — số SÀN thật trả về, CHỈ hiện khi có
- *     (`order.quyetToan !== null`, hiện tại chỉ TikTok đã quyết toán). Đặt CẠNH khối (1)
- *     để đối chiếu, TUYỆT ĐỐI không trộn vào phép tính của (1) — bất biến #7.
+ * Che giá vốn: người thiếu `gia-von-loi-nhuan:xem` nhận `order.coQuyenGiaVon === false` (server không gửi
+ * giá vốn) ⇒ không ô Lãi, không cột Giá vốn/Lãi dòng, cây dừng ở "Tiền sau voucher và phí sàn".
  *
- * Người thiếu `gia-von-loi-nhuan:xem` nhận `order.coQuyenGiaVon === false` (server không gửi giá vốn):
- * không cột giá vốn/lãi dòng, cây (1) dừng ở "Thực nhận từ sàn" — bỏ nhánh Giá vốn và dòng Lãi đơn.
+ * Dòng thời gian trạng thái đi kèm `order.thongTinPhu` (server đã chắt từ `Order.raw`, `raw` không ra
+ * client). `dieuHuong` (cụm ‹ i / N ›) do trang tính theo bộ lọc đang xem; thiếu ⇒ ẩn cụm. `now` = mốc
+ * server dùng cho danh sách — nhãn "tạm tính" của drawer tính theo đúng mốc đó, không theo giờ máy khách.
  */
-
-/** Dòng cây chỉ có nghĩa khi biết giá vốn — cắt khỏi cây ở nhánh che. */
-function laDongGiaVon(id: string): boolean {
-  return id === "cogs" || id.startsWith("cogs:") || id === "profit";
-}
-
-export function OrderDetailDrawer({ order }: { order: OrderDetailTheoQuyen | null }) {
+export function OrderDetailDrawer({
+  order,
+  dieuHuong = null,
+  now,
+}: {
+  order: OrderDetailTheoQuyen | null;
+  dieuHuong?: DieuHuongDon | null;
+  now: Date;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // Focus đầu vào nút ✕: mặc định hộp thoại focus phần tử đầu tiên (nút sao chép) — vòng focus hiện
+  // ngay cạnh mã đơn trông như lỗi, và Esc/✕ là thao tác đầu tiên hay dùng nhất.
+  const refNutDong = useRef<HTMLButtonElement>(null);
 
-  function close() {
+  /** Đóng = bỏ `don` khỏi URL, giữ mọi tham số khác (bộ lọc, trang). */
+  function dong() {
     const params = new URLSearchParams(searchParams);
     params.delete("don");
     router.replace(params.size ? `${pathname}?${params.toString()}` : pathname);
@@ -54,161 +45,21 @@ export function OrderDetailDrawer({ order }: { order: OrderDetailTheoQuyen | nul
 
   if (!order) return null;
 
-  const coGiaVon = order.coQuyenGiaVon;
-  // Nhánh che: không có giá vốn ⇒ đưa `costPrice: null`/`cogs: 0` cho hàm dựng cây rồi CẮT các dòng
-  // phụ thuộc giá vốn — số trên các dòng còn lại (doanh thu, phí sàn, thực nhận) không dùng tới chúng.
-  const itemsTinh = order.coQuyenGiaVon ? order.items : order.items.map((it) => ({ ...it, costPrice: null }));
-  const { cogs, missingCostCount } = order.coQuyenGiaVon ? calcOrderCogs(order.items) : { cogs: 0, missingCostCount: 0 };
-  const excludedFromPnl = order.status === "RETURNED" || order.status === "CANCELLED";
-  // Shopee/TikTok = phí sàn THẬT từ Pancake (`fee_marketplace`); kênh khác = ước tính % (Cài đặt).
-  const realFee = usesRealPlatformFee(order.channelId);
-  const provisionalFee = isProvisionalPlatformFee(order);
-  const returnedFeeDisplay = returnedOrderFeeDisplay(order, new Date());
-
-  // Cây "Lãi đơn" tính LUÔN cho mọi đơn (thuần, rẻ) — kể cả đơn hoàn/hủy: khối
-  // settlement bên dưới cần "Thực nhận từ sàn" của app để tính dòng chênh lệch,
-  // dù đơn hoàn/hủy không hiện cây này (đã có khối riêng, giữ nguyên như cũ).
-  const tatCaDong = buildOrderProfitLines({
-    itemsTotal: order.itemsTotal,
-    discount: order.discount,
-    platformFeeEst: order.platformFeeEst,
-    cogs,
-    items: itemsTinh,
-    feeComponents: order.feeComponents,
-    marketplaceFunded: order.marketplaceFunded,
-  });
-  const profitLines = coGiaVon ? tatCaDong : tatCaDong.filter((l) => !laDongGiaVon(l.id));
-  // Đơn hoàn/hủy KHÔNG có "thực nhận" (app cố tình loại khỏi P&L) nên không có gì
-  // để so — truyền `null` để bỏ dòng chênh, thay vì đem trừ một số không tồn tại
-  // rồi đỏ rực bằng đúng giá trị đơn ngay dưới dòng "đơn không tính vào P&L".
-  const thucNhanApp = excludedFromPnl ? null : (profitLines.find((l) => l.id === "netRevenue")?.value ?? 0);
-  const settlementLines = order.quyetToan ? buildSettlementLines(order.quyetToan, thucNhanApp) : null;
-
-  const feeBadges = provisionalFee
-    ? { platformFee: { label: "tạm tính", title: PROVISIONAL_FEE_TITLE } }
-    : undefined;
-  const feeRatio = formatPlatformFeeRatio(order.platformFeeEst, order.itemsTotal);
-  const feeAmountNotes = feeRatio ? { platformFee: feeRatio } : undefined;
-
   return (
     <Sheet
       open
-      onOpenChange={(next) => {
-        if (!next) close();
+      onOpenChange={(mo) => {
+        if (!mo) dong();
       }}
     >
       <SheetContent
         side="right"
-        className="gap-0 overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-[640px]"
+        showCloseButton={false}
+        initialFocus={refNutDong}
+        // Drawer nằm trong cổng (portal) ngoài khung trang ⇒ tự đặt `font-sans` (Inter) như trang.
+        className="gap-0 bg-tq-nen p-0 font-sans data-[side=right]:w-full data-[side=right]:sm:max-w-[640px]"
       >
-        <SheetHeader>
-          <div className="flex items-center gap-2">
-            <SheetTitle className="font-mono">{order.code}</SheetTitle>
-            <OrderStatusBadge status={order.status} />
-            <Badge variant="outline" className="gap-1.5">
-              <span className="size-2 rounded-full" style={{ backgroundColor: order.channelColor }} />
-              {order.channelName}
-            </Badge>
-          </div>
-          {/* Mã đơn BÊN SÀN để đối chiếu với seller center — `select-all` cho 1 click chọn trọn mã. */}
-          {order.maSan && (
-            <p className="text-xs text-muted-foreground">
-              Mã sàn <span className="font-mono select-all">{order.maSan}</span>
-            </p>
-          )}
-          <p className="text-xs text-muted-foreground">
-            đặt {formatNgayVn(order.orderedAt, "dd/MM HH:mm")}
-            {order.statusChangedAt && <> · cập nhật {formatNgayVn(order.statusChangedAt, "dd/MM HH:mm")}</>}
-            {" "}· đồng bộ {formatNgayVn(order.syncedAt, "dd/MM HH:mm")}
-          </p>
-        </SheetHeader>
-
-        <div className="flex flex-col gap-4 p-4">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>Tên</TableHead>
-                <TableHead className="text-right">SL</TableHead>
-                <TableHead className="text-right">Đơn giá</TableHead>
-                {coGiaVon && <TableHead className="text-right">Giá vốn hiện hành</TableHead>}
-                {coGiaVon && <TableHead className="text-right">Lãi gộp dòng</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {itemsTinh.map((it, i) => {
-                // Lãi dòng RÒNG (cùng cơ sở itemsTotal): doanh thu dòng sau giảm giá − giá vốn dòng.
-                const lineProfit = it.unitPrice * it.quantity - it.lineDiscount - (it.costPrice ?? 0) * it.quantity;
-                return (
-                  <TableRow key={i}>
-                    <TableCell className="font-mono text-sm">{it.sku}</TableCell>
-                    <TableCell className="text-sm">{it.productName}</TableCell>
-                    <TableCell className="text-right text-sm">{it.quantity}</TableCell>
-                    <TableCell className="text-right text-sm">{formatVnd(it.unitPrice)}</TableCell>
-                    {coGiaVon && (
-                    <TableCell className="text-right text-sm">
-                      {it.costPrice === 0 && it.sku ? (
-                        <Link
-                          // Dẫn thẳng tới ĐÚNG SKU đang xem, không qua bộ lọc: đơn HOÀN/HỦY bị
-                          // chính định nghĩa "đã bán" loại khỏi bộ lọc hẹp, nên link theo bộ lọc
-                          // sẽ mở ra danh sách KHÔNG có dòng người ta vừa bấm.
-                          href={`/san-pham?q=${encodeURIComponent(it.sku)}`}
-                          className="text-warning hover:underline"
-                        >
-                          ⚠ chưa có
-                        </Link>
-                      ) : it.costPrice === null ? (
-                        // KHÔNG khớp biến thể nào (`variantId` null) hoặc dòng không rõ SKU: màn
-                        // Sản phẩm không có gì để sửa — nhập giá cho một biến thể trùng tên cũng
-                        // KHÔNG đổi COGS của dòng này. Cảnh báo TĨNH, không link giả.
-                        <span
-                          className="text-warning"
-                          title="Dòng hàng không khớp biến thể nào trong app — nhập giá vốn không sửa được COGS của dòng này"
-                        >
-                          ⚠ không khớp SP
-                        </span>
-                      ) : (
-                        formatVnd(it.costPrice)
-                      )}
-                    </TableCell>
-                    )}
-                    {coGiaVon && (
-                      <TableCell data-testid="line-profit" className="text-right text-sm">
-                        {formatVnd(lineProfit)}
-                      </TableCell>
-                    )}
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-
-          {excludedFromPnl ? (
-            <OrderReturnedPanel order={order} returnedFeeDisplay={returnedFeeDisplay} />
-          ) : (
-            <div className="flex flex-col gap-2">
-              <OrderProfitTree items={profitLines} badges={feeBadges} amountNotes={feeAmountNotes} />
-              <p className="text-xs text-muted-foreground">
-                {realFee
-                  ? "Phí sàn là số THẬT sàn trả về (qua Pancake)."
-                  : "Phí sàn ước tính theo % kênh (Cài đặt)."}
-                {provisionalFee &&
-                  " Sàn chưa đối soát xong — phí thật thường cao hơn (~27-36%), nên LÃI THẬT sẽ thấp hơn số đang hiện; tự cập nhật khi đơn được đồng bộ lại."}
-                {coGiaVon && " Chưa gồm chi phí chung (ads, vận chuyển, đóng gói…)."}
-                {missingCostCount > 0 && ` ⚠ ${missingCostCount} dòng chưa có giá vốn — lãi đang tính thiếu.`}
-              </p>
-            </div>
-          )}
-
-          {settlementLines && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-muted-foreground">
-                Số dưới đây là số SÀN thật sự trả về khi quyết toán — độc lập với số app tính ở trên, không cái nào sửa cái nào.
-              </p>
-              <OrderProfitTree items={settlementLines} />
-            </div>
-          )}
-        </div>
+        <DrawerNoiDung order={order} thongTinPhu={order.thongTinPhu} dieuHuong={dieuHuong} now={now} onDong={dong} refNutDong={refNutDong} />
       </SheetContent>
     </Sheet>
   );

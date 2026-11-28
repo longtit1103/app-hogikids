@@ -89,7 +89,8 @@ export function OrderProfitTree({
             const note = amountNotes?.[item.id];
             return (
               <TableRow key={item.id} className={rowBandClass(item)}>
-                <TableCell className={cn(rowTypeClass(item), "print:whitespace-normal")}>
+                {/* Màn hẹp: cho nhãn xuống dòng để cột số tiền luôn nằm trong khung, không phải vuốt ngang mới thấy. */}
+                <TableCell className={cn(rowTypeClass(item), "max-sm:whitespace-normal print:whitespace-normal")}>
                   <div className="flex items-center gap-1.5">
                     <PnlLineLabel
                       item={item}

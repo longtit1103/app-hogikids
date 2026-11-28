@@ -19,3 +19,17 @@ export function chuanHoaSearchParams<T extends object>(tho: SearchParamsTho<T>):
   }
   return ra as { [K in keyof T]?: string };
 }
+
+/**
+ * Bản phía client của cùng luật: `URLSearchParams` (hook `useSearchParams`) → mỗi khoá lấy giá trị ĐẦU như
+ * server. `Object.fromEntries(searchParams.entries())` lấy giá trị CUỐI ⇒ với URL lặp tham số, tab kỳ trên
+ * thanh trên sáng theo một kỳ còn danh sách tính theo kỳ khác.
+ */
+export function thamSoDauTienTuUrl(p: Pick<URLSearchParams, "keys" | "get">): Record<string, string> {
+  const ra: Record<string, string> = {};
+  for (const khoa of p.keys()) {
+    const giaTri = p.get(khoa);
+    if (giaTri !== null && !Object.hasOwn(ra, khoa)) ra[khoa] = giaTri;
+  }
+  return ra;
+}
